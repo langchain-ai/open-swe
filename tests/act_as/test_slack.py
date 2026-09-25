@@ -85,6 +85,8 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(act_as_slack, "post_slack_thread_reply", thread_reply)
     ephemeral = AsyncMock()
     monkeypatch.setattr(act_as_slack, "post_slack_ephemeral_message", ephemeral)
+    concierge = AsyncMock()
+    monkeypatch.setattr(act_as_slack, "note_for_concierge", concierge)
     request = await (await ThreadActAs.load("thread-1")).request(
         "alice", owner="o", repo="r", head="h", base="b", title="t"
     )
@@ -93,6 +95,7 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
         preferences=preferences,
         thread_reply=thread_reply,
         ephemeral=ephemeral,
+        concierge=concierge,
     )
 
 
@@ -111,6 +114,9 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
 
     assert await _status() == status
     assert stack.thread_reply.await_args.args[:2] == ("C1", "1.0")
+    user_id, channel_id, note = stack.concierge.await_args.args
+    assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
+    assert act_as_slack._LABELS[action] in note
     if always_allow:
         stack.preferences.assert_awaited_once_with(
             "alice", UserPreferencesPatch(act_as_always_allowed=True)

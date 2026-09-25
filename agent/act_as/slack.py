@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import BackgroundTasks
 
 from agent.act_as.records import ActAsRequest, ThreadActAs
+from agent.prompts import render_prompt
 from agent.slack.blocks import Block, actions, block_payload, button, context, section
 from agent.slack.client import (
     get_active_slack_thread,
@@ -14,9 +15,11 @@ from agent.slack.client import (
     post_slack_thread_reply,
     update_slack_message,
 )
+from agent.slack.dm import note_for_concierge
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import WebhookResponse, accepted, ignored
 from agent.users import User
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -92,6 +95,15 @@ async def handle_button(
     approved = action != "deny"
     await thread.decide(request, approved=approved, always_allow=action == "always_allow")
     background_tasks.add_task(_close_card, interaction, _LABELS[action])
+    await note_for_concierge(
+        user_id,
+        channel_id,
+        render_prompt(
+            "slack/concierge-act-as-decided.md",
+            decision=_LABELS[action],
+            thread_url=dashboard_thread_url(button.thread_id) or button.thread_id,
+        ),
+    )
     source = await get_active_slack_thread(langgraph_client(), button.thread_id)
     source_channel = (source or {}).get("channel_id")
     source_ts = (source or {}).get("thread_ts")

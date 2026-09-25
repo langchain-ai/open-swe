@@ -22,8 +22,11 @@ def dm(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) -> AsyncMoc
         return requested or "alice"
 
     monkeypatch.setattr(gate, "pr_author_login", author_login)
+    monkeypatch.setattr(gate, "open_slack_dm", AsyncMock(return_value=("D-ALICE", None)))
     send = AsyncMock(return_value=("123.456", None))
     monkeypatch.setattr(gate, "post_slack_top_level_message_with_ts", send)
+    send.concierge = AsyncMock()
+    monkeypatch.setattr(gate, "note_for_concierge", send.concierge)
     monkeypatch.setattr(gate, "_WAIT_SECONDS", 4.0)
     monkeypatch.setattr(asyncio, "sleep", AsyncMock())
     return send
@@ -64,9 +67,12 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
 
     assert refusal is not None and refusal["act_as"] == "pending"
     dm.assert_awaited_once()
-    assert dm.await_args.args[0] == "U-ALICE"
+    assert dm.await_args.args[0] == "D-ALICE"
     value = json.loads(dm.await_args.kwargs["blocks"][1]["elements"][0]["value"])
     assert (value["type"], value["action"], value["thread_id"]) == ("act_as", "approve", "thread-1")
+    user_id, channel_id, note = dm.concierge.await_args.args
+    assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
+    assert '"t" in o/r' in note
 
 
 @pytest.mark.asyncio
@@ -134,6 +140,7 @@ async def test_failed_dm_refuses_instead_of_waiting(dm, monkeypatch):
     refusal = await _open()
 
     assert refusal is not None and refusal["act_as"] == "unreachable"
+    dm.concierge.assert_not_awaited()
 
 
 @pytest.mark.asyncio

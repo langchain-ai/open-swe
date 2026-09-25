@@ -11,11 +11,13 @@ import asyncio
 import logging
 from typing import Literal, TypedDict
 
-from agent.act_as.records import ThreadActAs
+from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
+from agent.prompts import render_prompt
 from agent.slack.blocks import block_payload
-from agent.slack.client import post_slack_top_level_message_with_ts
+from agent.slack.client import open_slack_dm, post_slack_top_level_message_with_ts
+from agent.slack.dm import note_for_concierge
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -89,24 +91,46 @@ async def require_consent(
         return _refusal(login, "unreachable", token_kind)
     request = await thread.request(login, owner=owner, repo=repo, head=head, base=base, title=title)
     if not request.notified:
-        thread_url = dashboard_thread_url(thread_id)
-        thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
-        message = (
-            f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
-            f"*{title}*\n`{owner}/{repo}` — `{head}` → `{base}`\n\n"
-            "Approve, always allow, or deny."
-        )
-        message_ts, error = await post_slack_top_level_message_with_ts(
-            slack_user_id, message, blocks=block_payload(card_blocks(message, request, thread_id))
-        )
-        if not message_ts:
-            logger.error(
-                "Could not DM the act-as card",
-                extra={"login": login, "thread_id": thread_id, "error": error},
-            )
+        if not await _send_card(slack_user_id, request, thread_id):
             return _refusal(login, "unreachable", token_kind)
         await thread.mark_notified(request)
     return await _wait_for_answer(thread_id, login, token_kind)
+
+
+async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) -> bool:
+    thread_url = dashboard_thread_url(thread_id)
+    thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
+    repo = f"{request.owner}/{request.repo}"
+    message = (
+        f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
+        f"*{request.title}*\n`{repo}` — `{request.head}` → `{request.base}`\n\n"
+        "Approve, always allow, or deny."
+    )
+    dm_channel_id, error = await open_slack_dm(slack_user_id)
+    message_ts = None
+    if dm_channel_id:
+        message_ts, error = await post_slack_top_level_message_with_ts(
+            dm_channel_id, message, blocks=block_payload(card_blocks(message, request, thread_id))
+        )
+    if not dm_channel_id or not message_ts:
+        logger.error(
+            "Could not DM the act-as card",
+            extra={"login": request.login, "thread_id": thread_id, "error": error},
+        )
+        return False
+    await note_for_concierge(
+        slack_user_id,
+        dm_channel_id,
+        render_prompt(
+            "slack/concierge-act-as-requested.md",
+            thread_url=thread_url or thread_id,
+            title=request.title,
+            repo=repo,
+            head=request.head,
+            base=request.base,
+        ),
+    )
+    return True
 
 
 async def _wait_for_answer(thread_id: str, login: str, token_kind: str) -> ActAsRefusal | None:
