@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { validateReviewsSearch } from "./search"
+import { parsePullRequestReference, validateReviewsSearch } from "./search"
 
 it("preserves an explicit ascending direction", () => {
   expect(
@@ -55,4 +55,19 @@ it("restores multiple repositories and statuses, dropping invalid and duplicate 
   })
   expect(result.repo).toEqual(["acme/app", "acme/other"])
   expect(result.status).toEqual(["Conflicted", "Failing"])
+})
+
+it("finds the pull request in a pasted link with surrounding text", () => {
+  const expected = { owner: "langchain-ai", repo: "open-swe", number: 3178 }
+  expect(
+    parsePullRequestReference(
+      "see https://github.com/langchain-ai/open-swe/pull/3178/files?w=1#diff thanks"
+    )
+  ).toEqual(expected)
+  expect(parsePullRequestReference("langchain-ai/open-swe#3178")).toEqual(
+    expected
+  )
+  expect(
+    parsePullRequestReference("https://github.com/langchain-ai")
+  ).toBeNull()
 })

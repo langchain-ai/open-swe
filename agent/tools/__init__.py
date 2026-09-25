@@ -4,14 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
-    "approve_plan": ".approve_plan",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
-    "enter_plan_mode": ".enter_plan_mode",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
@@ -22,11 +20,13 @@ _TOOL_MODULES = {
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
+    "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
+    "merge_expedited_pr": ".merge_expedited_pr",
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
@@ -34,8 +34,10 @@ _TOOL_MODULES = {
     "read_only_sql": ".read_only_sql",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
+    "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
+    "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
@@ -45,17 +47,21 @@ _TOOL_MODULES = {
     "save_organization_skill": ".organization_skills",
     "save_plan": ".save_plan",
     "save_user_instructions": ".save_user_instructions",
+    "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
+    "slack_list_channels": "agent.slack.tools.channels",
     "slack_move_thread": "agent.slack.tools.move_thread",
+    "slack_no_reply_needed": "agent.slack.tools.no_reply_needed",
+    "slack_post_message": "agent.slack.tools.channels",
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
+    "slack_reply": "agent.slack.tools.reply",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
-    "slack_thread_reply": "agent.slack.tools.thread_reply",
     "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
@@ -65,14 +71,12 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
-    "approve_plan",
     "background_execute",
     "background_task",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
-    "enter_plan_mode",
     "expedite_pr_approval",
     "expose_port",
     "fetch_review_diff",
@@ -83,11 +87,13 @@ __all__ = [
     "list_workspaces",
     "list_findings",
     "list_review_findings",
+    "link_pull_request",
     "list_threads",
     "manage_baby_sit",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
+    "merge_expedited_pr",
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
@@ -95,8 +101,10 @@ __all__ = [
     "read_only_sql",
     "read_repo_file",
     "read_user_settings",
+    "record_human_input",
     "recreate_sandbox",
     "refresh_workspace_start",
+    "configure_repository",
     "report_platform_issue",
     "request_pr_review",
     "reply_to_finding_thread",
@@ -106,17 +114,21 @@ __all__ = [
     "delete_organization_skill",
     "save_plan",
     "save_user_instructions",
+    "save_user_settings",
     "save_user_skill",
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
     "slack_add_reaction",
     "slack_attach_html",
+    "slack_list_channels",
     "slack_move_thread",
+    "slack_no_reply_needed",
+    "slack_post_message",
     "slack_read_channel_messages",
     "slack_read_thread_messages",
+    "slack_reply",
     "slack_start_new_thread",
-    "slack_thread_reply",
     "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
@@ -130,15 +142,16 @@ if TYPE_CHECKING:
     from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
+    from agent.slack.tools.channels import slack_list_channels, slack_post_message
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
+    from agent.slack.tools.no_reply_needed import slack_no_reply_needed
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+    from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
-    from agent.slack.tools.thread_reply import slack_thread_reply
     from agent.tools.add_finding import add_finding
-    from agent.tools.approve_plan import approve_plan
     from agent.tools.automations import (
         create_automation,
         delete_automation,
@@ -149,7 +162,6 @@ if TYPE_CHECKING:
     from agent.tools.background_execute import background_execute
     from agent.tools.background_task import background_task
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
-    from agent.tools.enter_plan_mode import enter_plan_mode
     from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.expose_port import expose_port
     from agent.tools.fetch_review_diff import fetch_review_diff
@@ -158,19 +170,22 @@ if TYPE_CHECKING:
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
-    from agent.tools.open_pull_request import open_pull_request
+    from agent.tools.open_pull_request import link_pull_request, open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_only_sql import read_only_sql
     from agent.tools.read_user_settings import read_user_settings
+    from agent.tools.record_human_input import record_human_input
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
+    from agent.tools.save_user_settings import save_user_settings
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread
@@ -178,6 +193,7 @@ if TYPE_CHECKING:
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search
     from agent.tools.workspaces import (
+        configure_repository,
         delete_workspace,
         list_workspaces,
         publish_workspace,

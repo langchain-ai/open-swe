@@ -3,6 +3,10 @@ import type {
   RoutedModel,
   StreamConnection,
 } from "@/features/agents/lib/stream/connection"
+import type {
+  QueuedTurn,
+  SubagentToolCall,
+} from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
 /** The human message and run configuration a new run starts from. */
@@ -15,12 +19,22 @@ export interface ThreadRunInput {
     images?: ReadonlyArray<ImageChunk>
   }
   configurable: Record<string, unknown>
+  /**
+   * Hold the message until the live run ends instead of steering it. The
+   * server makes it a run of its own that starts when the thread goes idle.
+   */
+  enqueue?: boolean
 }
 
 interface ThreadSourceShared {
   threadId: string
   /** The transcript, as rows the message renderers understand. */
   messages: Array<Message>
+  /**
+   * Follow-ups queued behind the live run, oldest first. Server truth: they
+   * survive a reload and show in every tab. Empty for sources without a queue.
+   */
+  queued: ReadonlyArray<QueuedTurn>
   /** A run is live as this client sees it. */
   isRunning: boolean
   /** The one-time transcript load has not produced anything yet. */
@@ -39,8 +53,8 @@ interface ThreadSourceShared {
    * does, the transcript log as soon as the command is accepted).
    */
   startRun: (input: ThreadRunInput) => Promise<void>
-  /** Cancel the live run. Resolves once the attempt settled, either way. */
-  stop: () => Promise<void>
+  /** Cancel the live run. Resolves with whether the server accepted it. */
+  stop: () => Promise<boolean>
   /**
    * The thread has turns older than the window that is loaded. Sources that
    * always hold the whole thread report false and a `loadOlder` that does
@@ -56,6 +70,21 @@ interface ThreadSourceShared {
 export interface StreamThreadSource extends ThreadSourceShared {
   kind: "stream"
   stream: AgentStream
+  /**
+   * Cancel one entry from the SDK's own submission queue, by
+   * `queued[].turnId` — keeps the local store in sync, unlike a plain
+   * run-cancel REST call (which leaves it stale until the next hydrate).
+   */
+  cancelQueued: (id: string) => Promise<boolean>
 }
 
-export type ThreadSource = StreamThreadSource
+/** The thread is served by the append-only transcript event log. */
+export interface TranscriptThreadSource extends ThreadSourceShared {
+  kind: "transcript"
+  /** Nested tool calls under a subagent namespace, for the subagent card. */
+  subagentToolCalls: (
+    namespace: ReadonlyArray<string>
+  ) => Array<SubagentToolCall>
+}
+
+export type ThreadSource = StreamThreadSource | TranscriptThreadSource

@@ -1,10 +1,12 @@
 """Dashboard API for named workspaces."""
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
@@ -17,6 +19,7 @@ from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
+    RepositorySettings,
     Workspace,
     WorkspaceConflictError,
     WorkspaceCreate,
@@ -24,6 +27,8 @@ from agent.workspaces.store import (
     list_workspace_options,
     slugify,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["workspaces"])
 
@@ -119,13 +124,76 @@ async def api_update_workspace(
     body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    normalized = _normalized_slug(slug)
+    previous = await WORKSPACES.get(normalized)
+    repos_changed = (
+        previous is not None
+        and body.repos is not None
+        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
+    )
+    if repos_changed and is_refresh_in_flight(previous):
+        raise HTTPException(409, "a refresh of this workspace is already running")
     try:
-        record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
+        record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
+        if repos_changed:
+            run_id = await start_refresh_run(record.slug)
+            if run_id is None:
+                raise HTTPException(
+                    502, "workspace was saved but its snapshot rebuild could not start"
+                )
+            return record.model_copy(
+                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
+            )
     return record
+
+
+class RepositoryConfiguration(BaseModel):
+    """Settings to change on one repository. Anything left out keeps its value."""
+
+    may_start_threads: bool | None = None
+
+
+@router.get("/workspaces/{slug}/repositories")
+async def api_list_workspace_repositories(
+    slug: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[RepositorySettings]:
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.slug_exists(normalized):
+        raise HTTPException(404, "workspace not found")
+    return await WORKSPACES.repository_settings(normalized)
+
+
+@router.put("/workspaces/{slug}/repositories/{owner}/{name}")
+async def api_configure_workspace_repository(
+    slug: str,
+    owner: str,
+    name: str,
+    body: RepositoryConfiguration,
+    admin: dict[str, Any] = ADMIN_DEP,
+) -> RepositorySettings:
+    """Change how one of a workspace's repositories is configured there."""
+    normalized = _normalized_slug(slug)
+    try:
+        settings = await WORKSPACES.configure_repository(
+            normalized, f"{owner}/{name}", may_start_threads=body.may_start_threads
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    logger.info(
+        "Configured a workspace repository",
+        extra={
+            "workspace": normalized,
+            "repository": settings.repo,
+            "may_start_threads": settings.may_start_threads,
+            "changed_by": str(admin.get("sub") or ""),
+        },
+    )
+    return settings
 
 
 @router.post("/workspaces/{slug}/refresh")

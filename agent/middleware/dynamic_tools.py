@@ -5,7 +5,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Annotated, Any, NotRequired
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain.agents.middleware.types import (
     AgentState,
@@ -13,8 +13,11 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     ToolCallRequest,
 )
-from langchain_core.messages import ToolMessage
+from langchain_anthropic import ChatAnthropic, convert_to_anthropic_tool
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
@@ -23,6 +26,28 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
+
+_LOAD_TOOL_NAME = "load_integration_tools"
+
+# Models that accept a tool added mid-conversation, by model ID prefix. Everything
+# else receives loaded tools in ``tools``, which invalidates the prompt cache.
+_ANTHROPIC_TOOL_ADDITION_MODELS = (
+    "claude-opus-5",
+    "claude-fable-5",
+    "claude-opus-4-8",
+    "claude-mythos-5",
+)
+# Responses API only: Chat Completions rejects ``additional_tools``.
+_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
+
+ToolAddition = dict[str, object]
+"""A provider-native content block that adds one tool from its position onward."""
+
+
+class LoadedToolsArtifact(TypedDict):
+    """Recorded on a successful load result; ``awrap_model_call`` anchors additions to it."""
+
+    newly_loaded: list[str]
 
 
 def _merge_tool_names(current: list[str], update: list[str]) -> list[str]:
@@ -62,7 +87,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         groups: Mapping[str, IntegrationGroup | Sequence[BaseTool]],
         reserved_names: Collection[str] = (),
     ) -> None:
-        reserved = {"load_integration_tools", *reserved_names}
+        reserved = {_LOAD_TOOL_NAME, *reserved_names}
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
@@ -125,6 +150,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                     }
                 )
             loaded = set(state.get("loaded_integration_tools", [])) if state else set()
+            newly_loaded = sorted(set(normalized_names) - loaded)
             loaded.update(normalized_names)
             return Command(
                 update={
@@ -137,6 +163,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
                                 "Call these tools normally on your next turn."
                             ),
                             tool_call_id=tool_call_id,
+                            artifact=LoadedToolsArtifact(newly_loaded=newly_loaded),
                         )
                     ],
                 }
@@ -152,7 +179,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         self.tools = [
             StructuredTool.from_function(
                 coroutine=load_integration_tools,
-                name="load_integration_tools",
+                name=_LOAD_TOOL_NAME,
                 description=description,
             )
         ]
@@ -160,6 +187,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     @property
     def has_groups(self) -> bool:
         return bool(self._groups)
+
+    async def catalog_tools(self) -> list[BaseTool]:
+        """Resolve the connected tools for authenticated sandbox discovery."""
+        await self._build(list(self._group_of))
+        return [tool for name in self._group_of if (tool := self._tool(name)) is not None]
 
     async def _resolve(self, group: str) -> dict[str, BaseTool]:
         resolved = self._resolved.setdefault(group, _Resolved())
@@ -191,6 +223,8 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        if state.get("_deepagents_forked_context"):
+            return {}
         return {"loaded_integration_tools": Overwrite([])}
 
     async def awrap_model_call(
@@ -201,8 +235,33 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         loaded = self._loaded_names(request.state)
         if loaded:
             await self._build(loaded)
-        tools = [tool for name in loaded if (tool := self._tool(name)) is not None]
-        return await handler(request.override(tools=[*request.tools, *tools]))
+        tools = {name: tool for name in loaded if (tool := self._tool(name)) is not None}
+        build_addition = _tool_addition_builder(request.model)
+        if build_addition is None or not tools:
+            return await handler(request.override(tools=[*request.tools, *tools.values()]))
+        additions = {
+            name: addition
+            for name, tool in tools.items()
+            if (addition := build_addition(tool)) is not None
+        }
+        # Added where each tool was loaded, so every request extends the previous
+        # one and the provider's prompt cache survives the load.
+        anchors = {
+            name: anchor for name, anchor in _anchors(request.messages).items() if name in additions
+        }
+        names_by_index: dict[int, list[str]] = {}
+        for name, anchor in anchors.items():
+            names_by_index.setdefault(_insertion_point(request.messages, anchor), []).append(name)
+        messages = list(request.messages)
+        for index in sorted(names_by_index, reverse=True):
+            blocks: list[str | ToolAddition] = [
+                additions[name] for name in sorted(names_by_index[index])
+            ]
+            messages.insert(index, SystemMessage(content=blocks))
+        unanchored = [tool for name, tool in tools.items() if name not in anchors]
+        return await handler(
+            request.override(messages=messages, tools=[*request.tools, *unanchored])
+        )
 
     async def awrap_tool_call(
         self,
@@ -232,6 +291,101 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     def _loaded_names(state: Mapping[str, Any]) -> list[str]:
         loaded = state.get("loaded_integration_tools", [])
         return loaded if isinstance(loaded, list) else []
+
+
+def _unwrap_bound(model: object) -> object:
+    current = model
+    for _ in range(10):
+        bound = getattr(current, "bound", None)
+        if bound is None or bound is current:
+            break
+        current = bound
+    return current
+
+
+def _tool_addition_builder(
+    model: object,
+) -> Callable[[BaseTool], ToolAddition | None] | None:
+    """Return how ``model`` is given a tool mid-conversation, or ``None`` if it can't be.
+
+    The builder returns ``None`` for a tool it can't add, which stays in ``tools``.
+    """
+    chat_model = _unwrap_bound(model)
+    if isinstance(chat_model, ChatAnthropic) and chat_model.model.startswith(
+        _ANTHROPIC_TOOL_ADDITION_MODELS
+    ):
+        return _anthropic_tool_addition
+    # Not subclasses: the desktop Codex model lifts every system message into
+    # ``instructions`` and raises on a non-text block.
+    if (
+        type(chat_model) is ChatOpenAI
+        and chat_model.use_responses_api is True
+        and chat_model.model_name.startswith(_OPENAI_TOOL_ADDITION_MODELS)
+    ):
+        return _openai_tool_addition
+    return None
+
+
+def _anthropic_tool_addition(tool: BaseTool) -> ToolAddition | None:
+    definition = convert_to_anthropic_tool(tool)
+    # Anthropic rejects a root oneOf/anyOf, failing the whole request. ``bind_tools``
+    # drops such a tool from ``tools`` instead, so leave it there.
+    if isinstance(schema := definition.get("input_schema"), Mapping) and (
+        "oneOf" in schema or "anyOf" in schema
+    ):
+        return None
+    return {"type": "tool_addition", "tool": {"type": "tool_definition", "definition": definition}}
+
+
+def _openai_tool_addition(tool: BaseTool) -> ToolAddition:
+    # The Responses shape of the function tool ``bind_tools`` would send in ``tools``.
+    function = {"type": "function", **convert_to_openai_tool(tool)["function"]}
+    return {"type": "additional_tools", "role": "developer", "tools": [function]}
+
+
+def _newly_loaded(artifact: object) -> list[str]:
+    if not isinstance(artifact, dict):
+        return []
+    names = artifact.get("newly_loaded")
+    if not isinstance(names, list):
+        return []
+    return [name for name in names if isinstance(name, str)]
+
+
+def _anchors(messages: Sequence[AnyMessage]) -> dict[str, int]:
+    """Index of the latest load result that newly loaded each tool.
+
+    The per-run reset empties the loaded list and a repeat load lists nothing new,
+    so the latest load result naming a tool is its first load in this run.
+    """
+    load_calls: set[str] = set()
+    anchors: dict[str, int] = {}
+    for index, message in enumerate(messages):
+        if isinstance(message, AIMessage):
+            load_calls.update(
+                call["id"]
+                for call in message.tool_calls
+                if call["name"] == _LOAD_TOOL_NAME and call["id"]
+            )
+        elif isinstance(message, ToolMessage) and message.tool_call_id in load_calls:
+            anchors.update(dict.fromkeys(_newly_loaded(message.artifact), index))
+    return anchors
+
+
+def _insertion_point(messages: Sequence[AnyMessage], anchor: int) -> int:
+    """Index after the anchor's tool-result batch and any follow-ups queued behind it.
+
+    Anthropic needs the addition after a user turn and before an assistant turn, so
+    it may not split a tool-result batch; OpenAI needs it to keep its position. An
+    empty reply is skipped too: Anthropic drops it, leaving no assistant turn there.
+    """
+    index = anchor + 1
+    while index < len(messages) and (
+        isinstance(message := messages[index], ToolMessage | HumanMessage)
+        or (isinstance(message, AIMessage) and not message.content and not message.tool_calls)
+    ):
+        index += 1
+    return index
 
 
 def _eager_group(tools: Sequence[BaseTool]) -> IntegrationGroup:

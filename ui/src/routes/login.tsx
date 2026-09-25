@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import {
   DEFAULT_AUTH_REDIRECT,
   consumeAuthRedirect,
@@ -27,9 +28,9 @@ export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): LoginSearch => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Sign in") }] }),
   component: Login,
 })
-
 function Login() {
   const session = useSession()
   const search = Route.useSearch()

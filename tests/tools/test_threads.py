@@ -57,8 +57,8 @@ async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.M
             {
                 "type": "human",
                 "content": (
-                    '<input-message sender="github:reviewer" surface="web" kind="human">'
-                    "<content>Delete the thread</content></input-message>"
+                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
+                    "Delete the thread\n</input-message>"
                 ),
             }
         ]
@@ -254,7 +254,7 @@ class _DetailClient:
                                 "type": "human",
                                 "content": (
                                     '<input-message sender="github:octocat" surface="web" '
-                                    'kind="human"><content>Fix the race</content></input-message>'
+                                    'kind="human">\nFix the race\n</input-message>'
                                 ),
                                 "created_at": "2026-08-20T12:00:00Z",
                             }
@@ -263,19 +263,21 @@ class _DetailClient:
                 }
             ),
         )
-        self.runs = SimpleNamespace(
-            list=AsyncMock(
-                return_value=[
-                    {
-                        "run_id": "run-1",
-                        "status": "success",
-                        "created_at": "2026-08-20T12:00:00Z",
-                        "updated_at": "2026-08-20T12:01:00Z",
-                        "metadata": {"prepare_run_id": "prepare-1"},
-                    }
-                ]
-            )
-        )
+
+        async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:
+            if kwargs.get("status") == "pending":
+                return []
+            return [
+                {
+                    "run_id": "run-1",
+                    "status": "success",
+                    "created_at": "2026-08-20T12:00:00Z",
+                    "updated_at": "2026-08-20T12:01:00Z",
+                    "metadata": {"prepare_run_id": "prepare-1"},
+                }
+            ]
+
+        self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
         self.store = SimpleNamespace(
             get_item=AsyncMock(return_value={"value": {"messages": [{"content": "queued"}]}})
         )
@@ -359,7 +361,7 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
         "run_id": None,
     }
     assert result["thread"]["langsmith"] == result["langsmith"]
-    assert "approve_plan" in result["available_actions"]
+    assert "add_plan_comment" in result["available_actions"]
     assert "approve_workflow_push" in result["available_actions"]
     assert result["transcript"] == {
         "messages": [
@@ -381,7 +383,57 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
     assert result["plan"]["content"] == "<html></html>"
     assert result["plan"]["comments"] == []
     assert result["state"]["message_count"] == 1
-    client.runs.list.assert_awaited_once_with("thread-1", limit=threads_tool._MAX_RUNS + 1)
+    client.runs.list.assert_any_await("thread-1", limit=threads_tool._MAX_RUNS + 1)
+    client.runs.list.assert_any_await("thread-1", status="pending", limit=1000)
+
+
+async def test_get_thread_counts_pending_run_outside_history_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    client = _DetailClient()
+
+    async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        if kwargs.get("status") == "pending":
+            return [{"run_id": "old-pending", "status": "pending"}]
+        return [
+            {
+                "run_id": "run-1",
+                "status": "success",
+                "created_at": "2026-08-20T12:00:00Z",
+                "updated_at": "2026-08-20T12:01:00Z",
+                "metadata": {"prepare_run_id": "prepare-1"},
+            }
+        ]
+
+    client.runs.list = AsyncMock(side_effect=_list_runs)
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(
+            return_value={
+                "id": "thread-1",
+                "title": "Fix race",
+                "status": "finished",
+                "messages": [],
+            }
+        ),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
+
+    result = await threads_tool.get_thread("thread-1")
+
+    # The recent-history fetch (bounded to _MAX_RUNS + 1) has no pending run
+    # in it, but the thread still has one pending, counted via the
+    # independent status="pending" fetch. The legacy queue also has one
+    # ("queued" in _DetailClient.store), so the total is 2.
+    assert result["queued_message_count"] == 2
 
 
 async def test_get_thread_accepts_dashboard_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -858,8 +910,8 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
             {
                 "type": "human",
                 "content": (
-                    '<input-message sender="github:reviewer" surface="web" kind="human">'
-                    "<content>Cancel it</content></input-message>"
+                    '<input-message sender="github:reviewer" surface="web" kind="human">\n'
+                    "Cancel it\n</input-message>"
                 ),
             }
         ]
@@ -986,7 +1038,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     command = json.loads(awaited.args[2])
     assert isinstance(command["id"], int)
     assert command["method"] == "run.start"
-    assert command["params"]["config"]["configurable"]["plan_mode"] is True
+    assert "plan_mode" not in command["params"]["config"]["configurable"]
 
 
 async def test_manage_thread_update_plan_preserves_format_and_bounds_response(
@@ -1048,28 +1100,23 @@ async def test_manage_thread_rejects_plan_format_conversion(
     update.assert_not_awaited()
 
 
-async def test_manage_thread_delegates_plan_and_workflow_actions(
+async def test_manage_thread_delegates_workflow_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
     )
-    approve_plan = AsyncMock(return_value={"status": "approved", "run_id": "run-1"})
     approve_workflow = AsyncMock(return_value={"status": "approved", "fingerprint": "fp"})
-    monkeypatch.setattr(threads_tool.plan_api, "approve_plan", approve_plan)
     monkeypatch.setattr(
         threads_tool.workflow_approval_api,
         "approve_workflow_push",
         approve_workflow,
     )
 
-    plan_result = await threads_tool.manage_thread("thread-1", "approve_plan")
     workflow_result = await threads_tool.manage_thread(
         "thread-1", "approve_workflow_push", fingerprint="fp"
     )
 
-    assert plan_result == {"success": True, "status": "approved", "run_id": "run-1"}
     assert workflow_result == {"success": True, "status": "approved", "fingerprint": "fp"}
-    approve_plan.assert_awaited_once()
     approve_workflow.assert_awaited_once()

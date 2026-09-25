@@ -5,6 +5,7 @@ from typing import Any, Literal, Self
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
+from agent.analytics.feedback import record_feedback_submission
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.source_context import SourceContext
 from agent.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store
@@ -79,6 +80,7 @@ async def submit_thread_feedback(
     login = str(session["sub"]).strip().lower()
     if not await _is_initiator(thread_id, login, session.get("email")):
         raise HTTPException(403, "Only the thread initiator can give feedback.")
+    newly_saved = False
     async with agent_thread_pr_state_lock(langgraph_client(), thread_id):
         record = await feedback_store().get(thread_id)
         if record is None:
@@ -97,4 +99,14 @@ async def submit_thread_feedback(
             record.rating = None if dismiss else submission.rating
             record.comment = "" if dismiss else submission.comment
             await feedback_store().put(thread_id, record)
+            newly_saved = not dismiss
+    if newly_saved and record.rating:
+        await record_feedback_submission(
+            feedback_key=f"thread:{thread_id}",
+            rating=5 if record.rating == "good" else 1,
+            source="dashboard",
+            run_key=record.answer_run_id or None,
+            github_login=login,
+            user_email=session.get("email"),
+        )
     return ThreadFeedbackResponse.model_validate(record, from_attributes=True)

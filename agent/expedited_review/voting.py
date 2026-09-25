@@ -1,66 +1,51 @@
-"""Approve and Reject clicks, the GitHub reviews they become, and the merge.
+"""Mark ready, Approve, Broadcast and Dismiss clicks on an expedited review card.
 
 A voter is a person (``users`` row) reached through their Slack identity whose
-GitHub identity has write access to the repository. A non-author approval is
-submitted to GitHub as that person's own ``APPROVE`` review before it counts. The second distinct approval merges the
-pull request with the GitHub App's token, conditional on the reviewed head SHA.
-GitHub's answer is final: there is no admin bypass.
+GitHub identity has write access to the repository. Only the author may mark a
+draft ready, and only someone else may approve. An approval is submitted as the
+voter's GitHub review as soon as it is recorded; the agent merges later.
 """
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Literal
 from uuid import UUID
 
-import httpx2
+from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import (
-    REQUIRED_APPROVALS,
-    ApprovalVote,
-    ExpeditedApproval,
-    VoteDecision,
-)
-from agent.expedited_review.readiness import Readiness, assess_readiness
-from agent.expedited_review.watch import (
-    mark_merged,
+from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
+from agent.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
+from agent.expedited_review.lifecycle import (
+    broadcast_card,
+    notify_agent,
     refresh_card,
     repo_token,
     retire,
-    transition,
 )
-from agent.github.app import (
-    get_github_app_installation_id_for_repo,
-    get_github_app_installation_token,
+from agent.expedited_review.reviews import (
+    github_token_hint,
+    settings_hint,
+    submit_approval,
 )
-from agent.github.ci import has_repo_write_permission
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.input_messages import PersonIdentity
+from agent.github.ci import fetch_pr, has_repo_write_permission
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
+from agent.github.pull_requests import PullRequestPayload
+from agent.input_messages import PersonIdentity, split_person_id
 from agent.prompts import render_prompt
-from agent.slack.client import (
-    post_slack_ephemeral_message,
-    post_slack_thread_reply,
-    slack_thread_mutation_lock,
-)
+from agent.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
 from agent.users import User
-from agent.users.resolve import resolve_person, split_identity
-from agent.utils.dashboard_links import dashboard_base_url
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
+VoteAction = Literal["approve", "ready"]
+CardAction = VoteAction | Literal["dismiss", "broadcast"]
 
 
 @dataclass(frozen=True, slots=True)
 class VoteOutcome:
     message: str
-    private: bool = True
-
-
-def _settings_hint(action: str) -> str:
-    base = dashboard_base_url()
-    return f"{action}: {base}/my-settings" if base else f"{action} in your Open SWE settings."
 
 
 def _slack_link_hint() -> str:
@@ -69,25 +54,27 @@ def _slack_link_hint() -> str:
     Signing in with GitHub creates the GitHub identity and no Slack one, so
     telling someone already signed in to do that again sends them in a circle.
     """
-    return _settings_hint("Connect Slack under Personal connections")
-
-
-def _github_token_hint() -> str:
-    return _settings_hint("Sign in again with GitHub to refresh Open SWE's access")
+    return settings_hint("Connect Slack under Personal connections")
 
 
 @dataclass(frozen=True, slots=True)
 class Voter:
     user: User
     github_login: str
-    app_token: str
+
+
+def _linked(user: User | None) -> Voter | VoteOutcome:
+    if user is None or not any(identity.provider == "github" for identity in user.identities):
+        return VoteOutcome(f"Your Slack account is not linked to GitHub. {_slack_link_hint()}")
+    return Voter(user=user, github_login=user.login_for("github"))
 
 
 async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Voter | VoteOutcome:
     """The authorized voter behind a click, or why they are not one."""
-    login = user.login_for("github") if user is not None else ""
-    if user is None or not any(identity.provider == "github" for identity in user.identities):
-        return VoteOutcome(f"Your Slack account is not linked to GitHub. {_slack_link_hint()}")
+    linked = _linked(user)
+    if isinstance(linked, VoteOutcome):
+        return linked
+    login = linked.github_login
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
@@ -96,223 +83,166 @@ async def _resolve_voter(approval: ExpeditedApproval, user: User | None) -> Vote
         owner=pr.owner, repo=pr.repo, username=login, token=token
     ):
         return VoteOutcome(f"@{login} does not have write access to {pr.owner}/{pr.repo}.")
-    return Voter(user=user, github_login=login, app_token=token)
-
-
-def _is_author(approval: ExpeditedApproval, voter: Voter) -> bool:
-    pr = approval.pull_request
-    if pr.author_user_id is not None:
-        return pr.author_user_id == voter.user.id
-    return bool(pr.author) and pr.author.lower() == voter.github_login.lower()
-
-
-async def _submit_github_approval(approval: ExpeditedApproval, login: str) -> int | VoteOutcome:
-    """POST an ``APPROVE`` review as ``login``; the review id, or why it failed."""
-    user_token = await get_valid_access_token(login)
-    if not user_token:
-        return VoteOutcome(
-            f"Open SWE has no GitHub token for @{login}, so it cannot submit your review. "
-            f"{_github_token_hint()}"
-        )
-    pr = approval.pull_request
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews"
-    payload = {
-        "commit_id": approval.head_sha,
-        "event": "APPROVE",
-        "body": "Approved via Open SWE expedited review in Slack.",
-    }
-    try:
-        async with github_client(token=user_token) as client:
-            response = await github_request(client, "POST", url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx2.HTTPStatusError as exc:
-        detail = _github_error(exc.response)
-        return VoteOutcome(f"GitHub rejected your review: {detail}")
-    except httpx2.HTTPError, ValueError:
-        return VoteOutcome("GitHub did not answer when submitting your review. Try again.")
-    review_id = data.get("id") if isinstance(data, dict) else None
-    if not isinstance(review_id, int):
-        return VoteOutcome("GitHub returned an unexpected review response. Try again.")
-    return review_id
-
-
-def _github_error(response: httpx2.Response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        body = None
-    message = body.get("message") if isinstance(body, dict) else None
-    text = message if isinstance(message, str) and message else response.text[:200]
-    return f"{response.status_code} {text}".strip()
+    return linked
 
 
 async def handle_vote(
     approval: ExpeditedApproval,
     *,
-    decision: VoteDecision,
+    decision: VoteAction,
     user: User | None,
-    feedback: str = "",
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
         return VoteOutcome("This expedited review is no longer accepting votes.")
+    if decision == "ready":
+        # The author's own token decides; a fork's author has no write access upstream.
+        author = _linked(user)
+        if isinstance(author, VoteOutcome):
+            return author
+        if not approval.is_author(author.user.id, author.github_login):
+            return VoteOutcome("Only the pull request's author can mark it ready for review.")
+        return await _mark_ready(approval, voter=author)
     voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
-    login, app_token = voter.github_login, voter.app_token
-    pr = approval.pull_request
+    authored = approval.is_author(voter.user.id, voter.github_login)
 
-    if decision == "reject":
-        return await _reject(approval, voter=voter, feedback=feedback)
-
+    if approval.awaiting_ready:
+        return VoteOutcome("The author has to mark this draft ready for review first.")
+    if authored:
+        return VoteOutcome("You authored this pull request; someone else has to approve it.")
     if approval.vote_by(voter.user.id) is not None:
         return VoteOutcome("You already approved this revision.")
-    review_id: int | None = None
-    if not _is_author(approval, voter):
-        submitted = await _submit_github_approval(approval, login)
-        if isinstance(submitted, VoteOutcome):
-            return submitted
-        review_id = submitted
+    if not await get_valid_access_token(voter.github_login):
+        return VoteOutcome(
+            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot submit "
+            f"your review. {github_token_hint()}"
+        )
 
     async with ExpeditedApproval.locked(approval.id) as (_, row):
-        if row is None or row.state != "open" or row.head_sha != approval.head_sha:
+        if row is None or row.state != "open":
             return VoteOutcome("This expedited review closed before your vote was recorded.")
-        if row.vote_by(voter.user.id) is None:
-            row.votes.append(
-                ApprovalVote(
-                    voter_user_id=voter.user.id, decision="approve", github_review_id=review_id
-                )
-            )
-        quorum = len(row.approvals) >= REQUIRED_APPROVALS
-        if quorum:
-            row.state = "merging"
+        first_approval = not row.approved
+        added = row.vote_by(voter.user.id) is None
+        if added:
+            row.votes.append(ApprovalVote(voter_user_id=voter.user.id, decision="approve"))
     current = await ExpeditedApproval.get(approval.id)
     if current is None:
         return VoteOutcome("This expedited review vanished.")
-    if not quorum:
-        await refresh_card(current)
-        return VoteOutcome(
-            f"Approval recorded as @{login}."
-            + (" A GitHub review was submitted." if review_id else "")
-        )
-    readiness = await assess_readiness(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=app_token
+    problem = await _submit_review(current, voter.user.id) if added else None
+    await refresh_card(current)
+    recorded = (
+        f"Approval recorded as @{voter.github_login}. {problem}"
+        if problem
+        else f"Approved on GitHub as @{voter.github_login}."
     )
-    if readiness is None:
-        return VoteOutcome("Approval recorded. GitHub is unreachable; the merge will be retried.")
-    status = await complete_merge(current, readiness, app_token)
-    if status == "merged":
-        return VoteOutcome(f"Merged {pr.url}.", private=False)
-    return VoteOutcome("Approval recorded; see the card for the merge outcome.")
+    if first_approval and not await notify_agent(
+        current,
+        render_prompt(
+            "runs/expedited-review-approved.md",
+            pr_url=current.pull_request.url,
+            approvers=", ".join(f"@{login}" for login in current.approvers),
+        ),
+    ):
+        return VoteOutcome(
+            f"{recorded} Open SWE could not be woken to merge it; tag it in the thread to "
+            "try again."
+        )
+    return VoteOutcome(recorded)
 
 
-async def _reject(approval: ExpeditedApproval, *, voter: Voter, feedback: str) -> VoteOutcome:
-    clean_feedback = " ".join(feedback.split())[:3000]
-    login = voter.github_login
+async def _submit_review(approval: ExpeditedApproval, voter_user_id: UUID) -> str | None:
+    """Send a new vote to GitHub now; what kept it off GitHub, or ``None`` once it is there.
+
+    A vote that could not be sent stays recorded, and the merge submits it. The POST
+    runs under the card's row lock, which the merge also holds, so one of them submits.
+    """
+    pr = approval.pull_request
+    unavailable = "GitHub was unavailable, so Open SWE will submit your review when it merges."
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return unavailable
+    payload = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
+    files = await fetch_changed_files(
+        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+    )
+    head_sha = PullRequestPayload.model_validate(payload).head_sha if payload else ""
+    if not head_sha or files is None:
+        return unavailable
+    if not fingerprint_matches(files, approval.diff_fingerprint):
+        return "A later commit changed the diff on this card, so no review was submitted."
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
-            return VoteOutcome("This expedited review is no longer accepting votes.")
-        row.votes = [vote for vote in row.votes if vote.voter_user_id != voter.user.id]
-        row.votes.append(
-            ApprovalVote(voter_user_id=voter.user.id, decision="reject", feedback=clean_feedback)
+            return "The card closed before your review reached GitHub."
+        vote = row.vote_by(voter_user_id)
+        if vote is None:
+            return "This expedited review vanished."
+        if vote.github_review_id is not None:
+            return None
+        failed = await submit_approval(row, vote, head_sha)
+    if failed is not None:
+        return f"{failed} Open SWE will try again when it merges."
+    return None
+
+
+async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
+    """Undraft the PR as its author, then open the card for approval."""
+    if not approval.awaiting_ready:
+        return VoteOutcome("This pull request is already ready for review.")
+    token = await get_valid_access_token(voter.github_login)
+    if not token:
+        return VoteOutcome(
+            f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
+            f"pull request ready. {github_token_hint()}"
         )
-    outcome = f"Rejected by @{login}." + (f" Feedback: {clean_feedback}" if clean_feedback else "")
     pr = approval.pull_request
-    await retire(
-        approval,
-        "rejected",
-        outcome,
-        expected=("open",),
-        agent_prompt=render_prompt(
-            "runs/expedited-review-rejected.md",
-            pr_url=pr.url,
-            rejector=login,
-            feedback=clean_feedback or "(none given)",
-        ),
-    )
-    return VoteOutcome("Rejected. The agent has been told.")
-
-
-async def _merge_token(owner: str, repo: str) -> str | None:
-    installation_id = await get_github_app_installation_id_for_repo(owner, repo)
-    if installation_id is None:
-        return None
-    return await get_github_app_installation_token(
-        installation_id=installation_id,
-        repositories=[repo],
-        permissions=_MERGE_PERMISSIONS,
-    )
-
-
-async def complete_merge(approval: ExpeditedApproval, readiness: Readiness, token: str) -> str:
-    """Revalidate and merge a ``merging`` approval; GitHub's refusal ends the vote."""
-    pr = approval.pull_request
-    snapshot = readiness.snapshot
-    if snapshot.merged:
-        await mark_merged(approval)
-        return "merged"
-    if snapshot.head_sha != approval.head_sha:
-        await retire(approval, "superseded", "A new commit replaced the reviewed revision.")
-        return "superseded"
-    if not readiness.ready:
-        reopened = await transition(
-            approval.id,
-            expected=("merging",),
-            state="open",
-            detail="; ".join(readiness.blockers),
-        )
-        if reopened is not None:
-            await refresh_card(reopened)
-        return "open"
-
-    merge_token = await _merge_token(pr.owner, pr.repo) or token
-    methods = snapshot.allowed_merge_methods or ["merge"]
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/merge"
-    payload: dict[str, Any] = {"sha": approval.head_sha, "merge_method": methods[0]}
     try:
-        async with github_client(token=merge_token) as client:
-            response = await github_request(client, "PUT", url, json=payload)
-    except httpx2.HTTPError:
-        logger.warning(
-            "Merge request did not complete; leaving approval in merging",
-            extra={"approval_id": str(approval.id)},
-            exc_info=True,
+        await act_on_pull_request(
+            pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
         )
-        return "merging"
-    if response.status_code == 200:
-        await mark_merged(approval)
-        return "merged"
-    if response.status_code in {405, 409, 422, 403, 404}:
-        detail = _github_error(response)
-        await retire(
-            approval,
-            "failed",
-            f"GitHub refused the merge: {detail}",
-            expected=("merging",),
-            agent_prompt=render_prompt(
-                "runs/expedited-review-merge-refused.md", pr_url=pr.url, reason=detail
-            ),
-        )
-        return "failed"
-    logger.warning(
-        "Unexpected merge response; leaving approval in merging",
-        extra={"approval_id": str(approval.id), "status_code": response.status_code},
-    )
-    return "merging"
+    except HTTPException as exc:
+        return VoteOutcome(f"GitHub did not mark the pull request ready: {exc.detail}")
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return VoteOutcome("This expedited review closed before it was marked ready.")
+        row.awaiting_ready = False
+    marked = "Marked ready for review. Someone else can approve it now."
+    current = await ExpeditedApproval.get(approval.id)
+    if current is None:
+        return VoteOutcome(marked)
+    await refresh_card(current)
+    return VoteOutcome(marked)
+
+
+async def request_broadcast(approval: ExpeditedApproval) -> VoteOutcome:
+    """Anyone in the thread may send an open card to the channel."""
+    if approval.state != "open" or approval.approved:
+        return VoteOutcome("This expedited review is no longer waiting for approval.")
+    if approval.slack_broadcast:
+        return VoteOutcome("This expedited review is already in the channel.")
+    if not await broadcast_card(approval):
+        return VoteOutcome("Open SWE could not send this expedited review to the channel.")
+    return VoteOutcome("Sent to the channel.")
+
+
+async def dismiss(approval: ExpeditedApproval, slack_user_id: str) -> VoteOutcome:
+    """Anyone in the thread may take the card down; it needs no GitHub link or access."""
+    if await retire(approval, "cancelled", f"dismissed by <@{slack_user_id}>") is None:
+        return VoteOutcome("This expedited review is already closed.")
+    return VoteOutcome("Dismissed.")
 
 
 async def process_vote(
     approval_id: str,
     *,
-    decision: VoteDecision,
+    decision: CardAction,
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
-    feedback: str = "",
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
-    slack_user_id = split_identity(person)[1]
+    slack_user_id = split_person_id(person)[1]
     try:
         approval = await ExpeditedApproval.get(UUID(approval_id))
     except ValueError:
@@ -326,16 +256,18 @@ async def process_vote(
         async with slack_thread_mutation_lock(
             langgraph_client(), channel_id, thread_ts, purpose=f"expedited:{approval_id}"
         ):
-            outcome = await handle_vote(
-                approval,
-                decision=decision,
-                user=await resolve_person(person),
-                feedback=feedback,
-            )
+            match decision:
+                case "dismiss":
+                    outcome = await dismiss(approval, slack_user_id)
+                case "broadcast":
+                    outcome = await request_broadcast(approval)
+                case _:
+                    outcome = await handle_vote(
+                        approval,
+                        decision=decision,
+                        user=await User.for_person(person),
+                    )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})
         outcome = VoteOutcome("Something went wrong recording your vote. Try again.")
-    if outcome.private:
-        await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)
-    else:
-        await post_slack_thread_reply(channel_id, thread_ts, outcome.message)
+    await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)

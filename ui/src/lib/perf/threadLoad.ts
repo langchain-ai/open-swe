@@ -18,14 +18,24 @@ import { startSpan } from "./trace"
 import type { PerfAttributes, SpanHandle } from "./trace"
 
 const THREAD_PATH_RE =
-  /^\/agents\/(?:local\/)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+  /^\/(agents(?:\/local)?|assistant)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+
+/** Which thread UI rendered the transcript, so the two can be compared on the same span. */
+export type ThreadLoadUi = "agents" | "assistant"
 
 let active: { threadId: string; span: SpanHandle; buildMs: number } | null =
   null
 let navigated = false
 
-function threadIdFromPath(pathname: string): string | null {
-  return THREAD_PATH_RE.exec(pathname)?.[1] ?? null
+function threadFromPath(
+  pathname: string
+): { threadId: string; ui: ThreadLoadUi } | null {
+  const match = THREAD_PATH_RE.exec(pathname)
+  if (!match?.[2]) return null
+  return {
+    threadId: match[2],
+    ui: match[1] === "assistant" ? "assistant" : "agents",
+  }
 }
 
 function current(threadId: string): SpanHandle | null {
@@ -41,7 +51,14 @@ function abandonThreadLoad(reason: string): void {
 subscribeRequestTimings((timing: RequestTiming) => {
   if (!active || active.span.ended) return
   if (active.threadId.toLowerCase() !== timing.threadId) return
-  if (timing.kind !== "thread_detail" && timing.kind !== "thread_state") return
+  if (
+    timing.kind !== "thread_detail" &&
+    timing.kind !== "thread_state" &&
+    timing.kind !== "thread_transcript"
+  )
+    return
+  // The snapshot is the transcript log's hydration request, so it reports under
+  // the same `state_*` attributes the SDK's state fetch does.
   const prefix = timing.kind === "thread_detail" ? "detail" : "state"
   const attributes: PerfAttributes = {
     [`${prefix}_ttfb_ms`]: Math.round(timing.ttfbMs),
@@ -56,7 +73,8 @@ subscribeRequestTimings((timing: RequestTiming) => {
 
 function beginThreadLoad(
   threadId: string,
-  source: "navigation" | "page_load"
+  source: "navigation" | "page_load",
+  ui: ThreadLoadUi
 ): void {
   if (typeof window === "undefined") return
   if (current(threadId)) return
@@ -66,7 +84,7 @@ function beginThreadLoad(
     buildMs: 0,
     span: startSpan(
       "thread_load",
-      { source, cold: source === "page_load" },
+      { source, cold: source === "page_load", ui },
       source === "page_load" ? { startedAt: 0 } : undefined
     ),
   }
@@ -79,9 +97,10 @@ export function onRouterNavigation(
 ): void {
   if (typeof window === "undefined") return
   navigated = true
-  const to = threadIdFromPath(toPathname)
-  const from = fromPathname ? threadIdFromPath(fromPathname) : null
-  if (to && to !== from) beginThreadLoad(to, "navigation")
+  const to = threadFromPath(toPathname)
+  const from = fromPathname ? threadFromPath(fromPathname) : null
+  if (to && to.threadId !== from?.threadId)
+    beginThreadLoad(to.threadId, "navigation", to.ui)
   else if (!to && active) abandonThreadLoad("navigated_away")
 }
 
@@ -89,9 +108,12 @@ export function onRouterNavigation(
  * Page hook: makes sure a span exists once the thread page mounts. Without a
  * prior client navigation this is a full page load, measured from time origin.
  */
-export function ensureThreadLoad(threadId: string): void {
+export function ensureThreadLoad(
+  threadId: string,
+  ui: ThreadLoadUi = "agents"
+): void {
   if (current(threadId)) return
-  beginThreadLoad(threadId, navigated ? "navigation" : "page_load")
+  beginThreadLoad(threadId, navigated ? "navigation" : "page_load", ui)
 }
 
 export function threadDetailResolved(

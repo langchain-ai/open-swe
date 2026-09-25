@@ -4,7 +4,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest
+from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -105,7 +105,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         "open_pull_request",
         "http_request",
         "background_execute",
-        "slack_thread_reply",
+        "slack_reply",
         "manage_incident",
     }
     assert {"record_incident_report", "search_incidents"} <= names
@@ -134,7 +134,16 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     subagent = result["subagents"][0]
     subagent_names = {_registered_tool_name(tool) for tool in subagent["tools"]}
     assert ("open_pull_request" in subagent_names) is explicit
-    assert not (runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}) & subagent_names
+    tool_guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
+    tool_handler = AsyncMock()
+    for name in runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}:
+        request = MagicMock(spec=ToolCallRequest)
+        request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
+        response = await tool_guard.awrap_tool_call(request, tool_handler)
+        assert isinstance(response, ToolMessage)
+        assert response.tool_call_id == name
+        assert "inside a subagent" in response.content
+    tool_handler.assert_not_awaited()
     guard = next(
         item for item in subagent["middleware"] if isinstance(item, runtime.IncidentMiddleware)
     )
@@ -172,6 +181,11 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     posted = AsyncMock(return_value=("9.0", None))
     monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
+    # The scripted model ends its turn in plain text, so the reply requirement
+    # posts on its behalf; that path is covered in its own suite.
+    monkeypatch.setattr(
+        "agent.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
+    )
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
     )

@@ -189,6 +189,8 @@ class GitHubProxyRule(TypedDict):
 
 
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
+    if not github_token:
+        return []
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [
@@ -198,8 +200,8 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
             "headers": [
                 {
                     "name": "Authorization",
-                    "type": "opaque" if github_token else "plaintext",
-                    "value": f"Bearer {github_token}" if github_token else "",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
                 }
             ],
             # `gh` refuses to run without a token in its environment even though the
@@ -215,9 +217,7 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
                     "type": "opaque",
                     "value": f"Basic {basic_auth}",
                 }
-            ]
-            if github_token
-            else [],
+            ],
         },
     ]
 
@@ -384,26 +384,17 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def configure_github_proxy(
+async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    thread_id: str | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject managed credentials for outbound traffic.
-
-    Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
-
-    Args:
-        sandbox_name: The sandbox name/ID returned by the LangSmith API.
-        github_token: GitHub token to inject as Authorization header.
-        base_proxy_config: Additional persisted proxy settings to preserve.
-    """
+    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
     api_key = _get_langsmith_api_key()
     if not api_key:
-        logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
+        logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
@@ -417,8 +408,17 @@ async def configure_github_proxy(
         or rule.get("name")
         not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
+    from agent.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    preserved_rules = [
+        rule
+        for rule in preserved_rules
+        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     proxy_config["rules"] = [
         *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
@@ -435,7 +435,7 @@ async def configure_github_proxy(
             )
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-    logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+    logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 
 class WorkspaceServiceURL(BaseModel):
@@ -590,13 +590,13 @@ async def create_langsmith_sandbox(
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await configure_github_proxy(
+            await configure_sandbox_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await configure_github_proxy(backend.id, github_token)
+            await configure_sandbox_proxy(backend.id, github_token)
 
     return backend
 

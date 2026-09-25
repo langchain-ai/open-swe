@@ -84,21 +84,14 @@ export function SkillsPage() {
     }
   }
 
-  const onDelete = async () => {
+  const onDelete = () => {
     if (
       !selectedName ||
       !window.confirm(`Delete ${selectedName}? This cannot be undone.`)
     ) {
       return
     }
-    try {
-      await remove.mutateAsync(selectedName)
-      clear()
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Could not delete skill"
-      )
-    }
+    remove.mutate(selectedName, { onSuccess: clear })
   }
 
   if (skills.isLoading) return <Skeleton className="m-6 h-64 flex-1" />
@@ -252,7 +245,7 @@ export function SkillsPage() {
                         variant="destructive"
                         className="ml-auto"
                         disabled={remove.isPending}
-                        onClick={() => void onDelete()}
+                        onClick={onDelete}
                       >
                         Delete
                       </Button>

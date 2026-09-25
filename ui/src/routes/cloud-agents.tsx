@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
-import type { ModelOption } from "@/lib/api"
+import type { ModelOption, ProfileUpdate } from "@/lib/api"
 import {
   AppShell,
   SettingsNavRow,
@@ -21,17 +21,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
-  buildProfileUpdate,
   useOptions,
+  usePatchProfile,
   useProfile,
   useRepos,
-  useSaveProfile,
 } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
+  head: () => ({ meta: [{ title: pageTitle("Open SWE Agent") }] }),
 })
 
 function CloudAgentsPage() {
@@ -39,7 +40,7 @@ function CloudAgentsPage() {
   const profile = useProfile()
   const options = useOptions()
   const repos = useRepos()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
 
   const [modelId, setModelId] = useState("")
   const [effortChoice, setEffort] = useState("")
@@ -48,7 +49,6 @@ function CloudAgentsPage() {
   const [defaultRepo, setDefaultRepo] = useState("")
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const initialized = useRef(false)
 
   const defaultModels = options.data?.models.filter(
@@ -119,14 +119,8 @@ function CloudAgentsPage() {
   const fallbackModel = defaultAgentModel
   const fallbackEffort = defaultAgentEffort
 
-  const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
-      )
-      .catch((e: Error) => setError(e.message))
-  }
+  const persist = (patch: Partial<ProfileUpdate>) =>
+    save.patch(patch, fallbackModel, fallbackEffort)
 
   const persistDefaults = () => {
     persist({
@@ -177,6 +171,19 @@ function CloudAgentsPage() {
                   <SelectItem value="disabled">Disabled</SelectItem>
                 </SelectContent>
               </Select>
+            }
+          />
+          <SettingsRow
+            label="Recent working contexts"
+            description="Include a filtered digest of your recent threads in agent runs."
+            control={
+              <Switch
+                checked={profile.data?.recent_thread_context_enabled ?? false}
+                onCheckedChange={(v) =>
+                  persist({ recent_thread_context_enabled: v })
+                }
+                disabled={profile.isLoading || save.isPending}
+              />
             }
           />
           <SettingsRow
@@ -343,12 +350,12 @@ function CloudAgentsPage() {
       <SettingsSection title="Slack">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Keep my DM as one conversation"
+            label="Concierge mode"
             description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
             control={
               <Switch
-                checked={profile.data?.dm_session_enabled ?? false}
-                onCheckedChange={(v) => persist({ dm_session_enabled: v })}
+                checked={profile.data?.concierge_mode ?? false}
+                onCheckedChange={(v) => persist({ concierge_mode: v })}
               />
             }
           />
@@ -362,8 +369,6 @@ function CloudAgentsPage() {
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
       </SettingsSection>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
   )
 }

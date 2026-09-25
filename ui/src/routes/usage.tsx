@@ -19,12 +19,15 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRatePayload,
+  PRMergeRateResponse,
   ReviewerStatsPayload,
   SortDirection,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -39,14 +42,21 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
+import {
+  buildUsageDiagnostics,
+  metricAvailability,
+  type MetricAvailability,
+} from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Usage") }] }),
   component: UsagePage,
 })
 
@@ -231,15 +241,34 @@ function UsageAnalyticsPeriod({
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
-  const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  // A refresh that fails keeps the last successful report visible, but the
+  // failure stays announced in the coverage details until one succeeds —
+  // manual or automatic (the query also refetches on interval/focus).
+  const [reportError, setReportError] = useState<ApiError | null>(null)
+  const report = usePRMergeRateReport(
+    activePeriod,
+    login,
+    isAdmin,
+    setReportError
+  )
   const refreshing = leaderboard.isFetching || report.isFetching
   const refreshNow = () => {
     void leaderboard.refetch()
-    void report.refetch()
+    // refetch() resolves on failure too, so the error has to come off the result.
+    void report.refetch().then((result) => {
+      const error = result.error
+      setReportError(
+        error == null
+          ? null
+          : error instanceof ApiError
+            ? error
+            : new ApiError(0, "unknown")
+      )
+    })
   }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
-    report.isError ? undefined : report.data,
+    report.isError ? undefined : report.data?.payload,
   ].filter((data): data is NonNullable<typeof data> => data != null)
 
   return (
@@ -386,8 +415,13 @@ function UsageAnalyticsPeriod({
       </SettingsSection>
       <AnalyticsCoverage
         reports={metadata}
+        reportPayload={report.data?.payload ?? null}
         refreshing={refreshing}
         onRefresh={refreshNow}
+        period={activePeriod}
+        reportFetchedAt={report.data?.fetchedAt ?? null}
+        reportServerAsOf={report.data?.payload.as_of ?? null}
+        reportRefreshError={report.isError && !report.data ? null : reportError}
       />
     </>
   )
@@ -395,12 +429,26 @@ function UsageAnalyticsPeriod({
 
 function AnalyticsCoverage({
   reports,
+  reportPayload,
   refreshing,
   onRefresh,
+  period,
+  reportFetchedAt,
+  reportServerAsOf,
+  reportRefreshError,
 }: {
   reports: AnalyticsMetadata[]
+  /** The retained PR report payload; survives a failed refresh even when `reports` excludes it. */
+  reportPayload: PRMergeRatePayload | null
   refreshing: boolean
   onRefresh: () => void
+  period: UsageLeaderboardPeriod
+  /** When this browser last received the PR report; separate from the server-side `as_of`. */
+  reportFetchedAt: string | null
+  /** The PR report's own server-side as_of; never another report's. */
+  reportServerAsOf: string | null
+  /** Failed manual refresh while the last good report stays on screen. */
+  reportRefreshError: ApiError | null
 }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
@@ -479,6 +527,30 @@ function AnalyticsCoverage({
         </summary>
         <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
           <p>
+            Period: {PERIOD_LABELS[period]} · PR report as of{" "}
+            {reportServerAsOf ? (
+              <time dateTime={reportServerAsOf}>
+                {new Date(reportServerAsOf).toLocaleString()}
+              </time>
+            ) : (
+              "Unavailable"
+            )}{" "}
+            (server); last fetched by this browser:{" "}
+            {reportFetchedAt
+              ? new Date(reportFetchedAt).toLocaleString()
+              : "Unavailable"}
+            .
+          </p>
+          {reportRefreshError ? (
+            <p className="text-destructive">
+              Last PR report refresh failed (
+              {reportRefreshError.status > 0
+                ? `HTTP ${reportRefreshError.status}`
+                : "network error"}
+              ). The report shown is from the last successful fetch above.
+            </p>
+          ) : null}
+          <p>
             Reporting since{" "}
             <time dateTime={latest.reporting_cutover_at}>
               {new Date(latest.reporting_cutover_at).toLocaleString()}
@@ -495,26 +567,58 @@ function AnalyticsCoverage({
             {hasFailedEvents
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
-            Reports checked {new Date(latest.as_of).toLocaleString()}.
           </p>
+          <CopyDiagnosticsButton
+            getDiagnostics={() =>
+              buildUsageDiagnostics({
+                period,
+                reports,
+                reportServerAsOf,
+                reportFetchedAt,
+                reportRefreshError,
+                avgDeliverySeconds: avgDeliveryAvailability(reportPayload),
+              })
+            }
+          />
         </div>
       </details>
     </div>
   )
 }
 
+/** Delivery-timing availability of the retained PR report, even while a refresh fails. */
+function avgDeliveryAvailability(
+  payload: PRMergeRatePayload | null
+): MetricAvailability | null {
+  if (!payload || payload.status !== "ready" || !payload.cohorts.length) {
+    return null
+  }
+  const cohorts = payload.cohorts
+  const supported = cohorts.some((cohort) => "avg_delivery_seconds" in cohort)
+  const values = cohorts
+    .map((cohort) =>
+      "avg_delivery_seconds" in cohort ? cohort.avg_delivery_seconds : null
+    )
+    .filter((value): value is number => typeof value === "number")
+  return metricAvailability(supported, values[0] ?? null)
+}
+
 function usePRMergeRateReport(
   period: UsageLeaderboardPeriod,
   login: string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  onRefreshErrorChange: (error: ApiError | null) => void
 ) {
   return useQuery({
     queryKey: ["prMergeRateByModel", period, login, isAdmin],
-    queryFn: () => api.prMergeRateByModel(period),
+    queryFn: (): Promise<PRMergeRateResponse> => api.prMergeRateByModel(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
+    // Manual refreshes are not the only successes: automatic interval/focus
+    // fetches must also clear a retained failure announcement.
+    meta: { onRefreshErrorChange },
   })
 }
 
@@ -523,7 +627,8 @@ function PRMergeRateSection({
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
 }) {
-  const data = report.isError ? undefined : report.data
+  const data = report.data?.payload
+  const failed = report.isError && !data
   const emptyMessage =
     data?.status === "not_started"
       ? "No analytics records have been captured since the reporting cutover yet."
@@ -545,7 +650,7 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
         </div>
-      ) : report.isError ? (
+      ) : failed ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
             {report.error instanceof ApiError && report.error.status === 503
@@ -706,8 +811,21 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
 }
 
 function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+  if (!("avg_delivery_seconds" in cohort)) {
+    // A backend that predates the metric has no key for it at all.
+    return (
+      <span
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        title="Metric unavailable from this backend"
+        aria-label="Avg time to PR: metric unavailable from this backend"
+        tabIndex={0}
+      >
+        —
+      </span>
+    )
+  }
   if (cohort.avg_delivery_seconds == null) {
-    return <span>—</span>
+    return <span title="No PRs with valid timing in this group">—</span>
   }
   return (
     <Tooltip>
@@ -841,7 +959,7 @@ function PRMergeRateTable({
                     setSort(nextSort)
                     setPage(1)
                   }}
-                  className={`${index === 0 ? "pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "sticky left-0 z-10 bg-card pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -857,7 +975,7 @@ function PRMergeRateTable({
               return (
                 <Fragment key={key}>
                   <tr>
-                    <td className="px-4 py-3">
+                    <td className="sticky left-0 z-10 bg-card px-4 py-3">
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
                           <button
@@ -913,7 +1031,7 @@ function PRMergeRateTable({
                           key={`${key}-${effort.effort ?? "unknown"}`}
                           className="bg-muted/35"
                         >
-                          <td className="py-3 pr-2 pl-11 font-medium">
+                          <td className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 font-medium">
                             {formatEffort(effort.effort)}
                           </td>
                           <PRMergeRateCells
@@ -998,6 +1116,7 @@ function usageColumns(
       } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
+    { key: "feedback_given", label: "# Feedback Given", align: "right" },
   ]
 }
 
@@ -1111,6 +1230,12 @@ function PRMergeRateCells({
             {cohort.distance_sample_size === 1 ? "" : "s"} measured
           </TooltipPopup>
         </Tooltip>
+        {(cohort.distance_sample_size ?? 0) > 0 &&
+          (cohort.distance_sample_size ?? 0) < 5 && (
+            <div className="text-xs text-amber-600 dark:text-amber-400">
+              Small sample
+            </div>
+          )}
       </td>
       <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
@@ -1166,7 +1291,7 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -1179,7 +1304,7 @@ function UsageTable({
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
               >
                 <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="px-2 py-3">
+                <td className="sticky left-0 z-10 bg-card px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
@@ -1228,10 +1353,13 @@ function UsageTable({
                   {(row.merged_prs_per_thread ?? 0).toFixed(2)}
                 </td>
                 <td
-                  className="px-4 py-3 text-right tabular-nums"
+                  className="px-2 py-3 text-right tabular-nums"
                   title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
                 >
                   {formatNumber(row.agent_loc)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatNumber(row.feedback_given)}
                 </td>
               </tr>
             ))}
@@ -1467,6 +1595,19 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
+          {row.is_top_feedback_contributor && (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Top feedback contributor"
+                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                <span aria-hidden="true">🏆</span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                Most feedback given in the selected date range.
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You

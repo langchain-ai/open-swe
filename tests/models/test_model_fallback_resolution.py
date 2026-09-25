@@ -24,15 +24,14 @@ from agent.dashboard.workspace_settings import (
     normalize_workspace_settings_for_response,
 )
 
-STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
-SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
-SUPPORTED_OPENAI = "openai:gpt-5.6-sol"
+STALE_ANTHROPIC = "anthropic:claude-opus-5"
+SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5-5"
+SUPPORTED_OPENAI = "openai:gpt-6-sol"
 SUPPORTED_ASTRA = "openai:gpt-6-astra"
 SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
-SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
 FABLE = "anthropic:claude-fable-5-1"
 
 
@@ -42,7 +41,7 @@ FABLE = "anthropic:claude-fable-5-1"
         ("", "", (SUPPORTED_OPENAI, "medium")),
         ("", "high", (SUPPORTED_OPENAI, "high")),
         (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
-        (" anthropic:claude-haiku-4-5 ", "", ("anthropic:claude-haiku-4-5", "none")),
+        (f" {SUPPORTED_ANTHROPIC} ", "", (SUPPORTED_ANTHROPIC, "medium")),
         (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
     ],
 )
@@ -76,15 +75,23 @@ def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert is_deprecated_model(model_id)
 
 
-def test_fireworks_glm_5_3_replaces_glm_5_2() -> None:
-    assert any(model["id"] == SUPPORTED_GLM for model in SUPPORTED_MODELS)
-
-
-def test_deprecated_models_defer_to_defaults() -> None:
-    for model_id in (DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM):
-        assert normalize_model_choice(model_id, "high") == (None, None)
-        assert provider_fallback_pair(model_id, "high") is None
-    assert normalize_model_choice("mystery:model", "high") == (None, None)
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        DEPRECATED_OPENAI,
+        DEPRECATED_ANTHROPIC,
+        DEPRECATED_GLM,
+        "fireworks:accounts/fireworks/models/glm-5p3",
+        "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+    ],
+)
+def test_deprecated_models_defer_to_defaults(model_id: str) -> None:
+    assert normalize_model_choice(model_id, "high") == (None, None)
+    assert provider_fallback_pair(model_id, "high") is None
+    assert normalize_profile_overrides({"default_model": model_id, "reasoning_effort": "high"}) == (
+        None,
+        None,
+    )
 
 
 def test_supported_models_do_not_hardcode_context_windows() -> None:
@@ -105,9 +112,8 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
     assert all("context_window" not in model for model in models)
     assert {model["id"]: model.get("context_window") for model in enriched} == {
         "openai:gpt-6-astra": 272_000,
-        "openai:gpt-5.6-sol": 272_000,
-        "openai:gpt-5.6-terra": 272_000,
-        "openai:gpt-5.6-luna": 272_000,
+        "openai:gpt-6-sol": 272_000,
+        "openai:gpt-6-luna": 272_000,
         SUPPORTED_KIMI: 1_048_576,
     }
 
@@ -146,22 +152,31 @@ def test_profile_update_defaults_draft_prs_to_none_for_legacy_clients() -> None:
     assert update.draft_prs is None
 
 
-def test_profile_response_and_override_defer_deprecated_models() -> None:
+@pytest.mark.parametrize(
+    ("model_id", "effort"),
+    [
+        (DEPRECATED_GLM, "high"),
+        ("anthropic:claude-sonnet-5", "high"),
+        ("anthropic:claude-haiku-4-5", "none"),
+    ],
+)
+def test_profile_response_and_override_defer_deprecated_models(model_id: str, effort: str) -> None:
     profile = normalize_profile_for_response(
         {
-            "default_model": DEPRECATED_GLM,
-            "reasoning_effort": "high",
-            "default_subagent_model": DEPRECATED_OPENAI,
-            "subagent_reasoning_effort": "low",
+            "default_model": model_id,
+            "reasoning_effort": effort,
+            "default_subagent_model": model_id,
+            "subagent_reasoning_effort": effort,
         }
     )
     assert "default_model" not in profile
     assert "reasoning_effort" not in profile
     assert "default_subagent_model" not in profile
     assert "subagent_reasoning_effort" not in profile
-    assert normalize_profile_overrides(
-        {"default_model": DEPRECATED_GLM, "reasoning_effort": "high"}
-    ) == (None, None)
+    assert normalize_profile_overrides({"default_model": model_id, "reasoning_effort": effort}) == (
+        None,
+        None,
+    )
 
 
 def test_workspace_settings_update_rejects_unknown_openai_model() -> None:
@@ -180,11 +195,19 @@ def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> 
         )
 
 
-def test_workspace_settings_response_defers_deprecated_models() -> None:
+@pytest.mark.parametrize(
+    ("model_id", "effort"),
+    [
+        (DEPRECATED_GLM, "high"),
+        ("anthropic:claude-sonnet-5", "high"),
+        ("anthropic:claude-haiku-4-5", "none"),
+    ],
+)
+def test_workspace_settings_response_defers_deprecated_models(model_id: str, effort: str) -> None:
     settings = normalize_workspace_settings_for_response(
         {
-            "default_agent_model": DEPRECATED_GLM,
-            "default_agent_reasoning_effort": "high",
+            "default_agent_model": model_id,
+            "default_agent_reasoning_effort": effort,
         }
     )
 
@@ -253,8 +276,8 @@ def test_gate_fable_swaps_to_opus_when_disabled() -> None:
 
 
 def test_gate_fable_leaves_non_fable_ids_alone() -> None:
-    assert gate_fable_model("openai:gpt-5.6-sol", "high", fable_enabled=False) == (
-        "openai:gpt-5.6-sol",
+    assert gate_fable_model("openai:gpt-6-sol", "high", fable_enabled=False) == (
+        "openai:gpt-6-sol",
         "high",
     )
 

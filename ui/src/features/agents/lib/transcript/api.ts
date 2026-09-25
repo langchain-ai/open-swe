@@ -1,19 +1,37 @@
 /**
- * Write endpoints for the transcript event log, plus the image fetch its
- * attachments need. Writes are the same v3 `run.start` command `useStream`
- * posts, so the server's existing enrichment (ownership, model, thread
- * creation) applies unchanged.
+ * Read and write endpoints for the transcript event log. Reads never touch
+ * LangGraph; writes are the same v3 `run.start` command `useStream` posts, so
+ * the server's existing enrichment (ownership, model, thread creation) applies
+ * unchanged.
  */
 
-import { AgentsApiError } from "@/features/agents/lib/api"
+import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+import {
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  networkError,
+  newRequestId,
+} from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 import type { ImageChunk } from "@/features/agents/lib/types"
+import type {
+  StoredEvent,
+  ToolOutputResponse,
+  TranscriptSnapshot,
+  TranscriptTurnPage,
+} from "./types"
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
-async function apiError(response: Response): Promise<AgentsApiError> {
+function transcriptPath(threadId: string, suffix = ""): string {
+  return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
+}
+
+async function apiError(
+  response: Response,
+  requestId?: string
+): Promise<AgentsApiError> {
   let message = response.statusText
   try {
     const body: unknown = await response.json()
@@ -26,7 +44,48 @@ async function apiError(response: Response): Promise<AgentsApiError> {
   } catch {
     // Not a JSON error body; the status text is all we have.
   }
-  return new AgentsApiError(response.status, message)
+  return new AgentsApiError(response.status, message, requestId)
+}
+
+/** The whole thread as of `version`; 404 for threads that predate the log. */
+export function fetchTranscript(threadId: string): Promise<TranscriptSnapshot> {
+  return agentsRequest<TranscriptSnapshot>(transcriptPath(threadId))
+}
+
+/**
+ * The page of turns immediately older than `cursor`. The cursor is opaque and
+ * thread-scoped: the server rejects one minted for another thread rather than
+ * serving a first page that would duplicate history.
+ */
+export function fetchOlderTurns(
+  threadId: string,
+  cursor: string,
+  signal?: AbortSignal
+): Promise<TranscriptTurnPage> {
+  return agentsRequest<TranscriptTurnPage>(
+    transcriptPath(threadId, `/turns?before=${encodeURIComponent(cursor)}`),
+    signal ? { signal } : {}
+  )
+}
+
+/** Full output for one tool call. The snapshot carries only a preview. */
+export function fetchToolOutput(
+  threadId: string,
+  toolCallId: string
+): Promise<ToolOutputResponse> {
+  return agentsRequest<ToolOutputResponse>(
+    transcriptPath(
+      threadId,
+      `/tool-calls/${encodeURIComponent(toolCallId)}/output`
+    )
+  )
+}
+
+/** Where one image attachment's bytes are served from. */
+export function attachmentUrl(threadId: string, attachmentId: string): string {
+  return dashboardApiUrl(
+    transcriptPath(threadId, `/attachments/${encodeURIComponent(attachmentId)}`)
+  )
 }
 
 /**
@@ -40,7 +99,98 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   return await response.blob()
 }
 
-interface RunStartMessage {
+export interface TranscriptEventHandlers {
+  onEvent: (event: StoredEvent) => void
+  /** The replay gap was too large to send event by event; reset to this. */
+  onSnapshot: (snapshot: TranscriptSnapshot) => void
+  /** Replay finished and the connection is now live. */
+  onSynchronized: () => void
+  /**
+   * The thread is gone, or the reader may no longer see it. The server ends
+   * the stream either way; do not reopen it.
+   */
+  onDeleted: () => void
+  onOpen?: () => void
+  /** The connection dropped or a frame was unreadable. Reopening is the caller's call. */
+  onError: (error: unknown) => void
+}
+
+export interface TranscriptEventStream {
+  close: () => void
+}
+
+/**
+ * Subscribe to everything after `after`. Same-origin (or the configured API
+ * origin) with the session cookie, which is all `EventSource` can carry — the
+ * route takes no headers for that reason.
+ *
+ * The stream is not reopened here: `EventSource`'s own retry would replay from
+ * the stale `after` it was opened with, so the caller closes it and reopens
+ * from the last applied version instead.
+ */
+export function openTranscriptEvents(
+  threadId: string,
+  after: number,
+  handlers: TranscriptEventHandlers
+): TranscriptEventStream {
+  const url = `${dashboardApiUrl(transcriptPath(threadId, "/events"))}?after=${after}`
+  const source = new EventSource(url, { withCredentials: true })
+  let closed = false
+
+  const close = () => {
+    closed = true
+    source.close()
+  }
+
+  const parse = <T>(event: MessageEvent<string>, apply: (value: T) => void) => {
+    if (closed) return
+    try {
+      apply(JSON.parse(event.data) as T)
+    } catch (error) {
+      handlers.onError(error)
+    }
+  }
+
+  source.addEventListener("transcript", (event) =>
+    parse<StoredEvent>(event, handlers.onEvent)
+  )
+  source.addEventListener("snapshot", (event) =>
+    parse<TranscriptSnapshot>(event, handlers.onSnapshot)
+  )
+  // Both frames carry an empty body; their arrival is the whole signal.
+  source.addEventListener("synchronized", () => {
+    if (!closed) handlers.onSynchronized()
+  })
+  // Both end the stream, and `EventSource` would treat that end as a drop
+  // worth retrying, so the source is closed before the handler can ask for
+  // more. A thread the reader can no longer see is surfaced the way a missing
+  // one already is: the read API answers both with a 404.
+  const ended = () => {
+    if (closed) return
+    close()
+    handlers.onDeleted()
+  }
+  source.addEventListener("deleted", ended)
+  source.addEventListener("revoked", ended)
+  source.addEventListener("open", () => {
+    if (!closed) handlers.onOpen?.()
+  })
+  source.addEventListener("error", () => {
+    if (closed) return
+    // `EventSource` gives no detail beyond readyState, so report the state.
+    handlers.onError(
+      new Error(
+        source.readyState === EventSource.CLOSED
+          ? "Transcript event stream closed"
+          : "Transcript event stream interrupted"
+      )
+    )
+  })
+
+  return { close }
+}
+
+export interface RunStartMessage {
   /** Client-minted id; the graph's HumanMessage and the log's message row share it. */
   id: string
   text: string
@@ -51,6 +201,7 @@ export interface RunStartCommand {
   id: number
   method: "run.start"
   params: {
+    multitask_strategy?: "enqueue"
     input: { messages: Array<Record<string, unknown>> } | null
     config: { configurable: Record<string, unknown> }
     assistant_id: string
@@ -68,16 +219,20 @@ export function runStartCommand({
   threadId,
   message,
   configurable = {},
+  enqueue = false,
 }: {
   threadId: string
   /** Omitted for a message-less run such as `/offload`. */
   message?: RunStartMessage
   configurable?: Record<string, unknown>
+  /** Queue behind the live run instead of steering it. */
+  enqueue?: boolean
 }): RunStartCommand {
   return {
     id: 1,
     method: "run.start",
     params: {
+      ...(enqueue ? { multitask_strategy: "enqueue" as const } : {}),
       input: message
         ? {
             messages: [
@@ -119,21 +274,28 @@ export async function startRun(
   threadId: string,
   command: RunStartCommand
 ): Promise<void> {
+  const requestId = newRequestId()
   const response = await timedFetch(
     dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
     {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+      },
       body: JSON.stringify(command),
     }
-  )
-  if (!response.ok) throw await apiError(response)
+  ).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
+  })
+  if (!response.ok) throw await apiError(response, requestId)
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(
       response.status,
-      payload.message ?? payload.error ?? "run.start failed"
+      payload.message ?? payload.error ?? "run.start failed",
+      requestId
     )
   }
 }

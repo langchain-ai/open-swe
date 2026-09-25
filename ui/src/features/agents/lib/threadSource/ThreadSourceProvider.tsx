@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react"
 
 import { useAgentStreamSource } from "./useAgentStreamSource"
+import { useTranscriptSource } from "./useTranscriptSource"
 import type { ReactNode } from "react"
 import type { ThreadSource } from "./types"
 
@@ -33,17 +34,40 @@ function StreamSource({
   )
 }
 
-/**
- * Picks the thread's source. Every thread is served by the SDK stream for now;
- * the seam is what lets a second implementation be added without any reader
- * under the thread page knowing which one it is reading.
- */
-export function ThreadSourceProvider({
+function TranscriptSource({
   threadId,
   children,
 }: {
   threadId: string
   children: ReactNode
 }) {
-  return <StreamSource threadId={threadId}>{children}</StreamSource>
+  const source = useTranscriptSource(threadId)
+  return (
+    <ThreadSourceContext.Provider value={source}>
+      {children}
+    </ThreadSourceContext.Provider>
+  )
+}
+
+/**
+ * Picks the thread's source. The component identity differs per kind, so each
+ * implementation owns its own hooks and neither runs for the other's threads:
+ * a transcript thread never opens an SDK stream, because only `StreamSource`
+ * mounts one and the page renders this once the thread detail has resolved.
+ */
+export function ThreadSourceProvider({
+  threadId,
+  transcript,
+  children,
+}: {
+  threadId: string
+  /** True for threads whose metadata says the event log serves them. */
+  transcript: boolean
+  children: ReactNode
+}) {
+  return transcript ? (
+    <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
+  ) : (
+    <StreamSource threadId={threadId}>{children}</StreamSource>
+  )
 }

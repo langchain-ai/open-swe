@@ -16,7 +16,7 @@ code runs for real.
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Slack webhook → `process_slack_mention` → run dispatch           | **real** (`agent.webapp`)                                                  |
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
-| `open_pull_request`, `slack_thread_reply` tools                  | **real**                                                                   |
+| `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
@@ -29,6 +29,8 @@ code runs for real.
 | GitHub App token mint + installation lookup, `api.github.com/user` identity | stubbed (offline)                                              |
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
+| Review page chat (`chat` graph) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
+| Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |
 | `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
 The fake GitHub/Slack stores are the single source of truth the mock UIs render,

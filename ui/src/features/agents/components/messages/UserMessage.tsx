@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
 
@@ -10,7 +10,13 @@ import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({ message }: { message: Message }) {
+export function UserMessage({
+  message,
+  showUserName = true,
+}: {
+  message: Message
+  showUserName?: boolean
+}) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -65,12 +71,22 @@ export function UserMessage({ message }: { message: Message }) {
             )}
           </button>
         ) : (
-          (message.structuredSenderName || isSlack) && (
+          ((showUserName && message.structuredSenderName) ||
+            isSlack ||
+            message.structuredSenderIsBot) && (
             <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
               {isSlack && (
                 <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
               )}
-              {message.structuredSenderName && (
+              {message.structuredSenderIsBot && (
+                <Bot
+                  className="size-3"
+                  role="img"
+                  aria-label="Bot"
+                  data-testid="user-message-bot-icon"
+                />
+              )}
+              {showUserName && message.structuredSenderName && (
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (
@@ -141,7 +157,18 @@ export function UserMessage({ message }: { message: Message }) {
                 : "text-muted-foreground"
             }`}
           >
-            {message.deliveryStatus === "failed" ? "Failed to send" : "Sending"}
+            {message.deliveryStatus !== "failed" ? (
+              "Sending"
+            ) : (
+              <span
+                title={message.deliveryError}
+                data-testid="user-message-delivery-error"
+              >
+                {message.deliveryError
+                  ? `Failed to send · ${message.deliveryError}`
+                  : "Failed to send"}
+              </span>
+            )}
           </div>
         )}
         {!message.timestampIsFallback && (!isSystem || expanded) && (

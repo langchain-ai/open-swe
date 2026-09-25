@@ -72,6 +72,24 @@ class ActionsBlock(TypedDict):
     elements: list[ButtonElement]
 
 
+class FeedbackButton(TypedDict):
+    text: PlainText
+    value: str
+    accessibility_label: str
+
+
+class FeedbackButtons(TypedDict):
+    type: Literal["feedback_buttons"]
+    action_id: str
+    positive_button: FeedbackButton
+    negative_button: FeedbackButton
+
+
+class ContextActionsBlock(TypedDict):
+    type: Literal["context_actions"]
+    elements: list[FeedbackButtons]
+
+
 class PlainTextInput(TypedDict):
     type: Literal["plain_text_input"]
     action_id: str
@@ -88,7 +106,15 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
-type Block = SectionBlock | ContextBlock | DividerBlock | ImageBlock | ActionsBlock | InputBlock
+type Block = (
+    SectionBlock
+    | ContextBlock
+    | DividerBlock
+    | ImageBlock
+    | ActionsBlock
+    | ContextActionsBlock
+    | InputBlock
+)
 
 
 class ModalView(TypedDict):

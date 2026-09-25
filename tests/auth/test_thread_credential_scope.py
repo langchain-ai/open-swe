@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
+from agent import credential_scope
 from agent.dashboard import profiles
 from agent.github import thread_token
 from agent.github import token as auth
@@ -172,6 +173,30 @@ async def test_background_completion_cannot_publish_with_saved_user_identity(
         with pytest.raises(RuntimeError, match="Background"):
             await opr._resolve_pr_author_token()
     credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_user_followup_can_publish_after_background_completion(
+    monkeypatch, thread_metadata, credentials, source
+):
+    from agent.dispatch import prepare_run_config
+
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    background_config = config(source=source)
+    background_config["configurable"]["background_task_completion"] = True
+    background_config = prepare_run_config(background_config, None)
+    monkeypatch.setattr("agent.run_config.get_config", lambda: background_config)
+
+    with pytest.raises(RuntimeError, match="Background"):
+        await opr._resolve_pr_author_token()
+    credentials.assert_not_awaited()
+
+    followup = prepare_run_config(config(source=source, login="bob"), None)
+    background_config["configurable"].update(followup["configurable"])
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
@@ -351,3 +376,51 @@ async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, cre
         == "bot-token"
     )
     personal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_pr_opens_as_a_named_participant(monkeypatch, thread_metadata, credentials):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata["participant_logins"] = {"alice": True, "bob": True}
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+
+    assert await opr._resolve_pr_author_token("alice") == ("alice-token", "user")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("participants", [{"bob": True}, {}, None])
+async def test_public_pr_rejects_an_author_who_never_posted(
+    monkeypatch, thread_metadata, credentials, participants
+):
+    """A named author is only ever someone who could have opened the PR themselves."""
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    if participants is not None:
+        thread_metadata["participant_logins"] = participants
+    monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
+
+    with pytest.raises(credential_scope.PrAuthorNotAParticipant):
+        await opr._resolve_pr_author_token("mallory")
+    credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["private", "system"])
+async def test_a_named_author_cannot_borrow_a_pinned_thread(
+    monkeypatch, thread_metadata, credentials, scope
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata["participant_logins"] = {"alice": True, "bob": True}
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    monkeypatch.setattr(
+        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
+    )
+    if scope == "private":
+        thread_metadata["visibility"] = "private"
+        monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="alice"))
+        assert await opr._resolve_pr_author_token("bob") == ("alice-token", "user")
+    else:
+        thread_metadata.update(owner_type="system")
+        thread_metadata.pop("owner_login")
+        monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="alice"))
+        assert await opr._resolve_pr_author_token("bob") == ("bot-token", "bot")

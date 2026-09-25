@@ -52,6 +52,7 @@ from agent.github.comments import (
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
@@ -193,7 +194,6 @@ __all__ = [
     "get_thread_metadata_safe",
     "get_thread_workspace",
     "get_thread_model_choice",
-    "get_thread_plan_mode",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
     "is_repo_allowed",
@@ -207,7 +207,6 @@ __all__ = [
     "review_comment_reply_parent_id",
     "reviewer_token_for_repo",
     "run_id_for_logging",
-    "set_thread_plan_mode",
     "store_current_reviewer_run_id",
     "thread_exists",
     "trigger_or_queue_run",
@@ -228,6 +227,7 @@ __all__ = [
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
@@ -679,7 +679,7 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    OEP-0003 puts a named repository ahead of a Slack channel's workspace
+    A named repository takes precedence over a Slack channel's workspace
     binding and a deployment-wide default behind it, so routing needs to tell
     the two apart. ``explicit`` is true only for a repository the thread or the
     channel description named.
@@ -820,23 +820,6 @@ async def ensure_thread_exists_for_metadata(
         return False
 
 
-async def get_thread_plan_mode(thread_id: str) -> bool | None:
-    """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            return None
-        logger.warning("Failed to fetch plan-mode metadata for thread %s", thread_id)
-        return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict):
-        return None
-    value = metadata.get("plan_mode")
-    return value if isinstance(value, bool) else None
-
-
 async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
     """Return the explicit model choice persisted for a thread, if any."""
     langgraph_client = get_client(url=LANGGRAPH_URL)
@@ -888,27 +871,6 @@ async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
     return (
         await workspace_for_repo(repo_config["owner"], repo_config["name"])
     ) or DEFAULT_WORKSPACE_SLUG
-
-
-async def set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
-    """Persist the plan-mode flag onto thread metadata."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
-        )
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            try:
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"plan_mode": bool(enabled)},
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to create thread %s while persisting plan_mode", thread_id)
-            return
-        logger.exception("Failed to persist plan_mode for thread %s", thread_id)
 
 
 async def post_account_link_prompt(

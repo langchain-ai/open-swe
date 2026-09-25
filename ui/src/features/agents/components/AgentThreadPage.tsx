@@ -12,12 +12,9 @@ import {
   threadDetailFailed,
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
+import { pageTitle } from "@/lib/pageTitle"
 
-export function AgentThreadPage(props: {
-  threadId: string
-  active?: boolean
-  autoFocusComposer?: boolean
-}) {
+export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
@@ -38,13 +35,12 @@ export function AgentThreadPage(props: {
 function AgentThreadContent({
   threadId,
   active = true,
-  autoFocusComposer = false,
 }: {
   threadId: string
   active?: boolean
-  autoFocusComposer?: boolean
 }) {
   const threadQuery = useAgentThread(threadId)
+  const transcript = threadQuery.data?.transcript === "v2"
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
   const hasDetail = threadQuery.data !== undefined
@@ -64,10 +60,10 @@ function AgentThreadContent({
 
   useEffect(() => {
     if (!active || !title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
-      if (document.title === documentTitle) document.title = "Open SWE"
+      if (document.title === documentTitle) document.title = pageTitle("Agents")
     }
   }, [active, title])
 
@@ -94,11 +90,8 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <ThreadSourceProvider threadId={threadId}>
-        <AgentThreadView
-          thread={threadQuery.data}
-          autoFocusComposer={autoFocusComposer}
-        />
+      <ThreadSourceProvider threadId={threadId} transcript={transcript}>
+        <AgentThreadView thread={threadQuery.data} />
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )

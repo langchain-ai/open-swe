@@ -17,11 +17,18 @@ from urllib.parse import urlparse
 import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    slack_error,
+    slack_error_details,
+    slack_retry_after,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -407,15 +414,18 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
-async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
         async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
-            "Orphaned Slack reply could not be removed",
+            "Slack message could not be deleted",
             extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
         )
+        return False
+    return True
 
 
 async def _post_slack_message_with_ts(
@@ -458,7 +468,7 @@ async def _post_slack_message_with_ts(
                 and not _threaded_under(data, reply_ts)
                 and not await _slack_thread_exists(channel_id, reply_ts)
             ):
-                await _delete_slack_message(channel_id, message_ts)
+                await delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
@@ -469,7 +479,10 @@ async def _post_slack_message_with_ts(
         return None, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return None, error
 
 
@@ -495,6 +508,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
@@ -916,7 +931,10 @@ async def update_slack_message(
         return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return False, error
 
 
@@ -974,6 +992,34 @@ async def upload_slack_thread_file(
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
         return None, error
+
+
+class _SlackFileInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    mimetype: str = ""
+
+
+async def wait_for_slack_file(
+    file_id: str, *, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Whether Slack finished processing an upload; a block citing it before then is refused."""
+    deadline = time.monotonic() + timeout
+    try:
+        async with SlackClient.bot() as client:
+            while True:
+                response = await client.files_info(file=file_id)
+                if _SlackFileInfo.model_validate(response.get("file") or {}).mimetype:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(interval)
+    except (*SLACK_REQUEST_ERRORS, ValidationError) as exc:
+        logger.warning(
+            "Slack file status check failed",
+            extra={"slack_error": slack_error(exc), "slack_file_id": file_id},
+        )
+        return False
 
 
 SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
@@ -1169,8 +1215,9 @@ async def invite_to_slack_channel(
     )
 
 
-async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
-    """Update or delete an interaction's source message, including ephemeral messages."""
+async def _post_slack_callback(
+    response_url: str, payload: dict[str, Any], path_prefix: str
+) -> bool:
     try:
         parsed = urlparse(response_url)
     except ValueError:
@@ -1178,7 +1225,7 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     if (
         parsed.scheme != "https"
         or parsed.netloc not in {"hooks.slack.com", "hooks.slack-gov.com"}
-        or not parsed.path.startswith("/actions/")
+        or not parsed.path.startswith(path_prefix)
     ):
         return False
     request = httpx2.Request(
@@ -1204,6 +1251,51 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     except httpx2.HTTPError, ValueError:
         logger.warning("Slack interaction response failed")
         return False
+
+
+async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
+    """Update or delete an interaction's source message, including ephemeral messages."""
+    return await _post_slack_callback(response_url, payload, "/actions/")
+
+
+async def acknowledge_slack_command(response_url: str, text: str) -> bool:
+    """Post a slash command's acknowledgement so a later reply can replace it.
+
+    `replace_original` only reaches a message sent through `response_url`, never
+    the body of the command's own HTTP response, so the acknowledgement has to
+    come from here for the answer to take its place.
+    """
+    return await _post_slack_callback(
+        response_url,
+        {"response_type": "ephemeral", "text": text},
+        "/commands/",
+    )
+
+
+async def replace_slack_command_message(
+    response_url: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
+    """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    payload: dict[str, Any] = {
+        "response_type": "ephemeral",
+        "replace_original": True,
+        "text": append_slack_web_link_footer(text, dashboard_url, usage),
+    }
+    updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    if updated_blocks:
+        payload["blocks"] = updated_blocks
+    return await _post_slack_callback(response_url, payload, "/commands/")
+
+
+async def clear_slack_command_message(response_url: str) -> bool:
+    """Remove a slash command's acknowledgement when something else answers instead."""
+    return await _post_slack_callback(response_url, {"delete_original": True}, "/commands/")
 
 
 async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:

@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres tunnel web build-dashboard desktop install-desktop install-checkout swagger
+.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -21,6 +21,9 @@ dev: $(if $(POSTGRES_URI),,postgres)
 
 postgres:
 	docker compose up -d --wait postgres
+
+migration:
+	uv run python scripts/new_migration.py "$(m)"
 
 # UI development in one terminal: Vite (`make web`) and the backend fronting it, so
 # http://localhost:2024 hot-reloads without a build or any cross-origin setup. The two
@@ -68,6 +71,14 @@ install-checkout:
 
 install:
 	uv sync --extra dev
+
+# Single-file `oswe` binary. Bun compiles its own runtime into the output,
+# so the result runs on any machine without Node or Bun installed.
+cli:
+	@command -v bun >/dev/null 2>&1 || { echo 'bun is required: https://bun.com/docs/installation' >&2; exit 1; }
+	pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+	pnpm --filter open-swe-cli run build
+	@echo "Built $(CURDIR)/cli/dist/oswe"
 
 ######################
 # TESTING
@@ -118,6 +129,7 @@ help:
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
+	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
 	@echo 'run                          - run webhook server'
@@ -126,6 +138,7 @@ help:
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
 	@echo 'install-checkout             - install the current checkout of Open SWE Desktop on macOS'
 	@echo 'install                      - install dependencies (incl. dev extras)'
+	@echo 'cli                          - build the oswe CLI binary into cli/dist/oswe'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on agent/ and tests/'

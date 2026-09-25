@@ -1,13 +1,13 @@
-"""The Slack message people vote on: the whole diff plus Approve and Reject."""
+"""The Slack message people vote on: the whole diff plus Approve and Dismiss."""
 
 import json
 
-from agent.expedited_review.approvals import REQUIRED_APPROVALS, ExpeditedApproval
+from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
+    SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
-    ModalView,
     actions,
     button,
     code_block,
@@ -15,55 +15,57 @@ from agent.slack.blocks import (
     divider,
     escape,
     image,
-    modal,
     section,
-    text_input,
 )
 
 BUTTON_TYPE = "expedited_review"
-REJECT_MODAL_CALLBACK = "expedited_review_reject"
-REJECT_FEEDBACK_BLOCK = "expedited_review_feedback"
-REJECT_FEEDBACK_ACTION = "feedback"
 
 _MAX_FILE_SECTIONS = 20
+# Slack refuses a section over 3000 characters, and refusing means no card at all.
+_MAX_PATCH_LINES = 60
+_OVERFLOW_NOTE_RESERVE = 64
 
 
 def _button_value(action: str, approval: ExpeditedApproval) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _vote_summary(approval: ExpeditedApproval) -> str:
-    approvers = approval.approvers
-    if not approvers:
-        return (
-            f"No approvals yet. {REQUIRED_APPROVALS} distinct reviewers with "
-            "write access are needed."
-        )
-    names = ", ".join(f"@{login}" for login in approvers)
-    remaining = max(REQUIRED_APPROVALS - len(approvers), 0)
-    if remaining:
-        return f"Approved by {names}. {remaining} more needed."
-    return f"Approved by {names}."
+def _vote_summary(approval: ExpeditedApproval, author: str) -> str:
+    """``author`` and the approvers are Slack mentions, so none of this is escaped."""
+    if not approval.approvals:
+        return f"Needs one approval from someone other than {author}."
+    return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
-def _header(approval: ExpeditedApproval, title: str) -> list[Block]:
+def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
     return [
         section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}"),
-        context(f"Revision `{approval.head_sha[:12]}` · author @{escape(pr.author or 'unknown')}"),
+        context(f"Author {author}"),
     ]
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
+    shown, tests = ChangedFile.split(files)
+    trailer = [*_overflow_note(shown), *_test_diffstat(tests)]
     if diff_image_id:
-        names = ", ".join(escape(file.filename) for file in files[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *_overflow_note(files)]
+        names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
+        return [image(diff_image_id, f"Diff of {names}"), *trailer]
     sections: list[Block] = []
-    for file in files[:_MAX_FILE_SECTIONS]:
+    for file in shown[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
-        sections.append(section(code_block(file.patch or "")))
-    return [*sections, *_overflow_note(files)]
+        sections.append(section(code_block(_clip(file.patch or ""))))
+    return [*sections, *trailer]
+
+
+def _clip(patch: str) -> str:
+    lines = patch.splitlines()
+    if len(lines) <= _MAX_PATCH_LINES:
+        return patch
+    return "\n".join(
+        [*lines[:_MAX_PATCH_LINES], f"… {len(lines) - _MAX_PATCH_LINES} more lines on GitHub"]
+    )
 
 
 def _overflow_note(files: list[ChangedFile]) -> list[Block]:
@@ -72,60 +74,107 @@ def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
-def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ButtonElement]:
-    return (
+def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
+    """Test files are never drawn; the card lists them with their line counts instead."""
+    if not tests:
+        return []
+    heading = "*Tests (not shown)*\n"
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for file in tests[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(tests):
+        lines.append(f"{len(tests) - len(lines)} more test files on GitHub.")
+    return [context(heading + "\n".join(lines))]
+
+
+def _vote_buttons(approval: ExpeditedApproval, channel: str | None) -> list[ButtonElement]:
+    buttons = [
         button(
             "Approve",
             action_id="open_swe_option_select_approve",
             value=_button_value("approve", approval),
             style="primary",
-        ),
-        button(
-            "Reject and give feedback",
-            action_id="open_swe_option_select_reject",
-            value=_button_value("reject", approval),
-            style="danger",
-        ),
+        )
+    ]
+    if channel and not approval.slack_broadcast:
+        buttons.append(
+            button(
+                f"Broadcast in {channel}",
+                action_id="open_swe_option_select_broadcast",
+                value=_button_value("broadcast", approval),
+            )
+        )
+    return [*buttons, _dismiss_button(approval)]
+
+
+def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
+    return button(
+        "Mark ready for review",
+        action_id="open_swe_option_select_ready",
+        value=_button_value("ready", approval),
+        style="primary",
     )
 
 
-def _failing_check_warning(failing_checks: list[str]) -> list[Block]:
-    if not failing_checks:
+def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
+    return button(
+        "Dismiss",
+        action_id="open_swe_option_select_dismiss",
+        value=_button_value("dismiss", approval),
+    )
+
+
+def _voting_diff(
+    approval: ExpeditedApproval, files: list[ChangedFile], diff_image_id: str | None
+) -> list[Block]:
+    """The diff voters read; an approved card no longer needs it."""
+    if approval.approved:
         return []
-    noun = "check" if len(failing_checks) == 1 else "checks"
-    names = ", ".join(escape(name) for name in failing_checks)
-    return [
-        section(
-            f":warning: *GitHub does not require the failing {noun}, so this can still "
-            f"merge:* {names}"
-        )
-    ]
+    return [*_diff_sections(files, diff_image_id), divider()]
+
+
+def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
+    if approval.awaiting_ready:
+        return [
+            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
+            actions(_ready_button(approval), _dismiss_button(approval)),
+        ]
+    if approval.approved:
+        return [
+            section(
+                f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
+            )
+        ]
+    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval, channel))]
 
 
 def open_card(
     approval: ExpeditedApproval,
     *,
     title: str,
+    author: str,
     files: list[ChangedFile],
-    failing_checks: list[str] | None = None,
     diff_image_id: str | None = None,
+    channel: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for a card that is accepting votes."""
+    """Text fallback and blocks for an open card; diff and buttons go once it is approved.
+
+    ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    ``channel`` (``#name``) offers broadcasting the card there; ``None`` offers nothing.
+    """
     pr = approval.pull_request
     blocks: list[Block] = [
-        *_header(approval, title),
+        *_header(approval, title, author),
         divider(),
-        *_diff_sections(files, diff_image_id),
-        divider(),
-        section(_vote_summary(approval)),
-        *_failing_check_warning(failing_checks or []),
-        context(
-            "Approve submits a GitHub review as you and, on the second approval, merges the "
-            "pull request. The author may approve but that click does not become a GitHub review."
-        ),
-        actions(*_vote_buttons(approval)),
+        *_voting_diff(approval, files, diff_image_id),
+        *_status(approval, author, channel),
     ]
-    text = f"Expedited review requested for {pr.url} ({approval.head_sha[:12]})"
+    text = f"Expedited review requested for {pr.url}"
     return text, blocks
 
 
@@ -133,43 +182,26 @@ def closed_card(
     approval: ExpeditedApproval,
     *,
     title: str,
+    author: str,
     files: list[ChangedFile],
     outcome: str,
     diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for a card whose vote is over."""
+    """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
+
+    A merged or cancelled card collapses to one line, since nothing is left to read or click.
+    """
     pr = approval.pull_request
+    if approval.state in {"merged", "cancelled"}:
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        return f"Expedited review: {outcome} — {pr.url}", [
+            section(f"*Expedited review: {outcome}*\n<{pr.url}|{label}> {escape(title)}")
+        ]
     blocks: list[Block] = [
-        *_header(approval, title),
+        *_header(approval, title, author),
         divider(),
-        *_diff_sections(files, diff_image_id),
-        divider(),
-        section(f"*{escape(outcome)}*"),
-        context(_vote_summary(approval)),
+        *_voting_diff(approval, files, diff_image_id),
+        section(f"*{outcome}*"),
+        context(_vote_summary(approval, author)),
     ]
     return f"{outcome} — {pr.url}", blocks
-
-
-def reject_modal(approval: ExpeditedApproval, *, channel_id: str, thread_ts: str) -> ModalView:
-    pr = approval.pull_request
-    return modal(
-        callback_id=REJECT_MODAL_CALLBACK,
-        title="Reject expedited review",
-        submit="Reject",
-        close="Cancel",
-        private_metadata=json.dumps(
-            {"approval_id": str(approval.id), "channel_id": channel_id, "thread_ts": thread_ts}
-        ),
-        blocks=[
-            section(f"Rejecting <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> ends this vote."),
-            text_input(
-                block_id=REJECT_FEEDBACK_BLOCK,
-                label="Feedback for the agent",
-                action_id=REJECT_FEEDBACK_ACTION,
-                multiline=True,
-                max_length=3000,
-                placeholder="What should change?",
-                optional=True,
-            ),
-        ],
-    )

@@ -24,6 +24,16 @@ from agent.users import User
 from agent.webhooks import common
 
 
+def _linear_person(author: dict[str, Any]) -> PersonIdentity:
+    key = author.get("id") or author.get("email") or author.get("name") or "unknown"
+    person: PersonIdentity = {"id": f"linear:{str(key).replace(' ', '-')}"}
+    if author.get("name"):
+        person["display_name"] = str(author["name"])
+    if author.get("email"):
+        person["email"] = str(author["email"])
+    return person
+
+
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
     issue_data: dict[str, Any], repo_config: dict[str, str]
 ) -> None:
@@ -273,16 +283,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             },
         ),
     ]
-    introduced: set[str] = set()
+    # The last comment triggers the run, and the run describes its author itself.
+    introduced: set[str] = {
+        _linear_person(comment.get("user") or {})["id"] for comment in included_comments[-1:]
+    }
     for comment in included_comments:
-        author = comment.get("user") or {}
-        author_key = author.get("id") or author.get("email") or author.get("name") or "unknown"
-        sender_id = f"linear:{str(author_key).replace(' ', '-')}"
-        person: PersonIdentity = {"id": sender_id, "platform": "linear"}
-        if author.get("name"):
-            person["display_name"] = str(author["name"])
-        if author.get("email"):
-            person["email"] = str(author["email"])
+        person = _linear_person(comment.get("user") or {})
+        sender_id = person["id"]
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)

@@ -95,7 +95,6 @@ export function AgentsHome({
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
-  const [planMode, setPlanMode] = useState(false)
   const cloudEnabled = Boolean(session.data)
   const preferences = useQuery({
     queryKey: ["myPreferences"],
@@ -110,7 +109,10 @@ export function AgentsHome({
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspaces = useMemo(
+    () => workspaceOptionsQuery.data?.workspaces ?? [],
+    [workspaceOptionsQuery.data]
+  )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
@@ -528,8 +530,8 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
-    configurable.visibility = visibility
-    if (planMode) configurable.plan_mode = true
+    configurable.thread_type =
+      visibility === "private" ? "private" : "workspace"
     if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
@@ -563,7 +565,9 @@ export function AgentsHome({
       }
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
-      const thread: AgentThread = optimisticThread(threadId, draft)
+      const thread: AgentThread = optimisticThread(threadId, draft, {
+        recorded: session.data?.transcript_recording === true,
+      })
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
@@ -676,8 +680,6 @@ export function AgentsHome({
               selectedLocalRef?.worktreePath ? "Worktree" : undefined
             }
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
-            planMode={planMode}
-            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             workspaceOptions={workspaces}
             selectedWorkspace={selectedWorkspace}
             onWorkspaceChange={

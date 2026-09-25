@@ -1,25 +1,30 @@
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, NotRequired, cast
+from typing import Annotated, Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
     ModelRequest,
     ModelResponse,
+    OmitFromOutput,
 )
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.utils.startup_trace import flush_phases
+from agent.utils.startup_trace import aphase, flush_phases
+
+
+def _take_latest[T](left: T | None, right: T | None) -> T | None:
+    return right if right is not None else left
 
 
 class PrepareRunState(AgentState):
-    run_prepared: NotRequired[bool]
-    run_prepared_for: NotRequired[str]
-    work_dir: NotRequired[str | None]
-    rendered_system_prompt: NotRequired[str | None]
+    run_prepared: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
+    run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
 
 
 def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
@@ -56,6 +61,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
         state: AgentState,
         runtime: Runtime,
     ) -> dict[str, Any] | None:
+        if state.get("_deepagents_forked_context"):
+            return None
         try:
             prepared_state = cast(PrepareRunState, state)
             fingerprint = self._prepare_fingerprint(prepared_state, runtime)
@@ -64,7 +71,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
                 and prepared_state.get("run_prepared_for") == fingerprint
             ):
                 return None
-            updates = await self._prepare(prepared_state, runtime)
+            async with aphase(getattr(self, "_thread_id", None), "prepare.total"):
+                updates = await self._prepare(prepared_state, runtime)
             return {"run_prepared": True, "run_prepared_for": fingerprint, **updates}
         finally:
             # This hook is the first span the startup work can hang off of. A

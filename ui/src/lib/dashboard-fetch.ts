@@ -26,3 +26,29 @@ export const dashboardForwardedHeaders = createIsomorphicFn()
 export function dashboardApiUrl(path: string): string {
   return `${dashboardRequestOrigin()}/dashboard/api${path}`
 }
+
+export const REQUEST_ID_HEADER = "X-Request-ID"
+
+export function newRequestId(): string {
+  return `req_${crypto.randomUUID()}`
+}
+
+/** A dashboard API call that failed; `requestId` matches the server's logs. */
+export class DashboardRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly requestId?: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+  }
+}
+
+/** Wraps a fetch rejection so a request that never reached the server keeps its ID. */
+export function networkError(cause: unknown, requestId: string): unknown {
+  if (cause instanceof DOMException && cause.name === "AbortError") return cause
+  return new DashboardRequestError(0, "Couldn't reach the server.", requestId, {
+    cause,
+  })
+}
