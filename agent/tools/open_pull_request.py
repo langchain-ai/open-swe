@@ -219,8 +219,8 @@ async def _pr_approval(
     from agent.slack.tools.reply import build_pr_approval_blocks
     from agent.users import User
 
-    author = await User.for_login("github", author_login)
-    if author is not None and author.typed_preferences.pr_attribution_always_allowed:
+    author_user = await User.for_login("github", author_login)
+    if author_user is not None and author_user.typed_preferences.pr_attribution_always_allowed:
         return None
 
     fingerprint = pr_approval_fingerprint(thread_id=cfg.thread_id, author_login=author_login)
@@ -238,7 +238,7 @@ async def _pr_approval(
             decided="denied this attribution",
         )
 
-    author_slack_id = author.slack_user_id if author is not None else ""
+    author_slack_id = author_user.slack_user_id if author_user is not None else ""
     if not author_slack_id:
         # No DM to send: the attribution stays unresolved rather than silently
         # publishing under someone else's name.
