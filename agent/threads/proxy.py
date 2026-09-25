@@ -16,6 +16,7 @@ from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
 )
+from agent.threads.changes import publish_thread_changed
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
 from agent.threads.runs import (
@@ -308,6 +309,7 @@ async def proxy_dashboard_thread_commands(
                 thread_id,
                 exc_info=True,
             )
+        await publish_thread_changed(thread_id)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 
@@ -503,5 +505,6 @@ async def proxy_dashboard_thread_run_cancel(
                 thread_id,
                 exc_info=True,
             )
+        await publish_thread_changed(thread_id)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type

@@ -46,6 +46,7 @@ from agent.input_messages import (
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
+from agent.threads.changes import publish_thread_changed
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,7 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    await publish_thread_changed(thread_id)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from agent.slack.thinking import sync_slack_background_status

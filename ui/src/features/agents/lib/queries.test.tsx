@@ -20,6 +20,7 @@ import {
   useSidebarPinnedThreads,
   useSidebarRepoThreads,
   useSidebarRecents,
+  useThreadChanges,
   useThreadsPage,
   useUpdateAgentSchedule,
   useWorkflowApprovalDecision,
@@ -53,6 +54,7 @@ afterEach(() => {
   for (const client of clients) client.clear()
   clients.length = 0
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function testClient() {
@@ -733,5 +735,186 @@ describe("markAgentThreadViewed", () => {
     expect(
       client.getQueryState(agentThreadKeys.detail("thread-1"))?.dataUpdatedAt
     ).toBe(0)
+  })
+})
+
+class FakeEventSource {
+  static instances: Array<FakeEventSource> = []
+  readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+  closed = false
+
+  constructor(readonly url: string) {
+    FakeEventSource.instances.push(this)
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+  }
+
+  close() {
+    this.closed = true
+  }
+
+  emit(type: string, data: unknown = {}) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) })
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
+}
+
+describe("pushed thread changes", () => {
+  const sidebarKey = agentThreadKeys.infinitePages({
+    limit: SIDEBAR_PAGE_SIZE,
+    resolved: false,
+    scope: "interactive",
+    sortBy: "created_at",
+  })
+
+  function cachedPages(client: QueryClient, items: Array<AgentThread>) {
+    client.setQueryData<InfiniteData<ThreadsPage>>(sidebarKey, {
+      pages: [{ items, limit: SIDEBAR_PAGE_SIZE, offset: 0, hasMore: false }],
+      pageParams: [0],
+    })
+  }
+
+  function connect(client: QueryClient) {
+    FakeEventSource.instances = []
+    vi.stubGlobal("EventSource", FakeEventSource)
+    const hook = renderHook(
+      () => {
+        useThreadChanges(true)
+        return useSidebarPinnedThreads()
+      },
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    const source = FakeEventSource.instances[0]
+    if (!source) throw new Error("no event source opened")
+    return { ...hook, source }
+  }
+
+  it("refetches the lists on every ready, the first included", () => {
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([])
+    const client = testClient()
+    const { source, unmount } = connect(client)
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+
+    act(() => source.emit("ready"))
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: agentThreadKeys.lists,
+    })
+    unmount()
+    expect(source.closed).toBe(true)
+  })
+
+  it("updates a thread every list holds in place without refetching", async () => {
+    const running = {
+      ...optimisticThread("thread-1", { prompt: "Fix it" }),
+      status: "running" as const,
+    }
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([])
+    const client = testClient()
+    cachedPages(client, [running])
+    const { source, unmount } = connect(client)
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+
+    act(() =>
+      source.emit("thread-updated", {
+        thread: { ...running, status: "finished" },
+      })
+    )
+
+    await waitFor(() =>
+      expect(
+        client.getQueryData<InfiniteData<ThreadsPage>>(sidebarKey)?.pages[0]
+          ?.items[0]
+      ).toMatchObject({ id: "thread-1", status: "finished" })
+    )
+    expect(invalidate).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it("refetches the lists when a sidebar page lacks the thread, even if pinned holds it", async () => {
+    const pinned = optimisticThread("pinned", { prompt: "Pinned" })
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([pinned])
+    const client = testClient()
+    cachedPages(client, [])
+    const { result, source, unmount } = connect(client)
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    await waitFor(() => expect(result.current.data).toEqual([pinned]))
+    const invalidate = vi.spyOn(client, "invalidateQueries")
+
+    act(() =>
+      source.emit("thread-updated", {
+        thread: { ...pinned, status: "finished" },
+      })
+    )
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: agentThreadKeys.lists,
+      })
+    )
+    unmount()
+  })
+
+  it("does not let a fetch that was in flight overwrite a pushed status", async () => {
+    const running = {
+      ...optimisticThread("pin", { prompt: "Pin" }),
+      status: "running" as const,
+    }
+    const finished = { ...running, status: "finished" as const }
+    let resolveStale: (threads: Array<AgentThread>) => void = () => {}
+    vi.spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValueOnce([running])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve
+          })
+      )
+      .mockResolvedValue([finished])
+    const client = testClient()
+    const { result, source, unmount } = connect(client)
+    await waitFor(() => expect(result.current.data).toEqual([running]))
+    // `ready` refetches the lists; that response is still on its way.
+    act(() => source.emit("ready"))
+    await waitFor(() => expect(client.isFetching()).toBeGreaterThan(0))
+
+    act(() => source.emit("thread-updated", { thread: finished }))
+    await waitFor(() => expect(result.current.data).toEqual([finished]))
+    await act(async () => resolveStale([running]))
+
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    expect(result.current.data).toEqual([finished])
+    unmount()
+  })
+
+  it("stops polling running pins while connected and resumes when it drops", async () => {
+    vi.useFakeTimers()
+    const running = optimisticThread("running-pin", { prompt: "Running" })
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValue([running])
+    const client = testClient()
+    const { result, source, unmount } = connect(client)
+    await vi.waitFor(() => expect(result.current.data).toEqual([running]))
+    act(() => source.emit("ready"))
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    const connectedCalls = listPins.mock.calls.length
+
+    await act(() => vi.advanceTimersByTimeAsync(6000))
+    expect(listPins).toHaveBeenCalledTimes(connectedCalls)
+
+    act(() => source.emit("error"))
+    await act(() => vi.advanceTimersByTimeAsync(2500))
+    expect(listPins.mock.calls.length).toBeGreaterThan(connectedCalls)
+    unmount()
   })
 })

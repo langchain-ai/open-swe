@@ -80,6 +80,7 @@ import {
   useSidebarRepos,
   useSidebarRepoThreads,
   useSidebarRecents,
+  useThreadChanges,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
@@ -266,6 +267,7 @@ export function AgentsSidebar({
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
+  useThreadChanges(!localOnly)
   const pinnedQuery = useSidebarPinnedThreads({ enabled: !localOnly })
   const recentsQuery = useSidebarRecents({
     repoMode,

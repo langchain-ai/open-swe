@@ -19,6 +19,7 @@ from agent.threads.diffs import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
 )
+from agent.threads.events import SSE_HEADERS, Viewer, stream_thread_changes
 from agent.threads.feedback import feedback_router
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -142,6 +143,19 @@ async def api_unpin_thread(
 ) -> Response:
     await unpin_dashboard_thread(thread_id, session["sub"])
     return Response(status_code=204)
+
+
+@router.get("/threads/events")
+async def api_stream_thread_changes(
+    all: bool = False,
+    session: dict[str, Any] = SESSION_DEP,
+) -> StreamingResponse:
+    if all and not session_is_admin(session):
+        raise HTTPException(403, "admin only")
+    viewer = Viewer(login=session["sub"], email=session.get("email"), include_all=all)
+    return StreamingResponse(
+        stream_thread_changes(viewer), media_type="text/event-stream", headers=SSE_HEADERS
+    )
 
 
 @router.get("/threads/page")

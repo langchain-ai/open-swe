@@ -9,6 +9,9 @@ notification carries ids only, so a subscriber always reads the rows itself.
 the HTTP app share a process, so the common case does not have to wait for the
 round trip — and it is deliberately the same code path as a notification, so a
 missing in-process publish only ever costs latency.
+
+The same connection also carries ``agent.threads.changes`` notifications, which
+wake live sidebars rather than transcript readers.
 """
 
 import asyncio
@@ -20,6 +23,7 @@ import asyncpg
 from sqlalchemy import ARRAY, Text, bindparam, make_url, text
 
 from agent.database import postgres
+from agent.threads import changes
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +155,13 @@ def _on_notify(
     publish(thread_id, int(version))
 
 
+def _on_thread_changed(
+    _connection: object, _pid: int, _channel: str, payload: str
+) -> None:  # pragma: no cover - driven by Postgres
+    if payload:
+        changes.publish_local(payload)
+
+
 async def _resync_subscribers() -> None:
     """Publish each subscribed thread's head after a gap in the notifications.
 
@@ -185,8 +196,11 @@ async def _listen_forever() -> None:
         try:
             connection = await asyncpg.connect(dsn=_dsn())
             await connection.add_listener(CHANNEL, _on_notify)
+            await connection.add_listener(changes.CHANNEL, _on_thread_changed)
             delay = _RECONNECT_DELAY_SECONDS
             logger.info("Transcript listener connected", extra={"transcript_channel": CHANNEL})
+            # Thread changes notified while disconnected reached nobody here.
+            changes.publish_local(changes.RESYNC)
             try:
                 await _resync_subscribers()
             except Exception:  # noqa: BLE001
