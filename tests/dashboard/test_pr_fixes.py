@@ -130,7 +130,7 @@ def test_thread_run_json_keys_match_the_dashboard_client():
         (FIX, "runs/pull-request-fix.md", "Fix acme/app#12", True),
         (
             ADDRESS_COMMENTS,
-            "runs/pull-request-comments.md",
+            "runs/pull-request-comments.md.jinja",
             "Address comments on acme/app#12",
             True,
         ),
@@ -140,7 +140,11 @@ async def test_each_intent_names_its_own_prompt_and_thread_title(
     setup, intent, template, title, dispatches
 ):
     FakeRegistry.thread_ids = []
-    prompt = pr_fixes.render_prompt(template, url=PR_URL)
+    prompt = (
+        pr_fixes.render_template(template, url=PR_URL, comment_url="")
+        if template.endswith(".jinja")
+        else pr_fixes.render_prompt(template, url=PR_URL)
+    )
 
     assert await pr_fixes.start_pull_request_thread(
         "acme", "app", 12, "alice", intent=intent
@@ -272,7 +276,9 @@ async def test_single_comment_run_names_the_comment_and_carries_instructions(set
 
     prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
     assert prompt.startswith(
-        pr_fixes.render_prompt("runs/pull-request-comment.md", url=PR_URL, comment_url=comment_url)
+        pr_fixes.render_template(
+            "runs/pull-request-comments.md.jinja", url=PR_URL, comment_url=comment_url
+        )
     )
     assert prompt.endswith("\nkeep the old name")
 

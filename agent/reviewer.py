@@ -61,7 +61,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt, render_template
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -347,30 +347,17 @@ def _build_first_review_context(
     existing_threads_block: str = "",
     include_historical_guidance: bool = True,
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"\n{overview}" if overview else ""
-    prior_section = (
-        f"\n## Pre-existing PR review threads\n\n{existing_threads_block}\n"
-        if existing_threads_block
-        else ""
-    )
-    historical_guidance = (
-        " If a Pre-existing PR review threads section is present, do not "
-        "re-file anything that overlaps one of those threads."
-        if include_historical_guidance
-        else ""
-    )
-    return render_prompt(
-        "reviewer/first-review-context.md",
+    return render_template(
+        "reviewer/first-review-context.md.jinja",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         base_sha=base_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
-        prior_section=prior_section,
-        historical_guidance=historical_guidance,
+        overview=_format_pr_overview(pr_title, pr_body),
+        existing_threads=existing_threads_block,
+        historical_guidance=include_historical_guidance,
     )
 
 
@@ -387,24 +374,17 @@ def _build_re_review_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    return render_prompt(
-        "reviewer/rereview-context.md",
+    return render_template(
+        "reviewer/rereview-context.md.jinja",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         last_reviewed_sha=last_reviewed_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 
@@ -422,27 +402,18 @@ def _build_finding_reply_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    safe_author = _safe_login(reply_author)
-    safe_reply_body = _escape_for_data_block(reply_body)
-    return render_prompt(
-        "reviewer/finding-reply-context.md",
+    return render_template(
+        "reviewer/finding-reply-context.md.jinja",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         finding_id=finding_id,
-        safe_author=safe_author,
-        safe_reply_body=safe_reply_body,
-        overview_section=overview_section,
+        safe_author=_safe_login(reply_author),
+        safe_reply_body=_escape_for_data_block(reply_body),
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 

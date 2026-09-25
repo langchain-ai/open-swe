@@ -13,7 +13,7 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.pull_requests import PullRequest
-from agent.prompts import render_prompt
+from agent.prompts import render_prompt, render_template
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
@@ -105,7 +105,7 @@ class AddressCommentsIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        return render_prompt("runs/pull-request-comments.md", url=url)
+        return render_template("runs/pull-request-comments.md.jinja", url=url, comment_url="")
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Address comments on {full_name}#{number}"
@@ -121,8 +121,8 @@ class AddressCommentIntent(_PullRequestIntentBase):
     def prompt(self, url: str) -> str:
         if not self.comment_url.startswith(f"{url}#"):
             raise HTTPException(422, "comment does not belong to this pull request")
-        prompt = render_prompt(
-            "runs/pull-request-comment.md", url=url, comment_url=self.comment_url
+        prompt = render_template(
+            "runs/pull-request-comments.md.jinja", url=url, comment_url=self.comment_url
         )
         instructions = self.instructions.strip()
         if not instructions:

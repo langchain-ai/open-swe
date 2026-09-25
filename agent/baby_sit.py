@@ -27,7 +27,7 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.github.pull_requests import PullRequestPayload
-from agent.prompts import render_prompt
+from agent.prompts import render_prompt, render_template
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
@@ -337,16 +337,17 @@ async def _has_expedited_card(watch: BabySitWatch) -> bool:
 
 async def _finish_ready(watch: BabySitWatch) -> str:
     """Hand a green PR back to its agent thread, which decides whether to merge or report."""
-    prompt = (
-        "runs/baby-sit-ready-expedited.md"
-        if await _has_expedited_card(watch)
-        else "runs/baby-sit-ready.md"
-    )
+    expedited = await _has_expedited_card(watch)
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            render_prompt(prompt, pr_url=watch.pr_url, head_sha=watch.head_sha),
+            render_template(
+                "runs/baby-sit-ready.md.jinja",
+                pr_url=watch.pr_url,
+                head_sha=watch.head_sha,
+                expedited=expedited,
+            ),
             configurable,
             source=str(configurable.get("source") or "github"),
             metadata={},
