@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useFeatureFlagsPanel } from "@/lib/featureFlags"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { useIsHydrated } from "@/lib/hydration"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
@@ -18,6 +19,7 @@ function FeatureFlagsPage() {
   const session = useSession()
   const visible = useFeatureFlagsPanel()
   const hydrated = useIsHydrated()
+  const paletteShortcut = useShortcutLabel("mod+k")
 
   if (session.isLoading) {
     return (
@@ -33,7 +35,7 @@ function FeatureFlagsPage() {
     <AppShell
       user={session.data}
       title="Feature Flags"
-      description="Experimental features under test. Toggle this tab from the command palette (⌘K)."
+      description={`Experimental features under test. Toggle this tab from the command palette (${paletteShortcut}).`}
     >
       <SettingsSection title="Experiments">
         <AssistantUiPreference />
