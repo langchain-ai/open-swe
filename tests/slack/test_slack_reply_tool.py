@@ -1,7 +1,7 @@
 import importlib
 import json
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -314,6 +314,79 @@ async def test_slack_reply_passes_executing_run_id(
     assert captured["triggering_user_id"] == "active-user"
 
 
+@pytest.mark.parametrize("response_type", ["progress", "final"])
+@pytest.mark.parametrize("options", [None, ["Yes", "No"]])
+async def test_only_final_reply_has_feedback_for_its_run(
+    monkeypatch: pytest.MonkeyPatch,
+    response_type: Literal["progress", "final"],
+    options: list[str] | None,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("Answer", response_type, options=options) == {
+        "success": True
+    }
+    assert post.await_args is not None
+    blocks = post.await_args.kwargs["blocks"]
+    feedback = [block for block in blocks if block["type"] == "context_actions"]
+    if response_type == "progress":
+        assert feedback == []
+    else:
+        buttons = feedback[0]["elements"][0]
+        assert buttons["type"] == "feedback_buttons"
+        assert json.loads(buttons["positive_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "up",
+        }
+        assert json.loads(buttons["negative_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "down",
+        }
+    assert blocks[0] == {"type": "markdown", "text": "Answer"}
+    if options:
+        assert blocks[1]["type"] == "actions"
+
+
+async def test_long_reply_retains_all_text_alongside_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {"success": True}
+    assert post.await_args is not None
+    blocks = post.await_args.kwargs["blocks"]
+    assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
+    assert all(len(block["text"]["text"]) <= 3000 for block in blocks[:-1])
+    assert blocks[-1]["type"] == "context_actions"
+
+
+async def test_custom_blocks_preserved_when_feedback_is_appended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+    post = AsyncMock(return_value=("2.0", None))
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Answer"}}]
+
+    assert await slack_reply_tool.slack_reply("Answer", "final", blocks=blocks) == {"success": True}
+    assert post.await_args is not None
+    assert post.await_args.kwargs["blocks"][:-1] == blocks
+    assert len(blocks) == 1
+
+
 async def test_slack_reply_restores_thinking_status_after_interim_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -520,7 +593,7 @@ async def test_slack_reply_passes_model_reported_usage(
         return "2.0", None
 
     config = _config()
-    config["configurable"]["resolved_agent_effort"] = "high"
+    config["configurable"].update(resolved_agent_model_id="model-a", resolved_agent_effort="high")
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
     state = {
@@ -555,12 +628,14 @@ async def test_slack_reply_uses_selected_route_effort(
     config = _config()
     config["configurable"].update(
         resolved_agent_model_id="model-balanced",
-        resolved_agent_effort="high",
+        resolved_agent_effort="max",
     )
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     state = {
         "model_route": "balanced",
+        "selected_model_id": "model-balanced",
+        "selected_effort": "high",
         "messages": [
             HumanMessage(content="request"),
             AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),

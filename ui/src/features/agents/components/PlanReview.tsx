@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react"
 
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
 import { addPlanComment, deletePlanComment, getPlanComments } from "@/lib/plan"
+import { reportError } from "@/lib/errorReporting"
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -103,13 +104,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
 
   const removeComment = useCallback(
     async (id: string) => {
-      setError(null)
       commentMutation.current += 1
       try {
         await deletePlanComment(plan.threadId, id)
         setComments((current) => current.filter((comment) => comment.id !== id))
       } catch (deleteError) {
-        setError((deleteError as Error).message)
+        reportError({ title: "Couldn't delete comment", error: deleteError })
       }
     },
     [plan.threadId]

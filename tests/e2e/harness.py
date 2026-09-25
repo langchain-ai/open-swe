@@ -301,33 +301,8 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
                 files=[FileLines(path=file["filename"]) for file in pull["files"]],
             )
         ],
+        human_input_summary=str(body.get("human_input") or ""),
     )
-    return JSONResponse({"ok": True})
-
-
-@app.post("/control/guidance")
-async def control_seed_guidance(request: Request) -> JSONResponse:
-    """Record author-guidance points on a fake pull request's head, as a scout would."""
-    from agent.github.pull_requests import PullRequest
-    from agent.review.author_guidance import GuidancePoint, GuidanceReview
-
-    body = await request.json()
-    pull = _seeded_pull(body)
-    record = await PullRequest(
-        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
-    ).ensure()
-    points = body.get("points")
-    for index, point in enumerate(points if isinstance(points, list) else []):
-        await GuidancePoint.record(
-            record,
-            summary=str(point.get("summary") or ""),
-            quote=str(point.get("quote") or ""),
-            author=str(point.get("author") or ""),
-            turn_index=index,
-            reviewer_thread_id="",
-            head_sha=pull["head_sha"],
-        )
-    await GuidanceReview.complete(pull["owner"], pull["repo"], pull["number"], pull["head_sha"])
     return JSONResponse({"ok": True})
 
 
@@ -1502,6 +1477,10 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "id": channel,
         "name": code_channel["name"] if code_channel else "demo",
         "name_normalized": code_channel["name"] if code_channel else "demo",
+        "is_channel": not channel.startswith("D"),
+        "is_private": False,
+        "is_im": channel.startswith("D"),
+        "is_mpim": False,
         "is_ext_shared": False,
         "is_pending_ext_shared": False,
         "topic": {"value": "Demo channel topic"},

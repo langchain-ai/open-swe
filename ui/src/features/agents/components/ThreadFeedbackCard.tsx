@@ -48,6 +48,17 @@ export function ThreadFeedbackCard({
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
+    meta: { errorTitle: "Couldn't save feedback" },
+    onMutate: (value) => {
+      if (!("rating" in value)) return
+      setShowComment(value.rating === "bad")
+      setShowConfirmation(value.rating !== "bad")
+    },
+    onError: (_error, value) => {
+      if (!("rating" in value)) return
+      setShowComment(false)
+      setShowConfirmation(false)
+    },
     onSuccess: (data, value) => {
       queryClient.setQueryData(["thread-feedback", threadId, login], data)
       const shouldShowComment =
@@ -63,10 +74,10 @@ export function ThreadFeedbackCard({
     },
   })
   useEffect(() => {
-    if (!showConfirmation) return
+    if (!showConfirmation || mutation.isPending) return
     const timeout = window.setTimeout(() => setShowConfirmation(false), 5000)
     return () => window.clearTimeout(timeout)
-  }, [showConfirmation])
+  }, [showConfirmation, mutation.isPending])
   const query = useQuery({
     queryKey: ["thread-feedback", threadId, login],
     queryFn: () => agentsApi.getThreadFeedback(threadId),
@@ -166,11 +177,6 @@ export function ThreadFeedbackCard({
             Dismiss
           </Button>
         </div>
-      )}
-      {mutation.isError && (
-        <p role="alert" className="w-full text-xs text-destructive">
-          Your feedback could not be saved. Please try again.
-        </p>
       )}
       {showComment && (
         <div className="flex items-center gap-2">

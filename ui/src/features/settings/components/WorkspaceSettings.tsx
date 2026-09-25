@@ -138,6 +138,7 @@ export function WorkspaceSettingsPanel({
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
   const deleteWorkspace = useMutation({
+    meta: { errorTitle: "Couldn't delete workspace" },
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
       setDeleting(false)
@@ -176,9 +177,10 @@ export function WorkspaceSettingsPanel({
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
-  const onRebuildStarted = () => {
+  const onRebuildStarted = async () => {
     // Show the run as underway at once, then let the poll confirm it, so a
     // second click cannot slip in before the record catches up.
+    await qc.cancelQueries({ queryKey: workspaceRecordKey(slug) })
     qc.setQueryData(
       workspaceRecordKey(slug),
       (current: WorkspaceRecord | undefined) =>
@@ -236,10 +238,7 @@ export function WorkspaceSettingsPanel({
               size="sm"
               variant="destructive"
               aria-label={`Delete ${record.data.name}`}
-              onClick={() => {
-                deleteWorkspace.reset()
-                setDeleting(true)
-              }}
+              onClick={() => setDeleting(true)}
             >
               Delete
             </Button>
@@ -262,11 +261,6 @@ export function WorkspaceSettingsPanel({
                 cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            {deleteWorkspace.error && (
-              <p role="alert" className="text-xs text-destructive">
-                {deleteWorkspace.error.message}
-              </p>
-            )}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={deleteWorkspace.isPending}>
                 Cancel

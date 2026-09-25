@@ -29,7 +29,6 @@ from agent.github.pull_request_diff import build_pr_diff_files
 from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
-from agent.review.author_guidance import GuidanceView
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     Finding,
@@ -39,6 +38,7 @@ from agent.review.findings import (
     is_thread_resolved,
 )
 from agent.review.session import PullRequestState, ReviewSession, now_ms
+from agent.review.walkthrough import WalkthroughView
 from agent.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from agent.thread_ids import reviewer_thread_id
 from agent.utils.json_types import ThreadLike, as_json_object, thread_metadata
@@ -1031,10 +1031,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "review_error": review_error,
         "walkthrough_scout_thread_id": target.thread_id if target else None,
         "assessment": assessment.model_dump() if assessment else None,
-        "guidance": [
-            point.model_dump(mode="json")
-            for point in await GuidanceView.for_pull_request(owner, repo, pr_number)
-        ],
     }
 
 
@@ -1083,7 +1079,7 @@ class PullRequestPreview(BaseModel):
     # or no checks configured.
     unresolved: list[PreviewThread] | None
     checks: list[PreviewCheck] | None
-    guidance: list[GuidanceView]
+    human_input: str
 
 
 class _GithubPreviewFile(BaseModel):
@@ -1186,6 +1182,7 @@ async def get_pull_request_preview(
     ]
     files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
     head_sha = pull.head.sha if pull.head else ""
+    walkthrough = await WalkthroughView.for_head(owner, repo, pr_number, head_sha)
     # CI reaches GitHub as check runs or as legacy commit statuses, and the PR
     # list counts both — a preview reading only one would contradict the rail.
     raw_checks, raw_statuses = (
@@ -1231,7 +1228,7 @@ async def get_pull_request_preview(
         changed_files=pull.changed_files or len(files),
         files=files[:_PREVIEW_FILE_LIMIT],
         unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
-        guidance=await GuidanceView.for_pull_request(owner, repo, pr_number),
+        human_input=walkthrough.human_input if walkthrough else "",
     )
 
 

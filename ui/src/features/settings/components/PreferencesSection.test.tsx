@@ -9,12 +9,8 @@ import {
 } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { api } from "@/lib/api"
+import { api, type UserPreferences } from "@/lib/api"
 import { PreferencesSection } from "./PreferencesSection"
-
-vi.mock("./AssistantUiPreference", () => ({
-  AssistantUiPreference: () => null,
-}))
 
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
@@ -26,13 +22,14 @@ afterEach(() => {
 })
 
 it("keeps preference labels when closed and saves workspace values, not labels", async () => {
-  vi.spyOn(api, "getMyPreferences").mockResolvedValue({
+  let stored: UserPreferences = {
     default_visibility: "private",
     default_workspace: null,
     follow_up_behavior: "queue",
     local_tracing_project: null,
     default_local_tracing_project: "shared",
-  })
+  }
+  vi.spyOn(api, "getMyPreferences").mockImplementation(async () => stored)
   vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
     default_slug: "engineering",
     workspaces: [
@@ -49,7 +46,10 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   })
   const save = vi
     .spyOn(api, "saveMyPreferences")
-    .mockImplementation(async (value) => value)
+    .mockImplementation(async (value) => {
+      stored = value
+      return value
+    })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })

@@ -133,7 +133,7 @@ async def test_provenance_migration_preserves_legacy_names(deployment_db):
             ),
             {"workspace": uuid4(), "person": uuid4(), "name": "Legacy Name"},
         )
-        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "head")
+        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "heads")
         row = (
             (
                 await conn.execute(

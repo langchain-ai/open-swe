@@ -61,8 +61,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
-from agent.review.author_guidance import GuidanceView
+from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -111,13 +110,6 @@ from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
-HISTORICAL_REVIEW_GUIDANCE = load_prompt("reviewer/historical-guidance.md")
-
-REVIEWER_PROMPT_TEMPLATE = load_prompt("reviewer/main.md")
-
-
-REVIEWER_EVAL_PROMPT_SUFFIX = load_prompt("reviewer/eval.md")
-
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
 
 
@@ -150,9 +142,9 @@ def _repo_checkout_note(
     head_sha: str,
 ) -> str:
     if repo_ready:
-        return render_prompt("reviewer/repo-ready.md", working_dir=working_dir)
-    return render_prompt(
-        "reviewer/repo-not-ready.md",
+        return prompt("reviewer/repo-ready", working_dir=working_dir)
+    return prompt(
+        "reviewer/repo-not-ready",
         working_dir=working_dir,
         parent_dir=posixpath.dirname(working_dir) or working_dir,
         repo_owner=repo_owner or "<owner>",
@@ -178,18 +170,14 @@ def _reviewer_system_prompt(
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
 ) -> str:
-    prompt = render_prompt(
-        "reviewer/main.md",
+    return prompt(
+        "reviewer/main",
         working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
-        historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
-        approval_assessment=(
-            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
-            if approval_policy and not reviewer_eval
-            else ""
-        ),
+        reviewer_eval=reviewer_eval,
+        approval_policy=approval_policy or "",
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -198,84 +186,15 @@ def _reviewer_system_prompt(
             pr_number=pr_number,
             head_sha=head_sha,
         ),
+        org_guidelines=org_guidelines or "",
+        repo_style_prompt=repo_style_prompt or "",
+        agents_md_content=agents_md_content or "",
+        scoped_agents_md=[
+            (path, posixpath.dirname(path), content)
+            for path, content in (scoped_agents_md or {}).items()
+        ],
+        api_standards_skill=api_standards_skill or "",
     )
-    if reviewer_eval:
-        prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
-    if org_guidelines:
-        prompt = (
-            f"{prompt}\n\n"
-            "# Organization-wide review guidelines\n\n"
-            "These guidelines were set by a workspace admin and apply to every "
-            "repository this reviewer covers. Apply them when they agree with the "
-            "global bar above; they refine tone, severity, and what this "
-            "organization typically flags. Repository-specific rules below take "
-            "precedence when they conflict.\n\n"
-            f"{org_guidelines}"
-        )
-    if repo_style_prompt:
-        prompt = (
-            f"{prompt}\n\n"
-            "# Repository-specific review style\n\n"
-            "The following rules were learned from this repository's historical "
-            "PR reviews. Apply them when they agree with the global bar above; "
-            "they refine tone, severity, and what this team typically flags.\n\n"
-            f"{repo_style_prompt}"
-        )
-    if agents_md_content or scoped_agents_md:
-        instruction_sections: list[str] = []
-        if agents_md_content:
-            instruction_sections.append(
-                f"## Root instructions (scope: entire repository)\n\n```\n{agents_md_content}\n```"
-            )
-        for path, content in (scoped_agents_md or {}).items():
-            scope = posixpath.dirname(path)
-            instruction_sections.append(
-                f"## Instructions from `{path}` (scope: `{scope}/`)\n\n```\n{content}\n```"
-            )
-        prompt = (
-            f"{prompt}\n\n"
-            "# Repository conventions (AGENTS.md / CLAUDE.md)\n\n"
-            "The following files come from the target branch (the PR's base), "
-            "not from the PR head. They document the "
-            "project's conventions, architecture, and rules. These rules are "
-            "**mandatory** — the project enforces them on every contributor and "
-            "they are not optional style preferences. When a changed line "
-            "violates one of these rules, file a finding for it (still anchored "
-            "to the changed line, still a concrete failure mode, still in-diff). "
-            "Do not file findings for pre-existing violations outside the diff.\n\n"
-            "Common rule categories to check:\n"
-            "- **Documentation sync rules** — many repos require docs/ to be "
-            "updated when behavior changes. If the PR changes behavior a doc "
-            "describes and the doc is not updated, that is a finding.\n"
-            "- **Naming / convention rules** — if the repo mandates specific "
-            "naming, patterns, or helpers and the PR uses the wrong one, that "
-            "is a finding (not a style nit — it violates an explicit repo rule).\n"
-            "- **Architecture / layering rules** — if the repo forbids certain "
-            "imports, cross-layer calls, or patterns and the PR introduces one, "
-            "that is a finding.\n"
-            "- **Process / CI rules** — if the repo requires tests, changelog "
-            "entries, or specific CI steps for certain changes and the PR skips "
-            "them, that is a finding.\n\n"
-            "Each scoped `AGENTS.md` applies only to changed files under its "
-            "listed directory. When instructions conflict, the most deeply "
-            "nested applicable file takes precedence.\n\n" + "\n\n".join(instruction_sections)
-        )
-    if api_standards_skill:
-        prompt = (
-            f"{prompt}\n\n"
-            "# API standards skill\n\n"
-            "Apply this skill ONLY when the PR introduces a new API or modifies "
-            "an existing one (HTTP routes/handlers, RPC or GraphQL endpoints, "
-            "public SDK/library signatures, request/response schemas, status "
-            "codes, headers, or other API contracts). When the diff touches such "
-            "surfaces, verify the change against the best practices below and "
-            "file a finding when a changed line violates them and clears the "
-            "global bar above (anchored, concrete failure mode, in-diff). If the "
-            "PR does not change any API, ignore this section. Do not file "
-            "style-only nits or pre-existing violations outside the diff.\n\n"
-            f"{api_standards_skill}"
-        )
-    return prompt
 
 
 def _format_pr_overview(pr_title: str, pr_body: str) -> str:
@@ -293,19 +212,14 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
         return ""
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
-    return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
+    return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
 
 
-def _format_author_guidance(points: list[GuidanceView]) -> str:
-    """Render the steering points the review scout recorded, or ``""`` without any."""
-    if not points:
+def _format_human_input(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's summary of what people asked for, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.human_input:
         return ""
-    lines: list[str] = []
-    for point in points:
-        author = f" ({point.author})" if point.author else ""
-        quote = "\n".join(f"  > {line}" for line in point.quote.splitlines())
-        lines.append(f"- {point.summary}{author}\n{quote}")
-    return render_prompt("reviewer/author-guidance.md", points="\n".join(lines))
+    return prompt("reviewer/human-input", summary=walkthrough.human_input)
 
 
 def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
@@ -337,7 +251,7 @@ def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
             f"<files>\n{files}\n</files>\n"
             "</step>"
         )
-    return render_prompt("reviewer/walkthrough.md", steps="\n".join(steps))
+    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -353,30 +267,17 @@ def _build_first_review_context(
     existing_threads_block: str = "",
     include_historical_guidance: bool = True,
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"\n{overview}" if overview else ""
-    prior_section = (
-        f"\n## Pre-existing PR review threads\n\n{existing_threads_block}\n"
-        if existing_threads_block
-        else ""
-    )
-    historical_guidance = (
-        " If a Pre-existing PR review threads section is present, do not "
-        "re-file anything that overlaps one of those threads."
-        if include_historical_guidance
-        else ""
-    )
-    return render_prompt(
-        "reviewer/first-review-context.md",
+    return prompt(
+        "reviewer/first-review-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         base_sha=base_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
-        prior_section=prior_section,
-        historical_guidance=historical_guidance,
+        overview=_format_pr_overview(pr_title, pr_body),
+        existing_threads=existing_threads_block,
+        historical_guidance=include_historical_guidance,
     )
 
 
@@ -393,24 +294,17 @@ def _build_re_review_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    return render_prompt(
-        "reviewer/rereview-context.md",
+    return prompt(
+        "reviewer/rereview-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         last_reviewed_sha=last_reviewed_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 
@@ -428,27 +322,18 @@ def _build_finding_reply_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    safe_author = _safe_login(reply_author)
-    safe_reply_body = _escape_for_data_block(reply_body)
-    return render_prompt(
-        "reviewer/finding-reply-context.md",
+    return prompt(
+        "reviewer/finding-reply-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         finding_id=finding_id,
-        safe_author=safe_author,
-        safe_reply_body=safe_reply_body,
-        overview_section=overview_section,
+        safe_author=_safe_login(reply_author),
+        safe_reply_body=_escape_for_data_block(reply_body),
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 
@@ -846,24 +731,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return None
 
-        async def _fetch_author_guidance_block() -> str:
-            if reviewer_eval or not repo_owner or not repo_name or not isinstance(pr_number, int):
-                return ""
-            # The scout records the steering points; wait for it like the walkthrough.
-            await walkthrough_task
-            try:
-                points = await GuidanceView.for_head(repo_owner, repo_name, pr_number, head_sha)
-            except Exception:
-                logger.exception(
-                    "Failed to load author guidance; continuing without it",
-                    extra={
-                        "pr_repo_full_name": f"{repo_owner}/{repo_name}",
-                        "pr_number": pr_number,
-                    },
-                )
-                return ""
-            return _format_author_guidance(points)
-
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -889,7 +756,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         walkthrough_task = asyncio.create_task(_await_walkthrough())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
-        author_guidance_task = asyncio.create_task(_fetch_author_guidance_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
@@ -912,7 +778,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         pr_overview = await pr_overview_task
         existing_threads_block = await existing_threads_task
-        author_guidance_block = await author_guidance_task
         repo_style_prompt = await repo_style_task
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
@@ -982,11 +847,13 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
-        walkthrough_block = _format_walkthrough(await walkthrough_task)
+        walkthrough = await walkthrough_task
+        walkthrough_block = _format_walkthrough(walkthrough)
         if walkthrough_block:
             system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-        if author_guidance_block:
-            system_prompt = f"{system_prompt}\n\n{author_guidance_block}"
+        human_input_block = _format_human_input(walkthrough)
+        if human_input_block:
+            system_prompt = f"{system_prompt}\n\n{human_input_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (

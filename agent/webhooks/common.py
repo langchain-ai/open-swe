@@ -52,6 +52,7 @@ from agent.github.comments import (
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
@@ -68,7 +69,7 @@ from agent.github.token import (
     is_bot_token_only_mode,
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -127,6 +128,7 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread, ensure_titled_thread
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
@@ -226,6 +228,7 @@ __all__ = [
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
@@ -512,7 +515,7 @@ async def upsert_agent_thread_metadata(
     repo_config: dict[str, str] | None = None,
     github_login: str = "",
     user_email: str = "",
-    title: str = "",
+    title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
@@ -636,8 +639,12 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
-                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
             )
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
@@ -808,10 +815,10 @@ async def thread_exists(thread_id: str) -> bool:
 
 
 async def ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
@@ -1054,7 +1061,7 @@ async def trigger_or_queue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=f"PR #{pr_number}" if pr_number else "",
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
     )
@@ -1072,6 +1079,7 @@ async def trigger_or_queue_run(
             "environment": workspace,
         },
         source="github",
+        thread_title=None,
         input=input,
         metadata=AGENT_VERSION_METADATA,
     )
@@ -1501,8 +1509,8 @@ def build_queued_finding_reply_prompt(
 ) -> str:
     safe_body = _escape_review_reply_data(reply_body)
     safe_author = _escape_review_reply_attr(reply_author)
-    return render_prompt(
-        "reviewer/queued-finding-reply.md",
+    return prompt(
+        "reviewer/queued-finding-reply",
         reply_author=reply_author,
         finding_id=finding_id,
         pr_number=pr_number,

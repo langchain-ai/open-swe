@@ -2351,6 +2351,106 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspaceDirectory": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "kind": {
+            "const": "directory",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "entries"
+        ],
+        "title": "WorkspaceDirectory",
+        "type": "object"
+      },
+      "WorkspaceEntry": {
+        "properties": {
+          "ignored": {
+            "title": "Ignored",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "directory"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "ignored"
+        ],
+        "title": "WorkspaceEntry",
+        "type": "object"
+      },
+      "WorkspaceFile": {
+        "properties": {
+          "binary": {
+            "title": "Binary",
+            "type": "boolean"
+          },
+          "contents": {
+            "title": "Contents",
+            "type": "string"
+          },
+          "kind": {
+            "const": "file",
+            "title": "Kind",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "contents",
+          "binary",
+          "truncated",
+          "size"
+        ],
+        "title": "WorkspaceFile",
+        "type": "object"
+      },
+      "WorkspaceFileIndex": {
+        "description": "Every non-ignored file in the workspace, for search.",
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "WorkspaceFileIndex",
+        "type": "object"
+      },
       "WorkspaceSettingsUpdate": {
         "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
         "properties": {
@@ -9216,6 +9316,127 @@
           "dashboard",
           "threads",
           "thread-feedback"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/file-index": {
+      "get": {
+        "operationId": "api_get_thread_file_index_dashboard_api_threads__thread_id__file_index_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFileIndex"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread File Index",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/files": {
+      "get": {
+        "operationId": "api_get_thread_path_dashboard_api_threads__thread_id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "directory": "#/components/schemas/WorkspaceDirectory",
+                      "file": "#/components/schemas/WorkspaceFile"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkspaceDirectory"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WorkspaceFile"
+                    }
+                  ],
+                  "title": "Response Api Get Thread Path Dashboard Api Threads  Thread Id  Files Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Path",
+        "tags": [
+          "dashboard",
+          "threads"
         ]
       }
     },

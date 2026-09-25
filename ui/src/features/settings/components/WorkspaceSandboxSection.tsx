@@ -66,6 +66,7 @@ export function WorkspaceSandboxSection({
     updateScript !== (record.update_script ?? "")
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: () =>
       api.updateWorkspace(record.slug, {
         setup_script: setupScript,
@@ -74,6 +75,7 @@ export function WorkspaceSandboxSection({
     onSuccess: onSaved,
   })
   const rebuild = useMutation({
+    meta: { errorTitle: "Couldn't start the image rebuild" },
     mutationFn: () => api.refreshWorkspace(record.slug),
     onSuccess: onRebuildStarted,
   })
@@ -153,9 +155,9 @@ export function WorkspaceSandboxSection({
             onChange={(e) => setUpdateScript(e.target.value)}
           />
         </div>
-        {(save.error || rebuild.error) && (
+        {save.error && (
           <p role="alert" className="text-xs text-destructive">
-            {(save.error ?? rebuild.error)?.message}
+            {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (

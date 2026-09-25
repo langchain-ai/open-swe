@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -176,15 +177,17 @@ export function ModelPicker({
       (id): id is string => id != null && entryIds.includes(id)
     ) ?? entryIds[0]
 
-  useEffect(() => {
-    if (!open) return
-    // oxlint-disable-next-line react/set-state-in-effect
+  // Seeded once per open; later edits come from pointer/keyboard interaction.
+  const seedOnOpen = useEffectEvent(() => {
     setPane("main")
     setQuery("")
     setFocusedModelId(null)
     const index = currentEffort ? efforts.indexOf(currentEffort) : -1
     setMainIndex(index === -1 ? 0 : index)
-    // Seeded once per open; later edits come from pointer/keyboard interaction.
+  })
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (open) seedOnOpen()
   }, [open])
 
   // The main pane owns the keyboard handler, so it needs DOM focus whenever it
@@ -423,7 +426,7 @@ export function ModelPicker({
               </>
             ) : (
               <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
-                Model and reasoning are chosen per request.
+                Model and reasoning are chosen when the thread starts.
               </p>
             )}
             <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">

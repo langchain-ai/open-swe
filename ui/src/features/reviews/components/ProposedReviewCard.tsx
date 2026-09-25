@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
@@ -64,10 +63,7 @@ export function ProposedReviewCard({
         queryKey: reviewConversationQueryKey(owner, repo, number),
       })
     },
-    onError: (error) =>
-      toast.error("Couldn't submit the review", {
-        description: error.message,
-      }),
+    meta: { errorTitle: "Couldn't submit the review" },
   })
   if (!drafts || !draft) return null
 

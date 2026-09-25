@@ -126,6 +126,7 @@ def _patch_handler(
         configurable: dict[str, Any],
         *,
         source: str,
+        thread_title: str | None,
         metadata: dict[str, Any],
         client: FakeClient,
     ) -> dict[str, str]:

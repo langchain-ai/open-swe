@@ -54,17 +54,29 @@ from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
-from agent.users.models import UserIdentity
+from agent.users.models import User, UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
 ThreadRole = Literal["primary", "secondary"]
+AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
 _DIFF_COLUMNS = ("additions", "deletions", "changed_files")
+_WRITE_ONCE_COLUMNS = (
+    "opening_base_sha",
+    "opening_head_sha",
+    "opening_model_id",
+    "opening_effort",
+    "langsmith_run_id",
+    "slack_team_id",
+    "slack_channel_id",
+    "slack_thread_ts",
+    "slack_message_ts",
+)
 
 
 class DiffStats(TypedDict):
@@ -124,6 +136,13 @@ class PullRequest(Base):
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     opening_base_sha: Mapped[str] = mapped_column(server_default="", default="")
     opening_head_sha: Mapped[str] = mapped_column(server_default="", default="")
+    opening_model_id: Mapped[str] = mapped_column(server_default="", default="")
+    opening_effort: Mapped[str] = mapped_column(server_default="", default="")
+    langsmith_run_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_team_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
+    slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
     author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     author_user_id: Mapped[UUID | None] = mapped_column(
@@ -211,6 +230,27 @@ class PullRequest(Base):
     @property
     def primary_thread_id(self) -> str | None:
         return next((link.thread_id for link in self.threads if link.role == "primary"), None)
+
+    @property
+    def agent_thread_id(self) -> str | None:
+        """The agent thread that created this PR; ``None`` for PRs it only linked or reused."""
+        if not self.opening_head_sha:
+            return None
+        return next(
+            (link.thread_id for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE),
+            None,
+        )
+
+    async def is_authored_by(self, login: str) -> bool:
+        """Whether ``login`` resolves to the same Open SWE user as this PR's author."""
+        commenter = await User.for_login("github", login)
+        if commenter is None:
+            return False
+        author_id = self.author_user_id
+        if author_id is None and self.author:
+            author = await User.for_login("github", self.author)
+            author_id = author.id if author is not None else None
+        return author_id is not None and commenter.id == author_id
 
     @property
     def thread_ids(self) -> list[str]:
@@ -424,8 +464,7 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
-            opening_base_sha=self.opening_base_sha,
-            opening_head_sha=self.opening_head_sha,
+            **{column: getattr(self, column) for column in _WRITE_ONCE_COLUMNS},
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
@@ -438,12 +477,12 @@ class PullRequest(Base):
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
-                "opening_base_sha": func.coalesce(
-                    func.nullif(cls.opening_base_sha, ""), upsert.excluded.opening_base_sha
-                ),
-                "opening_head_sha": func.coalesce(
-                    func.nullif(cls.opening_head_sha, ""), upsert.excluded.opening_head_sha
-                ),
+                **{
+                    column: func.coalesce(
+                        func.nullif(getattr(cls, column), ""), getattr(upsert.excluded, column)
+                    )
+                    for column in _WRITE_ONCE_COLUMNS
+                },
                 "author_github_id": func.coalesce(
                     upsert.excluded.author_github_id, cls.author_github_id
                 ),
@@ -485,6 +524,7 @@ class PullRequestPayload(BaseModel):
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
+    head_sha: str = Field("", validation_alias=AliasPath("head", "sha"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
 
 

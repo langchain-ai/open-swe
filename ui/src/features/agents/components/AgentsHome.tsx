@@ -112,7 +112,7 @@ export function AgentsHome({
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
   const workspaces = useMemo(
     () => workspaceOptionsQuery.data?.workspaces ?? [],
-    [workspaceOptionsQuery.data?.workspaces]
+    [workspaceOptionsQuery.data]
   )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.

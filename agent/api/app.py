@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
+from agent.api.request_ids import add_request_ids
 from agent.api.tracing import add_trace_resource_names
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
@@ -31,12 +32,14 @@ pin_single_event_loop()
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent import database
     from agent.analytics.worker import start_worker, stop_worker
+    from agent.bridge import listener as bridge_listener
     from agent.dashboard.admin import configured_admins
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.transcript import listener as transcript_listener
     from agent.users import User
+    from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
     from agent.utils.model import validate_local_dev_llm_config
     from agent.workspaces.store import import_store_records
@@ -74,6 +77,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "Imported user mappings from the LangGraph Store",
             extra={"imported_users": imported_users},
         )
+    try:
+        # Concierge mode used to be a Store profile flag; this moves it into
+        # users.preferences and is a no-op once it has.
+        await import_concierge_mode()
+    except Exception:  # noqa: BLE001
+        # Startup continues: opted-in people get a thread per DM message until
+        # an import succeeds.
+        logger.exception("Importing concierge mode from the LangGraph Store failed")
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -89,8 +100,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # driven from another process is what goes quiet until this recovers.
         logger.warning("Transcript listener startup failed", exc_info=True)
     try:
+        await bridge_listener.start()
+    except Exception:  # noqa: BLE001
+        # Bridge waiters fall back to in-process notifications and their own
+        # liveness ticks; what goes quiet is a bridge driven from another replica.
+        logger.warning("Sandbox bridge listener startup failed", exc_info=True)
+    try:
         yield
     finally:
+        await bridge_listener.stop()
         await transcript_listener.stop()
         await stop_worker()
         await database.close()
@@ -114,8 +132,10 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["*"],
+            expose_headers=["X-Request-ID"],
         )
     add_trace_resource_names(app)
+    add_request_ids(app)
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)

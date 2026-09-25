@@ -84,6 +84,41 @@ async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_
     assert saved.created_at is not None and saved.updated_at is not None
 
 
+async def test_opening_origin_fills_once_and_survives_later_saves() -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, title="From webhook").save()
+    await PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        opening_model_id="claude-opus-5-5",
+        opening_effort="high",
+        langsmith_run_id="run-1",
+        slack_team_id="T1",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+        slack_message_ts="1.5",
+    ).save()
+    await PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        slack_channel_id="C2",
+        opening_model_id="other",
+        langsmith_run_id="run-2",
+    ).save()
+    saved = await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+
+    assert (
+        saved.opening_model_id,
+        saved.opening_effort,
+        saved.langsmith_run_id,
+        saved.slack_team_id,
+        saved.slack_channel_id,
+        saved.slack_thread_ts,
+        saved.slack_message_ts,
+    ) == ("claude-opus-5-5", "high", "run-1", "T1", "C1", "1.0", "1.5")
+
+
 async def test_later_saves_refresh_line_counts_and_keep_them_when_omitted() -> None:
     await PullRequest(
         owner="lc", repo="repo", number=7, additions=2, deletions=1, changed_files=1
@@ -112,6 +147,21 @@ async def test_author_links_to_a_registered_user_by_github_id_or_login() -> None
     assert (by_id.author_user_id, by_login.author_user_id) == (ada.id, ada.id)
     assert (by_id.author_github_id, unregistered.author_github_id) == (42, 99)
     assert unregistered.author_user_id is None
+
+
+async def test_is_authored_by_maps_the_commenter_to_the_authoring_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "Ada,Grace")
+    await User.sign_in("github", "42", login="Ada")
+    await User.sign_in("github", "43", login="Grace")
+    pr = await PullRequest(
+        owner="lc", repo="repo", number=1, author="old-ada", author_github_id=42
+    ).save()
+
+    assert await pr.is_authored_by("ADA") is True
+    assert await pr.is_authored_by("Grace") is False
+    assert await pr.is_authored_by("stranger") is False
 
 
 async def test_a_resolved_author_survives_later_saves_and_links() -> None:
