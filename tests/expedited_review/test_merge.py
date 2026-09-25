@@ -62,6 +62,11 @@ class _GitHub:
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
         self.comments: list[str] = []
         monkeypatch.setattr(merge, "post_github_comment", self._comment)
+        self.threads: list[dict[str, Any]] = []
+        monkeypatch.setattr(merge, "fetch_unresolved_review_threads", self._threads)
+
+    async def _threads(self, *_: object) -> list[dict[str, Any]]:
+        return self.threads
 
     async def _comment(
         self, repo_config: dict[str, str], issue_number: int, body: str, *, token: str
@@ -201,6 +206,18 @@ async def test_a_review_github_dismissed_as_stale_is_submitted_on_the_new_head(
 
     assert result.status == "merged"
     assert github.reviews == [("grace", "abc123"), ("grace", "def456")]
+
+
+async def test_a_review_thread_opened_after_the_readiness_check_blocks_the_merge(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    github.threads = [{"id": "T1"}]
+
+    result = await merge.merge_approved(approval)
+
+    assert result.status == "not_ready"
+    assert github.merges == []
 
 
 async def test_a_draft_waiting_for_its_author_does_not_merge(

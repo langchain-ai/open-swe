@@ -29,6 +29,7 @@ from agent.github.app import (
 from agent.github.ci import fetch_pr
 from agent.github.comments import post_github_comment
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_status import fetch_unresolved_review_threads
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,14 @@ async def merge_approved(
                 "not_ready",
                 "The pull request's head changed while it was being checked. Call "
                 "`merge_expedited_pr` again.",
+            )
+        async with github_client(token=token) as client:
+            threads = await fetch_unresolved_review_threads(client, pr.owner, pr.repo, pr.number)
+        if threads is None:
+            return MergeResult("error", "GitHub was unavailable while checking review threads.")
+        if threads:
+            return MergeResult(
+                "not_ready", f"Not ready to merge: {len(threads)} unresolved review threads"
             )
         for vote in row.approvals:
             # An approval on an older head still counts unless GitHub dismissed it as stale;
