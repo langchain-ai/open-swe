@@ -61,6 +61,7 @@ from agent.dashboard.environments import (
 )
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    available_requested_models,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -628,6 +629,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         model_routing: bool,
         admin_environments: bool,
         credential_login: str | None = None,
+        fable_enabled: bool = False,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
@@ -644,6 +646,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._plan_mode = plan_mode
         self._model_routing = model_routing
+        self._fable_enabled = fable_enabled
         self._admin_environments = admin_environments
 
     def _prepare_config_fingerprint(self) -> Any:
@@ -656,6 +659,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "plan_mode": self._plan_mode,
             "model_routing": self._model_routing,
+            "fable_enabled": self._fable_enabled,
             "draft_prs": self._draft_prs,
             "model": self._model_id,
             "effort": self._effort,
@@ -824,6 +828,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 plan_mode=self._plan_mode,
                 plan_url=dashboard_plan_url(self._thread_id),
                 pre_routed_mode=self._model_routing,
+                fable_enabled=self._fable_enabled,
                 repo_custom_instructions=self._repo_instructions,
                 environment_name=environment.name if environment else None,
                 environment_instructions=environment.instructions if environment else None,
@@ -962,7 +967,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
     # A picked model always wins; "auto" defers to the user and org toggles above.
-    if cfg.source == "dashboard" and cfg.model_selection == "explicit":
+    if cfg.model_selection == "explicit":
         adaptive_model_routing = False
 
     # An explicit per-run model choice is the one thing allowed to move a thread
@@ -1220,9 +1225,28 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
+        requested_models = available_requested_models(fable_enabled=fable_enabled)
+
+        def requested_model_factory(requested_model: str) -> BaseChatModel | None:
+            option = requested_models.get(requested_model)
+            if option is None:
+                return None
+            return _make_model_or_defer(
+                requested_model,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    requested_model,
+                    option["default_effort"],
+                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                ),
+            )
+
         model_selection_middleware.append(
             ModelSelectionMiddleware(
-                routing_models, initial_route=thread_settings.get("model_route")
+                routing_models,
+                initial_route=thread_settings.get("model_route"),
+                initial_requested_model=thread_settings.get("requested_model"),
+                requested_model_factory=requested_model_factory,
             )
         )
     subagent_model = _make_model_or_defer(
@@ -1287,6 +1311,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                     draft_prs=sender_draft_prs,
                     plan_mode=plan_mode,
                     model_routing=adaptive_model_routing,
+                    fable_enabled=fable_enabled,
                     admin_environments=admin_thread,
                 ),
                 *([workspace_skills] if workspace_skills else []),

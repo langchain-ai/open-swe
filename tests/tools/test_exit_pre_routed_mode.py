@@ -1,5 +1,6 @@
 import importlib
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import ToolMessage
@@ -48,3 +49,137 @@ async def test_exit_pre_routed_mode_commits_route_and_title(
     assert isinstance(message, ToolMessage)
     assert message.tool_call_id == "call-1"
     assert "performance" in message.content
+
+
+@pytest.mark.parametrize(
+    ("requested_model", "fable_enabled", "selection"),
+    [
+        ("sonnnet", True, None),
+        ("anthropic:claude-fable-5-1", False, None),
+        ("anthropic:claude-haiku-4-5", True, "explicit"),
+    ],
+)
+@pytest.mark.parametrize("exit_tool", ["exit_pre_routed_mode", "exit_plan_mode"])
+async def test_invalid_or_overridden_model_does_not_commit(
+    monkeypatch, requested_model, fable_enabled, selection, exit_tool
+) -> None:
+    module = importlib.import_module(f"agent.tools.{exit_tool}")
+    commit = AsyncMock()
+    approve = AsyncMock()
+    monkeypatch.setattr(module, "commit_route", commit)
+    if exit_tool == "exit_plan_mode":
+        monkeypatch.setattr(module, "set_plan_status", approve)
+    monkeypatch.setattr(module, "get_team_fable_enabled", AsyncMock(return_value=fable_enabled))
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "t1", "model_selection": selection}},
+    )
+
+    result = await getattr(module, exit_tool)(
+        "fast", "Answer a question", tool_call_id="call-1", requested_model=requested_model
+    )
+
+    if exit_tool == "exit_plan_mode":
+        assert result["success"] is False
+    else:
+        assert isinstance(result, ToolMessage)
+        assert result.status == "error"
+    commit.assert_not_awaited()
+    approve.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("requested_model", "effort"),
+    [("anthropic:claude-haiku-4-5", "none"), ("anthropic:claude-fable-5-1", "high")],
+)
+@pytest.mark.parametrize("exit_tool", ["exit_pre_routed_mode", "exit_plan_mode"])
+async def test_requested_model_handoff_persists_and_routes_first_turn_and_followup(
+    monkeypatch, requested_model, effort, exit_tool
+) -> None:
+    from agent import model_routing
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.utils import thread_settings, ttl_cache
+
+    stored = {
+        "model_id": "openai:gpt-5.6-sol",
+        "effort": "xhigh",
+        "model_routing_enabled": True,
+        "repo_instructions": "Keep this setting",
+    }
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"agent_settings": stored}})
+    client.threads.update = AsyncMock()
+    title = AsyncMock()
+    monkeypatch.setattr(model_routing, "get_client", lambda: client)
+    monkeypatch.setattr(model_routing, "name_thread", title)
+    monkeypatch.setattr(ttl_cache, "set_cached", lambda *args: None)
+
+    async def uncached(key, ttl, loader):
+        return await loader()
+
+    monkeypatch.setattr(ttl_cache, "cached", uncached)
+    module = importlib.import_module(f"agent.tools.{exit_tool}")
+    plan_mode = exit_tool == "exit_plan_mode"
+    if plan_mode:
+        monkeypatch.setattr(module, "_thread_metadata", AsyncMock(return_value={}))
+        monkeypatch.setattr(
+            module, "get_plan_content", AsyncMock(return_value={"markdown": "Implement it"})
+        )
+        monkeypatch.setattr(module, "list_plan_comments", AsyncMock(return_value=[]))
+        monkeypatch.setattr(module, "set_plan_status", AsyncMock())
+    monkeypatch.setattr(module, "get_team_fable_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        "agent.run_config.get_config",
+        lambda: {"configurable": {"thread_id": "requested-model", "plan_mode": plan_mode}},
+    )
+    models = {route: MagicMock() for route in ("fast", "balanced", "performance")}
+    requested = MagicMock()
+    middleware = ModelSelectionMiddleware(models, requested_model_factory=lambda _: requested)
+    state = await middleware.abefore_agent({"messages": []}, MagicMock())
+    state["plan_mode"] = plan_mode
+    assert middleware._model_for(state) is models["performance" if plan_mode else "fast"]
+
+    result = await as_tool(getattr(module, exit_tool)).ainvoke(
+        {
+            "name": exit_tool,
+            "args": {
+                "model_route": "performance",
+                "title": "Answer a question",
+                "requested_model": requested_model,
+            },
+            "id": "call-1",
+            "type": "tool_call",
+        }
+    )
+    assert isinstance(result, Command)
+    state.update(result.update)
+    assert state["pre_routed"] is False
+    assert middleware._model_for(state) is requested
+    if plan_mode:
+        assert state["plan_mode"] is False
+    else:
+        assert requested_model in state["messages"][0].content
+    title.assert_awaited_once()
+    saved = client.threads.update.call_args.kwargs["metadata"]["agent_settings"]
+    assert saved == {
+        **stored,
+        "model_route": "performance",
+        "model_id": requested_model,
+        "requested_model": requested_model,
+        "effort": effort,
+    }
+    normalized, changed = thread_settings.normalize_thread_settings(saved)
+    assert not changed
+    followup = ModelSelectionMiddleware(
+        models,
+        initial_route=normalized["model_route"],
+        initial_requested_model=normalized["requested_model"],
+        requested_model_factory=lambda _: requested,
+    )
+    followup_state = await followup.abefore_agent({"messages": []}, MagicMock())
+    assert followup_state["pre_routed"] is False
+    assert followup._model_for(followup_state) is requested
+    assert (
+        followup._model_for({**followup_state, "messages": [], "plan_mode": True})
+        is models["performance"]
+    )

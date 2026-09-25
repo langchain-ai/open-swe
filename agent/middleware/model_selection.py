@@ -35,6 +35,7 @@ PRE_ROUTED_MODE_TOOLS: frozenset[str] = frozenset(
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[ModelRoute]
+    requested_model: NotRequired[str]
     pre_routed: NotRequired[bool]
     plan_mode: NotRequired[bool]
 
@@ -43,6 +44,7 @@ class ModelSelectionUpdate(TypedDict, total=False):
     """The channels this middleware writes, as a partial of ``ModelSelectionState``."""
 
     model_route: ModelRoute
+    requested_model: str
     pre_routed: bool
 
 
@@ -54,9 +56,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         models: Mapping[str, BaseChatModel],
         *,
         initial_route: ModelRoute | None = None,
+        initial_requested_model: str | None = None,
+        requested_model_factory: Callable[[str], BaseChatModel | None] | None = None,
     ) -> None:
         self._models = dict(models)
         self._initial_route = initial_route
+        self._initial_requested_model = initial_requested_model
+        self._requested_model_factory = requested_model_factory
+        self._requested_models: dict[str, BaseChatModel | None] = {}
 
     async def abefore_agent(
         self,
@@ -72,6 +79,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         update: ModelSelectionUpdate = (
             {"pre_routed": True} if route is None else {"model_route": route, "pre_routed": False}
         )
+        if requested_model := state.get("requested_model") or self._initial_requested_model:
+            update["requested_model"] = requested_model
         return dict(update)
 
     def _model_for(self, state: ModelSelectionState) -> BaseChatModel:
@@ -79,6 +88,14 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return self._models["performance"]
         if state.get("pre_routed"):
             return self._models["fast"]
+        requested_model = state.get("requested_model")
+        if requested_model and self._requested_model_factory:
+            if requested_model not in self._requested_models:
+                self._requested_models[requested_model] = self._requested_model_factory(
+                    requested_model
+                )
+            if model := self._requested_models[requested_model]:
+                return model
         return self._models.get(state.get("model_route", "balanced"), self._models["balanced"])
 
     async def awrap_model_call(

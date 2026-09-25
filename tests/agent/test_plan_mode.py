@@ -214,7 +214,10 @@ def test_enter_plan_mode_exported() -> None:
     assert callable(enter_plan_mode)
 
 
-async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("model_selection", [None, "explicit"])
+async def test_approve_plan_tool_exits_plan_mode(
+    monkeypatch: pytest.MonkeyPatch, model_selection: str | None
+) -> None:
     import importlib
 
     from langchain_core.messages import ToolMessage
@@ -236,6 +239,7 @@ async def test_approve_plan_tool_exits_plan_mode(monkeypatch: pytest.MonkeyPatch
                 "github_login": "octo",
                 "user_email": "octo@example.com",
                 "plan_mode": True,
+                "model_selection": model_selection,
             }
         },
     )
