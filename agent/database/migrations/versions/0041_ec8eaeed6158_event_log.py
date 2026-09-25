@@ -43,4 +43,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise NotImplementedError
+    op.execute("DROP TABLE event_log")
