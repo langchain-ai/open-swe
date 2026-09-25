@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from agent.linear import webhook as service
 from agent.users import User
 from agent.webhooks import common
-from agent.webhooks.event_log import EventLog
+from agent.webhooks.event_log import EventLog, EventRefs
 
 router = APIRouter()
 
@@ -43,6 +43,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         "linear",
         event_type=request.headers.get("Linear-Event", ""),
         delivery_id=request.headers.get("Linear-Delivery", ""),
+        refs=EventRefs.linear(body),
     )
 
     try:

@@ -17,7 +17,11 @@ def upgrade() -> None:
             endpoint text NOT NULL,
             event_type text NOT NULL DEFAULT '',
             delivery_id text NOT NULL DEFAULT '',
-            payload jsonb NOT NULL
+            payload jsonb NOT NULL,
+            user_id uuid,
+            workspace_id uuid,
+            repository_id uuid,
+            pull_request_id uuid
         ) PARTITION BY RANGE (received_at)
         """
     )
@@ -38,6 +42,15 @@ def upgrade() -> None:
         "COMMENT ON COLUMN event_log.payload IS 'Request body as sent. Form-encoded bodies are "
         "stored as an object of their fields; Slack interactivity keeps its JSON in the payload "
         "field as a string.'",
+        "COMMENT ON COLUMN event_log.user_id IS 'users.id of the sender (GitHub sender, Slack "
+        "user, Linear actor email), resolved at insert. No foreign key, so deletes elsewhere "
+        "never touch the log.'",
+        "COMMENT ON COLUMN event_log.workspace_id IS 'workspace.id owning the repository or "
+        "Slack channel, resolved at insert.'",
+        "COMMENT ON COLUMN event_log.repository_id IS 'repository.id of a GitHub delivery, "
+        "resolved at insert.'",
+        "COMMENT ON COLUMN event_log.pull_request_id IS 'pull_request.id of a GitHub pull "
+        "request, review, or PR comment delivery, resolved at insert.'",
     ):
         op.execute(statement)
 

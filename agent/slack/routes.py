@@ -54,7 +54,7 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
-from agent.webhooks.event_log import EventLog
+from agent.webhooks.event_log import EventLog, EventRefs
 
 router = APIRouter()
 
@@ -282,6 +282,12 @@ async def slack_webhook(
         "slack",
         event_type=envelope.kind if envelope else "",
         delivery_id=envelope.event_id if envelope else "",
+        refs=EventRefs(
+            slack_user_id=envelope.event.resolve_user_id(),
+            slack_channel_id=envelope.event.resolve_channel_id(),
+        )
+        if envelope and envelope.event
+        else None,
     )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")
@@ -598,7 +604,12 @@ async def slack_command(
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
     await EventLog.record(
-        request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
     )
     channel_id = value("channel_id")
     user_id = value("user_id")
@@ -648,7 +659,12 @@ async def slack_code_channel_command(
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
     await EventLog.record(
-        request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
     )
     channel_id = value("channel_id")
     user_id = value("user_id")
@@ -695,6 +711,9 @@ async def slack_interactivity(
         "slack",
         event_type=interaction.type if interaction else "",
         delivery_id=interaction.trigger_id if interaction else "",
+        refs=EventRefs(slack_user_id=interaction.user.id, slack_channel_id=interaction.channel_id)
+        if interaction
+        else None,
     )
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
