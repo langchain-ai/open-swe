@@ -92,7 +92,6 @@ async def handle_vote(
     *,
     decision: VoteAction,
     user: User | None,
-    broadcast: bool = False,
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
@@ -104,7 +103,7 @@ async def handle_vote(
             return author
         if not approval.is_author(author.user.id, author.github_login):
             return VoteOutcome("Only the pull request's author can mark it ready for review.")
-        return await _mark_ready(approval, voter=author, broadcast=broadcast)
+        return await _mark_ready(approval, voter=author)
     voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
@@ -190,7 +189,7 @@ async def _submit_review(approval: ExpeditedApproval, voter_user_id: UUID) -> st
     return None
 
 
-async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter, broadcast: bool) -> VoteOutcome:
+async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
     """Undraft the PR as its author, then open the card for approval."""
     if not approval.awaiting_ready:
         return VoteOutcome("This pull request is already ready for review.")
@@ -215,11 +214,7 @@ async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter, broadcast: b
     current = await ExpeditedApproval.get(approval.id)
     if current is None:
         return VoteOutcome(marked)
-    if broadcast and await broadcast_card(current):
-        return VoteOutcome(f"{marked} Sent to the channel too.")
     await refresh_card(current)
-    if broadcast:
-        return VoteOutcome(f"{marked} It could not be sent to the channel.")
     return VoteOutcome(marked)
 
 
@@ -248,7 +243,6 @@ async def process_vote(
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
-    broadcast_requested: bool = False,
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
     slack_user_id = split_person_id(person)[1]
@@ -275,7 +269,6 @@ async def process_vote(
                         approval,
                         decision=decision,
                         user=await User.for_person(person),
-                        broadcast=broadcast_requested,
                     )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})

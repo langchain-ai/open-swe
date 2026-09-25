@@ -92,8 +92,6 @@ async def _click(
     approval: ExpeditedApproval,
     slack_user: str,
     decision: voting.VoteAction = "approve",
-    *,
-    broadcast: bool = False,
 ) -> voting.VoteOutcome:
     current = await ExpeditedApproval.get(approval.id)
     assert current is not None
@@ -101,7 +99,6 @@ async def _click(
         current,
         decision=decision,
         user=await User.for_person({"id": f"slack:{slack_user}", "platform": "slack"}),
-        broadcast=broadcast,
     )
 
 
@@ -275,21 +272,6 @@ async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
     assert stored.state == "cancelled"
     assert stored.detail == "dismissed by <@U_NOBODY>"
     assert harness.agent_prompts == []
-
-
-async def test_marking_ready_with_the_box_ticked_sends_the_card_to_the_channel(
-    harness: _Harness, open_approval: OpenApproval, slack: _FakeSlack
-) -> None:
-    approval = await open_approval(awaiting_ready=True)
-
-    outcome = await _click(approval, "U_ADA", decision="ready", broadcast=True)
-
-    stored = await _stored(approval)
-    assert "Sent to the channel" in outcome.message
-    assert slack.broadcasts == [True]
-    assert slack.deleted == ["2.0"]
-    assert stored.slack_broadcast
-    assert stored.slack_message_ts == "3.0"
 
 
 async def test_a_broadcast_card_leaves_the_channel_once_it_closes(

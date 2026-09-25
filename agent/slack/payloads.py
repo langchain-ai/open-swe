@@ -224,15 +224,6 @@ class SlackInputValue(SlackPayload):
 class SlackViewState(SlackPayload):
     values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
 
-    def selected(self, action_id: str) -> set[str]:
-        """Option values ticked in the element ``action_id``, whichever block holds it."""
-        return {
-            option.value
-            for elements in self.values.values()
-            if (element := elements.get(action_id)) is not None
-            for option in element.selected_options
-        }
-
 
 class SlackInteraction(SlackPayload):
     """A Block Kit interaction (``block_actions``, ``block_suggestion``)."""
