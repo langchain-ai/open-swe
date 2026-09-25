@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
@@ -906,12 +907,15 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
-async def _stamp_attribution_footer(body: str) -> str:
+async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    if cfg.thread_id:
+    if isinstance(state, dict) and isinstance(state.get("selected_model_id"), str):
+        model_id = state["selected_model_id"]
+        effort = state.get("selected_effort")
+    if cfg.thread_id and not (isinstance(state, dict) and state.get("selected_model_id")):
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -975,6 +979,7 @@ async def _open_pull_request(
     draft: bool,
     resolves_thread: bool = False,
     author: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         token, kind = await _resolve_pr_author_token(author)
@@ -1036,7 +1041,8 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _stamp_attribution_footer(
-            await _maybe_append_references(client, token, owner, repo, body)
+            await _maybe_append_references(client, token, owner, repo, body),
+            state,
         )
         draft = _effective_draft(draft)
         payload = {
@@ -1139,6 +1145,7 @@ async def open_pull_request(
     draft: bool = True,
     resolves_thread: bool = False,
     author: str = "",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1151,6 +1158,7 @@ async def open_pull_request(
         draft=draft,
         resolves_thread=resolves_thread,
         author=author or None,
+        state=state,
     )
 
 

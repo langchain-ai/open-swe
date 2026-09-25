@@ -507,7 +507,7 @@ async def _coro(value: Any) -> Any:
     return value
 
 
-def _open_with_body(body: str) -> dict[str, Any]:
+def _open_with_body(body: str, state: dict[str, Any] | None = None) -> dict[str, Any]:
     return asyncio.run(
         opr._open_pull_request(
             owner="langchain-ai",
@@ -517,11 +517,12 @@ def _open_with_body(body: str) -> dict[str, Any]:
             title="feat: x",
             body=body,
             draft=True,
+            state=state,
         )
     )
 
 
-async def _passthrough_body(body: str) -> str:
+async def _passthrough_body(body: str, _state: dict[str, Any] | None = None) -> str:
     return body
 
 
@@ -626,16 +627,26 @@ def test_footer_names_the_model_that_opened_the_pr(
     assert sent_body.endswith(" · openai:gpt-5.6-luna (xhigh)")
 
 
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [
+        (None, "fireworks:accounts/fireworks/models/glm-5p3-flash (max)"),
+        (
+            {"selected_model_id": "openai:gpt-6-sol", "selected_effort": "high"},
+            "openai:gpt-6-sol (high)",
+        ),
+    ],
+)
 def test_footer_uses_selected_route_when_thread_metadata_is_missing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, selected: dict[str, str] | None, expected: str
 ) -> None:
     _set_config(
         monkeypatch,
         {
             "source": "dashboard",
             "thread_id": "thread-1",
-            "resolved_agent_model_id": "openai:balanced",
-            "resolved_agent_effort": "high",
+            "resolved_agent_model_id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
+            "resolved_agent_effort": "max",
         },
     )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
@@ -654,9 +665,9 @@ def test_footer_uses_selected_route_when_thread_metadata_is_missing(
         ),
     )
 
-    _open_with_body("body")
+    _open_with_body("body", state=selected)
 
-    assert client.post_calls[0]["json"]["body"].endswith(" · openai:balanced (high)")
+    assert client.post_calls[0]["json"]["body"].endswith(f" · {expected}")
 
 
 def test_uses_stored_slack_permalink_reference(monkeypatch: pytest.MonkeyPatch) -> None:
