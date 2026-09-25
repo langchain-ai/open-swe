@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from agent.review_scout.git import ScoutGitError, commit_staged
+from agent.review_scout.git import OTHER_TITLE, ScoutGitError, commit_staged, committed_kinds
 from agent.review_scout.paths import scout_repo_dir
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
@@ -14,24 +14,34 @@ MAX_TITLE_CHARS = 120
 MAX_SUMMARY_CHARS = 1_200
 
 
-async def commit_walkthrough_step(title: str, summary: str, other: bool = False) -> dict[str, Any]:
+async def commit_walkthrough_step(
+    title: str = "", summary: str = "", other: bool = False
+) -> dict[str, Any]:
     """Implement the `commit_walkthrough_step` tool."""
-    trimmed_title = " ".join(title.split())[:MAX_TITLE_CHARS]
+    trimmed_title = OTHER_TITLE if other else " ".join(title.split())[:MAX_TITLE_CHARS]
     if not trimmed_title:
         return {"success": False, "error": "title must name the step"}
     cfg = RunConfig.from_runtime()
-    if not cfg.thread_id:
+    if not cfg.thread_id or not cfg.base_sha or not cfg.head_sha:
         return {"success": False, "error": "scout thread unavailable"}
     backend = get_cached_sandbox_backend(cfg.thread_id)
     repo_dir = await scout_repo_dir(backend, cfg)
     if repo_dir is None:
         return {"success": False, "error": "scout repository unavailable"}
     try:
+        if not other and not any(
+            await committed_kinds(backend, repo_dir, base_sha=cfg.base_sha, head_sha=cfg.head_sha)
+        ):
+            return {
+                "success": False,
+                "error": "commit the `other: true` pass first: stage every change a reviewer "
+                "does not need to read and commit it before any step",
+            }
         sha = await commit_staged(
             backend,
             repo_dir,
             title=trimmed_title,
-            summary=summary.strip()[:MAX_SUMMARY_CHARS],
+            summary="" if other else summary.strip()[:MAX_SUMMARY_CHARS],
             other=other,
         )
     except ScoutGitError as exc:

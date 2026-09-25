@@ -111,7 +111,9 @@ What happens:
 2. A thread is created on the deployment, with `origin` repo detected from
    `git remote get-url origin`, and its dashboard URL is printed to stderr.
 3. The agent works. Nothing it says or runs is printed; follow it on the
-   dashboard.
+   dashboard. If the event stream drops, for example while the backend
+   restarts, the CLI reconnects with backoff; it gives up after 10 reconnects
+   in a row that each lasted under a minute.
 4. The agent ends the run by calling `cli_result` with `stdout` and an
    `exit_code`. The CLI prints that `stdout` verbatim as its only output on
    stdout, releases the bridge, and exits with that code.

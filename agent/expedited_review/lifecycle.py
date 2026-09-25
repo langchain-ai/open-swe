@@ -16,10 +16,13 @@ from agent.expedited_review import card
 from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
+from agent.expedited_review.reviews import dismiss_approval
 from agent.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
 )
+from agent.github.ci import fetch_pr
+from agent.github.pull_requests import PullRequestPayload
 from agent.slack.blocks import Block, block_payload
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -268,6 +271,7 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
             prompt,
             configurable,
             source=str(configurable["source"]),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )
@@ -290,10 +294,20 @@ async def retire(
     updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
-    # A closed card leaves the channel and stays in the thread only.
-    if not updated.slack_broadcast or not await _repost(updated, broadcast=False, outcome=outcome):
-        await refresh_card(updated, outcome=outcome)
+    if state != "merged":
+        await withdraw_reviews(updated)
+    await refresh_card_in_thread(updated, outcome=outcome)
     return updated
+
+
+async def refresh_card_in_thread(
+    approval: ExpeditedApproval, *, outcome: str | None = None
+) -> None:
+    """Re-render a card that no longer needs votes, reposting it out of the channel if broadcast."""
+    if not approval.slack_broadcast or not await _repost(
+        approval, broadcast=False, outcome=outcome
+    ):
+        await refresh_card(approval, outcome=outcome)
 
 
 async def remove_superseded_cards(approval: ExpeditedApproval) -> None:
@@ -316,3 +330,51 @@ async def mark_merged(approval: ExpeditedApproval) -> None:
     if location is not None:
         if not await add_slack_reaction(location[0], location[1], "merged"):
             await add_slack_reaction(location[0], location[1], "white_check_mark")
+
+
+async def withdraw_reviews(approval: ExpeditedApproval) -> None:
+    """Dismiss the GitHub reviews every closed, unmerged card of this PR still has standing.
+
+    Covers earlier cards too, so a dismissal GitHub refused is retried here.
+    """
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        logger.warning(
+            "No GitHub App token to dismiss expedited review approvals",
+            extra={"approval_id": str(approval.id)},
+        )
+        return
+    for stale in await ExpeditedApproval.with_standing_reviews(approval.pull_request_id):
+        async with ExpeditedApproval.locked(stale.id) as (_, row):
+            if row is None or row.state in {"open", "merged"}:
+                continue
+            for vote in row.approvals:
+                await dismiss_approval(row, vote, token, row.detail)
+
+
+async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
+    """Settle a PR's open card once the PR is closed on GitHub, whoever closed it.
+
+    Reads the PR's current state, so a late webhook cannot close a card for a reopened
+    PR. Only the card and the merged reaction change: nothing new is posted and the
+    agent is not woken.
+    """
+    approval = await ExpeditedApproval.active_for(owner, repo, number)
+    if approval is None:
+        return
+    token = await repo_token(owner, repo)
+    payload = (
+        await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token) if token else None
+    )
+    if payload is None:
+        logger.warning(
+            "Could not read a closed pull request to settle its expedited card",
+            extra={"approval_id": str(approval.id)},
+        )
+        return
+    current = PullRequestPayload.model_validate(payload)
+    if current.merged:
+        await mark_merged(approval)
+    elif current.state == "closed":
+        await retire(approval, "cancelled", "the pull request was closed")

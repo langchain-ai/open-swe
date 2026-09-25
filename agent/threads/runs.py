@@ -48,6 +48,7 @@ from agent.threads.access import (
     agent_version_metadata,
     resolve_run_email,
 )
+from agent.threads.creation import create_thread
 from agent.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
@@ -310,8 +311,10 @@ async def _create_dashboard_thread_record(
         metadata["transcript"] = TRANSCRIPT_VERSION
 
     client = langgraph_client()
-    await client.threads.create(
-        thread_id=thread_id,
+    await create_thread(
+        client,
+        thread_id,
+        title=initial_title,
         metadata={**metadata, "feedback_initiator_login": login},
         if_exists="raise",
     )
@@ -1129,6 +1132,7 @@ async def queue_follow_up_run(
             # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
             metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
             source=DASHBOARD_SOURCE,
+            thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
         )
@@ -1217,6 +1221,7 @@ async def dispatch_pending_follow_ups(
         None,
         configurable,
         source=DASHBOARD_SOURCE,
+        thread_title=None,
         input={"messages": []},
         metadata={"kind": FOLLOW_UP_PICKUP_KIND},
         client=client,
@@ -1302,7 +1307,9 @@ async def _create_system_thread_record(
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="raise")
+    await create_thread(
+        client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
+    )
     return as_thread_dict(await client.threads.get(thread_id))
 
 

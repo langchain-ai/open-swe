@@ -113,7 +113,7 @@ async def _move(request: SlackRequest, target: str) -> None:
         return
 
     title = str(metadata.get("title") or "").strip() or "Untitled"
-    heading = f"*Breakout thread:* {_title(title)}"
+    heading = f"`/breakout`: {_title(title)}"
     result = await move_slack_thread(
         client,
         thread_id,
@@ -143,7 +143,7 @@ async def _start(
     target: str,
     repo: common.SlackRepoResolution | None,
 ) -> None:
-    heading = f"*Breakout thread:* {_title(instruction)}"
+    heading = f"`/breakout`: {_title(instruction)}"
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
         await _root_text(request, heading),

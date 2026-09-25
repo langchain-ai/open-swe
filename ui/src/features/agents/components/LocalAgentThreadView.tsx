@@ -91,6 +91,7 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
+  const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const { stream } = useAgentThreadStream({
     transport: "local",
     threadId: sessionId,
@@ -529,6 +530,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               activeRun={{ threadId: thread.id, running: isRunning }}
               busy={isRunning}
               compact
+              followUpBehavior={followUpBehavior}
               models={models}
               selection={activeSelection}
               onSelectionChange={setSelection}
@@ -539,7 +541,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   setError(errorMessage(cause))
                 }
               }}
-              onSubmit={async (prompt, images) => {
+              onSubmit={async (prompt, images, options) => {
                 scrollControlRef.current?.scrollToBottom()
                 const terminalContext = terminalContexts
                   .map((context) => context.text)
@@ -548,7 +550,14 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                 const text = terminalContext
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                   : prompt
-                await submit(text, images, [], isRunning)
+                await submit(
+                  text,
+                  images,
+                  [],
+                  isRunning &&
+                    (followUpBehavior === "queue") !==
+                      (options?.alternate === true)
+                )
               }}
               placeholder="Add a follow up"
               skills={skills.data}

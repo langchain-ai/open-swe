@@ -220,7 +220,7 @@ export function PreferencesSection() {
         control={
           <Select
             items={FOLLOW_UP_BEHAVIORS}
-            value={preferences.data?.follow_up_behavior ?? "queue"}
+            value={preferences.data?.follow_up_behavior ?? "steer"}
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({

@@ -17,6 +17,7 @@ import {
   TerminalActions,
   TerminalPanel,
 } from "@/features/agents/components/TerminalPanel"
+import { FilesPanel } from "@/features/agents/components/files/FilesPanel"
 import { RightPanelTabs } from "@/features/agents/components/panel/RightPanelTabs"
 import { RightPanelSheet } from "@/features/agents/components/panel/RightPanelSheet"
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "@/features/agents/components/panel/rightPanelLayout"
@@ -25,6 +26,7 @@ import {
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
 import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
+import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { cn } from "@/lib/utils"
@@ -99,6 +101,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   const byThreadKey = useRightPanelStore((state) => state.byThreadKey)
   const openSurface = useRightPanelStore((state) => state.open)
   const openTerminalSurface = useRightPanelStore((state) => state.openTerminal)
+  const openFileSurface = useRightPanelStore((state) => state.openFile)
   const activateSurface = useRightPanelStore((state) => state.activateSurface)
   const closeSurfaceById = useRightPanelStore((state) => state.closeSurface)
   const closeOtherSurfaces = useRightPanelStore(
@@ -150,6 +153,10 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const handleAddDiff = useCallback(() => {
     openSurface(threadRef, "diff")
+  }, [openSurface, threadRef])
+
+  const handleAddFiles = useCallback(() => {
+    openSurface(threadRef, "files")
   }, [openSurface, threadRef])
 
   const handleActivate = useCallback(
@@ -303,6 +310,19 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}
+      {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
+        <FilesPanel
+          key={workspaceTargetKey(terminalTarget)}
+          target={terminalTarget}
+          relativePath={
+            activeSurface.kind === "file" ? activeSurface.relativePath : null
+          }
+          revealRequestId={
+            activeSurface.kind === "file" ? activeSurface.revealRequestId : 0
+          }
+          onOpenFile={(path) => openFileSurface(threadRef, path)}
+        />
+      ) : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab
           switches; every other surface unmounts. */}
       {surfaces
@@ -352,6 +372,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       onCopyFilePath={(relativePath) => void copy(relativePath)}
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}
+      onAddFiles={handleAddFiles}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
       layoutControls={layoutControls}

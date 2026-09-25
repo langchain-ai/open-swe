@@ -593,7 +593,7 @@ async def test_slack_reply_passes_model_reported_usage(
         return "2.0", None
 
     config = _config()
-    config["configurable"]["resolved_agent_effort"] = "high"
+    config["configurable"].update(resolved_agent_model_id="model-a", resolved_agent_effort="high")
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
     state = {
@@ -628,12 +628,14 @@ async def test_slack_reply_uses_selected_route_effort(
     config = _config()
     config["configurable"].update(
         resolved_agent_model_id="model-balanced",
-        resolved_agent_effort="high",
+        resolved_agent_effort="max",
     )
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     state = {
         "model_route": "balanced",
+        "selected_model_id": "model-balanced",
+        "selected_effort": "high",
         "messages": [
             HumanMessage(content="request"),
             AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),

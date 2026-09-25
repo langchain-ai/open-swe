@@ -21,6 +21,7 @@ from agent.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
+from agent.threads.creation import create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
@@ -50,6 +51,7 @@ from agent.threads.summary import (
 )
 from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
+from agent.transcript.subagents import attach_subagents
 from agent.transcript.turns import settle_run_turn
 from agent.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
@@ -185,6 +187,8 @@ async def get_dashboard_thread(
             latest_run_status=latest_run_status,
             latest_run_id=latest_run_id,
         )
+    with phase(record, "subagents"):
+        await attach_subagents([summary])
     return summary
 
 
@@ -568,7 +572,13 @@ async def continue_thread_privately(
         }
     )
     new_thread_id = str(uuid.uuid4())
-    await client.threads.create(thread_id=new_thread_id, metadata=new_metadata, if_exists="raise")
+    await create_thread(
+        client,
+        new_thread_id,
+        title=new_metadata["title"],
+        metadata=new_metadata,
+        if_exists="raise",
+    )
     if copied:
         try:
             await client.threads.update_state(new_thread_id, values={"messages": copied})
