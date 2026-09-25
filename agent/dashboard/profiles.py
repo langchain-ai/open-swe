@@ -60,6 +60,7 @@ class ProfileUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
+    preserve_sandbox_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
@@ -422,8 +423,8 @@ async def get_my_profile(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
     if not profile:
-        return {"concierge_mode": preferences.concierge_mode}
-    return {**normalize_profile_for_response(profile), "concierge_mode": preferences.concierge_mode}
+        return preferences.model_dump()
+    return {**normalize_profile_for_response(profile), **preferences.model_dump()}
 
 
 @router.put("/profile")
@@ -434,12 +435,16 @@ async def put_my_profile(
     update.validate_pairing()
     login = session["sub"]
     preferences = await User.update_preferences(
-        login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
+        login,
+        UserPreferencesPatch(
+            concierge_mode=update.concierge_mode,
+            preserve_sandbox_memory=update.preserve_sandbox_memory,
+        ),
     )
-    if preferences is None and update.concierge_mode:
+    if preferences is None and (update.concierge_mode or update.preserve_sandbox_memory):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        "concierge_mode": (preferences or UserPreferences()).concierge_mode,
+        **(preferences or UserPreferences()).model_dump(),
     }
