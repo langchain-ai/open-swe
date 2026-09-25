@@ -10,7 +10,7 @@ from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
 from agent.workspaces.routing import WorkspaceLookupError
 from agent.workspaces.store import WORKSPACES, WORKSPACES_NAMESPACE, import_store_records
-from tests.conftest import FakeStore, post_signed_github_webhook
+from tests.conftest import FakeStore, post_signed_github_webhook, register_github_logins
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"
 
@@ -60,6 +60,7 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
         called["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 

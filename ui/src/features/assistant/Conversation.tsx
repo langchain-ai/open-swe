@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { ArrowDown } from "lucide-react"
@@ -10,6 +10,7 @@ import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackC
 import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useSession } from "@/lib/session"
+import { pageTitle } from "@/lib/pageTitle"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useThreadMetadata } from "./AssistantProvider"
@@ -36,6 +37,17 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
     thread?.id ?? "",
     Boolean(thread?.pullRequests?.length)
   )
+  const title = thread?.title
+
+  useEffect(() => {
+    if (!title) return
+    const documentTitle = pageTitle(title)
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle)
+        document.title = pageTitle("Assistant")
+    }
+  }, [title])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">

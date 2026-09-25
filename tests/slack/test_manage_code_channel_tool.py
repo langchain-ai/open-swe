@@ -1,5 +1,3 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
@@ -75,16 +73,10 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     }
     client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
 
-    @asynccontextmanager
-    async def locked(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        yield source
-
     monkeypatch.setattr(
         manage_tool, "create_code_channel", AsyncMock(return_value=("C-code", None))
     )
-    monkeypatch.setattr(manage_tool, "slack_thread_mutation_lock", locked)
-    monkeypatch.setattr(manage_tool, "bind_slack_thread_id", AsyncMock())
-    monkeypatch.setattr(manage_tool, "delete_slack_thread_associations", AsyncMock())
+    monkeypatch.setattr(manage_tool, "rebind_slack_thread", AsyncMock())
     status = AsyncMock(return_value=({"ok": True}, None))
     context = AsyncMock(return_value=(True, None))
     commands = AsyncMock(return_value=({"ok": True}, None))
@@ -118,15 +110,10 @@ def promotion(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "triggering_user_id": "U1",
     }
 
-    @asynccontextmanager
-    async def locked(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        yield source
-
     invite = AsyncMock(return_value=(["U1", "U2"], ""))
     stubs: dict[str, Any] = {
         "create_code_channel": AsyncMock(return_value=("C-code", None)),
-        "bind_slack_thread_id": AsyncMock(),
-        "delete_slack_thread_associations": AsyncMock(),
+        "rebind_slack_thread": AsyncMock(),
         "set_session_status_result": AsyncMock(return_value=({"ok": True}, None)),
         "set_context_bar": AsyncMock(return_value=(True, None)),
         "set_commands": AsyncMock(return_value=({"ok": True}, None)),
@@ -134,7 +121,6 @@ def promotion(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     }
     for name, mock in stubs.items():
         monkeypatch.setattr(manage_tool, name, mock)
-    monkeypatch.setattr(manage_tool, "slack_thread_mutation_lock", locked)
     return {**stubs, "source": source}
 
 

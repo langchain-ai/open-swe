@@ -26,6 +26,7 @@ from agent.review.findings import (
     get_thread_metadata,
 )
 from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
+from agent.review.session import REVIEW_CHAT_SOURCE
 from agent.thread_ids import review_chat_thread_id, reviewer_thread_id
 from agent.threads.proxy import (
     langgraph_proxy_headers,
@@ -39,7 +40,6 @@ from agent.utils.thread_ops import langgraph_client, langgraph_url
 logger = logging.getLogger(__name__)
 
 _CHAT_ASSISTANT_ID = "chat"
-_CHAT_SOURCE = "review_chat"
 # Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
 _UNFETCHED = object()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
@@ -215,13 +215,13 @@ async def assert_chat_thread_access(
     ``None`` when the thread doesn't exist yet (it's created lazily on the first
     run, so there is nothing to leak). Raises 404 when a thread exists but is
     owned by someone else or scoped to a different repo/PR — this also rejects
-    reviewer (or any non-chat) threads, whose ``kind`` is not ``_CHAT_SOURCE``.
+    reviewer (or any non-chat) threads, whose ``kind`` is not ``REVIEW_CHAT_SOURCE``.
     """
     metadata = await _get_chat_thread_metadata(thread_id)
     if metadata is None:
         return None
     owns = (
-        metadata.get("kind") == _CHAT_SOURCE
+        metadata.get("kind") == REVIEW_CHAT_SOURCE
         and metadata.get("github_login") == login
         and metadata.get("repo_owner") == owner
         and metadata.get("repo_name") == repo
@@ -237,8 +237,8 @@ async def _create_chat_thread(
 ) -> None:
     now_ms = _now_ms()
     metadata = {
-        "kind": _CHAT_SOURCE,
-        "source": _CHAT_SOURCE,
+        "kind": REVIEW_CHAT_SOURCE,
+        "source": REVIEW_CHAT_SOURCE,
         "github_login": login,
         "repo_owner": owner,
         "repo_name": repo,
@@ -307,7 +307,7 @@ async def _enrich_chat_command(
 
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": _CHAT_SOURCE,
+        "source": REVIEW_CHAT_SOURCE,
         "github_login": login,
         "chat_repo_owner": owner,
         "chat_repo_name": repo,
@@ -334,8 +334,9 @@ async def _enrich_chat_command(
     # full review is only fetched below, by ``_build_pr_context``, when we
     # actually need to reseed. On lookup failure, keep the existing context.
     review: dict[str, Any] | None = None
-    needs_seed = created
-    if not created:
+    # A review listed in the sidebar creates the thread before its first chat.
+    needs_seed = created or not stored_head
+    if not needs_seed:
         current_head = await get_pr_head_sha(owner, repo, pr_number)
         needs_seed = (bool(current_head) and current_head != stored_head) or (
             current_review != stored_review

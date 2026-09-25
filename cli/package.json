@@ -1,0 +1,17 @@
+{
+  "name": "open-swe-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open SWE command-line client: runs a cloud agent against a local checkout",
+  "type": "module",
+  "scripts": {
+    "build": "bun build --compile --minify --no-compile-autoload-dotenv src/main.ts --outfile dist/oswe",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.9.3"
+  }
+}

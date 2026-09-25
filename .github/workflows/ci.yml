@@ -155,7 +155,26 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
       - name: Run desktop checks
-        run: pnpm run check
+        run: pnpm run check --filter open-swe-desktop
+
+  cli:
+    name: CLI checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+      - name: Run CLI checks
+        run: pnpm --filter open-swe-cli run check
+      - name: Build CLI binary
+        run: pnpm --filter open-swe-cli run build
 
   e2e-changes:
     name: Detect E2E changes

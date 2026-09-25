@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { GitMerge, ShieldCheck, TriangleAlert } from "lucide-react"
 
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 import {
+  agentMutationKeys,
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
 import { Button } from "@/components/ui/button"
+import { usePendingVariables } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 
 function shortSha(value: string): string {
@@ -32,7 +34,9 @@ export function WorkflowApprovalCard({
 }) {
   const query = useWorkflowApprovals(threadId, { pollWhileActive })
   const decision = useWorkflowApprovalDecision(threadId)
-  const [error, setError] = useState<string | null>(null)
+  const pendingDecisions = usePendingVariables<{ fingerprint: string }>(
+    agentMutationKeys.workflowDecision(threadId)
+  )
   const approvals = useMemo(
     () => pendingApprovals(query.data?.approvals),
     [query.data?.approvals]
@@ -40,20 +44,8 @@ export function WorkflowApprovalCard({
 
   if (approvals.length === 0) return null
 
-  const decide = async (
-    approval: WorkflowPushApproval,
-    kind: "approve" | "reject"
-  ) => {
-    setError(null)
-    try {
-      await decision.mutateAsync({
-        fingerprint: approval.fingerprint,
-        decision: kind,
-      })
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
+  const decide = (approval: WorkflowPushApproval, kind: "approve" | "reject") =>
+    decision.mutate({ fingerprint: approval.fingerprint, decision: kind })
 
   return (
     <div
@@ -61,7 +53,9 @@ export function WorkflowApprovalCard({
       className="mt-4 flex w-full flex-col gap-3"
     >
       {approvals.map((approval) => {
-        const busy = decision.isPending
+        const busy = pendingDecisions.some(
+          (vars) => vars.fingerprint === approval.fingerprint
+        )
         const inherited = approval.inheritedFrom
         return (
           <section
@@ -116,19 +110,17 @@ export function WorkflowApprovalCard({
               </div>
             </div>
 
-            {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
-
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 disabled={busy}
-                onClick={() => void decide(approval, "approve")}
+                onClick={() => decide(approval, "approve")}
               >
                 Approve &amp; continue push
               </Button>
               <Button
                 variant="secondary"
                 disabled={busy}
-                onClick={() => void decide(approval, "reject")}
+                onClick={() => decide(approval, "reject")}
               >
                 Cancel push
               </Button>

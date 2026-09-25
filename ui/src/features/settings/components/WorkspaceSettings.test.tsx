@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,9 +17,14 @@ import {
   ApiError,
   type WorkspaceSettings,
   type WorkspaceRecord,
+  type WorkspaceSettingsView,
 } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const RECORD: WorkspaceRecord = {
   slug: "oss",
@@ -106,9 +112,8 @@ function mockApis(record: WorkspaceRecord = RECORD) {
 }
 
 function renderPage(canEdit = true, onDeleted = vi.fn()) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -143,8 +148,15 @@ describe("WorkspaceSettingsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
     fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Could not delete the workspace"
+    await waitFor(() =>
+      expect(reportError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Couldn't delete workspace",
+          error: expect.objectContaining({
+            message: "Could not delete the workspace",
+          }),
+        })
+      )
     )
     expect(remove).toHaveBeenCalledWith("oss", expect.anything())
     expect(onDeleted).not.toHaveBeenCalled()
@@ -206,7 +218,144 @@ describe("WorkspaceSettingsPanel", () => {
         prompt: "Run make test.",
       })
     )
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+      ).toBe("OSS support")
+    )
+    expect(screen.queryByRole("status")).toBeNull()
   })
+
+  it.each([
+    ["refreshing", "success"],
+    ["refreshing", "failed"],
+    ["success", "success"],
+    ["success", "failed"],
+    ["refreshing", "unknown"],
+    ["success", "unknown"],
+  ] as const)(
+    "follows a repository rebuild from a %s save response through stale polls to %s",
+    async (savedStatus, outcome) => {
+      const initial = {
+        ...RECORD,
+        refresh_finished_at: "2026-01-01T00:00:00Z",
+      }
+      mockApis(initial)
+      vi.spyOn(api, "repos").mockResolvedValue({
+        installations: [],
+        repositories: [],
+      })
+      const saved = {
+        ...initial,
+        repos: [],
+        refresh_finished_at: "2026-01-01T00:00:30Z",
+      }
+      vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+        ...saved,
+        refresh_status: savedStatus,
+      })
+      renderPage()
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Choose repositories" })
+      )
+      fireEvent.click(await screen.findByRole("checkbox", { name: "acme/oss" }))
+      fireEvent.click(
+        screen.getByRole("button", { name: "Save 0 repositories" })
+      )
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      try {
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Save" }))
+          await vi.advanceTimersByTimeAsync(1)
+        })
+        const general = screen
+          .getByRole("button", { name: "Save" })
+          .closest("section")
+        if (!general) throw new Error("no General section")
+        expect(within(general).getByRole("status").textContent).toContain(
+          savedStatus === "refreshing"
+            ? "Rebuilding sandbox image"
+            : "rebuild queued"
+        )
+        expect(
+          screen
+            .getByRole("button", {
+              name:
+                savedStatus === "refreshing" ? "Rebuilding…" : "Rebuild image",
+            })
+            .hasAttribute("disabled")
+        ).toBe(savedStatus === "refreshing")
+
+        const getWorkspace = vi
+          .mocked(api.getWorkspace)
+          .mockResolvedValue(saved)
+        const reads = getWorkspace.mock.calls.length
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5001)
+        })
+        expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
+        expect(screen.getByRole("status").textContent).toContain(
+          "rebuild queued"
+        )
+
+        getWorkspace.mockResolvedValue({
+          ...saved,
+          refresh_status: outcome === "unknown" ? "success" : "refreshing",
+        })
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(65_001)
+        })
+        expect(
+          within(general).getByRole(outcome === "unknown" ? "alert" : "status")
+            .textContent
+        ).toContain(
+          outcome === "unknown"
+            ? "image rebuild could not be confirmed"
+            : "Rebuilding sandbox image"
+        )
+
+        getWorkspace.mockResolvedValue({
+          ...saved,
+          refresh_status: outcome === "unknown" ? "success" : outcome,
+          refresh_finished_at:
+            outcome === "unknown"
+              ? saved.refresh_finished_at
+              : "2026-01-01T00:01:00Z",
+          refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
+        })
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5001)
+        })
+        expect(
+          within(general).getByRole(outcome === "success" ? "status" : "alert")
+            .textContent
+        ).toContain(
+          outcome === "unknown"
+            ? "image rebuild could not be confirmed"
+            : outcome === "failed"
+              ? "Image rebuild failed. Setup script exited 1"
+              : "Sandbox image rebuilt with the saved repositories."
+        )
+        expect(
+          screen
+            .getByRole("button", { name: "Rebuild image" })
+            .hasAttribute("disabled")
+        ).toBe(false)
+        const settledReads = getWorkspace.mock.calls.length
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10001)
+        })
+        expect(getWorkspace.mock.calls.length).toBe(settledReads)
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
 
   it("shows a save conflict in the alert region", async () => {
     mockApis()
@@ -302,12 +451,14 @@ describe("WorkspaceSettingsPanel", () => {
 
   it("turns an inherited setting into an override and resets it back", async () => {
     mockApis()
+    let stored: WorkspaceSettingsView = { effective: SETTINGS, overrides: {} }
+    vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => stored)
     const save = vi
       .spyOn(api, "saveWorkspaceSettings")
-      .mockImplementation(async (_slug, overrides) => ({
-        effective: { ...SETTINGS, ...overrides },
-        overrides,
-      }))
+      .mockImplementation(async (_slug, overrides) => {
+        stored = { effective: { ...SETTINGS, ...overrides }, overrides }
+        return stored
+      })
     renderPage()
 
     const fable = (

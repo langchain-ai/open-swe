@@ -5,10 +5,12 @@ import json
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
+    SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
     actions,
     button,
+    checkbox,
     code_block,
     context,
     divider,
@@ -18,11 +20,14 @@ from agent.slack.blocks import (
 )
 
 BUTTON_TYPE = "expedited_review"
+# Outside the option-button namespace, so ticking it is acknowledged and otherwise ignored.
+BROADCAST_CHECKBOX_ACTION_ID = "expedited_review_broadcast"
+BROADCAST_OPTION = "broadcast"
 
 _MAX_FILE_SECTIONS = 20
-# Slack refuses a section over 3000 characters, and refusing means no card at
-# all. Only a shown test diff ever reaches this; source diffs cap out at 20 lines.
+# Slack refuses a section over 3000 characters, and refusing means no card at all.
 _MAX_PATCH_LINES = 60
+_OVERFLOW_NOTE_RESERVE = 64
 
 
 def _button_value(action: str, approval: ExpeditedApproval) -> str:
@@ -46,8 +51,8 @@ def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
-    shown, named = ChangedFile.rendered(files)
-    trailer = [*_overflow_note(shown), *_test_note(named)]
+    shown, tests = ChangedFile.split(files)
+    trailer = [*_overflow_note(shown), *_test_diffstat(tests)]
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
         return [image(diff_image_id, f"Diff of {names}"), *trailer]
@@ -73,26 +78,42 @@ def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
-def _test_note(tests: list[ChangedFile]) -> list[Block]:
-    """Names the test files the card is not drawing."""
+def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
+    """Test files are never drawn; the card lists them with their line counts instead."""
     if not tests:
         return []
-    noun = "test file" if len(tests) == 1 else "test files"
-    return [
-        context(f"{ChangedFile.total_lines(tests)} more lines in {len(tests)} {noun}, on GitHub.")
-    ]
+    heading = "*Tests (not shown)*\n"
+    budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
+    lines: list[str] = []
+    for file in tests[:_MAX_FILE_SECTIONS]:
+        line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        lines.append(line)
+    if len(lines) < len(tests):
+        lines.append(f"{len(tests) - len(lines)} more test files on GitHub.")
+    return [context(heading + "\n".join(lines))]
 
 
-def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
-    return (
+def _vote_buttons(approval: ExpeditedApproval, channel: str | None) -> list[ButtonElement]:
+    buttons = [
         button(
             "Approve",
             action_id="open_swe_option_select_approve",
             value=_button_value("approve", approval),
             style="primary",
-        ),
-        _dismiss_button(approval),
-    )
+        )
+    ]
+    if channel and not approval.slack_broadcast:
+        buttons.append(
+            button(
+                f"Broadcast in {channel}",
+                action_id="open_swe_option_select_broadcast",
+                value=_button_value("broadcast", approval),
+            )
+        )
+    return [*buttons, _dismiss_button(approval)]
 
 
 def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
@@ -121,19 +142,29 @@ def _voting_diff(
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
+def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
     if approval.awaiting_ready:
-        return [
-            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
-            actions(_ready_button(approval), _dismiss_button(approval)),
+        blocks: list[Block] = [
+            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it.")
         ]
+        if channel and not approval.slack_broadcast:
+            blocks.append(
+                actions(
+                    checkbox(
+                        f"Also send to {channel}",
+                        action_id=BROADCAST_CHECKBOX_ACTION_ID,
+                        value=BROADCAST_OPTION,
+                    )
+                )
+            )
+        return [*blocks, actions(_ready_button(approval), _dismiss_button(approval))]
     if approval.approved:
         return [
             section(
                 f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
             )
         ]
-    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval))]
+    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval, channel))]
 
 
 def open_card(
@@ -143,17 +174,19 @@ def open_card(
     author: str,
     files: list[ChangedFile],
     diff_image_id: str | None = None,
+    channel: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; diff and buttons go once it is approved.
 
     ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    ``channel`` (``#name``) offers broadcasting the card there; ``None`` offers nothing.
     """
     pr = approval.pull_request
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        *_status(approval, author),
+        *_status(approval, author, channel),
     ]
     text = f"Expedited review requested for {pr.url}"
     return text, blocks

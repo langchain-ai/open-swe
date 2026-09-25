@@ -11,6 +11,8 @@ import logging
 from typing import Any
 
 from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
 
 from agent.config import ENV
 
@@ -25,6 +27,27 @@ def langgraph_url() -> str:
 
 def langgraph_client():
     return get_client(url=langgraph_url())
+
+
+class ThreadRunError(BaseModel):
+    """The exception LangGraph records on a thread whose latest run failed."""
+
+    error: str = ""
+    message: str = ""
+
+    def describe(self) -> str:
+        return ": ".join(part for part in (self.error, self.message) if part)
+
+
+class _ErroredThread(BaseModel):
+    error: ThreadRunError | None = None
+
+
+async def thread_run_error(thread_id: str, client: LangGraphClient | None = None) -> str | None:
+    """Why the thread's latest run failed, or ``None`` when it recorded no error."""
+    thread = await (client or langgraph_client()).threads.get(thread_id)
+    failure = _ErroredThread.model_validate(thread).error
+    return (failure.describe() or None) if failure else None
 
 
 async def get_thread_active_status(thread_id: str) -> bool | None:
