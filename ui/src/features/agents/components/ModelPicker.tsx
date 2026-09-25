@@ -401,7 +401,7 @@ export function ModelPicker({
             </>
           ) : (
             <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
-              Model and reasoning are chosen per request.
+              Model and reasoning are chosen when the thread starts.
             </p>
           )}
           <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">

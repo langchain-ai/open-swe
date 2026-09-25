@@ -66,6 +66,17 @@ AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
 _DIFF_COLUMNS = ("additions", "deletions", "changed_files")
+_WRITE_ONCE_COLUMNS = (
+    "opening_base_sha",
+    "opening_head_sha",
+    "opening_model_id",
+    "opening_effort",
+    "langsmith_run_id",
+    "slack_team_id",
+    "slack_channel_id",
+    "slack_thread_ts",
+    "slack_message_ts",
+)
 
 
 class DiffStats(TypedDict):
@@ -125,6 +136,13 @@ class PullRequest(Base):
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     opening_base_sha: Mapped[str] = mapped_column(server_default="", default="")
     opening_head_sha: Mapped[str] = mapped_column(server_default="", default="")
+    opening_model_id: Mapped[str] = mapped_column(server_default="", default="")
+    opening_effort: Mapped[str] = mapped_column(server_default="", default="")
+    langsmith_run_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_team_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
+    slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     author: Mapped[str] = mapped_column(server_default="", default="")
     author_github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     author_user_id: Mapped[UUID | None] = mapped_column(
@@ -446,8 +464,7 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
-            opening_base_sha=self.opening_base_sha,
-            opening_head_sha=self.opening_head_sha,
+            **{column: getattr(self, column) for column in _WRITE_ONCE_COLUMNS},
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
@@ -460,12 +477,12 @@ class PullRequest(Base):
         github_changes = (
             {
                 **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
-                "opening_base_sha": func.coalesce(
-                    func.nullif(cls.opening_base_sha, ""), upsert.excluded.opening_base_sha
-                ),
-                "opening_head_sha": func.coalesce(
-                    func.nullif(cls.opening_head_sha, ""), upsert.excluded.opening_head_sha
-                ),
+                **{
+                    column: func.coalesce(
+                        func.nullif(getattr(cls, column), ""), getattr(upsert.excluded, column)
+                    )
+                    for column in _WRITE_ONCE_COLUMNS
+                },
                 "author_github_id": func.coalesce(
                     upsert.excluded.author_github_id, cls.author_github_id
                 ),

@@ -781,7 +781,9 @@ async def _process_slack_mention_impl(
     thread_messages = (
         []
         if message_update
-        else await common.fetch_slack_thread_messages(channel_id, context_thread_ts)
+        else await common.fetch_slack_thread_messages(
+            request.context_channel_id or channel_id, context_thread_ts
+        )
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),

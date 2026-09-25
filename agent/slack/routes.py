@@ -18,7 +18,7 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from agent.slack.breakout import parse_breakout_command, process_slack_breakout
+from agent.slack.breakout import BreakoutCommand, process_slack_breakout
 from agent.slack.dm import CONCIERGE_TS, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -562,15 +562,13 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
-            breakout_instruction = (
+            breakout = (
                 None
                 if in_code_channel or in_dm_channel or allowed_bot is not None
-                else parse_breakout_command(text, bot_user_id)
+                else BreakoutCommand.parse(text, bot_user_id)
             )
-            if breakout_instruction is not None:
-                background_tasks.add_task(
-                    process_slack_breakout, request, breakout_instruction, repo
-                )
+            if breakout is not None:
+                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
                 return accepted("Slack breakout queued")
             background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
