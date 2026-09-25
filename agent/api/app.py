@@ -42,6 +42,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
     from agent.utils.model import validate_local_dev_llm_config
+    from agent.webhooks import inbound as inbound_webhooks
     from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
@@ -105,9 +106,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Bridge waiters fall back to in-process notifications and their own
         # liveness ticks; what goes quiet is a bridge driven from another replica.
         logger.warning("Sandbox bridge listener startup failed", exc_info=True)
+    await inbound_webhooks.start()
     try:
         yield
     finally:
+        await inbound_webhooks.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
         await stop_worker()

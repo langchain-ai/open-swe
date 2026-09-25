@@ -54,6 +54,7 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
+from agent.webhooks.inbound import InboundWebhook
 
 router = APIRouter()
 
@@ -274,10 +275,17 @@ async def slack_webhook(
     _verify_signature(request, body, "events")
 
     payload = parse_json_object(body)
+    envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
+    await InboundWebhook.record(
+        request,
+        body,
+        "slack",
+        event_type=envelope.kind if envelope else "",
+        delivery_id=envelope.event_id if envelope else "",
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
-    envelope = SlackEventEnvelope.parse(payload)
     if envelope is None:
         return ignored("Invalid Slack event")
 
@@ -589,6 +597,9 @@ async def slack_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await InboundWebhook.record(
+        request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command")
@@ -636,6 +647,9 @@ async def slack_code_channel_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await InboundWebhook.record(
+        request, body, "slack", event_type=value("command"), delivery_id=value("trigger_id")
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command").removeprefix("/")
@@ -674,13 +688,20 @@ async def slack_interactivity(
     form = common.parse_qs(body.decode("utf-8"))
     payload_raw = (form.get("payload") or [""])[0]
     payload = parse_json_object(payload_raw.encode("utf-8"))
+    interaction = SlackInteraction.parse(payload) if payload is not None else None
+    await InboundWebhook.record(
+        request,
+        body,
+        "slack",
+        event_type=interaction.type if interaction else "",
+        delivery_id=interaction.trigger_id if interaction else "",
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
 
-    interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")
     if interaction.type == "block_actions":

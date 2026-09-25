@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
+from agent.webhooks.inbound import InboundWebhook
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
@@ -34,6 +35,9 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    await InboundWebhook.record(
+        request, body, "github", event_type=event_type, delivery_id=delivery_id
+    )
     common.logger.info(
         "GitHub webhook received",
         extra={

@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from agent.linear import webhook as service
 from agent.users import User
 from agent.webhooks import common
+from agent.webhooks.inbound import InboundWebhook
 
 router = APIRouter()
 
@@ -36,6 +37,13 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     if not common.verify_linear_signature(body, signature, common.LINEAR_WEBHOOK_SECRET):
         common.logger.warning("Invalid webhook signature")
         raise common.HTTPException(status_code=401, detail="Invalid signature")
+    await InboundWebhook.record(
+        request,
+        body,
+        "linear",
+        event_type=request.headers.get("Linear-Event", ""),
+        delivery_id=request.headers.get("Linear-Delivery", ""),
+    )
 
     try:
         payload = common.json.loads(body)

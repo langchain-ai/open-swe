@@ -150,6 +150,11 @@ class SlackEventEnvelope(SlackPayload):
     authed_users: list[str] = Field(default_factory=list)
     event: SlackEvent | None = None
 
+    @property
+    def kind(self) -> str:
+        """The inner event's type for a callback, else the envelope's own type."""
+        return self.event.type if self.event and self.event.type else self.type
+
     def bot_user_id(self, configured: str) -> str:
         """The app's own user id: configured, else whichever the delivery names."""
         if configured:
