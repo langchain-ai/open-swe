@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from agent.review_scout.git import ScoutGitError, commit_staged, committed_kinds
+from agent.review_scout.git import OTHER_TITLE, ScoutGitError, commit_staged, committed_kinds
 from agent.review_scout.paths import scout_repo_dir
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
@@ -14,9 +14,11 @@ MAX_TITLE_CHARS = 120
 MAX_SUMMARY_CHARS = 1_200
 
 
-async def commit_walkthrough_step(title: str, summary: str, other: bool = False) -> dict[str, Any]:
+async def commit_walkthrough_step(
+    title: str = "", summary: str = "", other: bool = False
+) -> dict[str, Any]:
     """Implement the `commit_walkthrough_step` tool."""
-    trimmed_title = " ".join(title.split())[:MAX_TITLE_CHARS]
+    trimmed_title = OTHER_TITLE if other else " ".join(title.split())[:MAX_TITLE_CHARS]
     if not trimmed_title:
         return {"success": False, "error": "title must name the step"}
     cfg = RunConfig.from_runtime()
@@ -39,7 +41,7 @@ async def commit_walkthrough_step(title: str, summary: str, other: bool = False)
             backend,
             repo_dir,
             title=trimmed_title,
-            summary=summary.strip()[:MAX_SUMMARY_CHARS],
+            summary="" if other else summary.strip()[:MAX_SUMMARY_CHARS],
             other=other,
         )
     except ScoutGitError as exc:

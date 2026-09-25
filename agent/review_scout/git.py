@@ -18,7 +18,6 @@ from agent.review.walkthrough import FileLines, LineRange, StepDraft
 GIT_TIMEOUT_SECONDS = 300
 SCOUT_KIND_TRAILER = "Scout-Kind"
 OTHER_TITLE = "Other changes"
-LEFTOVER_SUMMARY = "Changes the walkthrough did not place in a step."
 
 _IDENTITY = "-c user.name='Open SWE Review Scout' -c user.email=review-scout@open-swe.invalid"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -140,8 +139,7 @@ async def finalize(
         f'if ! git diff --quiet "$last" {head}; then\n'
         f"  tree=$(git rev-parse {head}^{{tree}})\n"
         f'  next=$(git {_IDENTITY} commit-tree "$tree" -p "$last" '
-        f"-m {shlex.quote(OTHER_TITLE)} -m {shlex.quote(LEFTOVER_SUMMARY)} "
-        f"-m {leftover_trailer})\n"
+        f"-m {shlex.quote(OTHER_TITLE)} -m {leftover_trailer})\n"
         '  git reset --quiet --soft "$next"\n'
         "fi",
     )
@@ -365,14 +363,14 @@ def _steps(
     for i, commit in enumerate(commits):
         if commit.is_other:
             if other is None:
-                other = StepDraft(title=OTHER_TITLE, summary=commit.summary, is_other=True)
+                other = StepDraft(title=OTHER_TITLE, is_other=True)
             other_commits.append(i)
         else:
             step_of[i] = len(steps)
             steps.append(StepDraft(title=commit.title, summary=commit.summary))
     has_unowned = any(_UNOWNED in owners for owners in (*added.values(), *deleted.values()))
     if other is None and has_unowned:
-        other = StepDraft(title=OTHER_TITLE, summary=LEFTOVER_SUMMARY, is_other=True)
+        other = StepDraft(title=OTHER_TITLE, is_other=True)
     if other is not None:
         steps.append(other)
         for i in (*other_commits, _UNOWNED):

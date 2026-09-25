@@ -30,7 +30,7 @@ Put a change in "Other" when it is obvious, forced, or behavior-neutral:
 8. Test scaffolding: fixtures, mocks, setup and teardown, helpers, and repeated cases. For each behavior a test pins, keep the scenario, its distinctive input and one decisive assertion per outcome; move equivalent cases, assertion batches and incidental construction here.
 9. Docs, changelogs, READMEs and config churn that restates what the code already shows.
 
-Stage these hunks, check them with `git diff --cached --stat`, and commit them with `other: true` and a one-sentence summary of what you set aside. If nothing qualifies, commit with nothing staged; the "Other" commit may be empty.
+Stage these hunks, check them with `git diff --cached --stat`, and commit them with only `other: true`: the "Other" step has no title or summary. If nothing qualifies, commit with nothing staged; the "Other" commit may be empty.
 
 Never hide a real behavior change here. A new condition, a different function called, a changed argument, return path or data flow always stays for a step.
 

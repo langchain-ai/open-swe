@@ -450,6 +450,7 @@ interface ResolvedGroup {
   index: number
   title: string
   summary: string
+  other: boolean
   files: Array<ResolvedGroupFile>
   additions: number
   deletions: number
@@ -601,6 +602,7 @@ function useExpandedFinding(): ExpandedFindingContextValue {
 const NO_FINDINGS: Array<ReviewFinding> = []
 const NO_CHAT_DRAFTS: ReadonlyArray<ProposedComment> = []
 const NO_PENDING_COMMENTS: ReadonlyArray<PendingReviewComment> = []
+const NO_PATHS: ReadonlySet<string> = new Set()
 const ignoreSection = (_path: string, _node: HTMLDivElement | null) => {}
 
 /** Scroll to a line in whichever registered slice of the file renders it. */
@@ -879,8 +881,7 @@ function ReviewBodyInner({
       return null
     const byPath = new Map(diffFiles.map((file) => [file.path, file]))
     const seen = new Set<string>()
-    const resolved: Array<Omit<ResolvedGroup, "index"> & { other: boolean }> =
-      []
+    const resolved: Array<Omit<ResolvedGroup, "index">> = []
     for (const step of walkthrough.steps) {
       const files: Array<ResolvedGroupFile> = []
       for (const lines of step.files) {
@@ -904,7 +905,7 @@ function ReviewBodyInner({
       if (files.length === 0) continue
       resolved.push({
         title: step.title,
-        summary: step.summary,
+        summary: step.other ? "" : step.summary,
         other: step.other,
         files,
         ...sumStats(files),
@@ -929,10 +930,7 @@ function ReviewBodyInner({
       }
     }
     if (resolved.length === 0) return null
-    return resolved.map(({ other: _other, ...group }, i) => ({
-      ...group,
-      index: i + 1,
-    }))
+    return resolved.map((group, i) => ({ ...group, index: i + 1 }))
   }, [diffFiles, walkthrough])
 
   const sidebarGroups = useMemo<Array<ReviewSidebarGroup> | null>(() => {
@@ -961,6 +959,22 @@ function ReviewBodyInner({
       window.localStorage.setItem(REVIEW_VIEW_STORAGE_KEY, next)
     }
   }, [])
+
+  const collapsedByDefault = useMemo<ReadonlySet<string>>(() => {
+    if (view !== "ai" || !groupedView) return NO_PATHS
+    const paths = (groups: Array<ResolvedGroup>) =>
+      groups.flatMap((group) => group.files.map((entry) => entry.file.path))
+    const inSteps = new Set(paths(groupedView.filter((group) => !group.other)))
+    return new Set(
+      paths(groupedView.filter((group) => group.other)).filter(
+        (path) => !inSteps.has(path)
+      )
+    )
+  }, [view, groupedView])
+  const collapsedByDefaultRef = useRef(collapsedByDefault)
+  useEffect(() => {
+    collapsedByDefaultRef.current = collapsedByDefault
+  }, [collapsedByDefault])
 
   const scrollToFile = useCallback((path: string) => {
     setSelectedFile(path)
@@ -1074,7 +1088,9 @@ function ReviewBodyInner({
   )
 
   const toggleExpanded = useCallback((path: string) => {
-    const current = expandedRef.current[path] ?? !viewedRef.current.has(path)
+    const current =
+      expandedRef.current[path] ??
+      (!viewedRef.current.has(path) && !collapsedByDefaultRef.current.has(path))
     const next = !current
     if (!next && expandedFindingRef.current?.file === path) setExpandedId(null)
     setExpandedFiles((prev) => ({ ...prev, [path]: next }))
@@ -1387,7 +1403,10 @@ function ReviewBodyInner({
         selectedLines={selectedLines}
         viewed={viewed.has(file.path)}
         onToggleViewed={toggleViewed}
-        expanded={expandedFiles[file.path] ?? !viewed.has(file.path)}
+        expanded={
+          expandedFiles[file.path] ??
+          (!viewed.has(file.path) && !collapsedByDefault.has(file.path))
+        }
         onToggleExpanded={toggleExpanded}
         onSelectLines={selectLines}
         onAddToChat={embedded ? undefined : addToChat}

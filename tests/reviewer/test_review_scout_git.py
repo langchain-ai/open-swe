@@ -94,7 +94,6 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
         StepDraft(title="Call `c`", files=[FileLines(path="cli.py", added=[(1, 2)])]),
         StepDraft(
             title=OTHER_TITLE,
-            summary=steps[-1].summary,
             is_other=True,
             files=[
                 FileLines(path="core.py", added=[(2, 2), (5, 5)], deleted=[(4, 4)]),
