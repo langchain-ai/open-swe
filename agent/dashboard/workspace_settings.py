@@ -48,7 +48,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-luna", "high")
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-sol", "medium")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
@@ -614,9 +614,9 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def review_scout_model(self) -> tuple[str, str]:
-        """The review scout's ``(model_id, reasoning_effort)``: model routing's fast tier."""
-        model = self.get("default_agent_routing_fast_model")
-        effort = self.get("default_agent_routing_fast_reasoning_effort")
+        """The review scout's ``(model_id, reasoning_effort)``: model routing's balanced tier."""
+        model = self.get("default_agent_routing_balanced_model")
+        effort = self.get("default_agent_routing_balanced_reasoning_effort")
         if (
             isinstance(model, str)
             and isinstance(effort, str)

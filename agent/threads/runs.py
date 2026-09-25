@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
@@ -47,6 +48,7 @@ from agent.threads.access import (
     agent_version_metadata,
     resolve_run_email,
 )
+from agent.threads.creation import create_thread
 from agent.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
@@ -309,8 +311,10 @@ async def _create_dashboard_thread_record(
         metadata["transcript"] = TRANSCRIPT_VERSION
 
     client = langgraph_client()
-    await client.threads.create(
-        thread_id=thread_id,
+    await create_thread(
+        client,
+        thread_id,
+        title=initial_title,
         metadata={**metadata, "feedback_initiator_login": login},
         if_exists="raise",
     )
@@ -518,6 +522,35 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
+async def _resolve_sandbox_bridge(
+    requested: object, *, owner_id: str, creating: bool
+) -> Bridge | None:
+    """The live bridge a new thread asked to run on, validated before it exists.
+
+    Checked before the thread record is written: a thread stamped with a bridge
+    nobody is answering can never be given a different sandbox later.
+    """
+    if requested is None:
+        return None
+    if not isinstance(requested, str) or not requested.strip():
+        raise HTTPException(422, "sandbox_bridge_id must be a non-empty string")
+    if not creating:
+        raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
+    return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
+
+
+async def _bind_thread_to_bridge(
+    thread_id: str, bridge: Bridge, metadata: dict[str, Any]
+) -> dict[str, Any]:
+    binding = SandboxBridgeBinding.of(bridge).dump()
+    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
+    logger.info(
+        "Bound a thread to a sandbox bridge",
+        extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
+    )
+    return {**metadata, **binding}
+
+
 def requested_thread_type(configurable: Mapping[str, Any]) -> ThreadType | None:
     """The kind of thread a creating command asks for, if it names one."""
     requested = configurable.get("thread_type")
@@ -662,6 +695,11 @@ async def _enrich_run_start_command(
         else:
             model_selection = "auto" if creating else metadata.get("model_selection")
     offloading = offload_requested(params)
+    sandbox_bridge = await _resolve_sandbox_bridge(
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=Principal.of_login(login, email).sender_id,
+        creating=creating,
+    )
     content = _command_message_content(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
@@ -701,6 +739,8 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
+        if sandbox_bridge is not None:
+            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
         run_model = _metadata_model_id(metadata)
         resolved_effort = metadata.get("resolved_effort")
         if isinstance(resolved_effort, str):
@@ -1092,6 +1132,7 @@ async def queue_follow_up_run(
             # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
             metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
             source=DASHBOARD_SOURCE,
+            thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
         )
@@ -1180,6 +1221,7 @@ async def dispatch_pending_follow_ups(
         None,
         configurable,
         source=DASHBOARD_SOURCE,
+        thread_title=None,
         input={"messages": []},
         metadata={"kind": FOLLOW_UP_PICKUP_KIND},
         client=client,
@@ -1265,7 +1307,9 @@ async def _create_system_thread_record(
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
     client = langgraph_client()
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="raise")
+    await create_thread(
+        client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
+    )
     return as_thread_dict(await client.threads.get(thread_id))
 
 
@@ -1331,6 +1375,11 @@ async def _enrich_system_run_start_command(
     if _dashboard_images_from_content(content):
         raise HTTPException(422, "machine principals cannot attach images")
 
+    sandbox_bridge = await _resolve_sandbox_bridge(
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=principal.sender_id,
+        creating=creating,
+    )
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
         title = client_configurable.get("title")
@@ -1343,6 +1392,8 @@ async def _enrich_system_run_start_command(
                 repo_config=repo_config,
             )
         )
+        if sandbox_bridge is not None:
+            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
     else:
         principal.assert_can_post(metadata)
 

@@ -244,10 +244,14 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
     can pick the draft flag, conflict state, checks and reviews up front."""
     body = await request.json()
     owner, name = _split_repo(body.get("repo"))
+    head = str(body.get("head") or "seeded-branch")
+    files = body.get("files")
+    if isinstance(files, dict) and files:
+        fakes.push_branch(owner, name, head, {str(path): str(text) for path, text in files.items()})
     pull = fakes.create_pull(
         owner,
         name,
-        head=str(body.get("head") or "seeded-branch"),
+        head=head,
         base=str(body.get("base") or BASE_BRANCH),
         title=str(body.get("title") or "Seeded pull request"),
         body=str(body.get("body") or ""),
@@ -266,6 +270,40 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
             "pull_request": fakes.pull_health_json(pull),
         }
     )
+
+
+def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
+    owner, name = _split_repo(body.get("repo"))
+    number = body.get("number")
+    pull = fakes.find_pull(number, owner, name) if isinstance(number, int) else None
+    if pull is None:
+        raise HTTPException(404, "No such fake pull request")
+    return pull
+
+
+@app.post("/control/walkthrough")
+async def control_seed_walkthrough(request: Request) -> JSONResponse:
+    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
+    from agent.review.walkthrough import FileLines, StepDraft, Walkthrough
+
+    body = await request.json()
+    pull = _seeded_pull(body)
+    await Walkthrough.replace(
+        pull["owner"],
+        pull["repo"],
+        pull["number"],
+        head_sha=pull["head_sha"],
+        merge_base_sha=fakes.base_sha(pull),
+        scout_thread_id="",
+        steps=[
+            StepDraft(
+                title=str(body.get("title") or "Seeded step"),
+                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+            )
+        ],
+        human_input_summary=str(body.get("human_input") or ""),
+    )
+    return JSONResponse({"ok": True})
 
 
 @app.post("/control/github-event")
@@ -818,6 +856,8 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "review_comments": p["review_comments"],
+                "standalone_comment_posts": p["standalone_comment_posts"],
                 "issue_comments": p["issue_comments"],
                 "created_at": p["created_at"],
                 "updated_at": p["updated_at"],
@@ -888,6 +928,7 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "head": {"ref": pr["head"], "sha": pr["head_sha"]},
         "base": {
             "ref": pr["base"],
+            "sha": fakes.base_sha(pr),
             "repo": {
                 "private": fakes.repo_private(),
                 "allow_squash_merge": True,
@@ -1022,11 +1063,102 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int) -> JSONResponse:
+async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
+    if "vnd.github.diff" in request.headers.get("Accept", ""):
+        return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
+async def gh_list_pull_comments(
+    owner: str, repo: str, number: int, request: Request, page: int = 1
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    visible = fakes.visible_review_comments(pr, _token_login(request))
+    return JSONResponse(list(reversed(visible)) if page == 1 else [])
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
+async def gh_create_pull_comment(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    """A standalone inline comment. Recorded so a spec can prove nothing posts one."""
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    pr["standalone_comment_posts"].append(await request.json())
+    return JSONResponse({"message": "Standalone comments are not used"}, status_code=422)
+
+
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/comments/{comment_id}")
+async def gh_delete_pull_comment(
+    owner: str, repo: str, comment_id: int, request: Request
+) -> Response:
+    if not fakes.delete_review_comment(owner, repo, comment_id, author=_token_login(request)):
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return Response(status_code=204)
+
+
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events")
+async def gh_submit_pending_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request
+) -> JSONResponse:
+    body = await request.json()
+    status, payload = fakes.submit_pending_review(
+        number,
+        owner,
+        repo,
+        review_id,
+        author=_token_login(request),
+        event=str(body.get("event") or ""),
+        body=str(body.get("body") or ""),
+    )
+    return JSONResponse(payload, status_code=status)
+
+
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}")
+async def gh_delete_pending_review(
+    owner: str, repo: str, number: int, review_id: int, request: Request
+) -> JSONResponse:
+    status, payload = fakes.delete_pending_review(
+        number, owner, repo, review_id, author=_token_login(request)
+    )
+    return JSONResponse(payload, status_code=status)
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
+async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(pr["issue_comments"] if page == 1 else [])
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/compare/{basehead:path}")
+async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
+    base, _, head = basehead.partition("...")
+    merge_base = fakes.merge_base(owner, repo, base, head)
+    if merge_base is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse(
+        {
+            "merge_base_commit": {"sha": merge_base},
+            "files": fakes.compare_files(owner, repo, base, head),
+        }
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")
+async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
+    content = fakes.file_at_ref(owner, repo, path, ref)
+    if content is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return Response(content, media_type="application/vnd.github.raw+json")
 
 
 @app.patch("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
@@ -1069,9 +1201,10 @@ async def gh_submit_pull_review(
         owner,
         repo,
         author=author,
-        state=str(body.get("event") or "COMMENT"),
+        state=str(body.get("event") or "PENDING"),
         commit_id=str(body.get("commit_id") or ""),
         body=str(body.get("body") or ""),
+        comments=[c for c in body.get("comments") or [] if isinstance(c, dict)],
     )
     if review is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1088,8 +1221,9 @@ async def gh_create_issue_comment(
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
-    comment = {"id": len(pr["issue_comments"]) + 1, "body": str(body.get("body") or "")}
-    pr["issue_comments"].append(comment)
+    comment = fakes.add_issue_comment(
+        pr, author=_token_login(request), body=str(body.get("body") or "")
+    )
     return JSONResponse(comment, status_code=201)
 
 
@@ -1109,14 +1243,22 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
 # Seeded reviews carry only ``{author, state}``, so the list has to be
 # normalised: the dashboard's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_list_pull_reviews(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+async def gh_list_pull_reviews(
+    owner: str, repo: str, number: int, request: Request, page: int = 1
+) -> JSONResponse:
+    """Submitted reviews, plus a pending one only for its author, as GitHub does."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     if page > 1:
         return JSONResponse([])
+    viewer = _token_login(request)
     return JSONResponse(
-        [fakes.review_rest_json(review, index) for index, review in enumerate(pr["reviews"])]
+        [
+            fakes.review_rest_json(review, index)
+            for index, review in enumerate(pr["reviews"])
+            if review.get("state") != "PENDING" or review.get("author") == viewer
+        ]
     )
 
 
@@ -1156,6 +1298,24 @@ async def gh_graphql(request: Request) -> JSONResponse:
         return JSONResponse(
             {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
         )
+    viewer = _token_login(request)
+    mutation_input = variables.get("input")
+    if "addPullRequestReviewThread" in query and isinstance(mutation_input, dict):
+        comment = fakes.add_review_thread(viewer, mutation_input)
+        if comment is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a pending review"}]})
+        thread = {"id": f"PRRT_node_{comment['id']}"}
+        return JSONResponse({"data": {"addPullRequestReviewThread": {"thread": thread}}})
+    if "updatePullRequestReviewComment" in query and isinstance(mutation_input, dict):
+        updated = fakes.update_review_comment_body(
+            viewer,
+            str(mutation_input.get("pullRequestReviewCommentId") or ""),
+            str(mutation_input.get("body") or ""),
+        )
+        if updated is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a comment"}]})
+        payload = {"pullRequestReviewComment": {"id": updated["node_id"]}}
+        return JSONResponse({"data": {"updatePullRequestReviewComment": payload}})
     owner = variables.get("owner")
     repo = variables.get("repo")
     number = variables.get("number")
@@ -1164,6 +1324,12 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "fullDatabaseId" in query and "reviewThreads" in query:
+        threads = {
+            "nodes": fakes.review_threads_graphql(pr, viewer),
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }
+        return JSONResponse({"data": {"repository": {"pullRequest": {"reviewThreads": threads}}}})
     if "PullRequestThreadCount" in query:
         return JSONResponse(
             {
@@ -1311,6 +1477,10 @@ async def slack_conversations_info(channel: str = "") -> JSONResponse:
         "id": channel,
         "name": code_channel["name"] if code_channel else "demo",
         "name_normalized": code_channel["name"] if code_channel else "demo",
+        "is_channel": not channel.startswith("D"),
+        "is_private": False,
+        "is_im": channel.startswith("D"),
+        "is_mpim": False,
         "is_ext_shared": False,
         "is_pending_ext_shared": False,
         "topic": {"value": "Demo channel topic"},

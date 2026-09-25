@@ -48,6 +48,7 @@ from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 
 class _DisableInheritedMiddleware(AgentMiddleware):
@@ -60,6 +61,8 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 
 from agent.analytics.usage import record_agent_invocation_usage
+from agent.bridge.cli_result import cli_result
+from agent.bridge.store import Bridge
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -122,6 +125,7 @@ from agent.middleware import (
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -148,6 +152,7 @@ from agent.sandboxes.lifecycle import (
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
@@ -155,7 +160,7 @@ from agent.sandboxes.state import (
 from agent.sandboxes.tool_access import tools_base_url
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from agent.slack.dm import is_dm_channel, is_dm_session
+from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
@@ -598,6 +603,7 @@ def _general_purpose_subagent(
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
                 TranscriptMiddleware(),
@@ -653,6 +659,23 @@ async def _private_thread(thread_id: str | None) -> bool:
         logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
         return False
     return thread_is_private(thread_metadata(thread))
+
+
+async def _bridged_thread(thread_id: str | None) -> bool:
+    """Whether this thread's sandbox is a CLI bridge on the user's machine."""
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the thread's sandbox; omitting cli_result",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
+    sandbox_id = thread_metadata(thread).get("sandbox_id")
+    return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -744,12 +767,12 @@ def _slack_ask_mode(cfg: RunConfig) -> bool:
     )
 
 
-def _slack_dm_run(cfg: RunConfig) -> bool:
-    """Whether this run answers in a bot DM the owner runs as one session."""
+def _slack_concierge_run(cfg: RunConfig) -> bool:
+    """Whether this run answers in a bot DM its owner runs in concierge mode."""
     return (
         _slack_tools_enabled(cfg)
         and cfg.slack_thread is not None
-        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+        and is_concierge_thread(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
 
 
@@ -898,7 +921,21 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     model=self._title_model,
                 )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
-                sandbox_backend = await get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+                try:
+                    sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+                    sandbox_backend = await retry_transient_sandbox_errors(
+                        sandbox_proxy.ready,
+                        description="Sandbox attach",
+                        max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+                    )
+                except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+                    await post_sandbox_unreachable_notification(
+                        self._config or {},
+                        sandbox_id=exc.sandbox_id
+                        if isinstance(exc, SandboxUnreachableError)
+                        else None,
+                    )
+                    raise
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -915,8 +952,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
         sandbox_task = asyncio.create_task(
-            get_or_create_sandbox_backend_proxy(self._thread_id).ready()
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
         )
         try:
             async with aphase(self._thread_id, "prepare.await_sandbox"):
@@ -924,16 +966,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     triggering_user_identity_task,
                     sandbox_task,
                 )
-        except SandboxUnreachableError as exc:
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
             # The run is about to die with no sandbox; make sure the user hears
             # why rather than getting silence.
             await post_sandbox_unreachable_notification(
-                self._config or {}, sandbox_id=exc.sandbox_id
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
             )
             raise
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -962,6 +1006,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     cast(ModelSelectionState, state)
                 )
                 attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+            configurable["resolved_agent_model_id"] = attribution_model_id
+            configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
                 cfg.slack_thread.triggering_bot_id
                 if self._source == "slack" and cfg.slack_thread
@@ -1033,6 +1079,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "selected_model_id": attribution_model_id,
+            "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
             **({"model_route": attribution_route} if attribution_route else {}),
             "rendered_system_prompt": construct_system_prompt(
@@ -1049,8 +1097,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
+                slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
+                local_checkout=bridged,
                 recent_thread_context=recent_thread_context,
             ),
         }
@@ -1314,6 +1364,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     source = cfg.source or "dashboard"
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
+    configurable["resolved_agent_effort"] = profile_effort
     user_email = cfg.user_email or ""
 
     async with aphase(thread_id, "factory.admin_thread"):
@@ -1328,6 +1379,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         private_thread = await _private_thread(thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    async with aphase(thread_id, "factory.bridged_thread"):
+        cli_result_required = (
+            not local_run and not stop_summary_mode and await _bridged_thread(thread_id)
+        )
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1405,6 +1460,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_thread_feedback,
         submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
+        *((cli_result,) if cli_result_required else ()),
         *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
     if credential_login is None:
@@ -1420,7 +1476,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
-    elif _slack_dm_run(cfg):
+    elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
@@ -1601,7 +1657,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         else []
                     ),
                     *([workspace_skills] if workspace_skills else []),
-                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeToolInputsMiddleware(),
                     ValidateImageReadsMiddleware(),
                     ModelCallLimitMiddleware(
@@ -1633,10 +1688,16 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                             _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
                         ),
                     ),
+                    *(
+                        [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
+                        if cli_result_required
+                        else []
+                    ),
                     notify_step_limit_reached,
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
+                    *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),

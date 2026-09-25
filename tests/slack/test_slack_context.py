@@ -187,7 +187,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="Alice"
+            "thread-id", source="slack", visibility="private", owner_login="Alice", title="Thread"
         )
     )
     assert created["visibility"] == "private"
@@ -195,7 +195,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="public", owner_login="bob"
+            "thread-id", source="slack", visibility="public", owner_login="bob", title="Thread"
         )
     )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -212,7 +212,7 @@ def test_upsert_keeps_original_github_initiator(
     for login in ("FirstUser", "second-user"):
         asyncio.run(
             webhook_common.upsert_agent_thread_metadata(
-                "thread-id", source=source, github_login=login
+                "thread-id", source=source, github_login=login, title="Thread"
             )
         )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -226,7 +226,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
 
@@ -238,7 +238,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(legacy))
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
     assert "visibility" not in cast(dict, legacy.thread)["metadata"]
@@ -718,11 +718,13 @@ def test_format_slack_web_link_footer_omits_unavailable_cost() -> None:
 
 
 def test_format_slack_web_link_footer_prefers_session_cost() -> None:
-    usage = RunUsageSummary(models=("model-a",), total_tokens=12_345, session_cost_usd=0.42)
+    usage = RunUsageSummary(
+        models=("model-a",), total_tokens=12_345, session_cost_usd=0.42, reasoning_effort="high"
+    )
 
     footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
 
-    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a • $0.42"
+    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a (high) • $0.42"
 
 
 def test_format_slack_run_usage_shortens_model_paths() -> None:
@@ -1480,13 +1482,13 @@ def test_process_slack_mention_creates_thread_first_run_without_trace_reply(
 
 
 @pytest.mark.parametrize(
-    ("thread_ts", "dm_session"),
+    ("thread_ts", "concierge_mode"),
     [("1700000000.000100", False), ("0", True)],
 )
 def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     monkeypatch: pytest.MonkeyPatch,
     thread_ts: str,
-    dm_session: bool,
+    concierge_mode: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1524,7 +1526,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
                     "text": "continue on the branch",
                     "bot_user_id": "UBOT",
                     "treat_all_messages_as_mentions": True,
-                    "dm_session": dm_session,
+                    "concierge_mode": concierge_mode,
                 }
             ),
             webhook_common.SlackRepoResolution(
@@ -1545,7 +1547,7 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
     # Guidance that holds for the whole DM rides a context block, deduped by
     # content, instead of framing every turn.
     assert not any('sender="system:slack-context"' in text for text in serialized)
-    assert dm_session == any(
+    assert concierge_mode == any(
         '<dynamic-context kind="system" id="system:slack-context"' in text for text in serialized
     )
     # The model wrote its own reply; replaying it would show it twice.
@@ -2082,6 +2084,7 @@ def test_thread_workspace_round_trips_through_metadata(
             "thread-id",
             source="slack",
             workspace="staging",
+            title="Thread",
         )
     )
     assert threads.thread is not None

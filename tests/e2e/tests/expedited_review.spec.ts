@@ -15,11 +15,12 @@ import {
 //   the author marks it ready; the card switches to Approve / Dismiss ->
 //   GitHub reports a FAILING check -> the watch wakes the agent, which pushes a
 //   test-only fix the card never drew ->
-//   the other person approves: the card collapses to who approved, and the agent
-//   is woken, tries to merge, and is told the new head's checks are failing ->
-//   GitHub reports the check GREEN -> the watch wakes the agent, which merges:
-//   the approval becomes a GitHub APPROVE review on the new head, the PR gets a
-//   comment linking the card, and the card becomes "Expedited review: merged".
+//   the other person approves: their click lands as a GitHub APPROVE review on
+//   the new head linking the Slack thread, the card collapses to who approved,
+//   and the agent is woken, tries to merge, and is told the new head's checks
+//   are failing ->
+//   GitHub reports the check GREEN -> the watch wakes the agent, which merges on
+//   that same review, and the card becomes "Expedited review: merged".
 
 const PEOPLE = [
   { login: "alice", slack_id: "U_ALICE" },
@@ -51,7 +52,13 @@ type PullRequest = {
   merged: boolean;
   author: string;
   head_sha: string;
-  reviews: Array<{ author: string; state: string; commit_id: string }>;
+  reviews: Array<{
+    id: number;
+    author: string;
+    state: string;
+    commit_id: string;
+    body: string;
+  }>;
   issue_comments: Array<{ body: string }>;
 };
 
@@ -284,8 +291,9 @@ test.describe("Expedited Slack review", () => {
     expect((await latest(request)).state).toBe("open");
 
     // 5. The other person approves. That one approval completes the card: the
-    //    diff and buttons go, and the agent is woken, tries to merge, and is
-    //    told the new head's checks are not green. Nothing reaches GitHub.
+    //    diff and buttons go, the click lands on GitHub as their review, and the
+    //    agent is woken, tries to merge, and is told the new head's checks are
+    //    not green.
     await expect
       .poll(async () => (await threadRuns(request, threadId)).idle, {
         timeout: 60_000,
@@ -314,11 +322,14 @@ test.describe("Expedited Slack review", () => {
       )
       .toBe(true);
     expect((await pull(request)).merged).toBe(false);
-    expect(approvedReviews(await pull(request))).toHaveLength(0);
+    const clicked = approvedReviews(await pull(request));
+    expect(clicked.map((r) => r.author)).toEqual([reviewer.login]);
+    expect(clicked[0]!.commit_id).toBe(fixed.head_sha);
+    expect(clicked[0]!.body).toContain("/mock/slack");
     expect((await latest(request)).state).toBe("open");
 
     // 6. GitHub reports the new head GREEN. That webhook wakes the agent at
-    //    once, which merges on the recorded approval.
+    //    once, which merges on the review the click already submitted.
     await reportCheck(request, fixed.head_sha, "success");
     await expect
       .poll(async () => (await pull(request)).merged, { timeout: 120_000 })
@@ -327,16 +338,12 @@ test.describe("Expedited Slack review", () => {
     const merged = await pull(request);
     expect(merged.state).toBe("closed");
     const reviews = approvedReviews(merged);
-    expect(reviews.map((r) => r.author)).toEqual([reviewer.login]);
-    expect(reviews[0]!.commit_id).toBe(fixed.head_sha);
+    expect(reviews.map((r) => r.id)).toEqual([clicked[0]!.id]);
 
-    // The PR links back to the Slack card that approved it, once.
-    const links = merged.issue_comments.filter((c) =>
-      c.body.includes("expedited review"),
-    );
-    expect(links).toHaveLength(1);
-    expect(links[0]!.body).toContain(`@${reviewer.login}`);
-    expect(links[0]!.body).toContain("/mock/slack");
+    // The review carries the Slack link; nothing else is posted on the PR.
+    expect(
+      merged.issue_comments.filter((c) => c.body.includes("expedited review")),
+    ).toHaveLength(0);
 
     const final = await latest(request);
     expect(final.state).toBe("merged");

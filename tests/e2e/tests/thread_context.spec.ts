@@ -122,9 +122,12 @@ class ThreadRecorder {
         ),
       ),
     );
+    // The fake model ends follow-ups without `slack_reply`, so the reply guard
+    // nudges it; that is retry traffic, not thread context.
     const human = appended
       .filter((message) => message.type === "human")
-      .map((message) => contentText(message));
+      .map((message) => contentText(message))
+      .filter((content) => !content.includes("system:reply-guard"));
     const recorded: Turn = {
       ...turn,
       dispatch: human.filter((content) => dispatched.has(content)),

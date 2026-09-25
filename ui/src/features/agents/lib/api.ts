@@ -11,19 +11,20 @@ import type {
 import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
   dashboardApiUrl,
   dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
-export class AgentsApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export class AgentsApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "AgentsApiError"
   }
 }
@@ -152,14 +153,18 @@ export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
+  const requestId = newRequestId()
   const res = await timedFetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -174,7 +179,7 @@ export async function agentsRequest<T>(
     } catch {
       /* ignore */
     }
-    throw new AgentsApiError(res.status, message)
+    throw new AgentsApiError(res.status, message, requestId)
   }
   // A proxied cancel comes back 202 with no body; only parse what is there.
   const text = await res.text()
@@ -187,9 +192,16 @@ function filenameFromContentDisposition(value: string | null): string | null {
 }
 
 async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
+  const requestId = newRequestId()
   const res = await fetch(dashboardApiUrl(path), {
     credentials: "include",
-    headers: { Accept: "text/x-diff", ...dashboardForwardedHeaders() },
+    headers: {
+      Accept: "text/x-diff",
+      [REQUEST_ID_HEADER]: requestId,
+      ...dashboardForwardedHeaders(),
+    },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -204,7 +216,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     } catch {
       /* ignore */
     }
-    throw new AgentsApiError(res.status, message)
+    throw new AgentsApiError(res.status, message, requestId)
   }
   return {
     blob: await res.blob(),

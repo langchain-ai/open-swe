@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
@@ -50,11 +51,13 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
+  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
   onSaved: (saved: WorkspaceRecord) => void
+  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -97,6 +100,7 @@ function GeneralSection({
         channelLabel={channelLabel}
       />
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}
@@ -136,7 +140,24 @@ export function WorkspaceSettingsPanel({
 }) {
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
+  const [repositoryRebuild, setRepositoryRebuild] = useState<{
+    slug: string
+    finishedAt: WorkspaceRecord["refresh_finished_at"]
+  } | null>(null)
+  const [repositoryRebuildTimedOut, setRepositoryRebuildTimedOut] =
+    useState(false)
+  useEffect(() => {
+    if (!repositoryRebuild) return
+    const timeout = setTimeout(() => setRepositoryRebuildTimedOut(true), 60_000)
+    return () => clearTimeout(timeout)
+  }, [repositoryRebuild])
+  const awaitingRepositoryRebuild = (workspace: WorkspaceRecord | undefined) =>
+    repositoryRebuild?.slug === slug &&
+    (!workspace ||
+      workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
+      !["success", "failed"].includes(workspace.refresh_status ?? "never"))
   const deleteWorkspace = useMutation({
+    meta: { errorTitle: "Couldn't delete workspace" },
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
       setDeleting(false)
@@ -150,7 +171,11 @@ export function WorkspaceSettingsPanel({
     // A rebuild runs in the background; keep the image state and the rebuild
     // button following it until it settles.
     refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ? 5000 : false,
+      query.state.data?.refresh_status === "refreshing" ||
+      (!repositoryRebuildTimedOut &&
+        awaitingRepositoryRebuild(query.state.data))
+        ? 5000
+        : false,
   })
   const options = useWorkspaceOptions(true)
   // Model options follow the workspace: the Fable flag that gates some of
@@ -173,12 +198,28 @@ export function WorkspaceSettingsPanel({
   }
 
   const onSaved = (saved: WorkspaceRecord) => {
+    const previousRepos = new Set(
+      record.data.repos.map((repo) => repo.toLowerCase())
+    )
+    const savedRepos = new Set(saved.repos.map((repo) => repo.toLowerCase()))
+    if (
+      saved.setup_script &&
+      (previousRepos.size !== savedRepos.size ||
+        [...savedRepos].some((repo) => !previousRepos.has(repo)))
+    ) {
+      setRepositoryRebuildTimedOut(false)
+      setRepositoryRebuild({
+        slug,
+        finishedAt: saved.refresh_finished_at,
+      })
+    }
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
-  const onRebuildStarted = () => {
+  const onRebuildStarted = async () => {
     // Show the run as underway at once, then let the poll confirm it, so a
     // second click cannot slip in before the record catches up.
+    await qc.cancelQueries({ queryKey: workspaceRecordKey(slug) })
     qc.setQueryData(
       workspaceRecordKey(slug),
       (current: WorkspaceRecord | undefined) =>
@@ -197,6 +238,44 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
+        rebuildStatus={
+          (!repositoryRebuildTimedOut &&
+            awaitingRepositoryRebuild(record.data)) ||
+          record.data.refresh_status === "refreshing" ? (
+            <p
+              role="status"
+              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
+            >
+              <CircleNotchIcon
+                aria-hidden="true"
+                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+              />
+              {record.data.refresh_status === "refreshing"
+                ? "Rebuilding sandbox image…"
+                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+              Existing runs keep their current image.
+            </p>
+          ) : awaitingRepositoryRebuild(record.data) ? (
+            <p
+              role="alert"
+              className="min-w-48 flex-1 text-xs text-destructive"
+            >
+              Repositories saved, but the image rebuild could not be confirmed.
+              Check the sandbox image status or retry Rebuild image.
+            </p>
+          ) : repositoryRebuild?.slug === slug ? (
+            <p
+              role={
+                record.data.refresh_status === "failed" ? "alert" : "status"
+              }
+              className="min-w-48 flex-1 text-xs text-muted-foreground"
+            >
+              {record.data.refresh_status === "failed"
+                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
+                : "Sandbox image rebuilt with the saved repositories."}
+            </p>
+          ) : null
+        }
       />
       <WorkspaceSandboxSection
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
@@ -227,10 +306,7 @@ export function WorkspaceSettingsPanel({
               size="sm"
               variant="destructive"
               aria-label={`Delete ${record.data.name}`}
-              onClick={() => {
-                deleteWorkspace.reset()
-                setDeleting(true)
-              }}
+              onClick={() => setDeleting(true)}
             >
               Delete
             </Button>
@@ -253,11 +329,6 @@ export function WorkspaceSettingsPanel({
                 cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            {deleteWorkspace.error && (
-              <p role="alert" className="text-xs text-destructive">
-                {deleteWorkspace.error.message}
-              </p>
-            )}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={deleteWorkspace.isPending}>
                 Cancel

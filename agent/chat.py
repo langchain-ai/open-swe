@@ -51,7 +51,7 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -66,6 +66,8 @@ from agent.tools import (
     search_repo_code,
     web_search,
 )
+from agent.tools.propose_pr_review import propose_pr_review
+from agent.tools.propose_review_comment import propose_review_comment
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -133,8 +135,8 @@ class PrepareChatRunMiddleware(BasePrepareRunMiddleware):
         if isinstance(token, str) and token:
             configurable["chat_github_token"] = token
         return {
-            "rendered_system_prompt": render_prompt(
-                "chat/main.md",
+            "rendered_system_prompt": prompt(
+                "chat/main",
                 repo_owner=cfg.chat_repo_owner or "<owner>",
                 repo_name=repo_name or "<repo>",
                 pr_number=cfg.chat_pr_number if cfg.chat_pr_number is not None else "?",
@@ -191,6 +193,8 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 list_review_findings,
                 web_search,
                 fetch_url,
+                propose_review_comment,
+                propose_pr_review,
             ]
         ),
         subagents=[_chat_general_purpose_subagent()],

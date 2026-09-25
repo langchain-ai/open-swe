@@ -7,7 +7,7 @@ lookup hit / null-name / failure / cache paths.
 
 import json
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langgraph.runtime import Runtime
@@ -161,6 +161,27 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     return await middleware._prepare(
         cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
     )
+
+
+async def test_routed_run_exposes_selected_model_and_effort_to_tools(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    config = _slack_config()
+    middleware = _middleware(config)
+    middleware._effort = "medium"
+    middleware._model_selection = MagicMock()
+    middleware._model_selection.select_route = AsyncMock(return_value="performance")
+    middleware._routing_defaults = {"performance": ("openai:routed", "high")}
+
+    prepared = await _prepare(middleware)
+
+    assert prepared["selected_model_id"] == "openai:routed"
+    assert prepared["selected_effort"] == "high"
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:routed"
+    assert config["configurable"]["resolved_agent_effort"] == "high"
+    assert prepare_harness["thread_update"]["metadata"]["effort"] == "high"
 
 
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(

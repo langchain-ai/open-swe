@@ -32,7 +32,6 @@ SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
-SUPPORTED_GLM = "fireworks:accounts/fireworks/models/glm-5p3"
 FABLE = "anthropic:claude-fable-5-1"
 
 
@@ -76,15 +75,23 @@ def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert is_deprecated_model(model_id)
 
 
-def test_fireworks_glm_5_3_replaces_glm_5_2() -> None:
-    assert any(model["id"] == SUPPORTED_GLM for model in SUPPORTED_MODELS)
-
-
-def test_deprecated_models_defer_to_defaults() -> None:
-    for model_id in (DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM):
-        assert normalize_model_choice(model_id, "high") == (None, None)
-        assert provider_fallback_pair(model_id, "high") is None
-    assert normalize_model_choice("mystery:model", "high") == (None, None)
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        DEPRECATED_OPENAI,
+        DEPRECATED_ANTHROPIC,
+        DEPRECATED_GLM,
+        "fireworks:accounts/fireworks/models/glm-5p3",
+        "fireworks:accounts/fireworks/models/deepseek-v4-pro",
+    ],
+)
+def test_deprecated_models_defer_to_defaults(model_id: str) -> None:
+    assert normalize_model_choice(model_id, "high") == (None, None)
+    assert provider_fallback_pair(model_id, "high") is None
+    assert normalize_profile_overrides({"default_model": model_id, "reasoning_effort": "high"}) == (
+        None,
+        None,
+    )
 
 
 def test_supported_models_do_not_hardcode_context_windows() -> None:

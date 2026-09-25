@@ -31,7 +31,7 @@ from agent.transcript.engine import AppendResult
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
-_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/deepseek-v4-pro"
+_TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6-sol"
 _FABLE = "anthropic:claude-fable-5-1"
 _PAIR = ("openai:gpt-6-sol", "medium")

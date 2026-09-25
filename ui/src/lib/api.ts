@@ -6,7 +6,14 @@
  */
 
 import { dashboardApiBase } from "./api-base"
-import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
+import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
+} from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
 
@@ -47,12 +54,18 @@ export function reviewImageProxyUrl(
   return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
 }
 
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export interface ClientErrorReport {
+  error_id: string
+  title: string
+  error_message: string
+  status: number | null
+  mutation: string | null
+  path: string
+}
+
+export class ApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "ApiError"
   }
 }
@@ -64,14 +77,18 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestId = newRequestId()
   const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -85,7 +102,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, requestId)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -208,7 +225,8 @@ export interface Profile {
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
   recent_thread_context_enabled?: boolean
-  dm_session_enabled?: boolean
+  concierge_mode?: boolean
+  preserve_sandbox_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -227,7 +245,8 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
   recent_thread_context_enabled?: boolean
-  dm_session_enabled?: boolean
+  concierge_mode?: boolean
+  preserve_sandbox_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -770,6 +789,32 @@ export interface ReviewCommentCreate {
   start_side?: "LEFT" | "RIGHT" | null
 }
 
+export type PullRequestReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+
+export interface PendingReviewComment {
+  id: number
+  node_id: string
+  path: string
+  line: number | null
+  start_line: number | null
+  side: "LEFT" | "RIGHT" | null
+  start_side: "LEFT" | "RIGHT" | null
+  body: string
+}
+
+/** The viewer's unsubmitted GitHub review; its comments post together on submit. */
+export interface PendingReview {
+  id: number
+  node_id: string
+  comments: Array<PendingReviewComment>
+}
+
+export interface SubmittedReview {
+  id: number
+  html_url: string
+  state: string
+}
+
 export interface ReviewCommentResult {
   id: number
   html_url: string
@@ -945,6 +990,8 @@ export interface ReviewWalkthroughStep {
 /** The review scout's reading order for the PR's current head. */
 export interface ReviewWalkthrough {
   head_sha: string
+  /** The scout's summary of what people asked for; empty when it wrote none. */
+  human_input: string
   steps: Array<ReviewWalkthroughStep>
 }
 
@@ -962,7 +1009,25 @@ export interface ReviewDetail extends Omit<
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
   walkthrough_running: boolean
-  guidance: Array<GuidancePoint>
+  /** Why the latest scout run on this head failed, when it did. */
+  walkthrough_error: string | null
+  walkthrough_scout_thread_id: string | null
+  /** What the running scout has done so far; set only while `walkthrough_running`. */
+  walkthrough_progress: ScoutProgress | null
+  /** Why the latest reviewer run failed, when `status` is `"error"`. */
+  review_error: string | null
+}
+
+export interface ScoutAction {
+  tool: string
+  target: string | null
+}
+
+export interface ScoutProgress {
+  steps: number
+  /** The latest action is still executing. */
+  running: boolean
+  recent: Array<ScoutAction>
 }
 
 export interface PublishedReviewAssessment {
@@ -972,17 +1037,6 @@ export interface PublishedReviewAssessment {
   risk_score: number
   decision: "would_approve" | "needs_human_review"
   explanation: string
-}
-
-/**
- * One place the author redirected Open SWE that the reviewer could see in the
- * final change. Recorded during a review, so it is absent until one has run.
- */
-export interface GuidancePoint {
-  summary: string
-  quote: string
-  /** Empty when the quote matched no stored message. */
-  author: string
 }
 
 export interface ReviewAssessmentFeedbackInput {
@@ -1056,7 +1110,8 @@ export interface PullRequestPreview {
   // or no checks configured.
   unresolved: Array<PreviewThread> | null
   checks: Array<PreviewCheck> | null
-  guidance: Array<GuidancePoint>
+  /** The review scout's summary of what people asked for; empty until one has run. */
+  human_input: string
 }
 
 export interface ReviewDiffPayload {
@@ -1209,6 +1264,12 @@ export const api = {
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
+    }),
+  reportClientError: (report: ClientErrorReport) =>
+    request<void>("/client-errors", {
+      method: "POST",
+      body: JSON.stringify(report),
+      keepalive: true,
     }),
   getMyInstructions: () => request<UserInstructions>("/me/instructions"),
   saveMyInstructions: (instructions: string) =>
@@ -1576,6 +1637,11 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
       { method: "POST" }
     ),
+  markReviewViewed: (owner: string, repo: string, number: number) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/viewed`,
+      { method: "POST" }
+    ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
       success: boolean
@@ -1586,15 +1652,55 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
     ),
-  createReviewComment: (
+  getPendingReview: (owner: string, repo: string, number: number) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`
+    ),
+  addPendingReviewComment: (
     owner: string,
     repo: string,
     number: number,
-    body: ReviewCommentCreate
+    comment: ReviewCommentCreate
   ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
-      { method: "POST", body: JSON.stringify(body) }
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
+    ),
+  updatePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
+    ),
+  deletePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number
+  ) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "DELETE" }
+    ),
+  discardPendingReview: (owner: string, repo: string, number: number) =>
+    request<{ discarded: boolean }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`,
+      { method: "DELETE" }
+    ),
+  submitPullRequestReview: (
+    owner: string,
+    repo: string,
+    number: number,
+    review: { event: PullRequestReviewEvent; body: string }
+  ) =>
+    request<SubmittedReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
+      { method: "POST", body: JSON.stringify(review) }
     ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(

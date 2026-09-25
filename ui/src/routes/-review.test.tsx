@@ -50,19 +50,17 @@ const VIEW: WorkspaceSettingsView = { effective: SETTINGS, overrides: {} }
 it("reads the workspace's settings and writes only its own override", async () => {
   const reads: string[] = []
   const writes: Array<{ url: string; body: WorkspaceSettingsOverrides }> = []
+  let stored = VIEW
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     if (init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as WorkspaceSettingsOverrides
       writes.push({ url, body })
-      const view: WorkspaceSettingsView = {
-        effective: { ...SETTINGS, ...body },
-        overrides: body,
-      }
-      return new Response(JSON.stringify(view))
+      stored = { effective: { ...SETTINGS, ...body }, overrides: body }
+      return new Response(JSON.stringify(stored))
     }
     reads.push(url)
-    return new Response(JSON.stringify(VIEW))
+    return new Response(JSON.stringify(stored))
   })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -102,15 +100,15 @@ it("reads the workspace's settings and writes only its own override", async () =
 it("saves and resets approval criteria without changing the review guidelines", async () => {
   const writes: WorkspaceSettingsOverrides[] = []
   const base = { ...SETTINGS, approval_policy: "Documentation only" }
+  let stored: WorkspaceSettingsView = { effective: base, overrides: {} }
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
     if (init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as WorkspaceSettingsOverrides
       writes.push(body)
-      return new Response(
-        JSON.stringify({ effective: { ...base, ...body }, overrides: body })
-      )
+      stored = { effective: { ...base, ...body }, overrides: body }
+      return new Response(JSON.stringify(stored))
     }
-    return new Response(JSON.stringify({ effective: base, overrides: {} }))
+    return new Response(JSON.stringify(stored))
   })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
