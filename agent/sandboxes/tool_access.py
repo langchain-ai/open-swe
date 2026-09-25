@@ -20,6 +20,7 @@ TOOLS_PATH = "/dashboard/api/sandbox-tools"
 TOOLS_HEADER = "X-Open-SWE-Tools-Token"
 TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
+TOOLS_URL_ENV = "OPEN_SWE_TOOLS_URL"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
 
 
@@ -87,7 +88,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
         "name": TOOLS_RULE,
         "match_hosts": [urlsplit(url).hostname],
         "headers": [{"name": TOOLS_HEADER, "type": "opaque", "value": token}],
-        "env_vars": {"OPEN_SWE_TOOLS_URL": url},
+        "env_vars": {TOOLS_URL_ENV: url},
     }
 
 

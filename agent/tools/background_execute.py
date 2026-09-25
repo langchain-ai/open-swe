@@ -10,7 +10,7 @@ from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
-from agent.sandboxes.tool_access import TOOLS_URL_FILE
+from agent.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 from agent.utils.background_task_state import update_background_task_state
 from agent.utils.thread_ops import langgraph_client
 
@@ -63,7 +63,7 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         omitted = 0
 
         def callback_url(event):
-            base = os.environ.get("OPEN_SWE_TOOLS_URL")
+            base = os.environ.get({TOOLS_URL_ENV!r})
             query = ""
             if not base:
                 try:
@@ -209,7 +209,7 @@ def _launch_command(task_id: str, command: str, timeout: int) -> str:
     return (
         "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
         "command -v curl >/dev/null || { echo 'background execution requires curl' >&2; exit 74; }; "
-        f'{{ [ -n "$OPEN_SWE_TOOLS_URL" ] || [ -s {shlex.quote(TOOLS_URL_FILE)} ]; }} || '
+        f'{{ [ -n "${TOOLS_URL_ENV}" ] || [ -s {shlex.quote(TOOLS_URL_FILE)} ]; }} || '
         "{ echo 'background execution needs the sandbox callback URL, which this deployment does not provide' >&2; exit 75; }; "
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
         f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
