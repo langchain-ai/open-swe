@@ -2500,18 +2500,18 @@ def test_feedback_and_web_usage_share_one_actions_block() -> None:
     assert blocks is not None
     assert [block["type"] for block in blocks] == ["section", "actions"]
     actions = blocks[-1]["elements"]
-    assert [action["text"]["text"] for action in actions] == ["↗ model-a", "👍", "👎"]
-    assert actions[0]["url"] == url
-    assert actions[0]["accessibility_label"] == "Open in Web"
+    assert [action["text"]["text"] for action in actions] == ["👍", "👎", "↗ model-a"]
+    assert actions[-1]["url"] == url
+    assert actions[-1]["accessibility_label"] == "Open in Web"
 
     text = slack_utils.append_slack_web_link_footer("Done", url, usage)
     updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
     assert updated_text.endswith("model-a • $0.42")
     assert updated_blocks is not None
     assert [action["text"]["text"] for action in updated_blocks[-1]["elements"]] == [
-        "↗ model-a • $0.42",
         "👍",
         "👎",
+        "↗ model-a • $0.42",
     ]
     assert slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42) == (
         updated_text,

@@ -716,8 +716,7 @@ def _with_slack_web_link_context_block(
         label = f"↗ {model_text[:60]}".rstrip()
         if cost_text:
             label = f"{label} • {cost_text}"
-        feedback["elements"].insert(
-            0,
+        feedback["elements"].append(
             {
                 "type": "button",
                 "action_id": "open_swe_web_link",
@@ -727,7 +726,7 @@ def _with_slack_web_link_context_block(
                 },
                 "url": dashboard_url,
                 "accessibility_label": "Open in Web",
-            },
+            }
         )
         return updated_blocks
     if dashboard_url and any(
