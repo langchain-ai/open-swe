@@ -19,6 +19,7 @@ from agent.slack.client import (
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.markdown import markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
@@ -121,6 +122,21 @@ async def slack_reply(
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
         )
+        if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
+            try:
+                await _handle_kickoff(
+                    client,
+                    str(channel_id),
+                    str(thread_ts),
+                    message_ts,
+                    response_type=response_type,
+                    eligible=cfg.slack_kickoff_eligible is True,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not update Slack investigation kickoff state",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
+                )
     if message_ts is None:
         if slack_error == "thread_not_found":
             moved = bool(thread_id) and await move_thread_to_dashboard(
@@ -142,6 +158,42 @@ async def slack_reply(
         else:
             await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _handle_kickoff(
+    client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    update_ts: str,
+    *,
+    response_type: Literal["progress", "final"],
+    eligible: bool,
+) -> None:
+    namespace = ("slack_kickoff", channel_id)
+    item = await client.store.get_item(namespace, thread_ts)
+    value = item.get("value") if isinstance(item, dict) else None
+    if isinstance(value, dict) and value.get("removed") is True:
+        return
+    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
+    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
+        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
+        return
+    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+        return
+    try:
+        async with SlackClient.bot() as slack:
+            await slack.chat_delete(channel=channel_id, ts=kickoff_ts)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Could not remove Slack investigation kickoff",
+            extra={
+                "slack_channel": channel_id,
+                "slack_thread_ts": thread_ts,
+                "slack_error": slack_error(exc),
+            },
+        )
+        return
+    await client.store.put_item(namespace, thread_ts, {"removed": True})
 
 
 async def _ephemeral_reply(

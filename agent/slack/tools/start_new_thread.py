@@ -351,6 +351,7 @@ async def slack_start_new_thread(
     new_configurable: dict[str, Any] = {
         "slack_thread": new_slack_thread,
         "source": "slack",
+        "slack_kickoff_eligible": True,
     }
     if repo:
         new_configurable["repo"] = repo
