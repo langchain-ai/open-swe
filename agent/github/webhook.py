@@ -35,8 +35,13 @@ from agent.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
+from agent.threads.creation import create_thread
 from agent.users import User
 from agent.webhooks import common
+
+
+def _reviewer_thread_title(pr_title: str, pr_number: int) -> str:
+    return f"Review: {pr_title} #{pr_number}" if pr_title else f"Review #{pr_number}"
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -292,7 +297,9 @@ async def trigger_pr_review_from_ref(
 
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_ref.number)
+    ):
         return {"success": False, "error": "Could not create reviewer thread"}
 
     pr_meta: ReviewerPRMeta = {
@@ -358,6 +365,7 @@ async def trigger_pr_review_from_ref(
         None,
         configurable,
         source=source,
+        thread_title=None,
         input=review_input,
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
@@ -433,7 +441,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         return
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+    ):
         return
 
     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
@@ -483,6 +493,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         None,
         configurable,
         source=source,
+        thread_title=None,
         input=run_input,
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
@@ -748,7 +759,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         return
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+    ):
         return
     try:
         threads = await common.fetch_pr_review_threads(
@@ -819,6 +832,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         None,
         configurable,
         source="github_push",
+        thread_title=None,
         input=_github_webhook_run_input(
             re_review_prompt,
             data={
@@ -967,8 +981,10 @@ async def process_github_pr_comment(
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
         except Exception as exc:  # noqa: BLE001
             if common.is_not_found_error(exc):
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
+                await create_thread(
+                    langgraph_client,
+                    thread_id,
+                    title=f"PR #{pr_number}",
                     if_exists="do_nothing",
                     metadata={"branch_name": branch_name},
                 )
@@ -1270,6 +1286,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         None,
         configurable,
         source="github_review_reply",
+        thread_title=None,
         input=_github_human_run_input(
             reply_author,
             finding_reply_prompt,
@@ -1430,7 +1447,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else ""),
+        title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
         workspace=workspace,
     )
@@ -1475,6 +1492,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         None,
         configurable,
         source="github_issue",
+        thread_title=None,
         input=run_input,
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,

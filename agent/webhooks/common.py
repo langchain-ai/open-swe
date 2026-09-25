@@ -128,6 +128,7 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread, ensure_titled_thread
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
@@ -514,7 +515,7 @@ async def upsert_agent_thread_metadata(
     repo_config: dict[str, str] | None = None,
     github_login: str = "",
     user_email: str = "",
-    title: str = "",
+    title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
@@ -638,8 +639,12 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
-                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
             )
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
@@ -810,10 +815,10 @@ async def thread_exists(thread_id: str) -> bool:
 
 
 async def ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
@@ -1056,7 +1061,7 @@ async def trigger_or_queue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=f"PR #{pr_number}" if pr_number else "",
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
     )
@@ -1074,6 +1079,7 @@ async def trigger_or_queue_run(
             "environment": workspace,
         },
         source="github",
+        thread_title=None,
         input=input,
         metadata=AGENT_VERSION_METADATA,
     )

@@ -46,6 +46,7 @@ from agent.input_messages import (
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
+from agent.threads.creation import ensure_titled_thread
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -250,6 +251,7 @@ async def create_durable_run(
     *,
     input: RunInput | dict[str, Any],
     source: str,
+    thread_title: str | None,
     config: LangGraphRunConfig | None = None,
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
@@ -260,8 +262,14 @@ async def create_durable_run(
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
 ) -> Run:
-    """Create a run with Open SWE's durable LangGraph defaults."""
+    """Create a run with Open SWE's durable LangGraph defaults.
+
+    ``thread_title`` names a thread the system owns, creating it if needed; ``None``
+    means the caller already created and titled the thread.
+    """
     client = client or dispatch_client()
+    if thread_title is not None:
+        await ensure_titled_thread(client, thread_id, title=thread_title)
     run_metadata = dict(metadata or {})
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
@@ -307,6 +315,7 @@ async def dispatch_agent_run(
     configurable: dict[str, Any],
     *,
     source: str,
+    thread_title: str | None,
     input: RunInput | None = None,
     context: InputMessageContext | None = None,
     channels: list[ChannelIdentity] | None = None,
@@ -352,6 +361,7 @@ async def dispatch_agent_run(
         config={"configurable": configurable},
         metadata=metadata or {},
         source=source,
+        thread_title=thread_title,
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,

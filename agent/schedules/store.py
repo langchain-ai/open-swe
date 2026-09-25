@@ -34,6 +34,7 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
+from agent.threads.creation import create_lock_thread, create_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import workspace_for_repo_config
@@ -708,7 +709,9 @@ async def _launch_agent_schedule_record(
             "schedule_id": schedule_id,
             "invocation_id": run_config["configurable"]["invocation_id"],
         }
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await create_thread(
+        client, thread_id, title=metadata["title"], metadata=metadata, if_exists="do_nothing"
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {
         "sender_id": f"system:schedule:{schedule_id}",
@@ -737,6 +740,7 @@ async def _launch_agent_schedule_record(
             ),
         ),
         source="schedule",
+        thread_title=None,
         config=run_config,
         client=client,
         stream_resumable=True,
@@ -816,10 +820,8 @@ def _issue_delivery_claim_thread_id(delivery_id: str, schedule_id: str) -> str:
 async def _claim_issue_delivery(delivery_id: str, schedule_id: str) -> str | None:
     claim_thread_id = _issue_delivery_claim_thread_id(delivery_id, schedule_id)
     try:
-        await langgraph_client().threads.create(
-            thread_id=claim_thread_id,
-            if_exists="raise",
-            ttl=_ISSUE_DELIVERY_CLAIM_TTL_MINUTES,
+        await create_lock_thread(
+            langgraph_client(), claim_thread_id, ttl_minutes=_ISSUE_DELIVERY_CLAIM_TTL_MINUTES
         )
     except ConflictError:
         return None

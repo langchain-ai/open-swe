@@ -18,7 +18,6 @@ from agent.review.walkthrough import FileLines, LineRange, StepDraft
 GIT_TIMEOUT_SECONDS = 300
 SCOUT_KIND_TRAILER = "Scout-Kind"
 OTHER_TITLE = "Other changes"
-LEFTOVER_SUMMARY = "Changes the walkthrough did not place in a step."
 
 _IDENTITY = "-c user.name='Open SWE Review Scout' -c user.email=review-scout@open-swe.invalid"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -84,21 +83,43 @@ async def setup_working_tree(
     return _require_sha(output.strip().splitlines()[-1].strip())
 
 
+async def committed_kinds(
+    backend: SandboxBackendProtocol, repo_dir: str, *, base_sha: str, head_sha: str
+) -> list[bool]:
+    """Whether each commit the scout has made so far is an "other" commit, oldest first."""
+    base, head = _require_sha(base_sha), _require_sha(head_sha)
+    fmt = shlex.quote(f"%(trailers:key={SCOUT_KIND_TRAILER},valueonly){_RECORD}")
+    log = await _run(
+        backend,
+        repo_dir,
+        f"mb=$(git merge-base {base} {head})\n"
+        f'git log --first-parent --reverse --format={fmt} "$mb"..HEAD',
+    )
+    return [kind.strip() == "other" for kind in log.split(_RECORD)[:-1]]
+
+
 async def commit_staged(
     backend: SandboxBackendProtocol, repo_dir: str, *, title: str, summary: str, other: bool
 ) -> str | None:
-    """Commit the index as one walkthrough step; ``None`` when nothing is staged."""
+    """Commit the index as one walkthrough step; ``None`` when nothing is staged.
+
+    An "other" commit may be empty, so a pull request with nothing mechanical can still open with one.
+    """
     kind = "other" if other else "step"
     message = ["-m", title]
     if summary:
         message += ["-m", summary]
     quoted = " ".join(shlex.quote(part) for part in message)
     trailer = shlex.quote(f"{SCOUT_KIND_TRAILER}: {kind}")
+    empty_check = (
+        "" if other else "if git diff --cached --quiet; then echo NOTHING_STAGED; exit 0; fi\n"
+    )
+    allow_empty = " --allow-empty" if other else ""
     output = await _run(
         backend,
         repo_dir,
-        "if git diff --cached --quiet; then echo NOTHING_STAGED; exit 0; fi\n"
-        f"git {_IDENTITY} commit --quiet --no-verify {quoted} --trailer {trailer}\n"
+        f"{empty_check}"
+        f"git {_IDENTITY} commit --quiet --no-verify{allow_empty} {quoted} --trailer {trailer}\n"
         "git rev-parse HEAD",
     )
     last = output.strip().splitlines()[-1].strip() if output.strip() else ""
@@ -118,8 +139,7 @@ async def finalize(
         f'if ! git diff --quiet "$last" {head}; then\n'
         f"  tree=$(git rev-parse {head}^{{tree}})\n"
         f'  next=$(git {_IDENTITY} commit-tree "$tree" -p "$last" '
-        f"-m {shlex.quote(OTHER_TITLE)} -m {shlex.quote(LEFTOVER_SUMMARY)} "
-        f"-m {leftover_trailer})\n"
+        f"-m {shlex.quote(OTHER_TITLE)} -m {leftover_trailer})\n"
         '  git reset --quiet --soft "$next"\n'
         "fi",
     )
@@ -343,14 +363,14 @@ def _steps(
     for i, commit in enumerate(commits):
         if commit.is_other:
             if other is None:
-                other = StepDraft(title=OTHER_TITLE, summary=commit.summary, is_other=True)
+                other = StepDraft(title=OTHER_TITLE, is_other=True)
             other_commits.append(i)
         else:
             step_of[i] = len(steps)
             steps.append(StepDraft(title=commit.title, summary=commit.summary))
     has_unowned = any(_UNOWNED in owners for owners in (*added.values(), *deleted.values()))
     if other is None and has_unowned:
-        other = StepDraft(title=OTHER_TITLE, summary=LEFTOVER_SUMMARY, is_other=True)
+        other = StepDraft(title=OTHER_TITLE, is_other=True)
     if other is not None:
         steps.append(other)
         for i in (*other_commits, _UNOWNED):
