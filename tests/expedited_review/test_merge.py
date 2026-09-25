@@ -60,6 +60,14 @@ class _GitHub:
         monkeypatch.setattr(lifecycle, "fetch_pr", self._pull)
         monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
         monkeypatch.setattr(lifecycle, "add_slack_reaction", AsyncMock(return_value=True))
+        self.comments: list[str] = []
+        monkeypatch.setattr(merge, "post_github_comment", self._comment)
+
+    async def _comment(
+        self, repo_config: dict[str, str], issue_number: int, body: str, *, token: str
+    ) -> bool:
+        self.comments.append(body)
+        return True
 
     def dismiss_as_stale(self) -> None:
         self.approved.clear()
@@ -222,7 +230,7 @@ async def test_a_commit_touching_only_unshown_tests_keeps_the_votes(
     assert github.merges == [{"sha": "def456", "merge_method": "squash"}]
 
 
-async def test_a_commit_changing_the_shown_diff_discards_the_votes_and_their_reviews(
+async def test_a_commit_changing_the_shown_diff_holds_the_merge_without_dismissing(
     github: _GitHub, open_approval: OpenApproval
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE", "U_LINUS"), github)
@@ -231,12 +239,44 @@ async def test_a_commit_changing_the_shown_diff_discards_the_votes_and_their_rev
 
     result = await merge.merge_approved(approval)
 
-    stored = await ExpeditedApproval.get(approval.id)
-    assert stored is not None
+    stored = await _reload(approval)
+    assert result.status == "diff_changed"
+    assert stored.state == "open"
+    assert github.dismissed == [] and github.merges == []
+
+
+async def test_keeping_the_approval_across_a_diff_change_merges_and_explains_it(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    github.files = [ChangedFile(filename="src/app.py", additions=1, patch="+renamed"), _TEST]
+    github.readiness = _readiness("def456")
+
+    result = await merge.merge_approved(approval, "renamed a local variable for lint")
+
+    assert result.status == "merged"
+    assert github.dismissed == []
+    assert github.merges == [{"sha": "def456", "merge_method": "squash"}]
+    assert len(github.comments) == 1 and "renamed a local variable" in github.comments[0]
+
+
+async def test_a_diff_grown_past_the_limit_discards_the_votes_even_when_kept(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE", "U_LINUS"), github)
+    github.files = [
+        ChangedFile(filename="src/app.py", additions=40, patch="+" * 40),
+        _TEST,
+    ]
+    github.readiness = _readiness("def456")
+
+    result = await merge.merge_approved(approval, "small follow-up")
+
+    stored = await _reload(approval)
     assert result.status == "invalidated"
     assert stored.state == "superseded"
     assert sorted(github.dismissed) == ["101", "102"]
-    assert len(github.reviews) == 2 and github.merges == []
+    assert github.merges == [] and github.comments == []
 
 
 async def test_nothing_reaches_github_without_an_approval_or_while_blocked(
