@@ -73,19 +73,20 @@ async def _merge_token(owner: str, repo: str) -> str | None:
 async def _keep_approval(
     approval: ExpeditedApproval, fingerprint: str, reason: str, token: str
 ) -> ExpeditedApproval | None:
-    """Carry the votes over to the current diff, noting on the PR why no re-review was needed."""
+    """Carry the votes over to the current diff once the PR says why no re-review was needed."""
+    pr = approval.pull_request
     async with ExpeditedApproval.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return None
+        if not await post_github_comment(
+            {"owner": pr.owner, "name": pr.repo},
+            pr.number,
+            "The diff changed after the expedited approval; the approval was kept because: "
+            f"{reason.strip()}",
+            token=token,
+        ):
+            return None
         row.diff_fingerprint = fingerprint
-    pr = approval.pull_request
-    await post_github_comment(
-        {"owner": pr.owner, "name": pr.repo},
-        pr.number,
-        "The diff changed after the expedited approval; the approval was kept because: "
-        f"{reason.strip()}",
-        token=token,
-    )
     logger.info(
         "Kept expedited approval across a diff change",
         extra={"approval_id": str(approval.id)},
@@ -119,14 +120,6 @@ async def merge_approved(
     if files is None:
         return MergeResult("error", "Could not read the pull request's changed files.")
     if not fingerprint_matches(files, approval.diff_fingerprint):
-        if not keep_approval_reason.strip():
-            return MergeResult(
-                "diff_changed",
-                "A commit since the card was posted changed the non-test diff the approver "
-                "saw. Nothing was discarded. If the change does not need the approver to look "
-                "again, call `merge_expedited_pr` again with `keep_approval_reason`; "
-                "otherwise call `expedite_pr_approval` for a fresh card.",
-            )
         verdict = assess_eligibility(files)
         if isinstance(verdict, Ineligible):
             await retire(
@@ -139,10 +132,19 @@ async def merge_approved(
                 f"The diff is no longer eligible for expedited review ({verdict.reason}), so "
                 "the approval was discarded. Ask for a normal GitHub review.",
             )
+        if not keep_approval_reason.strip():
+            return MergeResult(
+                "diff_changed",
+                "A commit since the card was posted changed the non-test diff the approver "
+                "saw. Nothing was discarded. If the change does not need the approver to look "
+                "again, call `merge_expedited_pr` again with `keep_approval_reason`; "
+                "otherwise call `expedite_pr_approval` for a fresh card.",
+            )
         kept = await _keep_approval(approval, verdict.fingerprint, keep_approval_reason, token)
         if kept is None:
             return MergeResult(
-                "closed", "The expedited review closed before the merge; nothing was merged."
+                "error",
+                "Could not record why the approval was kept, so nothing was merged. Try again.",
             )
         approval = kept
 
