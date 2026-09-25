@@ -10,6 +10,7 @@ the agent itself is stateless.
 # ruff: noqa: E402
 import hashlib
 import logging
+import shlex
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
@@ -151,7 +152,8 @@ from agent.sandboxes.lifecycle import (
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
-from agent.sandboxes.read_only_backend import ReadOnlyBackend
+from agent.sandboxes.read_only_backend import PrefixedReadOnlyBackend
+from agent.sandboxes.repo_prep import DEFAULT_SKILL_DIRS
 from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
     SandboxUnreachableError,
@@ -1111,6 +1113,35 @@ async def _get_agent(config: RunnableConfig) -> Pregel:
     return await build_agent(config)
 
 
+async def _discover_repo_skill_sources(
+    sandbox_backend: SandboxBackendProtocol,
+    work_dir: str,
+) -> list[str]:
+    """Find checked-out repository skill directories under the sandbox work directory."""
+    skill_paths = " ".join(
+        f"-path {shlex.quote(f'*/{skill_dir}')}" for skill_dir in DEFAULT_SKILL_DIRS
+    )
+    command = f"find {shlex.quote(work_dir)} -type d \\( {skill_paths} \\) -print"
+    try:
+        result = await sandbox_backend.aexecute(command)
+    except Exception:
+        logger.warning("Failed to discover repository skill directories", exc_info=True)
+        return []
+    if result.exit_code != 0:
+        logger.warning(
+            "Repository skill directory discovery failed with exit code %s",
+            result.exit_code,
+        )
+        return []
+    sources: list[str] = []
+    for line in result.output.splitlines():
+        path = line.strip()
+        source = path.rstrip("/") + "/"
+        if path.startswith("/") and source not in sources:
+            sources.append(source)
+    return sources
+
+
 async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | None = None) -> Pregel:
     """Get or create an agent with a sandbox for the given thread."""
     configurable = config.get("configurable") or {}
@@ -1531,28 +1562,46 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
     skill_routes: dict[str, BackendProtocol] = {
-        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
-            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
+        BUNDLED_SKILLS_ROUTE: PrefixedReadOnlyBackend(
+            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True),
+            BUNDLED_SKILLS_ROUTE,
+            reattach=False,
         ),
     }
     if is_desktop_run(cfg):
-        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
+        skill_routes[USER_SKILLS_ROUTE] = PrefixedReadOnlyBackend(
+            StateBackend(), USER_SKILLS_ROUTE, reattach=False
+        )
         skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         # The default backend is the user's project, so offloads would land in
         # their repository. Keep the agent's scratch files out of it.
         skill_routes.update(await desktop_artifact_routes(thread_id))
     else:
-        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = PrefixedReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,)),
+            ORGANIZATION_SKILLS_ROUTE,
+            reattach=False,
         )
         skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         if credential_login:
-            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
+            skill_routes[USER_SKILLS_ROUTE] = PrefixedReadOnlyBackend(
                 StoreBackend(
                     namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
-                )
+                ),
+                USER_SKILLS_ROUTE,
+                reattach=False,
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
+    try:
+        work_dir = await resolve_sandbox_work_dir(backend)
+    except Exception:
+        logger.warning(
+            "Failed to resolve work directory for repository skill discovery", exc_info=True
+        )
+    else:
+        for skill_source in await _discover_repo_skill_sources(backend, work_dir):
+            skill_routes[skill_source] = PrefixedReadOnlyBackend(backend, skill_source)
+            skill_sources.append(skill_source)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
