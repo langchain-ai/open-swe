@@ -3,6 +3,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
+import { SandboxMemoryPreference } from "@/features/settings/components/SandboxMemoryPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useFeatureFlagsPanel } from "@/lib/featureFlags"
 import { useShortcutLabel } from "@/lib/hotkeys"
@@ -39,6 +40,7 @@ function FeatureFlagsPage() {
     >
       <SettingsSection title="Experiments">
         <AssistantUiPreference />
+        <SandboxMemoryPreference />
       </SettingsSection>
     </AppShell>
   )
