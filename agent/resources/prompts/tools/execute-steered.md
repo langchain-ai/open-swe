@@ -1,1 +1,0 @@
-The user sent a new message while this command was running, so the command was stopped before it finished. Its output and side effects are unknown. Read the new message before deciding whether to run it again.

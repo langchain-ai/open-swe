@@ -17,9 +17,6 @@ from agent.config import ENV
 logger = logging.getLogger(__name__)
 
 MAX_QUEUED_MESSAGES = 100
-# Marks a queued message someone steered into a live run: it interrupts the
-# command that run is waiting on instead of waiting for it to finish.
-STEER_FLAG = "steer"
 
 
 def langgraph_url() -> str:
