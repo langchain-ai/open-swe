@@ -44,11 +44,7 @@ export function ReviewSettings({
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
   const toggle = (
-    field:
-      | "review_draft_prs"
-      | "pr_summaries"
-      | "review_trace_links"
-      | "review_auto_approve"
+    field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
   ) => (
     <Switch
       checked={!!settings.data?.[field]}
@@ -166,13 +162,6 @@ export function ReviewSettings({
 
       <SettingsSection title="Review configuration">
         <div className="divide-y divide-border">
-          <TierRow
-            settings={settings}
-            fields={["review_auto_approve"]}
-            label="Submit GitHub approvals"
-            description="Off by default. When enabled, submit an approval if the configured policy is satisfied, no findings remain, and the reviewed commit is still current. Requires an applicable approval policy. Never merges the PR."
-            control={toggle("review_auto_approve")}
-          />
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}

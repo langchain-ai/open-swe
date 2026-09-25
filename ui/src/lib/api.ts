@@ -282,7 +282,6 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
-  review_auto_approve?: boolean
   approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -1029,7 +1028,6 @@ export interface ScoutProgress {
 }
 
 export interface PublishedReviewAssessment {
-  approved?: boolean
   review_id: number
   head_sha: string
   risk_score: number
