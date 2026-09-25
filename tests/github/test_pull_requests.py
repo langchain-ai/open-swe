@@ -114,6 +114,21 @@ async def test_author_links_to_a_registered_user_by_github_id_or_login() -> None
     assert unregistered.author_user_id is None
 
 
+async def test_is_authored_by_maps_the_commenter_to_the_authoring_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "Ada,Grace")
+    await User.sign_in("github", "42", login="Ada")
+    await User.sign_in("github", "43", login="Grace")
+    pr = await PullRequest(
+        owner="lc", repo="repo", number=1, author="old-ada", author_github_id=42
+    ).save()
+
+    assert await pr.is_authored_by("ADA") is True
+    assert await pr.is_authored_by("Grace") is False
+    assert await pr.is_authored_by("stranger") is False
+
+
 async def test_a_resolved_author_survives_later_saves_and_links() -> None:
     ada = await User.sign_in("github", "42", login="Ada")
     await PullRequest(owner="lc", repo="repo", number=7, author="Ada", author_github_id=42).save()

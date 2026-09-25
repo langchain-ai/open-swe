@@ -198,7 +198,6 @@ export function buildProfileUpdate(
     model_routing_enabled: current?.model_routing_enabled ?? null,
     recent_thread_context_enabled:
       current?.recent_thread_context_enabled ?? false,
-    dm_session_enabled: current?.dm_session_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,

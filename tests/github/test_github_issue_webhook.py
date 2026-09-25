@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from agent.api.app import app
 from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
+from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
@@ -23,7 +24,7 @@ from agent.slack.tools.request_pr_review import request_pr_review as request_pr_
 from agent.thread_ids import github_issue_thread_id
 from agent.users import User
 from agent.webhooks import common as webhook_common
-from tests.conftest import post_signed_github_webhook
+from tests.conftest import post_signed_github_webhook, register_github_logins
 
 request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
 
@@ -274,6 +275,7 @@ async def test_github_webhook_accepts_issue_comment_events(monkeypatch, registry
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "issue_comment",
@@ -291,6 +293,50 @@ async def test_github_webhook_accepts_issue_comment_events(monkeypatch, registry
     assert called["event_type"] == "issue_comment"
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        (
+            "issue_comment",
+            {
+                "action": "created",
+                "issue": {"number": 42, "pull_request": {"url": "u"}},
+                "comment": {"body": "@openswe please handle this"},
+            },
+        ),
+        (
+            "pull_request_review_comment",
+            {
+                "action": "created",
+                "pull_request": {"number": 42, "head": {"ref": "feature"}},
+                "comment": {"id": 2, "in_reply_to_id": 1, "body": "The finding is wrong"},
+            },
+        ),
+    ],
+)
+async def test_github_webhook_ignores_comments_from_unregistered_senders(
+    monkeypatch, registry_db, event_type: str, payload: dict[str, object]
+) -> None:
+    async def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an unregistered sender must not reach a handler")
+
+    monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fail_if_called)
+    monkeypatch.setattr(github_webhooks, "process_github_review_finding_reply", fail_if_called)
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
+
+    response = await _post_github_webhook(
+        event_type,
+        {
+            **payload,
+            "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+            "sender": {"login": "stranger"},
+        },
+    )
+
+    assert response.json()["status"] == "ignored"
+
+
 async def test_github_webhook_ignores_unmentioned_comment_without_info_log(
     monkeypatch, caplog, registry_db
 ) -> None:
@@ -301,6 +347,7 @@ async def test_github_webhook_ignores_unmentioned_comment_without_info_log(
         github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
     )
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
     caplog.set_level(logging.INFO, logger=webhook_common.logger.name)
 
     response = await _post_github_webhook(
@@ -349,6 +396,7 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
     )
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "pull_request_review_comment",
@@ -375,6 +423,108 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
     payload = called["payload"]
     assert isinstance(payload, dict)
     assert payload["comment"]["in_reply_to_id"] == 111
+
+
+def _untagged_pr_event(
+    event_type: str, sender: dict[str, str], *, action: str = "", number: int = 1244
+) -> dict[object, object]:
+    repository = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
+    if event_type == "issue_comment":
+        return {
+            "action": action or "created",
+            "issue": {"number": number, "state": "open", "pull_request": {"url": "u"}},
+            "comment": {"id": 5, "body": "CI is failing on lint"},
+            "repository": repository,
+            "sender": sender,
+        }
+    return {
+        "action": action or "submitted",
+        "pull_request": {"number": number, "state": "open", "head": {"ref": "feature"}},
+        "review": {"id": 6, "body": "", "state": "changes_requested"},
+        "repository": repository,
+        "sender": sender,
+    }
+
+
+@pytest.mark.parametrize(
+    ("event_type", "action", "sender", "accepted"),
+    [
+        ("issue_comment", "", {"login": "octocat"}, True),
+        ("issue_comment", "edited", {"login": "octocat"}, True),
+        ("issue_comment", "deleted", {"login": "octocat"}, False),
+        ("issue_comment", "", {"login": "vercel[bot]"}, False),
+        ("issue_comment", "", {"login": "open-swe[bot]"}, False),
+        ("issue_comment", "", {"login": "stranger"}, False),
+        ("pull_request_review", "", {"login": "octocat"}, True),
+        ("pull_request_review", "edited", {"login": "octocat"}, True),
+        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, False),
+        ("pull_request_review", "", {"login": "stranger"}, False),
+    ],
+)
+async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
+    monkeypatch,
+    registry_db,
+    event_type: str,
+    action: str,
+    sender: dict[str, str],
+    accepted: bool,
+) -> None:
+    called: dict[str, object] = {}
+
+    async def fake_process_github_pr_comment(
+        payload: dict[str, object], event_type: str, *, agent_thread_id: str | None = None
+    ) -> None:
+        called["agent_thread_id"] = agent_thread_id
+
+    async def allow(payload: dict[str, object], event_type: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        github_webhooks, "process_github_pr_comment", fake_process_github_pr_comment
+    )
+    monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", allow)
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
+    await PullRequest(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        opening_head_sha="head-sha",
+        threads=[ThreadLink(thread_id="agent-thread", source=AGENT_OPENED_LINK_SOURCE)],
+    ).save()
+
+    response = await _post_github_webhook(
+        event_type, _untagged_pr_event(event_type, sender, action=action)
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["status"] == "accepted") is accepted
+    assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
+
+
+@pytest.mark.parametrize(
+    ("source", "opening_head_sha"),
+    [("github_pr_comment", "head-sha"), (AGENT_OPENED_LINK_SOURCE, "")],
+    ids=["commented-only", "linked-not-opened"],
+)
+async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
+    monkeypatch, registry_db, source: str, opening_head_sha: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    register_github_logins(monkeypatch, "octocat")
+    await PullRequest(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        opening_head_sha=opening_head_sha,
+        threads=[ThreadLink(thread_id="other-thread", source=source)],
+    ).save()
+
+    response = await _post_github_webhook(
+        "issue_comment", _untagged_pr_event("issue_comment", {"login": "octocat"})
+    )
+
+    assert response.json()["status"] == "ignored"
 
 
 def test_process_github_review_finding_reply_uses_rereview_config(monkeypatch) -> None:
@@ -894,7 +1044,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert isinstance(event_data, SlackRequest)
     assert event_data.text == "please check my branch"
     assert event_data.thread_ts == "1700000000.000200"
-    assert event_data.dm_session is False
+    assert event_data.concierge_mode is False
     assert event_data.treat_all_messages_as_mentions is True
 
 
@@ -1417,6 +1567,7 @@ async def test_github_webhook_routes_pr_comment_review_to_agent(monkeypatch, reg
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "issue_comment",
@@ -1450,6 +1601,7 @@ async def test_github_webhook_routes_pr_review_request_comment_to_agent(
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", fake_process_pr_comment)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
     monkeypatch.setattr(webhook_common, "ALLOWED_GITHUB_ORGS", frozenset({"langchain-ai"}))
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook(
         "issue_comment",

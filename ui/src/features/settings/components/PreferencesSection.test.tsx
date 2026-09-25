@@ -12,10 +12,6 @@ import { afterEach, expect, it, vi } from "vitest"
 import { api, type UserPreferences } from "@/lib/api"
 import { PreferencesSection } from "./PreferencesSection"
 
-vi.mock("./AssistantUiPreference", () => ({
-  AssistantUiPreference: () => null,
-}))
-
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
 }))

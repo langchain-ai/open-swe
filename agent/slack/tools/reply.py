@@ -9,6 +9,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
+from agent.slack.blocks import SECTION_TEXT_MAX_CHARS, block_payload, section
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
@@ -24,6 +25,7 @@ from agent.slack.orphan import (
     move_thread_to_dashboard,
     slack_thread_detached,
 )
+from agent.slack.run_feedback import feedback_block
 from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
@@ -93,6 +95,15 @@ async def slack_reply(
                 return _oversized_options_error(message)
             message = markdown_to_mrkdwn(message)
             slack_blocks = None
+        if response_type == "final" and run_id and _triggering_user_id(cfg):
+            if slack_blocks is None:
+                slack_blocks = block_payload(
+                    [
+                        section(message[start : start + SECTION_TEXT_MAX_CHARS])
+                        for start in range(0, len(message), SECTION_TEXT_MAX_CHARS)
+                    ]
+                )
+            slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
         usage = summarize_run_usage(state)
         if usage is not None:
             usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
