@@ -34,7 +34,6 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.threads.summary import DASHBOARD_SOURCE
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -776,11 +775,9 @@ async def _record_pr_telemetry(
                     slack_team_id=origin.team_id if origin else "",
                     slack_channel_id=origin.channel_id if origin else "",
                     slack_thread_ts=origin.thread_ts if origin else "",
-                    # A dashboard follow-up inherits the thread's last Slack trigger.
+                    # Other sources carry a stale trigger or the bot's own post.
                     slack_message_ts=(
-                        origin.triggering_event_ts
-                        if origin and cfg.source != DASHBOARD_SOURCE
-                        else ""
+                        origin.triggering_event_ts if origin and cfg.source == "slack" else ""
                     ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
