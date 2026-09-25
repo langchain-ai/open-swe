@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.utils.gateway import gateway_base_url
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ async def _select_jev_route(task: str) -> Route:
                     "state": task,
                     "questions": {
                         "route": Choice(
-                            instructions=render_prompt("model-selection.md", task=""),
+                            instructions=prompt("model-selection", task=""),
                             criteria=dict.fromkeys(("fast", "balanced", "performance")),
                         )
                     },

@@ -25,7 +25,7 @@ from agent.input_messages import (
 )
 from agent.middleware.message_content import content_to_text
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +162,8 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         )
 
     def _nudge(self, state: Mapping[str, Any]) -> list[HumanMessage]:
-        instruction = render_prompt(
-            "runs/missing-user-reply.md",
+        instruction = prompt(
+            "runs/missing-user-reply",
             {"reply_tool": self._tool_name, "no_reply_tool": self._no_reply_tool_name},
         )
         built = build_input_messages(

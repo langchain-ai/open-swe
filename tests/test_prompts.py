@@ -1,7 +1,8 @@
 import pytest
+from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 
 
 def sample_tool(value: str) -> str:
@@ -9,9 +10,20 @@ def sample_tool(value: str) -> str:
     return value
 
 
-def test_render_prompt_requires_all_placeholders() -> None:
+def test_prompt_requires_all_placeholders() -> None:
     with pytest.raises(KeyError):
-        render_prompt("model-selection.md")
+        prompt("model-selection")
+
+
+def test_prompt_prefers_the_jinja_template() -> None:
+    assert "expedited review card" in prompt(
+        "runs/baby-sit-ready", pr_url="P", head_sha="H", expedited=True
+    )
+
+
+def test_jinja_prompt_requires_all_variables() -> None:
+    with pytest.raises(UndefinedError):
+        prompt("runs/baby-sit-ready", pr_url="P", head_sha="H")
 
 
 def test_load_prompt_rejects_paths_outside_resources() -> None:

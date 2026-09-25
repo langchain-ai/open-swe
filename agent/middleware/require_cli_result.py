@@ -17,7 +17,7 @@ from agent.input_messages import (
 from agent.middleware.message_content import content_to_text
 from agent.middleware.require_user_reply import reported_failure, turn_tail
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         )
 
     def _nudge(self, state: Mapping[str, Any]) -> list[HumanMessage]:
-        instruction = render_prompt("runs/missing-cli-result.md", {"result_tool": self._tool_name})
+        instruction = prompt("runs/missing-cli-result", result_tool=self._tool_name)
         built = build_input_messages(
             instruction,
             {"sender_id": CLI_RESULT_GUARD["id"], "surface": "automation", "kind": "system"},

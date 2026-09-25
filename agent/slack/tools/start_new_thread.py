@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
 from agent.slack.channels import SlackChannel
@@ -130,8 +130,8 @@ async def _run_prompt(
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
-    return render_prompt(
-        "runs/slack-breakout.md",
+    return prompt(
+        "runs/slack-breakout",
         title=title,
         repo=repo_text,
         channel_id=channel_id,
