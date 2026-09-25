@@ -1,30 +1,31 @@
-import { useState } from "react"
+import { useSyncExternalStore } from "react"
 
 import type { SessionUser } from "@/lib/api"
-import { useHotkey } from "@/lib/hotkeys"
-import { useIsHydrated } from "@/lib/hydration"
 
 const STORAGE_KEY = "open-swe-feature-flags-panel"
 
 function readVisible(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.localStorage.getItem(STORAGE_KEY) === "true"
-  )
+  return window.localStorage.getItem(STORAGE_KEY) === "true"
 }
 
-/** Whether the Feature Flags settings tab is shown; toggled with Mod+Shift+E. */
+function subscribe(onChange: () => void): () => void {
+  window.addEventListener(STORAGE_KEY, onChange)
+  return () => window.removeEventListener(STORAGE_KEY, onChange)
+}
+
+export function canUseFeatureFlags(user: SessionUser | null | undefined) {
+  return user?.email?.toLowerCase().endsWith("@langchain.dev") ?? false
+}
+
+/** Flips the Feature Flags tab's visibility and returns the new value. */
+export function toggleFeatureFlagsPanel(): boolean {
+  const next = !readVisible()
+  window.localStorage.setItem(STORAGE_KEY, String(next))
+  window.dispatchEvent(new Event(STORAGE_KEY))
+  return next
+}
+
 export function useFeatureFlagsPanel(user: SessionUser): boolean {
-  const allowed = user.email?.toLowerCase().endsWith("@langchain.dev") ?? false
-  const hydrated = useIsHydrated()
-  const [visible, setVisible] = useState(readVisible)
-  useHotkey(
-    "mod+shift+e",
-    () => {
-      window.localStorage.setItem(STORAGE_KEY, String(!visible))
-      setVisible(!visible)
-    },
-    { enabled: allowed }
-  )
-  return allowed && hydrated && visible
+  const visible = useSyncExternalStore(subscribe, readVisible, () => false)
+  return canUseFeatureFlags(user) && visible
 }

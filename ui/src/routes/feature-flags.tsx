@@ -28,7 +28,7 @@ function FeatureFlagsPage() {
     <AppShell
       user={session.data}
       title="Feature Flags"
-      description="Experimental features under test. Toggle this tab with Ctrl+Shift+E (⌘+Shift+E on Mac)."
+      description="Experimental features under test. Toggle this tab from the command palette (⌘K)."
     >
       <SettingsSection title="Experiments">
         <AssistantUiPreference />
