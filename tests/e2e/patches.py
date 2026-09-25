@@ -92,7 +92,7 @@ def apply() -> None:
     # import time. Resolving an installation would reach api.github.com, and
     # without it a durable watch has no token and silently does nothing.
     from agent import baby_sit
-    from agent.expedited_review import lifecycle, merge, voting
+    from agent.expedited_review import lifecycle, merge, reviews, voting
 
     # Same shadowing caveat as ``opr`` above: the tools package re-exports the
     # functions, so reach the modules by name.
@@ -217,7 +217,7 @@ def apply() -> None:
         thread_access,
         webhook_common,
         voting,
-        merge,
+        reviews,
         repo_access,
         github_repos,
         review_routes,
@@ -240,14 +240,14 @@ def apply() -> None:
 
     # Every other module that captured the REST base at import time: PR and
     # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness and merge calls.
+    # eligibility, readiness, review and merge calls.
     from agent.expedited_review import eligibility, readiness
     from agent.github import checks as github_checks
     from agent.github import ci as github_ci
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, merge):
+    for module in (eligibility, readiness, reviews, merge):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox

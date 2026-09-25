@@ -213,7 +213,7 @@ async def test_an_approval_whose_wake_up_fails_tells_the_voter(
 
     outcome = await _click(approval, "U_GRACE")
 
-    assert "Approval recorded" in outcome.message
+    assert "Approved on GitHub" in outcome.message
     assert "tag it in the thread" in outcome.message
     assert (await _stored(approval)).approved
 
