@@ -8,18 +8,22 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
+from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.threads.listing import list_unresolved_dashboard_threads
+from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
+from agent.threads.machine_reads import machine_thread
+from agent.threads.principals import Principal
 from agent.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
@@ -37,17 +41,17 @@ from agent.threads.summary import (
     _metadata_model_id,
     _now_ms,
     _refresh_latest_run_metadata,
-    _run_status_to_agent_status,
     _thread_is_busy,
     _thread_run_id,
     _thread_summary,
     assert_thread_readable,
+    run_status_to_agent_status,
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.turns import settle_run_turn
-from agent.utils.json_types import as_json_object, as_thread_dict, thread_metadata
+from agent.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from agent.utils.thread_ops import (
     get_thread_active_status,
     langgraph_client,
@@ -83,6 +87,25 @@ async def _mark_thread_viewed(
         logger.debug("Could not mark thread %s viewed", thread_id, exc_info=True)
         return metadata
     return {**metadata, **metadata_update}
+
+
+async def mark_review_session_viewed(review: ReviewSession) -> None:
+    """Clear the review's unread dot; a no-op when the user has not listed this review."""
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(review.thread_id)
+    except NotFoundError:
+        return
+    metadata = thread_metadata(thread)
+    session = ReviewSessionMetadata.parse(metadata)
+    if session is None or not session.owned_by(review.login):
+        return
+    # Settled first so a walkthrough the user is looking at is not recorded as newer than the view.
+    thread = await settle_review_walkthrough(client, thread)
+    thread, _, latest_run_id = await _refresh_latest_run_metadata(client, thread)
+    await _mark_thread_viewed(
+        client, review.thread_id, thread_metadata(thread), latest_run_id=latest_run_id
+    )
 
 
 async def get_dashboard_terminal_sandbox(
@@ -137,7 +160,7 @@ async def get_dashboard_thread(
         client, thread, timings=record
     )
     metadata = thread_metadata(thread)
-    status = _run_status_to_agent_status(
+    status = run_status_to_agent_status(
         thread.get("status") if isinstance(thread.get("status"), str) else "idle",
         latest_run_status
         or (
@@ -361,6 +384,29 @@ async def cancel_dashboard_thread(
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     thread = await client.threads.get(thread_id)
     return await _thread_summary(thread)
+
+
+async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObject:
+    """Interrupt every run on a thread a machine principal started, queued ones included."""
+    client = langgraph_client()
+    try:
+        thread = await client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(404, "thread not found") from exc
+    principal.assert_can_post(thread_metadata(thread))
+    try:
+        cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to cancel a machine thread's runs", extra={"agent_thread_id": thread_id}
+        )
+        raise HTTPException(502, "failed to request thread cancellation") from exc
+    await interrupt_transcript_turns(thread_id, cancelled_run_ids)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+    )
+    return await machine_thread(thread_id, principal)
 
 
 async def admin_cancel_dashboard_thread(

@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -18,6 +18,7 @@ import {
   StackIcon,
 } from "@phosphor-icons/react"
 import { Radar } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
@@ -69,6 +70,8 @@ import type {
 } from "@/features/agents/lib/sidebarPrefs"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
+  agentMutationKeys,
+  agentThreadKeys,
   usePinAgentThread,
   useResolveAgentThread,
   useSeedAgentThreadDetails,
@@ -80,6 +83,7 @@ import {
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
+import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
 import {
   useDesktopLocalThreads,
@@ -106,6 +110,13 @@ import {
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
+import {
+  getLastSectionLocation,
+  sectionOf,
+  useHrefLinkOptions,
+} from "@/lib/appLocation"
+import { reportError } from "@/lib/errorReporting"
+import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
   user: SessionUser | null
@@ -198,11 +209,16 @@ export function AgentsSidebar({
     measure: measureScrollEdges,
   } = useScrollEdges()
   const { openPalette } = useAppCommandControls()
+  const queryClient = useQueryClient()
   const openThread = useCallback(
     (threadId: string) => {
-      void navigate({ to: chat.thread, params: { threadId } })
+      const review = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId)
+      )?.reviewPage
+      if (review) void navigate(reviewPageRoute(review))
+      else void navigate({ to: chat.thread, params: { threadId } })
     },
-    [navigate, chat.thread]
+    [navigate, chat.thread, queryClient]
   )
   const {
     prefs,
@@ -217,6 +233,10 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const activeSection = useRouterState({
+    select: (state) => sectionOf(state.location.pathname),
+  })
+  const sectionLinkTarget = useHrefLinkOptions()
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -274,6 +294,12 @@ export function AgentsSidebar({
   const refreshLocalThreads = useRefreshLocalThreads()
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
+  const pendingPins = usePendingVariables<{ threadId: string }>(
+    agentMutationKeys.pin
+  )
+  const pendingResolves = usePendingVariables<{ threadId: string }>(
+    agentMutationKeys.resolve
+  )
   const {
     projects: localRepos,
     addProject: addLocalRepo,
@@ -463,9 +489,12 @@ export function AgentsSidebar({
       void window.openSweDesktop
         ?.updateLocalThread({ threadId: item.id, archived: !isArchived(item) })
         .then(() => refreshLocalThreads(item.id))
+        .catch((error: unknown) =>
+          reportError({ title: "Couldn't archive or restore thread", error })
+        )
       return
     }
-    if (!resolveThread.isPending) {
+    if (!pendingResolves.some((vars) => vars.threadId === item.id)) {
       resolveThread.mutate({
         threadId: item.id,
         resolved: !isArchived(item),
@@ -477,7 +506,7 @@ export function AgentsSidebar({
       toggleLocalPin(item.id)
       return
     }
-    if (!pinThread.isPending) {
+    if (!pendingPins.some((vars) => vars.threadId === item.id)) {
       pinThread.mutate({
         threadId: item.id,
         pinned: !cloudPinnedIds.has(item.id),
@@ -741,15 +770,18 @@ export function AgentsSidebar({
               >
                 {NAV.map((item) => {
                   const Icon = item.icon
+                  const active = activeSection === item.to
                   return (
                     <Link
                       key={item.to}
-                      to={item.to}
+                      {...sectionLinkTarget(
+                        active ? item.to : getLastSectionLocation(item.to)
+                      )}
                       onClick={layout.closeOnMobile}
-                      className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
-                      activeProps={{
-                        className: "bg-sidebar-row-hover font-medium",
-                      }}
+                      className={cn(
+                        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",
+                        active && "bg-sidebar-row-hover font-medium"
+                      )}
                     >
                       <Icon className="size-4" />
                       {item.label}

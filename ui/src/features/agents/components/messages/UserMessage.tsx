@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
 
@@ -71,10 +71,20 @@ export function UserMessage({
             )}
           </button>
         ) : (
-          ((showUserName && message.structuredSenderName) || isSlack) && (
+          ((showUserName && message.structuredSenderName) ||
+            isSlack ||
+            message.structuredSenderIsBot) && (
             <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
               {isSlack && (
                 <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+              )}
+              {message.structuredSenderIsBot && (
+                <Bot
+                  className="size-3"
+                  role="img"
+                  aria-label="Bot"
+                  data-testid="user-message-bot-icon"
+                />
               )}
               {showUserName && message.structuredSenderName && (
                 <span>{message.structuredSenderName}</span>

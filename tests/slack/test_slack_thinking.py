@@ -1,8 +1,16 @@
+import asyncio
 from unittest.mock import AsyncMock, call
 
+import httpx
 import pytest
+from langgraph_sdk.client import LangGraphClient
 
 from agent.slack import thinking as slack_thinking
+
+
+@pytest.fixture(autouse=True)
+def immediate_status_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_thinking, "_STATUS_RETRY_DELAYS", (0.0, 0.0))
 
 
 def _event(method: str, data: dict, *, namespace: list[str] | None = None) -> dict:
@@ -209,34 +217,12 @@ class _AnchorStore:
         self.items.pop((namespace, key), None)
 
 
-class _IdleThreadStream:
-    """A run that ends the moment it is observed."""
-
-    def __init__(self, run_id: str) -> None:
-        self._run_id = run_id
-
-    async def __aenter__(self) -> _IdleThreadStream:
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
-
-    def subscribe(self, _channels: list[str]):
-        event = _event("lifecycle", {"event": "completed"})
-        event["event_id"] = f"synth:{self._run_id}:lc||completed"
-
-        async def iterator():
-            yield event
-
-        return iterator()
-
-
-def _status_client(store: _AnchorStore, run_id: str) -> AsyncMock:
+def _status_client(store: _AnchorStore) -> AsyncMock:
     client = AsyncMock()
     client.store = store
+    client.runs.join.return_value = {}
     client.runs.list.return_value = []
     client.threads.get.return_value = {"metadata": {}}
-    client.threads.stream = lambda *_args, **_kwargs: _IdleThreadStream(run_id)
     return client
 
 
@@ -253,7 +239,7 @@ async def test_session_status_moves_to_the_newest_message(monkeypatch) -> None:
     store = _AnchorStore()
 
     await slack_thinking.show_slack_thinking_status(
-        client=_status_client(store, "run-1"),
+        client=_status_client(store),
         thread_id="t1",
         run_id="run-1",
         channel_id="D1",
@@ -261,7 +247,7 @@ async def test_session_status_moves_to_the_newest_message(monkeypatch) -> None:
         session_ts="0",
     )
     await slack_thinking.show_slack_thinking_status(
-        client=_status_client(store, "run-2"),
+        client=_status_client(store),
         thread_id="t1",
         run_id="run-2",
         channel_id="D1",
@@ -289,7 +275,7 @@ async def test_session_status_release_leaves_a_newer_runs_indicator_alone(monkey
 
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     store = _AnchorStore()
-    client = _status_client(store, "run-2")
+    client = _status_client(store)
 
     # The newer run already owns the session's status.
     await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
@@ -301,33 +287,58 @@ async def test_session_status_release_leaves_a_newer_runs_indicator_alone(monkey
     assert store.items[(("slack_session_status_anchor", "D1"), "0")] == {"message_ts": "222.0"}
 
 
-async def test_thread_status_refreshes_until_the_run_ends(monkeypatch) -> None:
-    """A thread's indicator keeps refreshing until the run is over, then clears."""
-    set_status = AsyncMock(return_value=True)
+async def test_thread_status_refresh_finishes_before_completion_clears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refreshing = asyncio.Event()
+    cancelling = asyncio.Event()
+    finish_refresh = asyncio.Event()
+    calls: list[str] = []
+
+    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+        calls.append(status)
+        if len(calls) == 2:
+            refreshing.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelling.set()
+                await finish_refresh.wait()
+                calls.append("refresh finished")
+        return True
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        await refreshing.wait()
+        return {}
+
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+    client = _status_client(_AnchorStore())
+    client.runs.join.side_effect = join
 
-    client = _status_client(_AnchorStore(), "run-1")
-    client.runs.list = AsyncMock(return_value=[])
+    async with asyncio.timeout(2):
+        async with asyncio.TaskGroup() as tasks:
+            observer = tasks.create_task(
+                slack_thinking.show_slack_thinking_status(
+                    client=client,
+                    thread_id="thread-1",
+                    run_id="run-1",
+                    channel_id="C1",
+                    thread_ts="1.0",
+                )
+            )
+            await cancelling.wait()
+            assert not observer.done()
+            assert calls == ["Thinking...", "Thinking..."]
+            finish_refresh.set()
 
-    await slack_thinking.show_slack_thinking_status(
-        client=client,
-        thread_id="thread-1",
-        run_id="run-1",
-        channel_id="C1",
-        thread_ts="1.0",
-    )
-
-    assert set_status.await_args_list == [
-        call("C1", "1.0", slack_thinking._THINKING_STATUS),
-        call("C1", "1.0", ""),
-    ]
+    assert calls == ["Thinking...", "Thinking...", "refresh finished", ""]
 
 
 async def test_early_status_survives_while_another_run_is_active(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
 
     await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
@@ -341,7 +352,7 @@ async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
 
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
 
     await slack_thinking.show_slack_thinking_status(
@@ -360,7 +371,7 @@ async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool)
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     store = _AnchorStore()
-    client = _status_client(store, "run-1")
+    client = _status_client(store)
     metadata = {
         "running_background_tasks": ["cmd-1", "cmd-2"],
         "source_context": {
@@ -400,7 +411,7 @@ async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool)
 async def test_idle_settlement_preserves_newer_session_anchor(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
     await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
     await slack_thinking.clear_slack_thinking_status_if_idle(
@@ -412,7 +423,7 @@ async def test_idle_settlement_preserves_newer_session_anchor(monkeypatch) -> No
 async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     client.runs.list.side_effect = RuntimeError("unavailable")
     client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
     await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
@@ -424,7 +435,7 @@ async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -
 async def test_status_sync_reuses_metadata_for_idle_settlement(
     monkeypatch: pytest.MonkeyPatch, provided_metadata: bool, waiting: bool
 ) -> None:
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     metadata: dict[str, object] = {
         "running_background_tasks": ["cmd-1"] if waiting else [],
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
@@ -444,7 +455,7 @@ async def test_status_sync_reuses_metadata_for_idle_settlement(
 async def test_status_sync_does_not_clear_run_started_during_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _status_client(_AnchorStore(), "run-1")
+    client = _status_client(_AnchorStore())
     client.runs.list.side_effect = [[], [], [{"run_id": "new-run"}]]
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -480,3 +491,318 @@ async def test_status_sync_preserves_anchor_replaced_during_settlement(
     client.threads.get.assert_not_awaited()
     client.store.delete_item.assert_not_awaited()
     set_status.assert_not_awaited()
+
+
+async def test_status_wait_recovers_connection_failure_without_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _status_client(_AnchorStore())
+    client.runs.join.side_effect = [httpx.ConnectError("disconnected"), {}]
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+
+    await slack_thinking.show_slack_thinking_status(
+        client=client,
+        thread_id="thread-1",
+        run_id="run-1",
+        channel_id="C1",
+        thread_ts="1.0",
+    )
+
+    assert client.runs.join.await_count == 2
+    assert set_status.await_args_list == [
+        call("C1", "1.0", "Thinking..."),
+        call("C1", "1.0", ""),
+    ]
+
+
+@pytest.mark.parametrize("session", [False, True])
+async def test_status_wait_keeps_refreshing_after_repeated_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    session: bool,
+) -> None:
+    refreshed = asyncio.Event()
+    complete = asyncio.Event()
+    statuses: list[str] = []
+    store = _AnchorStore()
+    client = _status_client(store)
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        if client.runs.join.await_count <= 3:
+            raise httpx.ConnectError("disconnected")
+        await complete.wait()
+        client.runs.list.return_value = []
+        return {}
+
+    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+        statuses.append(status)
+        if status == "Thinking..." and client.runs.join.await_count > 3:
+            refreshed.set()
+        return True
+
+    client.runs.join.side_effect = join
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+    monkeypatch.setattr(slack_thinking, "_DEFAULT_RETRY_SECONDS", 0.0)
+
+    async with asyncio.timeout(2):
+        async with asyncio.TaskGroup() as tasks:
+            observer = tasks.create_task(
+                slack_thinking.show_slack_thinking_status(
+                    client=client,
+                    thread_id="thread-1",
+                    run_id="run-1",
+                    channel_id="C1",
+                    thread_ts="1.0",
+                    session_ts="0" if session else "",
+                )
+            )
+            await refreshed.wait()
+            assert not observer.done()
+            assert set(statuses) == {"Thinking..."}
+            complete.set()
+
+    assert statuses[-1] == ""
+    assert store.items == {}
+
+
+async def test_status_wait_cancellation_propagates_and_clears_idle_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waiting = asyncio.Event()
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        waiting.set()
+        await asyncio.Event().wait()
+        return {}
+
+    client = _status_client(_AnchorStore())
+    client.runs.join.side_effect = join
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+
+    async with asyncio.timeout(2):
+        async with asyncio.TaskGroup() as tasks:
+            observer = tasks.create_task(
+                slack_thinking.show_slack_thinking_status(
+                    client=client,
+                    thread_id="thread-1",
+                    run_id="run-1",
+                    channel_id="C1",
+                    thread_ts="1.0",
+                )
+            )
+            await waiting.wait()
+            observer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await observer
+
+    assert client.runs.join.await_count == 1
+    assert set_status.await_args_list == [
+        call("C1", "1.0", "Thinking..."),
+        call("C1", "1.0", ""),
+    ]
+
+
+@pytest.mark.parametrize("session", [False, True])
+async def test_failed_status_clear_retries_without_losing_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+    session: bool,
+) -> None:
+    store = _AnchorStore()
+    client = _status_client(store)
+    anchor_key = (("slack_session_status_anchor", "C1"), "0")
+    if session:
+        store.items[anchor_key] = {"message_ts": "1.0"}
+    statuses: list[str] = []
+
+    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+        if session:
+            assert store.items[anchor_key] == {"message_ts": "1.0"}
+        statuses.append(status)
+        return len(statuses) == 2
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        client,
+        "thread-1",
+        "C1",
+        "1.0",
+        session_ts="0" if session else "",
+    )
+
+    assert statuses == ["", ""]
+    assert store.items == {}
+
+
+async def test_failed_status_clear_stops_retrying_and_retains_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = _AnchorStore()
+    anchor_key = (("slack_session_status_anchor", "D1"), "0")
+    store.items[anchor_key] = {"message_ts": "1.0"}
+    set_status = AsyncMock(return_value=False)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        _status_client(store),
+        "thread-1",
+        "D1",
+        "1.0",
+        session_ts="0",
+    )
+
+    assert set_status.await_args_list == [call("D1", "1.0", "")] * 3
+    assert store.items[anchor_key] == {"message_ts": "1.0"}
+    assert "cleanup retries exhausted" in caplog.text
+
+
+@pytest.mark.parametrize("failed_read", ["runs", "metadata"])
+async def test_status_clear_recovers_transient_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    failed_read: str,
+) -> None:
+    client = _status_client(_AnchorStore())
+    if failed_read == "runs":
+        client.runs.list.side_effect = [httpx.ConnectError("unavailable"), [], []]
+    else:
+        client.threads.get.side_effect = [httpx.ConnectError("unavailable"), {"metadata": {}}]
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
+
+    set_status.assert_awaited_once_with("C1", "1.0", "")
+
+
+@pytest.mark.parametrize("new_owner", ["run", "anchor"])
+async def test_status_clear_retry_preserves_newer_work(
+    monkeypatch: pytest.MonkeyPatch,
+    new_owner: str,
+) -> None:
+    store = _AnchorStore()
+    anchor_key = (("slack_session_status_anchor", "D1"), "0")
+    store.items[anchor_key] = {"message_ts": "1.0"}
+    client = _status_client(store)
+    calls: list[str] = []
+
+    async def set_status(_channel_id: str, thread_ts: str, _status: str) -> bool:
+        calls.append(thread_ts)
+        if new_owner == "run":
+            client.runs.list.return_value = [{"run_id": "new-run"}]
+        else:
+            store.items[anchor_key] = {"message_ts": "2.0"}
+        return False
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        client,
+        "thread-1",
+        "D1",
+        "1.0",
+        session_ts="0",
+    )
+
+    assert calls == ["1.0"]
+    assert store.items[anchor_key] == {"message_ts": "1.0" if new_owner == "run" else "2.0"}
+
+
+async def test_status_clear_retry_reloads_background_task_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _AnchorStore()
+    anchor_key = (("slack_session_status_anchor", "D1"), "0")
+    store.items[anchor_key] = {"message_ts": "1.0"}
+    client = _status_client(store)
+    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["task-1"]}}
+    set_status = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+
+    await slack_thinking.clear_slack_thinking_status_if_idle(
+        client,
+        "thread-1",
+        "D1",
+        "1.0",
+        session_ts="0",
+        metadata={},
+    )
+
+    assert set_status.await_args_list == [
+        call("D1", "1.0", ""),
+        call("D1", "1.0", "Waiting for background tasks…"),
+    ]
+    assert store.items[anchor_key] == {"message_ts": "1.0"}
+
+
+@pytest.mark.parametrize("already_completed", [False, True])
+async def test_status_waits_for_each_run_without_polling(
+    monkeypatch: pytest.MonkeyPatch, already_completed: bool
+) -> None:
+    waiting = asyncio.Event()
+    completed = asyncio.Event()
+    refreshed = asyncio.Event()
+    requests: list[str] = []
+    statuses: list[str] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        requests.append(path)
+        if path == "/threads/thread-1/runs/old-run/join":
+            return httpx.Response(200, json={})
+        if path == "/threads/thread-1/runs/current-run/join":
+            waiting.set()
+            await completed.wait()
+            return httpx.Response(200, json={})
+        if path == "/threads/thread-1":
+            return httpx.Response(200, json={"metadata": {}})
+        if path == "/threads/thread-1/runs":
+            return httpx.Response(200, json=[])
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+        statuses.append(status)
+        if waiting.is_set() and status == "Thinking...":
+            refreshed.set()
+        return True
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://test"
+    ) as http:
+        client = LangGraphClient(http)
+        await slack_thinking.show_slack_thinking_status(
+            client=client,
+            thread_id="thread-1",
+            run_id="old-run",
+            channel_id="C1",
+            thread_ts="1.0",
+        )
+        assert statuses[-1] == ""
+        requests.clear()
+        statuses.clear()
+        if already_completed:
+            completed.set()
+        async with asyncio.timeout(2):
+            async with asyncio.TaskGroup() as tasks:
+                observer = tasks.create_task(
+                    slack_thinking.show_slack_thinking_status(
+                        client=client,
+                        thread_id="thread-1",
+                        run_id="current-run",
+                        channel_id="C1",
+                        thread_ts="1.0",
+                    )
+                )
+                if not already_completed:
+                    await refreshed.wait()
+                    assert not observer.done()
+                    assert "" not in statuses
+                    assert requests[0] == "/threads/thread-1/runs/current-run/join"
+                    assert set(requests[1:]) <= {"/threads/thread-1"}
+                    completed.set()
+        assert statuses[0] == "Thinking..."
+        assert statuses[-1] == ""
+        assert statuses.count("") == 1

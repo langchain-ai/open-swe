@@ -25,7 +25,7 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 | `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
 | `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
 
-The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/workspaces/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
+The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/workspaces/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`, `agent/bridge/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
 
 The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 
@@ -38,7 +38,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Keep comments minimal and only explain non-obvious reasons.
 - Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
-- Every new API write operation exposed through UI controls must also be available as an appropriately authorized agent tool. Prefer display-only UI with modifications performed through agent tools unless direct UI controls are explicitly required.
+- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists. Do not add a tool when the agent can already do the same thing through a CLI in its sandbox, such as the authenticated `gh`.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
 ## Testing

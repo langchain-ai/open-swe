@@ -1,4 +1,19 @@
-import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
+
+import { reportError } from "@/lib/errorReporting"
+
+type DashboardMutationMeta = {
+  /** Toast title when the mutation fails, e.g. "Couldn't pin thread". */
+  errorTitle?: string
+  /** The caller shows this failure inline, so skip the toast; it is still logged. */
+  silent?: boolean
+}
+
+declare module "@tanstack/react-query" {
+  interface Register {
+    mutationMeta: DashboardMutationMeta
+  }
+}
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -10,6 +25,17 @@ export function makeQueryClient() {
         if (typeof onRefreshErrorChange === "function") {
           ;(onRefreshErrorChange as (error: null) => void)(null)
         }
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error, _variables, _context, mutation) => {
+        const key = mutation.options.mutationKey
+        reportError({
+          title: mutation.meta?.errorTitle ?? "Something went wrong",
+          error,
+          mutation: key ? JSON.stringify(key) : undefined,
+          showToast: !mutation.meta?.silent,
+        })
       },
     }),
     defaultOptions: {

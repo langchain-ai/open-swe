@@ -1,16 +1,24 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import MagicMock
 from xml.etree import ElementTree
 
 import pytest
-from langchain.agents.middleware import AgentState
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage
+from deepagents import create_deep_agent
+from deepagents.backends import StateBackend
+from langchain.agents.middleware import AgentState, wrap_model_call
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 
 from agent.input_messages import human_input, person_introduction
+from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from agent.middleware.require_user_reply import RequireUserReplyMiddleware
 from agent.run_config import RunConfig
 from agent.server import PrepareAgentRunMiddleware
 from agent.slack.payloads import SlackChannelContext
@@ -331,3 +339,92 @@ async def test_fork_preserves_prepared_context() -> None:
     )
     assert await middleware.abefore_agent(state, cast(Runtime[None], MagicMock())) is None
     assert middleware.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_parallel_forks_keep_prepared_context_without_overwriting_parent() -> None:
+    middleware = DummyPrepareMiddleware()
+    fork_prompts: list[str] = []
+    fingerprints: list[str] = []
+
+    @wrap_model_call
+    async def scripted_model(
+        request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+    ) -> ModelResponse | ExtendedModelResponse:
+        if request.state.get("_deepagents_forked_context"):
+            assert request.state.get("run_prepared") is True
+            assert request.state.get("work_dir") == "/tmp/work"
+            fingerprint = request.state.get("run_prepared_for")
+            assert isinstance(fingerprint, str)
+            fingerprints.append(fingerprint)
+            assert request.system_message is not None
+            fork_prompts.append(request.system_message.text)
+            task = request.messages[-1].text
+            return ExtendedModelResponse(
+                model_response=ModelResponse(result=[AIMessage(content=task)]),
+                command=Command(
+                    update={
+                        "run_prepared_for": task,
+                        "work_dir": f"/tmp/{task}",
+                        "rendered_system_prompt": task,
+                        "reply_surface": "web",
+                        "reply_nudges": 2,
+                        "conversation_offloading": {"status": task},
+                    }
+                ),
+            )
+        if isinstance(request.messages[-1], HumanMessage):
+            return ModelResponse(
+                result=[
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "task",
+                                "args": {"description": task, "subagent_type": "worker"},
+                                "id": task,
+                            }
+                            for task in ("first", "second")
+                        ],
+                    )
+                ]
+            )
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    model = FakeListChatModel(responses=["unused"])
+    backend = StateBackend()
+    graph = create_deep_agent(
+        model=model,
+        backend=backend,
+        middleware=[
+            middleware,
+            ConversationOffloadingMiddleware(model, backend),
+            RequireUserReplyMiddleware("reply", "no_reply", initial_surface="web"),
+            scripted_model,
+        ],
+        subagents=[{"name": "worker", "description": "worker", "mode": "fork", "model": model}],
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "parallel-forks"}}
+    result = await graph.ainvoke(
+        {
+            "messages": [HumanMessage("delegate")],
+            "conversation_offloading": {"status": "parent"},
+        },
+        config,
+    )
+
+    assert middleware.calls == 1
+    assert len(fork_prompts) == 2
+    assert all("prepared prompt" in prompt for prompt in fork_prompts)
+    assert {
+        message.tool_call_id for message in result["messages"] if isinstance(message, ToolMessage)
+    } == {"first", "second"}
+    state = (await graph.aget_state(config)).values
+    assert state["run_prepared"] is True
+    assert fingerprints == [state["run_prepared_for"]] * 2
+    assert state["work_dir"] == "/tmp/work"
+    assert state["rendered_system_prompt"] == "prepared prompt"
+    assert state["reply_surface"] == "web"
+    assert state["reply_nudges"] == 0
+    assert state["conversation_offloading"] == {"status": "parent"}

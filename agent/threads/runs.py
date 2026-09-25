@@ -6,12 +6,13 @@ import logging
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
@@ -22,6 +23,7 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
+from agent.dashboard.repo_access import require_repo_access_for_workspace
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
@@ -46,6 +48,7 @@ from agent.threads.access import (
     agent_version_metadata,
     resolve_run_email,
 )
+from agent.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from agent.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -78,11 +81,12 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-from agent.workspaces.routing import resolve_workspace
+from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "agent"
+API_SOURCE = "api"
 # Modes required for the v3 event-stream protocol (`POST …/stream/events`).
 DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "values",
@@ -515,6 +519,69 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
+async def _resolve_sandbox_bridge(
+    requested: object, *, owner_id: str, creating: bool
+) -> Bridge | None:
+    """The live bridge a new thread asked to run on, validated before it exists.
+
+    Checked before the thread record is written: a thread stamped with a bridge
+    nobody is answering can never be given a different sandbox later.
+    """
+    if requested is None:
+        return None
+    if not isinstance(requested, str) or not requested.strip():
+        raise HTTPException(422, "sandbox_bridge_id must be a non-empty string")
+    if not creating:
+        raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
+    return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
+
+
+async def _bind_thread_to_bridge(
+    thread_id: str, bridge: Bridge, metadata: dict[str, Any]
+) -> dict[str, Any]:
+    binding = SandboxBridgeBinding.of(bridge).dump()
+    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
+    logger.info(
+        "Bound a thread to a sandbox bridge",
+        extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
+    )
+    return {**metadata, **binding}
+
+
+def requested_thread_type(configurable: Mapping[str, Any]) -> ThreadType | None:
+    """The kind of thread a creating command asks for, if it names one."""
+    requested = configurable.get("thread_type")
+    if requested is None:
+        return None
+    if requested not in ("system", "workspace", "private"):
+        raise HTTPException(422, "thread_type must be system, workspace, or private")
+    return cast(ThreadType, requested)
+
+
+async def _requested_visibility(
+    configurable: Mapping[str, Any], *, login: str
+) -> Literal["public", "private"]:
+    """How visible a person's new thread is, from the kind they asked for.
+
+    ``workspace`` and ``private`` are the two a person may create, and they are
+    what "public" and "private" have always meant here. A client that names
+    neither falls back to their saved default.
+    """
+    requested = requested_thread_type(configurable)
+    if requested == "system":
+        # The principal check upstream allows this only for an admin, and an admin's
+        # system thread is not created through the dashboard record at all.
+        raise HTTPException(500, "system threads are not created as a person's thread")
+    if requested is not None:
+        return "private" if requested == "private" else "public"
+    visibility = (
+        configurable.get("visibility") or (await get_user_preferences(login))["default_visibility"]
+    )
+    if visibility not in ("public", "private"):
+        raise HTTPException(422, "visibility must be public or private")
+    return cast(Literal["public", "private"], visibility)
+
+
 async def _attributed_run_messages(
     thread_id: str,
     login: str,
@@ -625,6 +692,11 @@ async def _enrich_run_start_command(
         else:
             model_selection = "auto" if creating else metadata.get("model_selection")
     offloading = offload_requested(params)
+    sandbox_bridge = await _resolve_sandbox_bridge(
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=Principal.of_login(login, email).sender_id,
+        creating=creating,
+    )
     content = _command_message_content(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
@@ -643,12 +715,7 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = (
-            client_configurable.get("visibility")
-            or (await get_user_preferences(login))["default_visibility"]
-        )
-        if visibility not in ("public", "private"):
-            raise HTTPException(422, "visibility must be public or private")
+        visibility = await _requested_visibility(client_configurable, login=login)
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
         thread = await _create_dashboard_thread_record(
             thread_id,
@@ -669,6 +736,8 @@ async def _enrich_run_start_command(
             ),
         )
         metadata = thread_metadata(thread)
+        if sandbox_bridge is not None:
+            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
         run_model = _metadata_model_id(metadata)
         resolved_effort = metadata.get("resolved_effort")
         if isinstance(resolved_effort, str):
@@ -1193,3 +1262,173 @@ async def _notify_slack_web_handoff(
         return
 
     await update_slack_trace_reply_for_web_handoff(channel_id, trace_message_ts, thread_id)
+
+
+async def _create_system_thread_record(
+    thread_id: str,
+    principal: Principal,
+    *,
+    prompt: str,
+    title: str | None,
+    repo_config: dict[str, str],
+) -> dict[str, Any]:
+    """Stamp a thread that belongs to a workspace rather than to a person.
+
+    Deliberately not built from :func:`_create_dashboard_thread_record`: there is
+    no profile to read defaults from, no owner to record, and no participant to
+    merge, and inheriting those would give the thread a person it does not have.
+    """
+    now_ms = _now_ms()
+    metadata: dict[str, Any] = {
+        "source": API_SOURCE,
+        "origin": API_SOURCE,
+        "thread_category": "automation",
+        "trigger_kind": "api",
+        "automation_scope": "workspace",
+        "owner_type": "system",
+        "visibility": "public",
+        "workspace": principal.workspace,
+        "environment": principal.workspace,
+        STARTED_BY_ID: principal.started_by_id,
+        STARTED_BY_NAME: principal.started_by_name,
+        "created_by": principal.created_by,
+        "title": title or prompt[:80] or principal.started_by_name,
+        "base_branch": "main",
+        "model": "Default",
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    if repo_config:
+        metadata["repo_owner"] = repo_config["owner"]
+        metadata["repo_name"] = repo_config["name"]
+    client = langgraph_client()
+    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="raise")
+    return as_thread_dict(await client.threads.get(thread_id))
+
+
+async def _system_repo_config(
+    configurable: Mapping[str, Any], principal: Principal
+) -> dict[str, str]:
+    """The repository a machine's thread works in, checked against its workspace.
+
+    A federated workflow that names none gets its own repository, which is the
+    only one it could have been talking about.
+    """
+    requested = configurable.get("repo")
+    if requested is None and principal.default_repo:
+        requested = principal.default_repo
+    if requested is None:
+        return {}
+    repo_config = _parse_repo(requested)
+    if not repo_config:
+        raise HTTPException(422, "repo must be owner/name")
+    owner = await workspace_for_repo(repo_config["owner"], repo_config["name"])
+    if owner != principal.workspace:
+        raise HTTPException(403, "repository is not in this workspace")
+    await require_repo_access_for_workspace(f"{repo_config['owner']}/{repo_config['name']}")
+    return repo_config
+
+
+async def _enrich_system_run_start_command(
+    thread_id: str,
+    principal: Principal,
+    command: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+    creating: bool = False,
+) -> dict[str, Any]:
+    """The machine-principal half of ``run.start``.
+
+    The person's path resolves a profile, a model, participants and a GitHub
+    token for whoever sent the message. None of that exists here, so this stamps
+    the workspace's own thread and run config and leaves the rest of the command
+    pipeline — forwarding, streaming, run bookkeeping — shared.
+    """
+    if command.get("method") != "run.start":
+        raise HTTPException(403, "a machine principal may only start runs")
+
+    params = command.get("params")
+    if not isinstance(params, dict):
+        params = {}
+        command["params"] = params
+    client_config = params.get("config")
+    client_config = client_config if isinstance(client_config, dict) else {}
+    client_configurable = client_config.get("configurable")
+    client_configurable = client_configurable if isinstance(client_configurable, dict) else {}
+
+    requested = requested_thread_type(client_configurable)
+    if requested is None:
+        raise HTTPException(422, "thread_type is required")
+    principal.authorize(requested)
+
+    content = _command_message_content(params)
+    prompt = _command_prompt_text(content)
+    if not prompt.strip():
+        raise HTTPException(422, "a run needs a prompt")
+    if _dashboard_images_from_content(content):
+        raise HTTPException(422, "machine principals cannot attach images")
+
+    sandbox_bridge = await _resolve_sandbox_bridge(
+        client_configurable.get("sandbox_bridge_id"),
+        owner_id=principal.sender_id,
+        creating=creating,
+    )
+    repo_config = await _system_repo_config(client_configurable, principal)
+    if creating:
+        title = client_configurable.get("title")
+        metadata = thread_metadata(
+            await _create_system_thread_record(
+                thread_id,
+                principal,
+                prompt=prompt,
+                title=title if isinstance(title, str) else None,
+                repo_config=repo_config,
+            )
+        )
+        if sandbox_bridge is not None:
+            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
+    else:
+        principal.assert_can_post(metadata)
+
+    invocation_id = new_invocation_id()
+    structured = build_input_messages(
+        content if content is not None else prompt,
+        {"sender_id": principal.sender_id, "surface": "automation", "kind": "system"},
+        systems=[
+            {
+                "id": principal.sender_id,
+                "display_name": principal.started_by_name,
+                "platform": "open-swe",
+            }
+        ],
+    )
+    run_input = params.get("input")
+    if isinstance(run_input, dict):
+        run_input["messages"] = structured
+    else:
+        params["input"] = {"messages": structured}
+
+    configurable: dict[str, Any] = with_invocation_id(
+        {
+            "thread_id": thread_id,
+            "source": API_SOURCE,
+            "workspace": principal.workspace,
+            "environment": principal.workspace,
+            STARTED_BY_ID: principal.started_by_id,
+        },
+        invocation_id,
+    )
+    configurable["invocation_started_at"] = datetime.now(UTC).isoformat()
+    stored_repo = repo_config_from_metadata(metadata)
+    if stored_repo:
+        configurable["repo"] = stored_repo
+    elif repo_config:
+        configurable["repo"] = repo_config
+
+    params["assistant_id"] = _ASSISTANT_ID
+    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_resumable", True)
+    params["config"] = {**client_config, "configurable": configurable}
+    params["metadata"] = with_invocation_id({**agent_version_metadata()}, invocation_id)
+    command["params"] = params
+    return command

@@ -8,7 +8,6 @@ import pytest
 from langchain_core.tools import StructuredTool
 
 from agent.dashboard.personal_settings import SettingValue, patch_personal_settings
-from agent.dashboard.profiles import ProfileUpdate, upsert_profile
 from agent.tools.read_user_settings import read_user_settings
 from agent.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeStore
@@ -160,7 +159,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"instructions": "new"},
         {"theme": "dark"},
         {"default_visibility": "everyone"},
-        {"dm_session_enabled": None},
+        {"concierge_mode": None},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
         {"default_subagent_model": "openai:gpt-5.5", "subagent_reasoning_effort": "high"},
@@ -190,16 +189,16 @@ async def test_invalid_patch_rejects_all_changes(
 
 @pytest.mark.parametrize("value", [True, False, None])
 @pytest.mark.parametrize("mixed", [False, True])
-async def test_agent_cannot_change_dm_session_even_in_mixed_patch(
+async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     fake_store: FakeStore,
     requester: dict[str, object],
     saved_scope: dict[str, object],
     value: bool | None,
     mixed: bool,
 ) -> None:
-    fake_store.seed(["profiles"], "Alice", {"dm_session_enabled": value is not True})
+    fake_store.seed(["profiles"], "Alice", {"auto_fix_ci": True})
     fake_store.seed(["user_preferences"], "Alice", {"default_workspace": "keep"})
-    settings: dict[str, SettingValue] = {"dm_session_enabled": value}
+    settings: dict[str, SettingValue] = {"concierge_mode": value}
     if mixed:
         settings = {"auto_fix_ci": False, "default_workspace": "new", **settings}
     before = deepcopy(fake_store.items)
@@ -207,21 +206,6 @@ async def test_agent_cannot_change_dm_session_even_in_mixed_patch(
     assert result["ok"] is False
     assert "dashboard" in str(result["error"])
     assert fake_store.items == before
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_dashboard_can_still_toggle_dm_session(fake_store: FakeStore, enabled: bool) -> None:
-    fake_store.seed(["profiles"], "Alice", {"dm_session_enabled": not enabled})
-    await upsert_profile(
-        "Alice",
-        "alice@example.com",
-        ProfileUpdate(
-            default_model="openai:gpt-6-sol",
-            reasoning_effort="high",
-            dm_session_enabled=enabled,
-        ),
-    )
-    assert fake_store.values(["profiles"])["Alice"]["dm_session_enabled"] is enabled
 
 
 async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeStore) -> None:
@@ -249,7 +233,6 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         "base_branch": None,
         "branch_prefix": None,
         "auto_fix_ci": False,
-        "dm_session_enabled": False,
         "draft_prs": False,
         "default_visibility": "private",
         "local_tracing_project": None,
@@ -264,9 +247,9 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
 
 
 async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: FakeStore) -> None:
-    await patch_personal_settings("alice", {"dm_session_enabled": True})
+    await patch_personal_settings("alice", {"auto_fix_ci": False})
     profile = fake_store.values(["profiles"])["alice"]
-    assert profile["dm_session_enabled"] is True
+    assert profile["auto_fix_ci"] is False
     assert "default_model" not in profile
     assert "reasoning_effort" not in profile
     await patch_personal_settings("alice", {"local_tracing_project": "  project  "})
@@ -327,7 +310,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         "base_branch": "develop",
         "branch_prefix": "alice/",
         "model_routing_enabled": False,
-        "dm_session_enabled": True,
     }
     fake_store.seed(
         ["profiles"],
@@ -348,7 +330,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
     assert result["participants"] == [
         {
             "login": "Alice",
-            "profile": ordinary,
+            "profile": {**ordinary, "concierge_mode": False},
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",

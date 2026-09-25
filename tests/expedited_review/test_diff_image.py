@@ -89,3 +89,13 @@ def test_render_produces_a_png_covering_both_files() -> None:
         assert image.format == "PNG"
         assert image.width == one_file.width
         assert image.height > one_file.height
+
+
+def test_yaml_tokens_missing_from_the_style_still_render() -> None:
+    patch = "@@ -1,2 +1,2 @@\n limits:\n-  - sandboxes: 100\n+  - sandboxes: 250\n"
+    png = render_diff_png(
+        [ChangedFile(filename="quota.yaml", additions=1, deletions=1, patch=patch)]
+    )
+
+    with Image.open(BytesIO(png)) as image:
+        assert image.format == "PNG"

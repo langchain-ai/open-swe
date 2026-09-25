@@ -777,6 +777,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         for message in request.messages:
             if not isinstance(message, HumanMessage):
                 continue
+            if message.additional_kwargs.get("lc_source") == "summarization":
+                continue
             message_id = message.id
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
                 continue

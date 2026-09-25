@@ -1,11 +1,12 @@
-"""Expedited approvals: a Slack vote on one revision of a small pull request.
+"""Expedited approvals: a Slack vote on what one card showed of a small pull request.
 
-An approval pins the pull request's head SHA and a fingerprint of its diff.
-Votes belong to the approval, so a new commit voids them: the row is marked
-``superseded`` and the agent has to ask again. One approval per pull request
-may be active (``waiting``, ``open`` or ``merging``) at a time; a partial unique
-index enforces that. A vote names its voter by ``users.id``, never by a GitHub
-or Slack handle, so one person cannot vote twice under two identities.
+An approval pins the head SHA the card was posted for and a fingerprint of the
+diff the card drew. One approval from someone other than the author completes
+it. Votes are only recorded here; nothing reaches GitHub until the agent
+merges, and a later commit keeps them only if the fingerprint still matches.
+One approval per pull request may be ``open`` at a time; a partial unique index
+enforces that. A vote names its voter by ``users.id``, never by a GitHub or
+Slack handle.
 """
 
 import logging
@@ -29,11 +30,8 @@ from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
 
-ApprovalState = Literal["waiting", "open", "merging", "merged", "rejected", "superseded", "failed"]
+ApprovalState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 VoteDecision = Literal["approve", "reject"]
-
-ACTIVE_STATES: tuple[ApprovalState, ...] = ("waiting", "open", "merging")
-REQUIRED_APPROVALS = 2
 
 
 class ApprovalVote(Base):
@@ -47,13 +45,24 @@ class ApprovalVote(Base):
     )
     decision: Mapped[VoteDecision] = mapped_column(Text, default="approve")
     github_review_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
-    feedback: Mapped[str] = mapped_column(server_default="", default="")
+    github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
     voted_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     voter: Mapped[User] = relationship(init=False)
 
     @property
     def github_login(self) -> str:
         return self.voter.login_for("github")
+
+    @property
+    def slack_mention(self) -> str:
+        return slack_mention(self.voter, self.github_login)
+
+
+def slack_mention(user: User | None, fallback_login: str) -> str:
+    """A Slack mention for ``user``, or their GitHub handle when Slack is not linked."""
+    if user is not None and user.slack_user_id:
+        return f"<@{user.slack_user_id}>"
+    return f"@{fallback_login}"
 
 
 class ExpeditedApproval(Base):
@@ -64,16 +73,18 @@ class ExpeditedApproval(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     thread_id: Mapped[str] = mapped_column(server_default="", default="")
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
-    state: Mapped[ApprovalState] = mapped_column(Text, default="waiting")
+    state: Mapped[ApprovalState] = mapped_column(Text, default="open")
     detail: Mapped[str] = mapped_column(server_default="", default="")
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
     slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
+    # Slack only renders a file cited when the message is first posted, so updates reuse it.
+    slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    # A draft PR's card offers only "Mark ready", to its author, until they click it.
+    awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
+    # The posted card is a thread reply also sent to the channel.
+    slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
-    cron_id: Mapped[str] = mapped_column(server_default="", default="")
-    # Checks failing that GitHub does not require, so the card can keep naming
-    # them across re-renders that have no readiness pass of their own.
-    advisory_failures: Mapped[list[str]] = mapped_column(JSONB, default_factory=list)
     votes: Mapped[list[ApprovalVote]] = relationship(
         default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at
     )
@@ -83,20 +94,38 @@ class ExpeditedApproval(Base):
 
     @property
     def active(self) -> bool:
-        return self.state in ACTIVE_STATES
+        return self.state == "open"
 
     @property
     def approvals(self) -> list[ApprovalVote]:
-        return [vote for vote in self.votes if vote.decision == "approve"]
+        """Approvals from anyone but the author; older cards may still hold an author's vote."""
+        return [
+            vote
+            for vote in self.votes
+            if vote.decision == "approve"
+            and not self.is_author(vote.voter_user_id, vote.github_login)
+        ]
+
+    @property
+    def approved(self) -> bool:
+        """One approval from someone other than the author is enough."""
+        return bool(self.approvals)
+
+    async def author_mention(self) -> str:
+        pr = self.pull_request
+        author = await User.get(pr.author_user_id) if pr.author_user_id else None
+        return slack_mention(author, pr.author or "the author")
+
+    def is_author(self, user_id: UUID, login: str) -> bool:
+        pr = self.pull_request
+        if pr.author_user_id is not None:
+            return pr.author_user_id == user_id
+        return bool(pr.author) and pr.author.lower() == login.lower()
 
     @property
     def approvers(self) -> list[str]:
         """GitHub handles of the approvers, for display."""
         return [vote.github_login for vote in self.approvals]
-
-    @property
-    def rejection(self) -> ApprovalVote | None:
-        return next((vote for vote in self.votes if vote.decision == "reject"), None)
 
     def vote_by(self, user_id: UUID) -> ApprovalVote | None:
         return next((vote for vote in self.votes if vote.voter_user_id == user_id), None)
@@ -129,9 +158,22 @@ class ExpeditedApproval(Base):
                 .where(
                     Repository.key == f"{owner}/{repo}".lower(),
                     PullRequest.number == number,
-                    cls.state.in_(ACTIVE_STATES),
+                    cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def superseded_on_slack(cls, pull_request_id: UUID) -> list[Self]:
+        """Superseded cards for a pull request whose Slack message is still up."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls)).where(
+                    cls.pull_request_id == pull_request_id,
+                    cls.state == "superseded",
+                    cls.slack_message_ts != "",
+                )
+            )
+            return list(rows)
 
     @classmethod
     async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
@@ -143,18 +185,6 @@ class ExpeditedApproval(Base):
                 .join(PullRequest.repository)
                 .where(Repository.key == f"{owner}/{repo}".lower())
                 .order_by(cls.created_at, cls.id)
-            )
-            return list(rows)
-
-    @classmethod
-    async def active_in_repo(cls, owner: str, repo: str) -> list[Self]:
-        async with postgres.session() as session:
-            rows = await session.scalars(
-                cls._loaded(select(cls))
-                .join(cls.pull_request)
-                .join(PullRequest.repository)
-                .where(Repository.key == f"{owner}/{repo}".lower(), cls.state.in_(ACTIVE_STATES))
-                .order_by(cls.created_at)
             )
             return list(rows)
 

@@ -2,6 +2,7 @@ import type { OpenPullRequest } from "@/lib/api"
 import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
+  canUpdateBranch,
   hasUnresolvedConversations,
   isFixable,
 } from "../lib/status"
@@ -9,6 +10,7 @@ import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
 import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
 export type PullRequestOutcome = "merged" | "closed"
 
@@ -24,12 +26,14 @@ export function PullRequestActions({
   outcome,
   onSettled,
   onReady,
+  onReviewPage = false,
 }: {
   pr: OpenPullRequest
   login: string
   outcome?: PullRequestOutcome
   onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
+  onReviewPage?: boolean
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -53,6 +57,9 @@ export function PullRequestActions({
             {pr.draft === true && (
               <MarkPullRequestReady pr={pr} onReady={onReady} />
             )}
+            {canUpdateBranch(pr) && (
+              <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
+            )}
             {canAttemptMerge(pr) && (
               <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />
             )}
@@ -60,7 +67,12 @@ export function PullRequestActions({
           </>
         )}
       </div>
-      <PullRequestLinks repo={pr.repo} number={pr.number} title={pr.title} />
+      <PullRequestLinks
+        repo={pr.repo}
+        number={pr.number}
+        title={pr.title}
+        onReviewPage={onReviewPage}
+      />
     </div>
   )
 }

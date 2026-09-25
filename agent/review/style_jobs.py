@@ -15,11 +15,13 @@ from agent.review.style_collector import (
 )
 from agent.review.styles import (
     REVIEW_STYLES,
+    TERMINAL_RUN_FAILURES,
     ReviewStyle,
     reconcile_running_status,
 )
 from agent.thread_ids import review_style_thread_id
 from agent.utils.analyzer_skills import build_skill_files
+from agent.utils.thread_ops import thread_run_error
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +221,18 @@ async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
         logger.debug("Could not sync run status for %s", full_name, exc_info=True)
         return record
 
+    run_error: str | None = None
+    if run_status in TERMINAL_RUN_FAILURES:
+        try:
+            run_error = await thread_run_error(thread_id, client)
+        except Exception:
+            logger.warning(
+                "Could not read review style run error",
+                exc_info=True,
+                extra={"repo_full_name": full_name},
+            )
     return await reconcile_running_status(
-        full_name, record, run_status=run_status, run_missing=run_missing
+        full_name, record, run_status=run_status, run_missing=run_missing, run_error=run_error
     )
 
 

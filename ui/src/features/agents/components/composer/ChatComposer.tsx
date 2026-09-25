@@ -670,7 +670,7 @@ export const ChatComposer = memo(function ChatComposer({
       {(onRepoChange ||
         onRunTargetChange ||
         onWorkspaceChange ||
-        onSelectLocalRepoBranch) && (
+        (runTarget === "local" && onSelectLocalRepoBranch)) && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
           {runTarget && onRunTargetChange && (
             <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
@@ -730,9 +730,11 @@ export const ChatComposer = memo(function ChatComposer({
 
       <div
         className={cn(
-          "relative z-10 flex flex-col rounded-2xl border-[0.75px] border-foreground/[0.06] bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.045)] transition-colors dark:bg-[#222] dark:shadow-none",
+          "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:bg-[#222]",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind && "border border-primary"
+          dragKind
+            ? "border-primary"
+            : "focus-within:border-foreground/30 hover:border-foreground/30"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}

@@ -20,8 +20,13 @@ from fastapi import HTTPException
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
-from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.review.findings import (
+    ReviewerThreadMissingError,
+    get_thread_last_reviewed_sha,
+    get_thread_metadata,
+)
 from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
+from agent.review.session import REVIEW_CHAT_SOURCE
 from agent.thread_ids import review_chat_thread_id, reviewer_thread_id
 from agent.threads.proxy import (
     langgraph_proxy_headers,
@@ -35,7 +40,6 @@ from agent.utils.thread_ops import langgraph_client, langgraph_url
 logger = logging.getLogger(__name__)
 
 _CHAT_ASSISTANT_ID = "chat"
-_CHAT_SOURCE = "review_chat"
 # Sentinel: caller did not pre-fetch the thread metadata, so fetch it here.
 _UNFETCHED = object()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
@@ -49,19 +53,23 @@ def _now_ms() -> int:
 _TITLE_MAX_CHARS = 60
 
 
-async def _reviewer_thread_exists(owner: str, repo: str, pr_number: int) -> bool:
+async def _last_reviewed_sha(owner: str, repo: str, pr_number: int) -> str:
+    """The head the PR's latest published review covers, or ``""`` before any review."""
     try:
-        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
-    except Exception:  # noqa: BLE001
-        return False
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    return isinstance(metadata, dict) and metadata.get("kind") == REVIEWER_THREAD_KIND
+        metadata = await get_thread_metadata(reviewer_thread_id(owner, repo, pr_number))
+    except ReviewerThreadMissingError:
+        return ""
+    return get_thread_last_reviewed_sha(metadata) or ""
 
 
 async def get_review_chat(owner: str, repo: str, pr_number: int, login: str) -> dict[str, Any]:
-    """Chat availability for this PR, and the one thread this user chats in."""
+    """Chat availability for this PR, and the one thread this user chats in.
+
+    Chat seeds itself from the PR's diff and details, so it needs no review to
+    have run; findings are simply empty until one does.
+    """
     return {
-        "available": await _reviewer_thread_exists(owner, repo, pr_number),
+        "available": True,
         "assistant_id": _CHAT_ASSISTANT_ID,
         "thread_id": review_chat_thread_id(owner, repo, pr_number, login),
     }
@@ -207,13 +215,13 @@ async def assert_chat_thread_access(
     ``None`` when the thread doesn't exist yet (it's created lazily on the first
     run, so there is nothing to leak). Raises 404 when a thread exists but is
     owned by someone else or scoped to a different repo/PR — this also rejects
-    reviewer (or any non-chat) threads, whose ``kind`` is not ``_CHAT_SOURCE``.
+    reviewer (or any non-chat) threads, whose ``kind`` is not ``REVIEW_CHAT_SOURCE``.
     """
     metadata = await _get_chat_thread_metadata(thread_id)
     if metadata is None:
         return None
     owns = (
-        metadata.get("kind") == _CHAT_SOURCE
+        metadata.get("kind") == REVIEW_CHAT_SOURCE
         and metadata.get("github_login") == login
         and metadata.get("repo_owner") == owner
         and metadata.get("repo_name") == repo
@@ -229,8 +237,8 @@ async def _create_chat_thread(
 ) -> None:
     now_ms = _now_ms()
     metadata = {
-        "kind": _CHAT_SOURCE,
-        "source": _CHAT_SOURCE,
+        "kind": REVIEW_CHAT_SOURCE,
+        "source": REVIEW_CHAT_SOURCE,
         "github_login": login,
         "repo_owner": owner,
         "repo_name": repo,
@@ -299,7 +307,7 @@ async def _enrich_chat_command(
 
     configurable: dict[str, Any] = {
         "thread_id": thread_id,
-        "source": _CHAT_SOURCE,
+        "source": REVIEW_CHAT_SOURCE,
         "github_login": login,
         "chat_repo_owner": owner,
         "chat_repo_name": repo,
@@ -312,20 +320,27 @@ async def _enrich_chat_command(
         configurable["chat_effort"] = effort
 
     # Seed PR context on the thread's first run, and reseed whenever the PR head
-    # has moved since the last seed — otherwise the chat keeps answering from a
-    # stale diff/findings while the review page already shows the current head.
+    # has moved or a review has published since the last seed — otherwise the
+    # chat keeps answering from a stale diff/findings while the review page
+    # already shows the current ones. A chat can now start before any review.
     stored_head = metadata.get("chat_head_sha") if isinstance(metadata, dict) else None
     stored_head = stored_head if isinstance(stored_head, str) else ""
+    stored_review = metadata.get("chat_review_sha") if isinstance(metadata, dict) else None
+    stored_review = stored_review if isinstance(stored_review, str) else ""
+    current_review = await _last_reviewed_sha(owner, repo, pr_number)
 
     # Detect head movement with a single lightweight PR lookup instead of a full
     # ``get_review`` (which also fetches check runs + the reviewer thread). The
     # full review is only fetched below, by ``_build_pr_context``, when we
     # actually need to reseed. On lookup failure, keep the existing context.
     review: dict[str, Any] | None = None
-    needs_seed = created
-    if not created:
+    # A review listed in the sidebar creates the thread before its first chat.
+    needs_seed = created or not stored_head
+    if not needs_seed:
         current_head = await get_pr_head_sha(owner, repo, pr_number)
-        needs_seed = bool(current_head) and current_head != stored_head
+        needs_seed = (bool(current_head) and current_head != stored_head) or (
+            current_review != stored_review
+        )
 
     if needs_seed:
         try:
@@ -357,7 +372,8 @@ async def _enrich_chat_command(
             if head_sha:
                 configurable["chat_head_sha"] = head_sha
                 await langgraph_client().threads.update(
-                    thread_id=thread_id, metadata={"chat_head_sha": head_sha}
+                    thread_id=thread_id,
+                    metadata={"chat_head_sha": head_sha, "chat_review_sha": current_review},
                 )
             elif stored_head:
                 configurable["chat_head_sha"] = stored_head

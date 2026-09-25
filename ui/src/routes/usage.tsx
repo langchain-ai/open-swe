@@ -42,6 +42,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import {
@@ -55,6 +56,7 @@ export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Usage") }] }),
   component: UsagePage,
 })
 
@@ -459,22 +461,21 @@ function AnalyticsCoverage({
     tone: string
   } = hasFailedEvents
     ? {
-        label: "Event processing needs attention",
+        label: "Analytics need attention",
         description:
-          "Some captured events could not be processed. Reports may be incomplete.",
+          "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
         tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
-          label: "Event processing is behind",
-          description:
-            "New activity is still waiting to be processed into reports.",
+          label: "Analytics are updating",
+          description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
           tone: "text-amber-600 dark:text-amber-400",
         }
       : {
-          label: "Event processing is up to date",
+          label: "Analytics are up to date",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }

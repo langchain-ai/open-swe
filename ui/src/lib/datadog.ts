@@ -14,6 +14,10 @@ type RumClient = {
     }
   ) => void
   setGlobalContextProperty?: (key: string, value: string) => void
+  addError?: (
+    error: unknown,
+    context?: Record<string, string | number | null>
+  ) => void
 }
 type RumLoader = () => Promise<RumClient>
 

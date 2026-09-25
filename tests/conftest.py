@@ -25,6 +25,14 @@ from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
+_MAX_PARAM_ID_CHARS = 40
+
+
+def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
+    """Keep node IDs short; a 100 KB ID line truncates `gh run view --log-failed` output."""
+    if isinstance(val, str) and len(val) > _MAX_PARAM_ID_CHARS:
+        return f"{argname}-{hashlib.sha256(val.encode()).hexdigest()[:8]}"
+    return None
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
@@ -99,6 +107,18 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
+    """Treat ``logins`` as registered Open SWE users."""
+    from agent.users import User
+
+    registered = {login.lower() for login in logins}
+
+    async def known_logins(candidates: Sequence[str]) -> frozenset[str]:
+        return frozenset(c.lower() for c in candidates if c.lower() in registered)
+
+    monkeypatch.setattr(User, "known_logins", known_logins)
 
 
 async def post_signed_github_webhook(
