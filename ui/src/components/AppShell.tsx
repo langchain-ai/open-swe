@@ -108,7 +108,7 @@ export function AuthedAppShell({
   if (session.isLoading) {
     return (
       <div className="flex h-svh overflow-hidden bg-background">
-        <main className="flex-1 overflow-y-auto">
+        <main className="relative flex-1 overflow-y-auto">
           <div className={cn(PAGE_CONTAINER, className)}>
             <Skeleton className="mb-10 h-7 w-48" />
             <Skeleton className="h-40 w-full" />
