@@ -150,6 +150,11 @@ class SlackEventEnvelope(SlackPayload):
     authed_users: list[str] = Field(default_factory=list)
     event: SlackEvent | None = None
 
+    @property
+    def kind(self) -> str:
+        """The inner event's type for a callback, else the envelope's own type."""
+        return self.event.type if self.event and self.event.type else self.type
+
     def bot_user_id(self, configured: str) -> str:
         """The app's own user id: configured, else whichever the delivery names."""
         if configured:
@@ -210,6 +215,34 @@ class SlackInteractionUser(SlackPayload):
     username: str = ""
 
 
+class SlackSelectedOption(SlackPayload):
+    value: str = ""
+
+
+class SlackInputValue(SlackPayload):
+    """One element's current value, as a view's or message's ``state.values`` carries it."""
+
+    value: str | None = None
+    selected_options: list[SlackSelectedOption] = Field(default_factory=list)
+
+
+class SlackViewState(SlackPayload):
+    values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
+
+
+class SlackView(SlackPayload):
+    id: str = ""
+    callback_id: str = ""
+    private_metadata: str = ""
+    state: SlackViewState = Field(default_factory=SlackViewState)
+
+
+class SlackModalOrigin(SlackPayload):
+    """The channel a modal was opened from, as Open SWE packs it into ``private_metadata``."""
+
+    channel_id: str = ""
+
+
 class SlackInteraction(SlackPayload):
     """A Block Kit interaction (``block_actions``, ``block_suggestion``)."""
 
@@ -222,10 +255,23 @@ class SlackInteraction(SlackPayload):
     user: SlackInteractionUser = Field(default_factory=SlackInteractionUser)
     channel: SlackRef = Field(default_factory=SlackRef)
     message: SlackInteractionMessage = Field(default_factory=SlackInteractionMessage)
+    state: SlackViewState = Field(default_factory=SlackViewState)
+    view: SlackView = Field(default_factory=SlackView)
 
     @property
     def channel_id(self) -> str:
         return self.channel.id or self.container.channel_id
+
+    @property
+    def origin_channel_id(self) -> str:
+        """``channel_id``, or for a modal submission the channel its metadata names."""
+        if self.channel_id or not self.view.private_metadata:
+            return self.channel_id
+        try:
+            return SlackModalOrigin.model_validate_json(self.view.private_metadata).channel_id
+        except ValidationError:
+            logger.debug("Slack modal metadata names no origin channel", exc_info=True)
+            return ""
 
     @property
     def thread_ts(self) -> str:
@@ -245,23 +291,6 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
-
-
-class SlackInputValue(SlackPayload):
-    """One input element's submitted value, as ``view.state.values`` carries it."""
-
-    value: str | None = None
-
-
-class SlackViewState(SlackPayload):
-    values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
-
-
-class SlackView(SlackPayload):
-    id: str = ""
-    callback_id: str = ""
-    private_metadata: str = ""
-    state: SlackViewState = Field(default_factory=SlackViewState)
 
 
 class SlackViewSubmission(SlackPayload):
@@ -315,6 +344,7 @@ class SlackChannelContext(SlackPayload):
     is_ext_shared: bool | None = None
     is_pending_ext_shared: bool | None = None
     is_im: bool | None = None
+    is_mpim: bool | None = None
 
     def dump(self) -> JsonObject:
         """The JSON value to store in thread metadata."""
@@ -436,4 +466,5 @@ class SlackChannelPayload(SlackPayload):
             is_ext_shared=self.is_ext_shared,
             is_pending_ext_shared=self.is_pending_ext_shared,
             is_im=self.is_im,
+            is_mpim=self.is_mpim,
         )

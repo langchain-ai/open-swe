@@ -16,7 +16,6 @@ from agent.input_messages import (
     PersonIdentity,
     SystemIdentity,
     human_input,
-    person_introduction,
     system_input,
     system_introduction,
 )
@@ -146,13 +145,23 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
 
 
 async def queued_context_count(thread_id: str) -> int:
+    """Count of messages waiting to reach this thread's agent.
+
+    Combines the legacy in-run injection queue (``queue_context`` /
+    ``queue_message_for_thread``, still used by Slack context and the
+    ``send_dashboard_message`` agent tool) with genuine pending runs
+    (a composer follow-up enqueued via the server-backed queue adapter is a
+    real LangGraph run, not a KV-store entry, and would otherwise be
+    invisible here).
+    """
     try:
         item = await store_client().store.get_item(("queue", thread_id), "pending_messages")
     except Exception:  # noqa: BLE001
-        return 0
+        item = None
     value = item.get("value") if isinstance(item, dict) else None
     messages = value.get("messages") if isinstance(value, dict) else None
-    return len(messages) if isinstance(messages, list) else 0
+    kv_count = len(messages) if isinstance(messages, list) else 0
+    return kv_count + len(await _runs(thread_id, "pending"))
 
 
 def _configurable(
@@ -208,13 +217,9 @@ def _input(
                 ),
             ]
         }
-    person: PersonIdentity = requester or {
-        "id": "system:incidents-dashboard",
-        "platform": "open-swe",
-    }
+    person: PersonIdentity = requester or {"id": "system:incidents-dashboard"}
     return {
         "messages": [
-            person_introduction(person),
             human_input(
                 request,
                 {
@@ -254,6 +259,7 @@ async def dispatch_turn(
             automatic_request=AUTOMATIC_REQUEST if explicit else await _automatic_request(record),
         ),
         source="incidents_agent",
+        thread_title=None,
         config={
             "configurable": _configurable(
                 record, policy, request=request, reply_thread_ts=reply_thread_ts

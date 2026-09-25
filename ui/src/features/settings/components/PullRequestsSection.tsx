@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import {
@@ -10,13 +9,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
-import {
-  buildProfileUpdate,
-  useOptions,
-  useProfile,
-  useSaveProfile,
-} from "@/lib/profile"
+import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
+import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 
 type DraftReviewChoice = "team_default" | "always_on" | "always_off"
 
@@ -35,7 +29,7 @@ function toChoice(value: boolean | null | undefined): DraftReviewChoice {
 export function PullRequestsSection() {
   const profile = useProfile()
   const options = useOptions()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
   // Which team default applies depends on the workspace a pull request's
   // repository belongs to; the user's own workspace is the one answer this
   // page can give, and it is where their new threads run.
@@ -49,7 +43,6 @@ export function PullRequestsSection() {
     queryKey: ["workspaceSettings", workspace],
     queryFn: () => api.getWorkspaceSettings(workspace),
   })
-  const [error, setError] = useState<string | null>(null)
 
   const firstModel = options.data?.models[0]
   const fallbackModel =
@@ -59,18 +52,14 @@ export function PullRequestsSection() {
     firstModel?.default_effort ??
     ""
 
-  const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
-      )
-      .catch((e: Error) => setError(e.message))
-  }
+  const persist = (patch: Partial<ProfileUpdate>) =>
+    save.patch(patch, fallbackModel, fallbackEffort)
 
-  const disabled = profile.isLoading || save.isPending
+  const disabled = profile.isLoading
   const teamDefaultOn =
     workspaceSettings.data?.effective.review_draft_prs ?? false
+  const expeditedOn =
+    workspaceSettings.data?.effective.expedited_review_enabled ?? false
 
   return (
     <SettingsSection
@@ -79,7 +68,11 @@ export function PullRequestsSection() {
     >
       <SettingsRow
         label="Create PRs as draft"
-        description="New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        description={
+          expeditedOn
+            ? "New pull requests are created as drafts, except ones the agent nominates for expedited Slack review, which it marks ready. Existing pull requests keep their current draft status."
+            : "New pull requests are created as drafts. Existing pull requests keep their current draft status."
+        }
         control={
           <Switch
             checked={profile.data?.draft_prs ?? true}
@@ -114,7 +107,6 @@ export function PullRequestsSection() {
           </Select>
         }
       />
-      {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
     </SettingsSection>
   )
 }

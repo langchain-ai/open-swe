@@ -9,7 +9,6 @@ export function DeleteThreadDialog({
   isDeleting,
   onConfirm,
   detail = "This cannot be undone.",
-  error,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -17,7 +16,6 @@ export function DeleteThreadDialog({
   isDeleting: boolean
   onConfirm: () => void
   detail?: string
-  error?: string | null
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -31,7 +29,6 @@ export function DeleteThreadDialog({
             <Dialog.Description className="text-xs text-muted-foreground">
               Delete "{threadTitle}"? {detail}
             </Dialog.Description>
-            {error && <p className="text-xs text-destructive">{error}</p>}
             <div className="mt-2 flex justify-end gap-2">
               <Button
                 variant="outline"

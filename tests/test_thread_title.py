@@ -117,10 +117,10 @@ async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_title_generation_leaves_a_dm_session_unnamed(
+async def test_title_generation_leaves_a_concierge_dm_unnamed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A DM shares the session timestamp but has no session name to set."""
+    """A concierge DM shares the session timestamp but has no session name to set."""
     threads = _Threads(
         {
             "source": "slack",
@@ -265,7 +265,7 @@ async def test_title_generation_reads_the_whole_thread() -> None:
     )
     client = type("Client", (), {"threads": threads})()
 
-    person = person_introduction({"id": "github:octocat", "platform": "github"})
+    person = person_introduction({"id": "github:octocat", "github_login": "octocat"})
     prompt = human_input(
         "first", {"sender_id": "github:octocat", "surface": "web", "kind": "human"}
     )

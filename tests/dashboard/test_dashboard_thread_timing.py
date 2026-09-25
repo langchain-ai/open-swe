@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 from agent.threads import handlers as thread_api
 from agent.threads import routes
+from agent.threads.principals import Principal
 
 
 async def test_get_thread_reports_server_timing_phases(monkeypatch) -> None:
@@ -29,10 +30,10 @@ async def test_get_thread_reports_server_timing_phases(monkeypatch) -> None:
     )
     monkeypatch.setattr(thread_api, "_thread_summary", AsyncMock(return_value={"id": "thread-1"}))
 
-    response = await routes.api_get_thread("thread-1", True, {"sub": "alice"})
+    response = await routes.api_get_thread("thread-1", Principal.of_login("alice"), True)
 
-    assert json.loads(response.body) == {"id": "thread-1"}
+    assert json.loads(response.body) == {"id": "thread-1", "subagents": []}
     header = response.headers["Server-Timing"]
     phases = {part.split(";", 1)[0] for part in header.split(", ")}
-    assert phases == {"thread_get", "runs_list", "mark_viewed", "summary", "total"}
+    assert phases == {"thread_get", "runs_list", "mark_viewed", "summary", "subagents", "total"}
     assert all(";dur=" in part for part in header.split(", "))

@@ -42,7 +42,7 @@ from typing import Any, Literal, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -530,6 +530,19 @@ class RefreshStep(BaseModel):
     log_path: str | None = None
 
 
+class RepositorySettings(BaseModel):
+    """How one repository is configured inside one workspace.
+
+    Separate from the binding itself: belonging to a workspace says the agent
+    may work in the repository, while these say what the repository may do.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    repo: str
+    may_start_threads: bool = False
+
+
 class Workspace(BaseModel):
     # Assignment is validated because the store mutates records in place, and an
     # unvalidated write here is only caught on the next read — by which point the
@@ -731,10 +744,12 @@ class WorkspaceStore:
         queries: routing checks a tag or a user's default against it, and a
         workspace an admin just created has to resolve at once.
         """
+        return await self.id_for_slug(slug) is not None
+
+    async def id_for_slug(self, slug: str) -> UUID | None:
+        """The stable id behind ``slug``, for records that must outlive it."""
         async with postgres.session() as session:
-            return (
-                await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
-            ) is not None
+            return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
 
     def repo_import_is_pending(self, full_name: str) -> bool:
         """Whether a Store record naming this repository still awaits import."""
@@ -861,6 +876,104 @@ class WorkspaceStore:
                 .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
                 .where(Repository.key == key)
             )
+
+    async def thread_starter_of_repo(self, full_name: str) -> str | None:
+        """The slug of the workspace this repository may start threads in, if any.
+
+        The whole trust policy for a federated GitHub Actions token: a workflow
+        gets in only where an admin bound its repository *and* granted it this.
+        """
+        try:
+            key = normalize_repo_full_name(full_name).lower()
+        except ValueError:
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(WorkspaceRow.slug)
+                .join(
+                    WorkspaceRepositoryRow, WorkspaceRepositoryRow.workspace_id == WorkspaceRow.id
+                )
+                .join(Repository, Repository.id == WorkspaceRepositoryRow.repository_id)
+                .where(Repository.key == key, WorkspaceRepositoryRow.may_start_threads.is_(True))
+            )
+
+    async def repository_settings(self, slug: str) -> list[RepositorySettings]:
+        """Every repository bound to ``slug``, with how it is configured there."""
+        async with postgres.session() as session:
+            rows = (
+                await session.execute(
+                    select(Repository.full_name, WorkspaceRepositoryRow.may_start_threads)
+                    .join(
+                        WorkspaceRepositoryRow,
+                        WorkspaceRepositoryRow.repository_id == Repository.id,
+                    )
+                    .join(WorkspaceRow, WorkspaceRow.id == WorkspaceRepositoryRow.workspace_id)
+                    .where(WorkspaceRow.slug == slug)
+                    .order_by(Repository.key)
+                )
+            ).tuples()
+        return [
+            RepositorySettings(repo=full_name, may_start_threads=may_start_threads)
+            for full_name, may_start_threads in rows
+        ]
+
+    async def configure_repository(
+        self, slug: str, full_name: str, *, may_start_threads: bool | None = None
+    ) -> RepositorySettings:
+        """Change how one repository is configured inside ``slug``.
+
+        Only a repository already bound to the workspace can be configured;
+        anything else raises, so a settings write can never widen which
+        repositories the workspace owns. Settings left as ``None`` keep their
+        stored value.
+        """
+        key = normalize_repo_full_name(full_name).lower()
+        changes: dict[str, bool] = {}
+        if may_start_threads is not None:
+            changes["may_start_threads"] = may_start_threads
+        async with postgres.session() as session:
+            workspace_id = await session.scalar(
+                select(WorkspaceRow.id).where(WorkspaceRow.slug == slug)
+            )
+            if workspace_id is None:
+                raise ValueError(f"no workspace named {slug!r}")
+            repository_id = await session.scalar(
+                select(Repository.id)
+                .join(
+                    WorkspaceRepositoryRow,
+                    WorkspaceRepositoryRow.repository_id == Repository.id,
+                )
+                .where(WorkspaceRepositoryRow.workspace_id == workspace_id, Repository.key == key)
+            )
+            if repository_id is None:
+                raise ValueError(f"{full_name!r} is not bound to workspace {slug!r}")
+            if changes:
+                await session.execute(
+                    update(WorkspaceRepositoryRow)
+                    .where(
+                        WorkspaceRepositoryRow.workspace_id == workspace_id,
+                        WorkspaceRepositoryRow.repository_id == repository_id,
+                    )
+                    .values(**changes)
+                )
+            row = (
+                (
+                    await session.execute(
+                        select(Repository.full_name, WorkspaceRepositoryRow.may_start_threads)
+                        .join(
+                            WorkspaceRepositoryRow,
+                            WorkspaceRepositoryRow.repository_id == Repository.id,
+                        )
+                        .where(
+                            WorkspaceRepositoryRow.workspace_id == workspace_id,
+                            Repository.id == repository_id,
+                        )
+                    )
+                )
+                .tuples()
+                .one()
+            )
+        return RepositorySettings(repo=row[0], may_start_threads=row[1])
 
     async def owner_of_slack_channel(self, channel_id: str) -> str | None:
         """The slug of the workspace this Slack channel is bound to, if any."""
@@ -1236,8 +1349,6 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
-    if update.name is not None and slugify(update.name) != record.slug:
-        raise ValueError("renaming a workspace across slugs is not supported; create a new one")
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:

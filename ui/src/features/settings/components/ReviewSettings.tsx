@@ -21,8 +21,8 @@ export function ReviewSettings({
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
   const [policyDraft, setPolicyDraft] = useState("")
 
-  const guidelinesValue = settings.data?.org_guidelines ?? ""
-  const policyValue = settings.data?.approval_policy ?? ""
+  const guidelinesValue = settings.saved?.org_guidelines ?? ""
+  const policyValue = settings.saved?.approval_policy ?? ""
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -53,7 +53,7 @@ export function ReviewSettings({
     <Switch
       checked={!!settings.data?.[field]}
       onCheckedChange={(v) => settings.save({ [field]: v })}
-      disabled={!editable || settings.saving}
+      disabled={!editable}
     />
   )
 
@@ -87,7 +87,7 @@ export function ReviewSettings({
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                disabled={!editable || !guidelinesDirty || settings.saving}
+                disabled={!editable || !guidelinesDirty}
                 onClick={() =>
                   settings.save({ org_guidelines: trimmedGuidelines || null })
                 }
@@ -98,7 +98,7 @@ export function ReviewSettings({
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={!editable || settings.saving}
+                  disabled={!editable}
                   onClick={() => settings.reset("org_guidelines")}
                 >
                   Reset to instance
@@ -134,7 +134,6 @@ export function ReviewSettings({
                 size="sm"
                 disabled={
                   !editable ||
-                  settings.saving ||
                   policyDraft.trim() ===
                     (settings.data?.approval_policy ?? "").trim()
                 }
@@ -148,9 +147,7 @@ export function ReviewSettings({
                 size="sm"
                 variant="ghost"
                 disabled={
-                  !editable ||
-                  settings.saving ||
-                  (scoped && settings.inherits("approval_policy"))
+                  !editable || (scoped && settings.inherits("approval_policy"))
                 }
                 onClick={() =>
                   scoped
@@ -204,10 +201,6 @@ export function ReviewSettings({
         <p className="text-xs text-muted-foreground">
           These settings are read-only. Ask a workspace admin to change them.
         </p>
-      )}
-
-      {settings.error && (
-        <p className="text-xs text-destructive">{settings.error}</p>
       )}
     </>
   )

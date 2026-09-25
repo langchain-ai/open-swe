@@ -1,7 +1,10 @@
 import { ApiError } from "@/lib/api"
 import {
+  REQUEST_ID_HEADER,
   dashboardApiUrl,
   dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
 } from "@/lib/dashboard-fetch"
 
 export type IncidentView = "active" | "inactive" | "all" | "history"
@@ -94,13 +97,17 @@ export interface IncidentSettingsPayload {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const requestId = newRequestId()
   const response = await fetch(dashboardApiUrl(`/incidents${path}`), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!response.ok) {
     const body = await response.json().catch(() => null)
@@ -108,7 +115,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
       typeof body?.detail === "string"
         ? body.detail
-        : `Request failed (${response.status}). Please try again.`
+        : `Request failed (${response.status}). Please try again.`,
+      requestId
     )
   }
   return response.json() as Promise<T>

@@ -3,7 +3,13 @@ import type {
   DesktopLocalThreadSummary,
   DesktopProject,
 } from "@/desktop"
-import type { AgentSource, AgentStatus, AgentThread } from "./types"
+import type {
+  AgentSource,
+  AgentStatus,
+  AgentSubagentSummary,
+  AgentThread,
+  ReviewPageRef,
+} from "./types"
 
 export type SidebarThreadLocation = "cloud" | "local"
 
@@ -26,6 +32,9 @@ interface SidebarThreadItemBase {
   pr?: AgentThread["pr"]
   /** `owner/repo` + number of `pr`, when the thread carries a full PR record. */
   prRef?: { repoFullName: string; number: number }
+  reviewPage?: ReviewPageRef
+  /** Subagents the thread spawned, listed as sub-threads under its row. */
+  subagents?: Array<AgentSubagentSummary>
 }
 
 export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
@@ -109,6 +118,8 @@ export function cloudSidebarThread(
     planStatus: thread.planStatus,
     pr: thread.pr,
     prRef: pullRequestRef(thread),
+    reviewPage: thread.reviewPage,
+    subagents: thread.subagents,
     thread,
   }
 }

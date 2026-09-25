@@ -688,7 +688,9 @@ async def _slack_follow_up(fake_client: MagicMock) -> dict[str, Any]:
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
-        await webhook_common.upsert_agent_thread_metadata("t1", source="slack", github_login="octo")
+        await webhook_common.upsert_agent_thread_metadata(
+            "t1", source="slack", github_login="octo", title="Thread"
+        )
     fake_client.threads.update.assert_awaited_once()
     assert fake_client.threads.update.await_args is not None
     return fake_client.threads.update.await_args.kwargs["metadata"]

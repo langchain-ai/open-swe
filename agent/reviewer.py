@@ -40,7 +40,6 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
-from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -62,7 +61,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -75,10 +74,11 @@ from agent.review.findings import Finding
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
-from agent.review.groups import maybe_generate_and_store_diff_groups
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
 from agent.review.styles import get_approval_policy
+from agent.review.walkthrough import WalkthroughView
+from agent.review_scout.launch import ReviewScoutTarget
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -109,13 +109,6 @@ from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
-
-HISTORICAL_REVIEW_GUIDANCE = load_prompt("reviewer/historical-guidance.md")
-
-REVIEWER_PROMPT_TEMPLATE = load_prompt("reviewer/main.md")
-
-
-REVIEWER_EVAL_PROMPT_SUFFIX = load_prompt("reviewer/eval.md")
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
 
@@ -149,9 +142,9 @@ def _repo_checkout_note(
     head_sha: str,
 ) -> str:
     if repo_ready:
-        return render_prompt("reviewer/repo-ready.md", working_dir=working_dir)
-    return render_prompt(
-        "reviewer/repo-not-ready.md",
+        return prompt("reviewer/repo-ready", working_dir=working_dir)
+    return prompt(
+        "reviewer/repo-not-ready",
         working_dir=working_dir,
         parent_dir=posixpath.dirname(working_dir) or working_dir,
         repo_owner=repo_owner or "<owner>",
@@ -177,18 +170,14 @@ def _reviewer_system_prompt(
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
 ) -> str:
-    prompt = render_prompt(
-        "reviewer/main.md",
+    return prompt(
+        "reviewer/main",
         working_dir=working_dir,
         repo_owner=repo_owner or "<owner>",
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
-        historical_review_guidance="" if reviewer_eval else HISTORICAL_REVIEW_GUIDANCE,
-        approval_assessment=(
-            render_prompt("reviewer/approval-assessment.md", approval_policy=approval_policy)
-            if approval_policy and not reviewer_eval
-            else ""
-        ),
+        reviewer_eval=reviewer_eval,
+        approval_policy=approval_policy or "",
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
             working_dir=working_dir,
@@ -197,84 +186,15 @@ def _reviewer_system_prompt(
             pr_number=pr_number,
             head_sha=head_sha,
         ),
+        org_guidelines=org_guidelines or "",
+        repo_style_prompt=repo_style_prompt or "",
+        agents_md_content=agents_md_content or "",
+        scoped_agents_md=[
+            (path, posixpath.dirname(path), content)
+            for path, content in (scoped_agents_md or {}).items()
+        ],
+        api_standards_skill=api_standards_skill or "",
     )
-    if reviewer_eval:
-        prompt = f"{prompt}\n{REVIEWER_EVAL_PROMPT_SUFFIX}"
-    if org_guidelines:
-        prompt = (
-            f"{prompt}\n\n"
-            "# Organization-wide review guidelines\n\n"
-            "These guidelines were set by a workspace admin and apply to every "
-            "repository this reviewer covers. Apply them when they agree with the "
-            "global bar above; they refine tone, severity, and what this "
-            "organization typically flags. Repository-specific rules below take "
-            "precedence when they conflict.\n\n"
-            f"{org_guidelines}"
-        )
-    if repo_style_prompt:
-        prompt = (
-            f"{prompt}\n\n"
-            "# Repository-specific review style\n\n"
-            "The following rules were learned from this repository's historical "
-            "PR reviews. Apply them when they agree with the global bar above; "
-            "they refine tone, severity, and what this team typically flags.\n\n"
-            f"{repo_style_prompt}"
-        )
-    if agents_md_content or scoped_agents_md:
-        instruction_sections: list[str] = []
-        if agents_md_content:
-            instruction_sections.append(
-                f"## Root instructions (scope: entire repository)\n\n```\n{agents_md_content}\n```"
-            )
-        for path, content in (scoped_agents_md or {}).items():
-            scope = posixpath.dirname(path)
-            instruction_sections.append(
-                f"## Instructions from `{path}` (scope: `{scope}/`)\n\n```\n{content}\n```"
-            )
-        prompt = (
-            f"{prompt}\n\n"
-            "# Repository conventions (AGENTS.md / CLAUDE.md)\n\n"
-            "The following files come from the target branch (the PR's base), "
-            "not from the PR head. They document the "
-            "project's conventions, architecture, and rules. These rules are "
-            "**mandatory** — the project enforces them on every contributor and "
-            "they are not optional style preferences. When a changed line "
-            "violates one of these rules, file a finding for it (still anchored "
-            "to the changed line, still a concrete failure mode, still in-diff). "
-            "Do not file findings for pre-existing violations outside the diff.\n\n"
-            "Common rule categories to check:\n"
-            "- **Documentation sync rules** — many repos require docs/ to be "
-            "updated when behavior changes. If the PR changes behavior a doc "
-            "describes and the doc is not updated, that is a finding.\n"
-            "- **Naming / convention rules** — if the repo mandates specific "
-            "naming, patterns, or helpers and the PR uses the wrong one, that "
-            "is a finding (not a style nit — it violates an explicit repo rule).\n"
-            "- **Architecture / layering rules** — if the repo forbids certain "
-            "imports, cross-layer calls, or patterns and the PR introduces one, "
-            "that is a finding.\n"
-            "- **Process / CI rules** — if the repo requires tests, changelog "
-            "entries, or specific CI steps for certain changes and the PR skips "
-            "them, that is a finding.\n\n"
-            "Each scoped `AGENTS.md` applies only to changed files under its "
-            "listed directory. When instructions conflict, the most deeply "
-            "nested applicable file takes precedence.\n\n" + "\n\n".join(instruction_sections)
-        )
-    if api_standards_skill:
-        prompt = (
-            f"{prompt}\n\n"
-            "# API standards skill\n\n"
-            "Apply this skill ONLY when the PR introduces a new API or modifies "
-            "an existing one (HTTP routes/handlers, RPC or GraphQL endpoints, "
-            "public SDK/library signatures, request/response schemas, status "
-            "codes, headers, or other API contracts). When the diff touches such "
-            "surfaces, verify the change against the best practices below and "
-            "file a finding when a changed line violates them and clears the "
-            "global bar above (anchored, concrete failure mode, in-diff). If the "
-            "PR does not change any API, ignore this section. Do not file "
-            "style-only nits or pre-existing violations outside the diff.\n\n"
-            f"{api_standards_skill}"
-        )
-    return prompt
 
 
 def _format_pr_overview(pr_title: str, pr_body: str) -> str:
@@ -292,7 +212,46 @@ def _format_pr_overview(pr_title: str, pr_body: str) -> str:
         return ""
     safe_title = _escape_for_data_block(title)
     safe_body = _escape_for_data_block(body) if body else "_(no description provided)_"
-    return render_prompt("reviewer/pr-overview.md", title=safe_title, body=safe_body)
+    return prompt("reviewer/pr-overview", title=safe_title, body=safe_body)
+
+
+def _format_human_input(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's summary of what people asked for, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.human_input:
+        return ""
+    return prompt("reviewer/human-input", summary=walkthrough.human_input)
+
+
+def _format_line_ranges(prefix: str, ranges: list[tuple[int, int]]) -> list[str]:
+    return [
+        f"{prefix}{start}" if start == end else f"{prefix}{start}-{end}" for start, end in ranges
+    ]
+
+
+def _format_walkthrough(walkthrough: WalkthroughView | None) -> str:
+    """Render the scout's steps as an untrusted-data block, or ``""`` without one."""
+    if walkthrough is None or not walkthrough.steps:
+        return ""
+    steps: list[str] = []
+    for step in walkthrough.steps:
+        files = "\n".join(
+            " ".join(
+                [
+                    _escape_for_data_block(file.path),
+                    *_format_line_ranges("+", file.added),
+                    *_format_line_ranges("-", file.deleted),
+                ]
+            )
+            for file in step.files
+        )
+        steps.append(
+            f'<step index="{step.index}">\n'
+            f"<title>{_escape_for_data_block(step.title)}</title>\n"
+            f"<summary>{_escape_for_data_block(step.summary)}</summary>\n"
+            f"<files>\n{files}\n</files>\n"
+            "</step>"
+        )
+    return prompt("reviewer/walkthrough", steps="\n".join(steps))
 
 
 def _build_first_review_context(
@@ -308,30 +267,17 @@ def _build_first_review_context(
     existing_threads_block: str = "",
     include_historical_guidance: bool = True,
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"\n{overview}" if overview else ""
-    prior_section = (
-        f"\n## Pre-existing PR review threads\n\n{existing_threads_block}\n"
-        if existing_threads_block
-        else ""
-    )
-    historical_guidance = (
-        " If a Pre-existing PR review threads section is present, do not "
-        "re-file anything that overlaps one of those threads."
-        if include_historical_guidance
-        else ""
-    )
-    return render_prompt(
-        "reviewer/first-review-context.md",
+    return prompt(
+        "reviewer/first-review-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         base_sha=base_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
-        prior_section=prior_section,
-        historical_guidance=historical_guidance,
+        overview=_format_pr_overview(pr_title, pr_body),
+        existing_threads=existing_threads_block,
+        historical_guidance=include_historical_guidance,
     )
 
 
@@ -348,24 +294,17 @@ def _build_re_review_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    return render_prompt(
-        "reviewer/rereview-context.md",
+    return prompt(
+        "reviewer/rereview-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         last_reviewed_sha=last_reviewed_sha,
         head_sha=head_sha,
-        overview_section=overview_section,
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 
@@ -383,27 +322,18 @@ def _build_finding_reply_context(
     pr_body: str = "",
     existing_threads_block: str = "",
 ) -> str:
-    overview = _format_pr_overview(pr_title, pr_body)
-    overview_section = f"{overview}\n" if overview else ""
-    prior_threads_section = (
-        f"## Pre-existing PR review threads\n\n{existing_threads_block}\n\n"
-        if existing_threads_block
-        else ""
-    )
-    safe_author = _safe_login(reply_author)
-    safe_reply_body = _escape_for_data_block(reply_body)
-    return render_prompt(
-        "reviewer/finding-reply-context.md",
+    return prompt(
+        "reviewer/finding-reply-context",
         repo_owner=repo_owner,
         repo_name=repo_name,
         pr_number=pr_number,
         pr_url=pr_url,
         finding_id=finding_id,
-        safe_author=safe_author,
-        safe_reply_body=safe_reply_body,
-        overview_section=overview_section,
+        safe_author=_safe_login(reply_author),
+        safe_reply_body=_escape_for_data_block(reply_body),
+        overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
-        prior_threads_section=prior_threads_section,
+        existing_threads=existing_threads_block,
     )
 
 
@@ -430,6 +360,10 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "body",
     "pr_overview",
     "title",
+    "review_walkthrough",
+    "step",
+    "summary",
+    "files",
 )
 _CLOSING_TAG_RE = re.compile(
     r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
@@ -551,11 +485,6 @@ def _format_existing_findings(findings: list[Finding]) -> str:
     return "\n".join(lines) if lines else "_(no open findings)_"
 
 
-# Strong references to fire-and-forget background tasks (e.g. the AI-sorted
-# diff grouping pass) so the event loop doesn't garbage-collect them mid-flight.
-_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
-
-
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -567,38 +496,6 @@ def _make_model_or_defer(
     except Exception as e:  # noqa: BLE001
         logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
         return make_deferred_error_model(e, model_id=model_id)
-
-
-def _on_background_task_done(task: asyncio.Task[None]) -> None:
-    _BACKGROUND_TASKS.discard(task)
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.warning("Background reviewer task failed: %s", exc)
-
-
-async def _resolve_grouping_model(cfg: RunConfig, *, use_gateway: bool) -> BaseChatModel:
-    """Resolve the model for the diff-grouping pass.
-
-    Per-run override (``grouping_model_id``/``grouping_reasoning_effort``) wins;
-    otherwise the workspace default, which itself inherits the reviewer subagent
-    model when no grouping-specific model is configured.
-    """
-    settings = await get_workspace_settings(cfg.workspace_slug)
-    if cfg.grouping_model_id:
-        model_id = cfg.grouping_model_id
-        effort = cfg.grouping_reasoning_effort
-    else:
-        model_id, effort = settings.default_grouping_model
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    model_kwargs = provider_model_kwargs(
-        model_id,
-        effort,
-        max_tokens=DEFAULT_LLM_MAX_TOKENS,
-        openai_reasoning_default=DEFAULT_LLM_REASONING,
-    )
-    return _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
 
 
 async def _cached_api_standards_skill() -> str | None:
@@ -813,6 +710,27 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return ""
 
+        async def _await_walkthrough() -> WalkthroughView | None:
+            if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
+                return None
+            pr_title, _ = await pr_overview_task
+            target = ReviewScoutTarget(
+                owner=repo_owner,
+                repo=repo_name,
+                pr_number=pr_number,
+                pr_title=pr_title,
+                base_sha=base_sha,
+                head_sha=head_sha,
+                workspace_slug=cfg.workspace_slug,
+            )
+            try:
+                return await target.await_walkthrough()
+            except Exception:
+                logger.warning(
+                    "Reviewing without a walkthrough", exc_info=True, extra=target.log_extra
+                )
+                return None
+
         async def _fetch_repo_style_prompt() -> str | None:
             if not repo_owner or not repo_name:
                 return None
@@ -836,6 +754,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
+        walkthrough_task = asyncio.create_task(_await_walkthrough())
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
@@ -928,6 +847,13 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
+        walkthrough = await walkthrough_task
+        walkthrough_block = _format_walkthrough(walkthrough)
+        if walkthrough_block:
+            system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
+        human_input_block = _format_human_input(walkthrough)
+        if human_input_block:
+            system_prompt = f"{system_prompt}\n\n{human_input_block}"
         if skill_sources:
             skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
             skill_update = (
@@ -959,19 +885,6 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                         skills_list=skills_list,
                     )
                 )
-
-        if reviewer_event != "finding_reply" and pr_diff_text and self._thread_id:
-            grouping_model = await _resolve_grouping_model(cfg, use_gateway=self._use_gateway)
-            grouping_task = asyncio.create_task(
-                maybe_generate_and_store_diff_groups(
-                    thread_id=self._thread_id,
-                    head_sha=head_sha,
-                    diff_text=pr_diff_text,
-                    model=grouping_model,
-                )
-            )
-            _BACKGROUND_TASKS.add(grouping_task)
-            grouping_task.add_done_callback(_on_background_task_done)
 
         return {
             "work_dir": work_dir,

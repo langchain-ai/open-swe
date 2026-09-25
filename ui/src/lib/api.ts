@@ -6,7 +6,14 @@
  */
 
 import { dashboardApiBase } from "./api-base"
-import { dashboardApiUrl, dashboardForwardedHeaders } from "./dashboard-fetch"
+import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
+} from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
 
@@ -47,12 +54,18 @@ export function reviewImageProxyUrl(
   return `${API_BASE}/dashboard/api${path}?url=${encodeURIComponent(src)}`
 }
 
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export interface ClientErrorReport {
+  error_id: string
+  title: string
+  error_message: string
+  status: number | null
+  mutation: string | null
+  path: string
+}
+
+export class ApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "ApiError"
   }
 }
@@ -64,14 +77,18 @@ export function isGithubReauthError(error: unknown): boolean {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestId = newRequestId()
   const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -85,7 +102,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, requestId)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -123,13 +140,57 @@ export interface SessionUser {
   user_id?: string | null
   slack_user_id?: string | null
   is_admin: boolean
-  /** Mirrors the user's preference, so the thread page has it on first render. */
-  transcript_streaming?: boolean
+  /** Mirrors the user's preference: what Enter does while a run is live. */
+  follow_up_behavior?: FollowUpBehavior
   /** Whether the server records new threads into the transcript log. */
   transcript_recording?: boolean
   slack_oauth_enabled?: boolean
+  build_info?: BuildInfo
   api_base_url?: string
   slack_base_url?: string
+}
+
+/** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
+export interface BuildInfo {
+  backend: {
+    /** LangGraph Platform revision id — opaque, never a git SHA. */
+    revision_id: string | null
+    commit: string | null
+    built_at: string | null
+    package_version: string | null
+  }
+  dashboard: {
+    commit: string | null
+    built_at: string | null
+    served: boolean
+  }
+}
+
+/** Normalizes session build identifiers, including older backends with no field. */
+export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
+  if (typeof raw !== "object" || raw === null) return null
+  const backend = (raw as { backend?: unknown }).backend
+  if (typeof backend !== "object" || backend === null) return null
+  const b = backend as Partial<BuildInfo["backend"]>
+  const dashboard = (raw as { dashboard?: unknown }).dashboard
+  const d =
+    typeof dashboard === "object" && dashboard !== null
+      ? (dashboard as Partial<BuildInfo["dashboard"]>)
+      : undefined
+  return {
+    backend: {
+      revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
+      commit: typeof b.commit === "string" ? b.commit : null,
+      built_at: typeof b.built_at === "string" ? b.built_at : null,
+      package_version:
+        typeof b.package_version === "string" ? b.package_version : null,
+    },
+    dashboard: {
+      commit: d && typeof d.commit === "string" ? d.commit : null,
+      built_at: d && typeof d.built_at === "string" ? d.built_at : null,
+      served: typeof d?.served === "boolean" ? d.served : false,
+    },
+  }
 }
 
 export interface ModelOption {
@@ -151,6 +212,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  experimental_assistant_ui?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -162,13 +224,17 @@ export interface Profile {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
-  dm_session_enabled?: boolean
+  recent_thread_context_enabled?: boolean
+  concierge_mode?: boolean
+  preserve_sandbox_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+  slack_onboarding_dismissed?: boolean
   updated_at?: string
 }
 
 export interface ProfileUpdate {
+  experimental_assistant_ui?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null
@@ -178,9 +244,12 @@ export interface ProfileUpdate {
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
-  dm_session_enabled?: boolean
+  recent_thread_context_enabled?: boolean
+  concierge_mode?: boolean
+  preserve_sandbox_memory?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
+  slack_onboarding_dismissed?: boolean
 }
 
 export interface SlackBotOption {
@@ -232,8 +301,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_grouping_model?: string | null
-  default_grouping_reasoning_effort?: string | null
   default_chat_model?: string | null
   default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
@@ -307,6 +374,21 @@ export interface AdminUsersPage {
 }
 
 export type UsageLeaderboardPeriod = "24h" | "7d" | "30d" | "all"
+
+/** Origin + mount path only, so diagnostics can name the API without tokens or query data. */
+export function describeApiBase(apiBaseUrl: string | undefined): {
+  origin: string | null
+  path: string
+} {
+  const path = `${dashboardApiBase()}/dashboard/api`
+  if (!apiBaseUrl) return { origin: null, path }
+  try {
+    return { origin: new URL(apiBaseUrl).origin, path }
+  } catch {
+    return { origin: null, path }
+  }
+}
+
 export type UsageLeaderboardSort =
   | "rank"
   | "user"
@@ -322,6 +404,7 @@ export type UsageLeaderboardSort =
   | "merged_prs"
   | "merged_prs_per_thread"
   | "agent_loc"
+  | "feedback_given"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -333,6 +416,8 @@ export interface AnalyticsMetadata {
   has_pending_events: boolean
   has_failed_events: boolean
   as_of: string
+  /** Absent on backends that predate build reporting. */
+  build_info?: BuildInfo
 }
 
 export interface UsageLeaderboardRow {
@@ -353,6 +438,8 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  feedback_given: number
+  is_top_feedback_contributor?: boolean
   additions: number
   deletions: number
   total_tokens: number
@@ -423,7 +510,12 @@ export interface PRMergeRateCohort {
   mature_denominator: number
   mature_cohort_merge_share: number | null
   avg_merge_seconds: number | null
-  avg_delivery_seconds: number | null
+  /**
+   * Present-but-null means every PR in the group lacked valid timing; a missing
+   * key (older backend) means the metric itself is unsupported. Zero is a real
+   * measurement, distinct from both.
+   */
+  avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
   distance_sample_size?: number
@@ -438,6 +530,12 @@ export interface PRMergeRatePayload extends AnalyticsMetadata {
   suppression_threshold: number
   cohorts: PRMergeRateCohort[]
   unavailable_thread_ids: string[]
+}
+
+/** The PR report plus when this browser last received it, kept apart from the server's `as_of`. */
+export interface PRMergeRateResponse {
+  payload: PRMergeRatePayload
+  fetchedAt: string
 }
 
 export interface Repository {
@@ -496,13 +594,15 @@ export interface UserInstructions {
 }
 
 export type ThreadVisibility = "public" | "private"
+/** Queue holds a follow-up until the run ends; steer delivers it into the live run. */
+export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
   local_tracing_project: string | null
   default_local_tracing_project: string
   default_workspace: string | null
-  transcript_streaming: boolean
+  follow_up_behavior: FollowUpBehavior
 }
 
 export interface Skill {
@@ -633,6 +733,12 @@ export interface WorkspaceRecord {
   refresh_error?: string | null
 }
 
+/** How one repository is configured inside a workspace. */
+export interface RepositorySettings {
+  repo: string
+  may_start_threads: boolean
+}
+
 /** What `POST /workspaces/{slug}/refresh` answers. */
 export interface WorkspaceRefreshStart {
   started: boolean
@@ -681,6 +787,32 @@ export interface ReviewCommentCreate {
   body: string
   start_line?: number | null
   start_side?: "LEFT" | "RIGHT" | null
+}
+
+export type PullRequestReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+
+export interface PendingReviewComment {
+  id: number
+  node_id: string
+  path: string
+  line: number | null
+  start_line: number | null
+  side: "LEFT" | "RIGHT" | null
+  start_side: "LEFT" | "RIGHT" | null
+  body: string
+}
+
+/** The viewer's unsubmitted GitHub review; its comments post together on submit. */
+export interface PendingReview {
+  id: number
+  node_id: string
+  comments: Array<PendingReviewComment>
+}
+
+export interface SubmittedReview {
+  id: number
+  html_url: string
+  state: string
 }
 
 export interface ReviewCommentResult {
@@ -768,12 +900,17 @@ export interface OpenPullRequest {
 
 export type MergeMethod = "squash" | "merge" | "rebase"
 
-export type PullRequestActionName = "merge" | "close" | "mark-ready"
+export type PullRequestActionName =
+  | "merge"
+  | "close"
+  | "mark-ready"
+  | "update-branch"
 
 export type PullRequestActionRequest =
   | { action: "merge"; sha: string | null; merge_method: MergeMethod }
-  | { action: "close" }
+  | { action: "close"; reason?: string }
   | { action: "mark-ready" }
+  | { action: "update-branch"; sha: string | null }
 
 export interface PullRequestActionResult {
   action: PullRequestActionName
@@ -784,6 +921,12 @@ export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
   | { intent: "fix"; context: OpenPullRequest | null }
   | { intent: "address-comments" }
+  | { intent: "address-comment"; comment_url: string; instructions: string }
+
+export interface ResolveReviewThreadsResult {
+  resolved: Array<string>
+  failed: Array<string>
+}
 
 export interface PullRequestThreadResult {
   thread_id: string
@@ -826,20 +969,65 @@ export interface ReviewPrDetails {
   labels: Array<{ name: string; color: string | null }>
 }
 
-export interface ReviewDiffGroup {
+/** Inclusive `[start, end]` line numbers. */
+export type ReviewLineRange = [number, number]
+
+/** Added lines are head line numbers; deleted lines are merge-base line numbers. */
+export interface ReviewWalkthroughFile {
+  path: string
+  added: Array<ReviewLineRange>
+  deleted: Array<ReviewLineRange>
+}
+
+export interface ReviewWalkthroughStep {
   index: number
   title: string
   summary: string
-  files: Array<string>
+  other: boolean
+  files: Array<ReviewWalkthroughFile>
 }
 
-export interface ReviewDetail extends ReviewSummary {
+/** The review scout's reading order for the PR's current head. */
+export interface ReviewWalkthrough {
+  head_sha: string
+  /** The scout's summary of what people asked for; empty when it wrote none. */
+  human_input: string
+  steps: Array<ReviewWalkthroughStep>
+}
+
+/** `status: "none"` is a PR the reviewer graph has never run on. */
+export interface ReviewDetail extends Omit<
+  ReviewSummary,
+  "thread_id" | "status"
+> {
+  thread_id: string | null
+  status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
   checks: Array<ReviewCheckRun>
   findings: Array<ReviewFinding>
-  diff_groups: Array<ReviewDiffGroup>
-  diff_groups_stale: boolean
+  walkthrough: ReviewWalkthrough | null
+  /** A review scout is working on this head, so `walkthrough` is on its way. */
+  walkthrough_running: boolean
+  /** Why the latest scout run on this head failed, when it did. */
+  walkthrough_error: string | null
+  walkthrough_scout_thread_id: string | null
+  /** What the running scout has done so far; set only while `walkthrough_running`. */
+  walkthrough_progress: ScoutProgress | null
+  /** Why the latest reviewer run failed, when `status` is `"error"`. */
+  review_error: string | null
+}
+
+export interface ScoutAction {
+  tool: string
+  target: string | null
+}
+
+export interface ScoutProgress {
+  steps: number
+  /** The latest action is still executing. */
+  running: boolean
+  recent: Array<ScoutAction>
 }
 
 export interface PublishedReviewAssessment {
@@ -870,6 +1058,60 @@ export interface ReviewDiffFile {
   originalContent: string
   modifiedContent: string
   unrenderable?: boolean
+}
+
+export type PreviewFileStatus =
+  | "added"
+  | "removed"
+  | "modified"
+  | "renamed"
+  | "copied"
+  | "changed"
+  | "unchanged"
+
+export interface PreviewFile {
+  path: string
+  status: PreviewFileStatus
+  additions: number
+  deletions: number
+}
+
+export interface PreviewThread {
+  thread_id: string | null
+  author: string | null
+  body: string
+  path: string
+  line: number | null
+  url: string | null
+}
+
+export interface PreviewCheck {
+  name: string
+  status: string
+  conclusion: string | null
+  url: string | null
+}
+
+export interface PullRequestPreview {
+  title: string
+  body: string
+  author: string | null
+  author_avatar_url: string | null
+  state: string
+  draft: boolean
+  head_ref: string
+  base_ref: string
+  commits: number
+  additions: number
+  deletions: number
+  changed_files: number
+  files: Array<PreviewFile>
+  // null when GitHub could not answer, which is not the same as none unresolved
+  // or no checks configured.
+  unresolved: Array<PreviewThread> | null
+  checks: Array<PreviewCheck> | null
+  /** The review scout's summary of what people asked for; empty until one has run. */
+  human_input: string
 }
 
 export interface ReviewDiffPayload {
@@ -1023,6 +1265,12 @@ export const api = {
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  reportClientError: (report: ClientErrorReport) =>
+    request<void>("/client-errors", {
+      method: "POST",
+      body: JSON.stringify(report),
+      keepalive: true,
+    }),
   getMyInstructions: () => request<UserInstructions>("/me/instructions"),
   saveMyInstructions: (instructions: string) =>
     request<UserInstructions>("/me/instructions", {
@@ -1117,6 +1365,22 @@ export const api = {
     request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "DELETE",
     }),
+  listWorkspaceRepositories: (slug: string) =>
+    request<RepositorySettings[]>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories`
+    ),
+  configureWorkspaceRepository: (
+    slug: string,
+    repo: string,
+    settings: { may_start_threads?: boolean }
+  ) =>
+    request<RepositorySettings>(
+      `/workspaces/${encodeURIComponent(slug)}/repositories/${repo
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+      { method: "PUT", body: JSON.stringify(settings) }
+    ),
   /** The instance record every workspace inherits. */
   getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
   getWorkspaceSettings: (slug: string) =>
@@ -1252,7 +1516,7 @@ export const api = {
   ) =>
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
-    ),
+    ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
   adminListUsers: (page = 1, pageSize = 20) =>
     request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
@@ -1272,6 +1536,26 @@ export const api = {
     pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
+  addressPullRequestComment: (
+    repo: string,
+    number: number,
+    commentUrl: string,
+    instructions: string
+  ) =>
+    pullRequestThread(repo, number, {
+      intent: "address-comment",
+      comment_url: commentUrl,
+      instructions,
+    }),
+  resolveReviewThreads: (
+    repo: string,
+    number: number,
+    threadIds: Array<string>
+  ) =>
+    request<ResolveReviewThreadsResult>(
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/review-threads/resolve`,
+      { method: "POST", body: JSON.stringify({ thread_ids: threadIds }) }
+    ),
   pullRequestThreadStatus: (repo: string, number: number) =>
     request<{ running: boolean }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/thread`
@@ -1287,8 +1571,18 @@ export const api = {
       sha: pr.headSha,
       merge_method: method,
     }),
-  closePullRequest: (pr: OpenPullRequest): Promise<PullRequestActionResult> =>
-    pullRequestAction(pr, { action: "close" }),
+  closePullRequest: (
+    pr: OpenPullRequest,
+    reason?: string
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(
+      pr,
+      reason ? { action: "close", reason } : { action: "close" }
+    ),
+  updatePullRequestBranch: (
+    pr: OpenPullRequest
+  ): Promise<PullRequestActionResult> =>
+    pullRequestAction(pr, { action: "update-branch", sha: pr.headSha }),
   markPullRequestReady: (
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
@@ -1326,6 +1620,10 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
     ),
+  getPullRequestPreview: (owner: string, repo: string, number: number) =>
+    request<PullRequestPreview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`
+    ),
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
@@ -1333,6 +1631,16 @@ export const api = {
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
+    ),
+  runReviewScout: (owner: string, repo: string, number: number) =>
+    request<{ started: boolean; run_id: string | null }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/scout`,
+      { method: "POST" }
+    ),
+  markReviewViewed: (owner: string, repo: string, number: number) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/viewed`,
+      { method: "POST" }
     ),
   reReview: (owner: string, repo: string, number: number) =>
     request<{
@@ -1344,15 +1652,55 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/re-review`,
       { method: "POST" }
     ),
-  createReviewComment: (
+  getPendingReview: (owner: string, repo: string, number: number) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`
+    ),
+  addPendingReviewComment: (
     owner: string,
     repo: string,
     number: number,
-    body: ReviewCommentCreate
+    comment: ReviewCommentCreate
   ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
-      { method: "POST", body: JSON.stringify(body) }
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
+    ),
+  updatePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number,
+    body: string
+  ) =>
+    request<PendingReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "PATCH", body: JSON.stringify({ body }) }
+    ),
+  deletePendingReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    commentId: number
+  ) =>
+    request<PendingReview | null>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review/comments/${commentId}`,
+      { method: "DELETE" }
+    ),
+  discardPendingReview: (owner: string, repo: string, number: number) =>
+    request<{ discarded: boolean }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/pending-review`,
+      { method: "DELETE" }
+    ),
+  submitPullRequestReview: (
+    owner: string,
+    repo: string,
+    number: number,
+    review: { event: PullRequestReviewEvent; body: string }
+  ) =>
+    request<SubmittedReview>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
+      { method: "POST", body: JSON.stringify(review) }
     ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(

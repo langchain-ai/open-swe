@@ -17,11 +17,21 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 from agent.users import User
 from agent.webhooks import common
+
+
+def _linear_person(author: dict[str, Any]) -> PersonIdentity:
+    key = author.get("id") or author.get("email") or author.get("name") or "unknown"
+    person: PersonIdentity = {"id": f"linear:{str(key).replace(' ', '-')}"}
+    if author.get("name"):
+        person["display_name"] = str(author["name"])
+    if author.get("email"):
+        person["email"] = str(author["email"])
+    return person
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
@@ -157,20 +167,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
     ticket_url = full_issue.get("url", "") or issue_data.get("url", "")
-    ticket_url_line = f"## Linear Ticket URL: {ticket_url}\n\n" if ticket_url else ""
-
-    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
-    prompt = render_prompt(
-        "runs/linear-issue.md",
+    issue_prompt = prompt(
+        "runs/linear-issue",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
         title=title,
-        triggered_by_line=triggered_by_line,
+        triggered_by=user_name,
         identifier=identifier,
         issue_id=issue_id,
-        ticket_url_line=ticket_url_line,
+        ticket_url=ticket_url,
         description=description,
     )
-    description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    description_blocks: list[dict[str, Any]] = [
+        cast(dict[str, Any], create_text_block(issue_prompt))
+    ]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email the same way Slack does, so
@@ -256,7 +265,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
         ),
         system_input(
-            description_blocks if len(description_blocks) > 1 else prompt,
+            description_blocks if len(description_blocks) > 1 else issue_prompt,
             {
                 "sender_id": "system:linear-issue",
                 "surface": "linear",
@@ -273,16 +282,13 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             },
         ),
     ]
-    introduced: set[str] = set()
+    # The last comment triggers the run, and the run describes its author itself.
+    introduced: set[str] = {
+        _linear_person(comment.get("user") or {})["id"] for comment in included_comments[-1:]
+    }
     for comment in included_comments:
-        author = comment.get("user") or {}
-        author_key = author.get("id") or author.get("email") or author.get("name") or "unknown"
-        sender_id = f"linear:{str(author_key).replace(' ', '-')}"
-        person: PersonIdentity = {"id": sender_id, "platform": "linear"}
-        if author.get("name"):
-            person["display_name"] = str(author["name"])
-        if author.get("email"):
-            person["email"] = str(author["email"])
+        person = _linear_person(comment.get("user") or {})
+        sender_id = person["id"]
         if sender_id not in introduced:
             run_messages.append(person_introduction(person))
             introduced.add(sender_id)
@@ -317,6 +323,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         None,
         configurable,
         source="linear",
+        thread_title=None,
         input=run_input,
         metadata=common.AGENT_VERSION_METADATA,
     )

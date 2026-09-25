@@ -64,7 +64,7 @@ def context_message(ts: str = "1.0") -> HumanMessage:
             "source_url": f"https://slack.com/archives/C1/p{ts.replace('.', '')}",
         }
     )
-    return HumanMessage(content=f"<content>{CONTEXT_MARKER}{header}\nErrors reported</content>")
+    return HumanMessage(content=f"{CONTEXT_MARKER}{header}\nErrors reported")
 
 
 def request(*messages) -> ModelRequest:

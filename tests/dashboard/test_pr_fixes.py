@@ -126,11 +126,11 @@ def test_thread_run_json_keys_match_the_dashboard_client():
 @pytest.mark.parametrize(
     "intent,template,title,dispatches",
     [
-        (OPEN, "runs/pull-request-thread.md", "Fix broken build", False),
-        (FIX, "runs/pull-request-fix.md", "Fix acme/app#12", True),
+        (OPEN, "runs/pull-request-thread", "Fix broken build", False),
+        (FIX, "runs/pull-request-fix", "Fix acme/app#12", True),
         (
             ADDRESS_COMMENTS,
-            "runs/pull-request-comments.md",
+            "runs/pull-request-comments",
             "Address comments on acme/app#12",
             True,
         ),
@@ -140,7 +140,7 @@ async def test_each_intent_names_its_own_prompt_and_thread_title(
     setup, intent, template, title, dispatches
 ):
     FakeRegistry.thread_ids = []
-    prompt = pr_fixes.render_prompt(template, url=PR_URL)
+    prompt = pr_fixes.prompt(template, url=PR_URL, comment_url="")
 
     assert await pr_fixes.start_pull_request_thread(
         "acme", "app", 12, "alice", intent=intent
@@ -258,8 +258,41 @@ async def test_fix_message_includes_full_displayed_failure_context(setup):
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
 
     prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
-    assert prompt.startswith(pr_fixes.render_prompt("runs/pull-request-fix.md", url=PR_URL))
+    assert prompt.startswith(pr_fixes.prompt("runs/pull-request-fix", url=PR_URL))
     assert json.loads(prompt[prompt.index("{\n") :]) == context.model_dump()
+
+
+async def test_single_comment_run_names_the_comment_and_carries_instructions(setup):
+    comment_url = f"{PR_URL}#discussion_r42"
+    intent = pr_fixes.AddressCommentIntent(
+        intent="address-comment", comment_url=comment_url, instructions="  keep the old name  "
+    )
+
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+
+    prompt = pr_fixes.dispatch_agent_run.await_args.args[1]
+    assert prompt.startswith(
+        pr_fixes.prompt("runs/pull-request-comments", url=PR_URL, comment_url=comment_url)
+    )
+    assert prompt.endswith("\nkeep the old name")
+
+
+@pytest.mark.parametrize(
+    "comment_url",
+    [
+        "https://github.com/acme/app/pull/13#discussion_r42",
+        "https://github.com/acme/other/pull/12#discussion_r42",
+        "https://evil.example/acme/app/pull/12#discussion_r42",
+    ],
+)
+async def test_single_comment_run_rejects_a_comment_from_another_pull_request(setup, comment_url):
+    intent = pr_fixes.AddressCommentIntent(intent="address-comment", comment_url=comment_url)
+
+    with pytest.raises(HTTPException) as exc:
+        await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+
+    assert exc.value.status_code == 422
+    pr_fixes.dispatch_agent_run.assert_not_awaited()
 
 
 async def test_opening_a_thread_neither_dispatches_a_run_nor_mutates_it(setup):

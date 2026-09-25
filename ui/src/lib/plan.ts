@@ -2,8 +2,12 @@
 
 import { dashboardApiBase } from "./api-base"
 import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
   dashboardForwardedHeaders,
   dashboardRequestOrigin,
+  networkError,
+  newRequestId,
 } from "./dashboard-fetch"
 
 const API_BASE = dashboardApiBase()
@@ -21,27 +25,12 @@ export interface PlanUser {
   name: string
 }
 
-export type PlanStatus =
-  | "planning"
-  | "ready"
-  | "shared"
-  | "revising"
-  | "approved"
-  | "cancelled"
-
-export interface PlanApprover {
-  id: string
-  name: string
-  source: string
-}
-
 export interface PlanData {
   threadId: string
-  status: PlanStatus
+  status: string
   html: string
   markdown: string
-  approvedBy: PlanApprover | null
-  approvedAt: string | null
+  dismissed: boolean
   user: PlanUser
 }
 
@@ -64,25 +53,26 @@ export interface PlanComment {
   anchor: PlanTextAnchor | null
 }
 
-export class PlanApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export class PlanApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "PlanApiError"
   }
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const requestId = newRequestId()
   const res = await fetch(`${apiBase()}/dashboard/api${path}`, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -96,7 +86,7 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new PlanApiError(res.status, message)
+    throw new PlanApiError(res.status, message, requestId)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
@@ -104,6 +94,13 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function getPlan(threadId: string): Promise<PlanData> {
   return req<PlanData>(`/plan/${encodeURIComponent(threadId)}`)
+}
+
+export function dismissPlan(threadId: string): Promise<{ dismissed: boolean }> {
+  return req(`/plan/${encodeURIComponent(threadId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ dismissed: true }),
+  })
 }
 
 export async function getPlanComments(
@@ -134,33 +131,4 @@ export function deletePlanComment(
     `/plan/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}`,
     { method: "DELETE" }
   )
-}
-
-export function updatePlan(
-  threadId: string,
-  content: string,
-  format: "html" | "markdown"
-): Promise<{ status: PlanStatus; html?: string; markdown?: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}`, {
-    method: "PUT",
-    body: JSON.stringify({ [format]: content }),
-  })
-}
-
-export function approvePlan(
-  threadId: string
-): Promise<{ status: string; run_id: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}/approve`, {
-    method: "POST",
-  })
-}
-
-export function rejectPlan(
-  threadId: string,
-  dispatch = true
-): Promise<{ status: string }> {
-  return req(`/plan/${encodeURIComponent(threadId)}/reject`, {
-    method: "POST",
-    body: JSON.stringify({ dispatch }),
-  })
 }

@@ -98,6 +98,26 @@ async def pr(person_id, *, age=1, state="open", additions=0, deletions=0, **kwar
     return pr_id
 
 
+async def feedback(
+    person_id: UUID | None,
+    *,
+    age: int = 1,
+    withdrawn_at: datetime | None = None,
+    workspace_id: UUID | None = None,
+) -> UUID:
+    feedback_id = uuid4()
+    await insert(
+        "feedback_projection",
+        workspace_id=workspace_id,
+        feedback_id=feedback_id,
+        user_id=person_id,
+        sentiment="positive",
+        submitted_at=NOW - timedelta(days=age),
+        withdrawn_at=withdrawn_at,
+    )
+    return feedback_id
+
+
 async def report(**kwargs):
     return await queries.usage_leaderboard(
         **{"period": "7d", "limit": 100, "current_login": None, "current_email": None, **kwargs}
@@ -401,6 +421,114 @@ async def test_aliases_and_pr_only_members_preserve_privacy(usage_db):
     assert admin["rows"][0]["user"]["github_login"] == "named"
     assert admin["rows"][1]["user"]["name"] == "private"
     assert all(row["user"]["email"] is None for row in admin["rows"])
+
+
+async def test_feedback_counts_active_submissions_by_canonical_person(usage_db: UUID) -> None:
+    canonical = await person("named", "named@example.com")
+    private = await person(email="private@example.com")
+    no_feedback = await person("runner")
+    stale = await person("stale")
+    alias = uuid4()
+    await insert("identity_aliases", alias_person_id=alias, person_id=canonical)
+    await run(alias)
+    await run(canonical)
+    await run(no_feedback)
+    await pr(alias, state="merged")
+    await feedback(alias)
+    await feedback(canonical, age=0)
+    await feedback(canonical, age=7, withdrawn_at=NOW + timedelta(days=1))
+    await feedback(canonical, withdrawn_at=NOW)
+    await feedback(canonical, withdrawn_at=NOW - timedelta(hours=1))
+    await feedback(canonical, age=8)
+    await feedback(canonical, age=-1)
+    await feedback(canonical, workspace_id=uuid4())
+    await feedback(stale, age=8)
+    await feedback(None)
+    await feedback(private)
+
+    ordinary = await report(sort="feedback_given", direction="desc")
+    assert ordinary["total_members"] == 3
+    assert [row["feedback_given"] for row in ordinary["rows"]] == [3, 1, 0]
+    assert [row["is_top_feedback_contributor"] for row in ordinary["rows"]] == [True, False, False]
+    assert ordinary["rows"][0]["invocations"] == 2
+    assert ordinary["rows"][0]["prs_opened"] == 1
+    private_row = ordinary["rows"][1]
+    assert private_row["invocations"] == private_row["prs_opened"] == 0
+    assert private_row["user"] == {
+        "name": "Open SWE user",
+        "github_login": None,
+        "email": None,
+        "avatar_url": None,
+    }
+    own = await report(
+        current_email=" PRIVATE@EXAMPLE.COM ", sort="feedback_given", direction="desc"
+    )
+    assert own["current_user_rank"] == own["rows"][1]["rank"]
+    assert own["rows"][1]["user"]["email"] == "private@example.com"
+    admin = await report(admin=True, sort="feedback_given", direction="desc")
+    assert admin["rows"][1]["user"]["name"] == "private"
+    assert all(row["user"]["email"] is None for row in admin["rows"])
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+async def test_feedback_sort_preserves_snapshot_and_ties_across_pages(
+    usage_db: UUID, monkeypatch: pytest.MonkeyPatch, direction: queries.SortDirection
+) -> None:
+    first = await person("first", display_name="Same")
+    second = await person("second", display_name="Same")
+    zero = await person("zero")
+    await feedback(first, age=7)
+    withdrawn = await feedback(second, age=7)
+    await run(zero)
+    expected = await report(sort="feedback_given", direction=direction)
+    first_page = await report(limit=1, sort="feedback_given", direction=direction)
+
+    class LaterDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW + timedelta(days=2)
+
+    monkeypatch.setattr(queries, "datetime", LaterDatetime)
+    await feedback(first, age=-1)
+    await feedback(await person("new"), age=-1)
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE feedback_projection SET withdrawn_at = :withdrawn WHERE feedback_id = :id"
+            ),
+            {"withdrawn": NOW + timedelta(days=1), "id": withdrawn},
+        )
+    actual = first_page["rows"]
+    cursor = first_page["next_cursor"]
+    while cursor:
+        page = await report(limit=1, cursor=cursor, sort="feedback_given", direction=direction)
+        assert page["as_of"] == first_page["as_of"]
+        assert page["total_members"] == 3
+        actual.extend(page["rows"])
+        cursor = page["next_cursor"]
+    assert actual == expected["rows"]
+    assert [row["is_top_feedback_contributor"] for row in actual] == (
+        [False, True, True] if direction == "asc" else [True, True, False]
+    )
+    assert [row["feedback_given"] for row in actual] == (
+        [0, 1, 1] if direction == "asc" else [1, 1, 0]
+    )
+    with pytest.raises(queries.InvalidUsageCursor):
+        await report(cursor=first_page["next_cursor"], sort="rank", direction=direction)
+
+
+async def test_feedback_reporting_period_and_cutover(usage_db: UUID) -> None:
+    member = await person("member")
+    for age in (0, 1, 7, 8, 30, 31, 91):
+        await feedback(member, age=age)
+    for period, count in (("24h", 2), ("7d", 3), ("30d", 5), ("all", 6)):
+        assert (await report(period=period))["rows"][0]["feedback_given"] == count
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE deployment_metadata SET reporting_cutover_at = :cutover"),
+            {"cutover": NOW - timedelta(days=1)},
+        )
+    assert (await report(period="all"))["rows"][0]["feedback_given"] == 2
 
 
 async def test_reviewer_uses_publication_recording_and_surfacing_cohorts(usage_db):

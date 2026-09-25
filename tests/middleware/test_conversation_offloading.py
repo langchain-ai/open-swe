@@ -148,7 +148,11 @@ async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
         return original_status(value, **details)
 
     monkeypatch.setattr(middleware, "_status", status)
-    graph = create_agent(model=model, middleware=[middleware, Prepare()])
-    state = await graph.ainvoke({"messages": [HumanMessage(content="hello")]})
+    graph = create_agent(
+        model=model, middleware=[middleware, Prepare()], checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "manual-prepare"}}
+    await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
+    state = (await graph.aget_state(config)).values
     assert state["run_prepared"] is True
     assert state["conversation_offloading"]["status"] == "skipped"

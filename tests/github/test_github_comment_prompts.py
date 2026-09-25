@@ -9,13 +9,13 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from agent.dashboard.agent_overrides import profile_draft_prs
 from agent.github import comments as github_comments
 from agent.github import webhook as github_webhooks
-from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.prompt import construct_system_prompt
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,
+    ThreadParticipant,
     add_pr_collaboration_note,
-    resolve_triggering_user_identity,
 )
 
 _BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
@@ -92,7 +92,7 @@ def test_background_task_prompt_continues_without_acknowledging() -> None:
 
     assert "background sandbox command completed" in prompt
     assert "Do not send an initial acknowledgement" in prompt
-    assert "Make `slack_thread_reply` your first tool call" not in prompt
+    assert "Make `slack_reply` your first tool call" not in prompt
 
 
 def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
@@ -105,7 +105,7 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
     for source, guidance in expected.items():
         prompt = construct_system_prompt(working_dir="/workspace", source=source)
         assert guidance in prompt
-        assert "Make `slack_thread_reply` your first tool call" not in prompt
+        assert "Make `slack_reply` your first tool call" not in prompt
 
     scheduled_slack = construct_system_prompt(
         working_dir="/workspace", source="schedule", slack_context=True
@@ -116,16 +116,16 @@ def test_non_web_source_prompts_use_their_own_delivery_paths() -> None:
 def test_dashboard_prompt_omits_slack_tools() -> None:
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert "slack_thread_reply" not in prompt
+    assert "slack_reply" not in prompt
     assert "slack_add_reaction" not in prompt
 
 
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
-    from agent.prompt import OPEN_SWE_SHARED_BASE
+    from agent.prompts import load_prompt
 
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert prompt.endswith(OPEN_SWE_SHARED_BASE)
+    assert prompt.endswith(load_prompt("system/shared-base.md"))
     assert "base prompt replaces deepagents" not in prompt
 
 
@@ -150,9 +150,7 @@ def test_profile_draft_prs_defaults_to_draft_policy() -> None:
     assert profile_draft_prs({"draft_prs": True}) is True
 
 
-def test_construct_system_prompt_shell_escapes_user_name() -> None:
-    import shlex
-
+def test_a_hostile_name_stays_out_of_the_system_prompt() -> None:
     hostile = "O'Connor'; rm -rf / #"
     identity = CollaboratorIdentity(
         display_name=hostile,
@@ -162,18 +160,13 @@ def test_construct_system_prompt_shell_escapes_user_name() -> None:
     )
 
     system_prompt = construct_system_prompt(working_dir="/workspace")
-    sender_context = construct_sender_context(
-        identity,
-        model_id="openai:gpt-5.6-luna",
-        reasoning_effort="xhigh",
-    )
+    person = ThreadParticipant(
+        identity=identity, person_id="user:0199e0ae-0000-7000-8000-000000000000"
+    ).as_person()
 
     assert hostile not in system_prompt
-    assert f"git config user.name {shlex.quote(hostile)}" in sender_context
-    assert f"git config user.name {hostile}" not in sender_context
-    assert (
-        "Made by [Open SWE](https://github.com/langchain-ai/open-swe) · openai:gpt-5.6-luna (xhigh)"
-    ) in sender_context
+    assert person["commit_name"] == hostile
+    assert person["commit_email"] == "1234+oconnor@users.noreply.github.com"
 
 
 def test_add_pr_collaboration_note_replaces_legacy_footer() -> None:
@@ -202,32 +195,25 @@ def test_add_pr_collaboration_note_links_thread() -> None:
     )
 
 
-def test_add_pr_collaboration_note_skips_when_footer_present_with_other_link() -> None:
+def test_add_pr_collaboration_note_replaces_an_existing_footer() -> None:
+    """The footer is platform-owned: the agent's own line gives way to the canonical one."""
     body = "## Description\nDone.\n\nMade by [Open SWE](https://openswe.vercel.app)"
 
-    assert (
-        add_pr_collaboration_note(body, thread_url="https://openswe.vercel.app/agents/abc-123")
-        == body
+    assert add_pr_collaboration_note(
+        body, thread_url="https://openswe.vercel.app/agents/abc-123"
+    ) == (
+        "## Description\nDone.\n\nMade by [Open SWE](https://github.com/langchain-ai/open-swe)"
+        " · [view thread](https://openswe.vercel.app/agents/abc-123)"
     )
 
 
-async def test_resolve_triggering_user_identity_combines_slack_name_with_github_login() -> None:
-    identity = await resolve_triggering_user_identity(
-        {
-            "configurable": {
-                "github_login": "mdrxy",
-                "github_user_id": 1234,
-                "slack_thread": {"triggering_user_name": "Mason Daugherty"},
-            }
-        }
+def test_add_pr_collaboration_note_names_the_model() -> None:
+    assert add_pr_collaboration_note(
+        "Done.", model_id="openai:gpt-5.6-luna", reasoning_effort="xhigh"
+    ) == (
+        "Done.\n\nMade by [Open SWE](https://github.com/langchain-ai/open-swe)"
+        " · openai:gpt-5.6-luna (xhigh)"
     )
-
-    assert identity is not None
-    assert identity.display_name == "Mason Daugherty"
-    assert identity.commit_name == "Mason Daugherty"
-    assert identity.commit_email == "1234+mdrxy@users.noreply.github.com"
-    assert identity.github_login == "mdrxy"
-    assert identity.pr_attribution_name == "Mason Daugherty (@mdrxy)"
 
 
 def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:

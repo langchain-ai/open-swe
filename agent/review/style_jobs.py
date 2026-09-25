@@ -15,15 +15,21 @@ from agent.review.style_collector import (
 )
 from agent.review.styles import (
     REVIEW_STYLES,
+    TERMINAL_RUN_FAILURES,
     ReviewStyle,
     reconcile_running_status,
 )
 from agent.thread_ids import review_style_thread_id
 from agent.utils.analyzer_skills import build_skill_files
+from agent.utils.thread_ops import thread_run_error
 
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "analyzer"
+
+
+def _thread_title(full_name: str) -> str:
+    return f"Review style: {full_name}"
 
 
 def langgraph_client():
@@ -148,6 +154,7 @@ async def start_bootstrap_analysis(
                 files=build_skill_files(),
             ),
             source="review-style-bootstrap",
+            thread_title=_thread_title(full_name),
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
@@ -177,6 +184,7 @@ async def start_continual_run(
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
             source="review-style-continual",
+            thread_title=_thread_title(full_name),
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
@@ -219,8 +227,18 @@ async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
         logger.debug("Could not sync run status for %s", full_name, exc_info=True)
         return record
 
+    run_error: str | None = None
+    if run_status in TERMINAL_RUN_FAILURES:
+        try:
+            run_error = await thread_run_error(thread_id, client)
+        except Exception:
+            logger.warning(
+                "Could not read review style run error",
+                exc_info=True,
+                extra={"repo_full_name": full_name},
+            )
     return await reconcile_running_status(
-        full_name, record, run_status=run_status, run_missing=run_missing
+        full_name, record, run_status=run_status, run_missing=run_missing, run_error=run_error
     )
 
 

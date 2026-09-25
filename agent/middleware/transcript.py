@@ -42,12 +42,10 @@ from sqlalchemy import text as sql
 
 from agent.database import postgres
 from agent.input_messages import (
-    SENDER_CONTEXT_SENDER_ID,
     input_message_text,
     message_sender_id,
 )
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.transcript import checkpoints
 from agent.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from agent.transcript.engine import Command, append
 from agent.transcript.events import (
@@ -172,7 +170,6 @@ class RunState:
     run_id: str
     turn_id: UUID
     enabled: bool
-    start_head: str | None = None
     seen_human_ids: set[str] = field(default_factory=set)
     buffers: dict[str, MessageBuffers] = field(default_factory=dict)
     message_alias: dict[str, str] = field(default_factory=dict)
@@ -288,8 +285,7 @@ def _transcribed_human_text(message: HumanMessage) -> str:
     Who sent it, on which surface, and whether it is a platform-generated
     context message the UI hides are all carried by the ``<input-message>``
     wrapper and by nothing else on the wire. Unwrapping here would strip a
-    message of its attribution and turn ``system:sender-context`` into a
-    message apparently typed by the user.
+    message of its attribution.
     """
     return _message_text(message).strip()
 
@@ -302,14 +298,10 @@ def _is_dynamic_context(message: HumanMessage) -> bool:
 def _is_turn_annotation(message: HumanMessage) -> bool:
     """A platform block that annotates the turn instead of being it.
 
-    The run appends the sender-context metadata *after* the message it
-    describes, and a ``<dynamic-context>`` introduction can trail it too, so the
-    last human message in state is routinely neither the request nor anything a
-    reader should see attributed to the user.
+    A ``<dynamic-context>`` introduction can trail the message it describes, so
+    the last human message in state is not reliably the request itself.
     """
-    return _is_dynamic_context(message) or (
-        message_sender_id(message.content) == SENDER_CONTEXT_SENDER_ID
-    )
+    return _is_dynamic_context(message)
 
 
 def _usage(message: AIMessage) -> MessageUsage | None:
@@ -737,10 +729,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and not _is_dynamic_context(message)
         )
         run_state.enqueue(*commands)
-        # The baseline the turn's checkpoint is diffed against when the thread
-        # has no earlier one. Read after the queue is primed: it is one sandbox
-        # round trip, and nothing before it has to wait on it.
-        run_state.start_head = await checkpoints.read_head(ids.thread_id)
 
     async def awrap_model_call(
         self,
@@ -788,6 +776,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         """Human messages the queue injected mid-run are not in ``turn.requested``."""
         for message in request.messages:
             if not isinstance(message, HumanMessage):
+                continue
+            if message.additional_kwargs.get("lc_source") == "summarization":
                 continue
             message_id = message.id
             if not isinstance(message_id, str) or message_id in state.seen_human_ids:
@@ -991,25 +981,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 extra={"transcript_tool_call_id": tool_call_id},
             )
 
-    async def _capture_checkpoint(self, state: RunState) -> None:
-        """Record what the turn left in the sandbox, enqueued before the event
-        that ends it so a reader never sees a settled turn with nothing to diff."""
-        try:
-            state.enqueue(
-                await checkpoints.checkpoint_command(
-                    state.thread_id,
-                    state.turn_id,
-                    run_id=state.run_id,
-                    start_head=state.start_head,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "Transcript turn checkpoint failed",
-                exc_info=True,
-                extra={"transcript_thread_id": state.thread_id},
-            )
-
     async def _interrupt_turn(self, state: RunState) -> None:
         """End a cancelled turn. The cancel endpoint writes the same command id."""
         if state.terminal:
@@ -1036,7 +1007,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             return
         state.terminal = True
         try:
-            await self._capture_checkpoint(state)
             state.enqueue(
                 Command(
                     command_id=f"turn:{state.turn_id}:failed",
@@ -1068,7 +1038,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         try:
             if not run_state.terminal:
                 run_state.terminal = True
-                await self._capture_checkpoint(run_state)
                 run_state.enqueue(
                     Command(
                         command_id=f"turn:{run_state.turn_id}:completed",
@@ -1129,7 +1098,6 @@ def _turn_requested(
             model_id=_string(ids.configurable.get("resolved_agent_model_id"))
             or _string(ids.configurable.get("agent_model_id")),
             effort=_string(ids.configurable.get("agent_effort")),
-            plan_mode=ids.configurable.get("plan_mode") is True,
         ),
         actor_kind="user",
         run_id=state.run_id,

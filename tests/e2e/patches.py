@@ -13,6 +13,7 @@ process), so it runs before the first run regardless of import order. Idempotent
 import logging
 import os
 import re
+import socket
 from urllib.parse import urlparse
 
 import e2e_env  # noqa: F401  (sets env before any agent import)
@@ -26,6 +27,16 @@ def apply() -> None:
     global _applied
     if _applied:
         return
+
+    # E2E_LOG_FILE captures the server's own logging, which langgraph dev does
+    # not surface: without it a swallowed warning is invisible to the suite.
+    log_file = os.environ.get("E2E_LOG_FILE")
+    if log_file:
+        handler = logging.FileHandler(log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        root = logging.getLogger()
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
 
     import importlib
 
@@ -54,6 +65,12 @@ def apply() -> None:
             return FakeScriptedChatModel(script=build_script())
 
         server.make_model = _fake_make_model
+        # The review chat and review scout graphs bind their own factory by name.
+        from agent import chat as chat_graph
+        from agent.review_scout import graph as review_scout_graph
+
+        for module in (chat_graph, review_scout_graph):
+            module.__dict__["make_model"] = _fake_make_model
 
     # Callers pass installation ids, repository scopes and permission maps; the
     # fake GitHub does not care, so accept whatever the real signatures take.
@@ -75,7 +92,7 @@ def apply() -> None:
     # import time. Resolving an installation would reach api.github.com, and
     # without it a durable watch has no token and silently does nothing.
     from agent import baby_sit
-    from agent.expedited_review import voting, watch
+    from agent.expedited_review import lifecycle, merge, reviews, voting
 
     # Same shadowing caveat as ``opr`` above: the tools package re-exports the
     # functions, so reach the modules by name.
@@ -83,7 +100,7 @@ def apply() -> None:
     expedite_tool = importlib.import_module("agent.tools.expedite_pr_approval")
     thread_tools = importlib.import_module("agent.tools.threads")
 
-    for module in (watch, voting, manage_baby_sit, baby_sit):
+    for module in (lifecycle, merge, voting, manage_baby_sit, baby_sit):
         for name, stub in (
             ("get_github_app_installation_id_for_repo", _dummy_install_id),
             ("get_github_app_installation_token", _dummy_install_token),
@@ -125,13 +142,48 @@ def apply() -> None:
             url=f"{BASE_URL}/mock/github/{owner}/{repo}/pull/{number}",
         )
 
+    # Uploading the expedited-review diff image crosses two production guards
+    # that a loopback harness cannot satisfy: the ticket URL must be on
+    # files.slack.com, and the byte transfer must survive the SSRF check, which
+    # rejects loopback. Widen both to this one harness path — skipping them
+    # would stop exercising them at all, and without the upload the card
+    # silently degrades to its text fallback and the suite tests a rendering
+    # nobody sees.
+    from agent.utils import url_safety
+
+    _harness_upload = f"{BASE_URL}/fake-slack/upload/"
+    _real_validate_upload = slack_client._validate_slack_upload_url
+    _real_resolve = url_safety.resolve_and_validate
+
+    def _validate_upload_url(url: str) -> tuple[bool, str]:
+        if url.startswith(_harness_upload):
+            return True, ""
+        return _real_validate_upload(url)
+
+    def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
+        if url.startswith(_harness_upload):
+            host = urlparse(url).hostname or "127.0.0.1"
+            return True, "", host, socket.getaddrinfo(host, urlparse(url).port or 80)
+        return _real_resolve(url)
+
+    slack_client._validate_slack_upload_url = _validate_upload_url
+    url_safety.resolve_and_validate = _resolve_and_validate
+
     slack_client.parse_github_pr_url = _parse_pr_url
-    for module in (manage_baby_sit, expedite_tool, thread_tools, opr, request_pr_review):
+    merge_tool = importlib.import_module("agent.tools.merge_expedited_pr")
+    for module in (
+        manage_baby_sit,
+        expedite_tool,
+        merge_tool,
+        thread_tools,
+        opr,
+        request_pr_review,
+    ):
         if "parse_github_pr_url" in module.__dict__:
             module.__dict__["parse_github_pr_url"] = _parse_pr_url
 
     # Keep the triggering-user identity lookup offline; the real fallback to
-    # config-derived identity (Slack name/email) still runs.
+    # the config's GitHub login still runs.
     async def _no_github_identity(_token: str | None) -> None:
         return None
 
@@ -165,6 +217,7 @@ def apply() -> None:
         thread_access,
         webhook_common,
         voting,
+        reviews,
         repo_access,
         github_repos,
         review_routes,
@@ -187,14 +240,14 @@ def apply() -> None:
 
     # Every other module that captured the REST base at import time: PR and
     # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness and voting calls.
+    # eligibility, readiness, review and merge calls.
     from agent.expedited_review import eligibility, readiness
     from agent.github import checks as github_checks
     from agent.github import ci as github_ci
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, voting):
+    for module in (eligibility, readiness, reviews, merge):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
@@ -218,7 +271,59 @@ def apply() -> None:
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
     workspace_refresh._release_builder_sandbox = _release_nothing
 
+    # The review page reads the PR, its diff and its comments with the App token
+    # against a REST base each module captured at import time.
+    from agent import chat as chat_graph
+    from agent.github import pull_request_diff
+    from agent.review import chat as review_chat
+    from agent.review import conversation as review_conversation
+    from agent.review import reviews as review_reviews
+    from agent.review_scout import graph as review_scout_graph
+
+    for module in (review_reviews, pull_request_diff, review_conversation):
+        module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
+    review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
+    for module in (review_reviews, review_chat, chat_graph):
+        module.__dict__["get_github_app_installation_token"] = _dummy_install_token
+    review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
+
+    # A scout sandbox clones the PR through the GitHub proxy, which the local
+    # provider cannot reach, so provisioning fails the way an unavailable
+    # sandbox provider does. The delay keeps the run visibly in flight first,
+    # which is the state the review page polls through.
+    review_scout_graph.__dict__["_ensure_scout_sandbox"] = _unavailable_scout_sandbox
+
     _applied = True
+
+
+SCOUT_SANDBOX_ERROR = "E2E has no sandbox provider for the review scout"
+
+
+async def _unavailable_scout_sandbox(_thread_id: str, _cfg: object) -> object:
+    import asyncio
+
+    await asyncio.sleep(float(os.environ.get("E2E_SCOUT_FAIL_AFTER_SECONDS", "4")))
+    raise RuntimeError(SCOUT_SANDBOX_ERROR)
+
+
+async def _fake_fetch_pr_diff(
+    *, owner: str, repo: str, pr_number: int, token: str, timeout: float = 30.0
+) -> str | None:
+    import httpx2
+    from e2e_env import FAKE_GITHUB_API
+
+    async with httpx2.AsyncClient(timeout=timeout) as client:
+        response = await client.get(
+            f"{FAKE_GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.diff"},
+        )
+    if response.status_code != 200:
+        logger.warning(
+            "Fake PR diff fetch failed",
+            extra={"pr_number": pr_number, "status_code": response.status_code},
+        )
+        return None
+    return response.text
 
 
 async def _fake_assert_repo_access(full_name: str, token: str) -> str:

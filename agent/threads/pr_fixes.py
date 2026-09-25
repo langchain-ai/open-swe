@@ -13,7 +13,7 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.pull_requests import PullRequest
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
@@ -73,7 +73,7 @@ class OpenThreadIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = False
 
     def prompt(self, url: str) -> str:
-        return render_prompt("runs/pull-request-thread.md", url=url)
+        return prompt("runs/pull-request-thread", url=url)
 
     def thread_title(self, full_name: str, number: int) -> str:
         return self.title
@@ -86,14 +86,14 @@ class FixIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        prompt = render_prompt("runs/pull-request-fix.md", url=url)
+        text = prompt("runs/pull-request-fix", url=url)
         if self.context is None:
-            return prompt
-        snapshot = render_prompt(
-            "runs/pull-request-fix-context.md",
+            return text
+        snapshot = prompt(
+            "runs/pull-request-fix-context",
             snapshot=self.context.model_dump_json(indent=2),
         )
-        return f"{prompt}\n\n{snapshot}"
+        return f"{text}\n\n{snapshot}"
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Fix {full_name}#{number}"
@@ -105,14 +105,36 @@ class AddressCommentsIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        return render_prompt("runs/pull-request-comments.md", url=url)
+        return prompt("runs/pull-request-comments", url=url, comment_url="")
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Address comments on {full_name}#{number}"
 
 
+class AddressCommentIntent(_PullRequestIntentBase):
+    intent: Literal["address-comment"]
+    comment_url: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(default="", max_length=10_000)
+
+    dispatches_run: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        if not self.comment_url.startswith(f"{url}#"):
+            raise HTTPException(422, "comment does not belong to this pull request")
+        text = prompt("runs/pull-request-comments", url=url, comment_url=self.comment_url)
+        instructions = self.instructions.strip()
+        if not instructions:
+            return text
+        extra = prompt("runs/pull-request-comment-instructions", instructions=instructions)
+        return f"{text}\n\n{extra}"
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Address comment on {full_name}#{number}"
+
+
 PullRequestThreadIntent = Annotated[
-    OpenThreadIntent | FixIntent | AddressCommentsIntent, Field(discriminator="intent")
+    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent,
+    Field(discriminator="intent"),
 ]
 
 
@@ -278,6 +300,7 @@ async def start_pull_request_thread(
             prompt,
             configurable,
             source="dashboard",
+            thread_title=None,
             client=client,
             multitask_strategy="enqueue",
         )

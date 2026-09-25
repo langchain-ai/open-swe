@@ -14,7 +14,12 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
         patch(
             "agent.dashboard.profiles.get_profile",
             new_callable=AsyncMock,
-            return_value={"draft_prs": False, "model_routing_enabled": False},
+            return_value={
+                "draft_prs": False,
+                "model_routing_enabled": False,
+                "recent_thread_context_enabled": True,
+                "slack_onboarding_dismissed": True,
+            },
         ),
         patch("agent.store.store_client") as client,
     ):
@@ -23,9 +28,12 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
 
     assert profile["draft_prs"] is False
     assert profile["model_routing_enabled"] is False
+    assert profile["recent_thread_context_enabled"] is True
+    assert profile["slack_onboarding_dismissed"] is True
     assert put_item.await_args is not None
     assert put_item.await_args.args[2]["draft_prs"] is False
     assert put_item.await_args.args[2]["model_routing_enabled"] is False
+    assert put_item.await_args.args[2]["recent_thread_context_enabled"] is True
 
 
 @pytest.mark.asyncio

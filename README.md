@@ -27,7 +27,7 @@ Open SWE turns engineering work into a repeatable system. Give it a code-change 
 It goes beyond code generation. Open SWE can review pull requests, learn a repository's review style, monitor CI, and respond to feedback. It is open source, deployable in your infrastructure, and designed to be adapted to your team's repositories, tools, policies, and workflows.
 
 > [!NOTE]
-> Open SWE is under active development. APIs, setup, and product surfaces may continue to evolve.
+> **Under active development.** We’re rapidly iterating on Open SWE, so expect breaking changes and rough edges. We’re not accepting issues or external contributions at this time. You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
 
 ---
 
@@ -130,7 +130,6 @@ A useful software factory needs both autonomy and boundaries. Open SWE includes:
 - Credentials kept in the server process or injected through a sandbox proxy
 - Human approval before pushing workflow-file changes
 - Read-only reviewer and PR chat agents
-- Plan mode for reviewing an implementation approach before code changes
 - Opt-in automatic review and CI monitoring
 
 Sandboxes can have network access and powerful tools. Deployments should use least-privilege credentials, restrict enabled repositories and integrations, and tailor approval rules to their environment.
@@ -142,7 +141,7 @@ Open SWE includes a LangGraph backend, a web dashboard, and an experimental desk
 - **[Installation Guide](docs/INSTALLATION.md)** — Deploy Open SWE for a team: LangGraph Platform or Docker, the GitHub and Slack apps, model providers, environment variables, and the optional Linear trigger
 - **[Development Guide](docs/DEVELOPMENT.md)** — Run it on your machine, with hot reload for the dashboard and an ngrok tunnel for webhooks
 - **[Customization Guide](docs/CUSTOMIZATION.md)** — Change models, sandboxes, tools, skills, prompts, triggers, and middleware
-- **[Open SWE Enhancement Proposals](oeps/README.md)** — Review consequential product, architecture, security, and process decisions
+- **Architecture references:** [Workspaces](docs/reference/workspaces.md) and [expedited Slack review](docs/reference/expedited-slack-review.md)
 
 One deployment serves the API, the webhooks, and the dashboard from a single URL. Locally:
 

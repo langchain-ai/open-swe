@@ -7,11 +7,12 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_sender_context, construct_system_prompt
+from agent.prompt import construct_system_prompt
 from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
 from agent.users import User
+from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 from agent.workspaces import refresh
 from agent.workspaces.store import Workspace
 
@@ -476,9 +477,15 @@ async def test_refresh_start_refuses_while_one_is_running(
 # --- prompt wiring ---
 
 
-def test_sender_context_includes_workspace_admin_status() -> None:
-    assert "Workspace admin: yes." in construct_sender_context(None, workspace_admin=True)
-    assert "Workspace admin: no." in construct_sender_context(None)
+def test_person_block_includes_workspace_admin_status() -> None:
+    identity = CollaboratorIdentity(
+        display_name="alice", commit_name="alice", commit_email="alice@example.com"
+    )
+    admin = ThreadParticipant(identity=identity, person_id="user:1", workspace_admin=True)
+    member = ThreadParticipant(identity=identity, person_id="user:1")
+
+    assert admin.as_person()["workspace_admin"] == "yes"
+    assert member.as_person()["workspace_admin"] == "no"
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:
@@ -503,3 +510,25 @@ def test_blank_workspace_prompt_renders_nothing() -> None:
         working_dir="/workspace", workspace_name="Base", workspace_instructions="   "
     )
     assert "Workspace Instructions" not in prompt
+
+
+async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An admin requester must not make everyone else in the roster look like one."""
+    from agent import server
+    from agent.users import User
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
+    monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))
+    bob = CollaboratorIdentity(
+        display_name="bob", commit_name="bob", commit_email="bob@example.com", github_login="bob"
+    )
+    admin_requester_config = {"configurable": {"user_email": "admin@example.com"}}
+
+    as_seen_by_admin = await server._thread_participant(bob, admin_requester_config)
+    assert as_seen_by_admin.workspace_admin is False
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com,bob")
+    assert (await server._thread_participant(bob, admin_requester_config)).workspace_admin is True

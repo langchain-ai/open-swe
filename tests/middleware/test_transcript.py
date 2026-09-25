@@ -64,11 +64,6 @@ def _install(
         return transcribed
 
     monkeypatch.setattr(mw, "_has_transcript", _has_transcript)
-
-    async def _turn_context(thread_id: str, turn_id: UUID) -> tuple[str | None, str | None]:
-        return None, None
-
-    monkeypatch.setattr(mw.checkpoints, "_turn_context", _turn_context)
     configurable: dict[str, Any] = {"thread_id": THREAD_ID, "run_id": RUN_ID}
     if turn_id is not None:
         configurable["transcript_turn_id"] = str(turn_id)
@@ -186,7 +181,6 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
         "message.completed",
         "tool.started",
         "tool.completed",
-        "turn.checkpoint.completed",
         "turn.completed",
     ]
     assert engine.command_ids[0] == f"turn:{turn_id}:started:{RUN_ID}"
@@ -255,13 +249,21 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     ]
     await middleware.abefore_agent({"messages": history}, None)
 
-    injected = HumanMessage(content="also do this", id="human-queued")
+    summary = HumanMessage(
+        content="You are in the middle of a conversation that has been summarized.",
+        id="summary-1",
+        additional_kwargs={"lc_source": "summarization"},
+    )
+    injected = HumanMessage(content=summary.content, id="human-queued")
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
+        assert summary in request.messages
         return ModelResponse(result=[AIMessage(content="ok", id="ai-2")])
 
     for _ in range(2):
-        await middleware.awrap_model_call(_model_request([*history, injected]), model_handler)
+        await middleware.awrap_model_call(
+            _model_request([summary, *history, injected]), model_handler
+        )
     await middleware.aafter_agent({"messages": history}, None)
 
     human_events = [
@@ -279,25 +281,24 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     middleware = mw.TranscriptMiddleware()
     entity = HumanMessage(
         content=(
-            '<dynamic-context kind="person" id="slack:U1"><handle>bob</handle></dynamic-context>'
+            '<dynamic-context kind="channel" id="slack:C1">\nplatform: slack\n</dynamic-context>'
         ),
-        id="entity-bob",
+        id="entity-channel",
     )
     envelope = (
-        '<input-message sender="slack:U1" surface="slack" kind="human">'
-        "<content>add a greet() helper</content></input-message>"
+        '<input-message sender="slack:U1" surface="slack" kind="human">\n'
+        "add a greet() helper\n</input-message>"
     )
     human = HumanMessage(content=envelope, id="human-1")
-    # The run appends its own annotation of the sender *after* the turn's
-    # message, so the last human message in state is not the request.
-    sender_context = HumanMessage(
+    # The run appends the sender's person block *after* the turn's message, so
+    # the last human message in state is not the request.
+    person = HumanMessage(
         content=(
-            '<input-message sender="system:sender-context" surface="automation" kind="system">'
-            "<content>Workspace admin: yes.</content></input-message>"
+            '<dynamic-context kind="person" id="slack:U1">\ndisplay_name: bob\n</dynamic-context>'
         ),
-        id="sender-context-1",
+        id="person-bob",
     )
-    messages = [entity, human, sender_context]
+    messages = [entity, human, person]
     await middleware.abefore_agent({"messages": messages}, None)
 
     async def model_handler(request: ModelRequest) -> ModelResponse:
@@ -313,8 +314,11 @@ async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
     # The introduction that names the sender is recorded too, though it renders
     # as nothing: without it the reader has no display name to attribute by.
     recorded = [command for command in engine.commands if command.command_id.startswith("human:")]
-    assert [command.command_id for command in recorded] == ["human:entity-bob"]
-    assert "slack:U1" in (recorded[0].event.text or "")
+    assert [command.command_id for command in recorded] == [
+        "human:entity-channel",
+        "human:person-bob",
+    ]
+    assert "slack:U1" in (recorded[1].event.text or "")
 
 
 async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -328,7 +332,7 @@ async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(RuntimeError):
         await middleware.awrap_model_call(_model_request([]), model_handler)
 
-    assert engine.types == ["turn.started", "turn.checkpoint.completed", "turn.failed"]
+    assert engine.types == ["turn.started", "turn.failed"]
     failed = engine.commands[-1].event
     assert isinstance(failed, TurnFailed)
     assert "provider exploded" in failed.error

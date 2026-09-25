@@ -12,7 +12,7 @@ if model_id == DEFAULT_LLM_MODEL_ID:
 return create_deep_agent(
     model=make_model(model_id, **model_kwargs),
     system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, slack_thread_reply],
+    tools=[http_request, fetch_url, slack_reply],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -140,11 +140,11 @@ See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsm
 Set optional deployment defaults with `LLM_MODEL_ID` and `LLM_REASONING_EFFORT`:
 
 ```bash
-LLM_MODEL_ID="anthropic:claude-sonnet-5"
+LLM_MODEL_ID="anthropic:claude-opus-5-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5`. All other deployments default to `openai:gpt-5.6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
 Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
@@ -158,10 +158,10 @@ Use the `provider:model` format:
 
 ```python
 # Anthropic
-model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -172,7 +172,7 @@ The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models
 ```python
 from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model_name="claude-sonnet-5", temperature=0, max_tokens=16_000)
+model = ChatAnthropic(model_name="claude-opus-5-5", temperature=0, max_tokens=16_000)
 
 return create_deep_agent(
     model=model,
@@ -190,10 +190,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     
     if source == "slack":
         # Faster model for Slack Q&A
-        model = make_model("anthropic:claude-sonnet-5", temperature=0, max_tokens=16_000)
+        model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("openai:gpt-5.6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+        model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```
@@ -228,7 +228,7 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 | `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_thread_reply` | `agent/slack/tools/thread_reply.py` | Reply in Slack threads |
+| `slack_reply` | `agent/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
 
 ### Workspace MCP servers
 
@@ -236,8 +236,7 @@ Admins can connect generic remote MCP servers under **Admin → Instance MCPs**,
 Connections belong to this Open SWE deployment and are shared across repositories
 and remote coding-agent threads. Enabled connections provide baseline tools for
 all users, limited to the tools selected by an admin. Only admins can manage
-connections or reveal saved credentials. Plan mode continues to block workspace
-MCP tools.
+connections or reveal saved credentials.
 
 1. Choose **Add MCP server** and enter a unique lowercase connection name, an
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
@@ -445,14 +444,14 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
 Then register it in `agent/server.py`:
 
 ```python
-from .tools import fetch_url, http_request, slack_thread_reply
+from .tools import fetch_url, http_request, slack_reply
 from .tools.datadog_search import datadog_search
 
 return create_deep_agent(
     ...
     tools=[
         http_request, fetch_url,
-        slack_thread_reply,
+        slack_reply,
         datadog_search,  # new tool
     ],
     ...
@@ -463,7 +462,7 @@ The agent will automatically see the tool's name, docstring, and parameter types
 
 ### Removing tools
 
-If you don't use Slack, remove `slack_thread_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
+If you don't use Slack, remove `slack_reply` from the tools list. If you don't need web fetching, remove `fetch_url`.
 
 ### Conditional tools
 
@@ -474,7 +473,7 @@ base_tools = [http_request, fetch_url]
 source = config["configurable"].get("source")
 
 if source == "slack":
-    tools = [*base_tools, slack_thread_reply]
+    tools = [*base_tools, slack_reply]
 else:
     tools = base_tools
 
@@ -599,18 +598,16 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
+The system prompt is the template `agent/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `agent/prompt.py`. It includes each section from its own file under `agent/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
 
-| Section | What it controls |
+| File | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
-| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
-| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
-| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
-| `PLAN_MODE_SECTION` | Read-only planning mode instructions |
-
-> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
+| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
+| `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
+| `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `dependencies.md` | Installing, vetting, and managing project dependencies |
+| `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |
+| `shared-base.md` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
 
 ### Default prompt file
 

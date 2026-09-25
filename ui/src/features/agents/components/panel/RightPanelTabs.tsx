@@ -52,6 +52,7 @@ interface RightPanelTabsProps {
   onCopyFilePath: (relativePath: string) => void
   onAddTerminal: () => void
   onAddDiff: () => void
+  onAddFiles: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   children: ReactNode
@@ -60,6 +61,7 @@ interface RightPanelTabsProps {
 const SURFACE_DISABLED_REASONS = {
   terminal: "Terminals are only available from a running workspace.",
   diff: "Changes are only available for threads with a repository.",
+  files: "Files are only available from a running workspace.",
 } as const
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -76,6 +78,7 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 const SURFACE_UNAVAILABLE_HINTS = {
   terminal: "Available once the workspace is running.",
   diff: "Available for Git repositories.",
+  files: "Available once the workspace is running.",
 } as const
 
 type SurfaceShortcutEvent = Pick<
@@ -146,6 +149,7 @@ function SurfaceMenuItem(props: {
 function RightPanelEmptyState(props: {
   onAddTerminal: () => void
   onAddDiff: () => void
+  onAddFiles: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
 }) {
@@ -170,6 +174,15 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
       onClick: props.onAddDiff,
+    },
+    {
+      label: "Files",
+      description: "Browse files in this workspace.",
+      icon: Files,
+      shortcut: "F",
+      available: props.terminalAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
+      onClick: props.onAddFiles,
     },
   ] as const
 
@@ -415,6 +428,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
     },
+    {
+      label: "Files",
+      icon: Files,
+      shortcut: "F",
+      available: props.terminalAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: props.onAddFiles,
+    },
   ] as const
 
   const handleAddSurfaceMenuKeyDown = (
@@ -647,6 +668,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <RightPanelEmptyState
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
+            onAddFiles={props.onAddFiles}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
           />

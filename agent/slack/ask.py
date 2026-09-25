@@ -14,13 +14,16 @@ from typing import Any
 from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    acknowledge_slack_command,
+    clear_slack_command_message,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
+    replace_slack_command_message,
 )
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.webhook import workspace_scoped_default_repo
@@ -42,6 +45,7 @@ _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
+_ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
 
 
 class SlackAskRequest(BaseModel):
@@ -51,6 +55,7 @@ class SlackAskRequest(BaseModel):
     thread_id: str
     command: str = ASK_COMMAND
     team_id: str = ""
+    response_url: str = ""
 
 
 def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
@@ -105,6 +110,8 @@ async def _channel_context(channel_id: str) -> str:
 
 
 async def _refuse(request: SlackAskRequest, text: str) -> None:
+    if request.response_url and await replace_slack_command_message(request.response_url, text):
+        return
     await post_slack_ephemeral_message(request.channel_id, request.user_id, text)
 
 
@@ -130,10 +137,14 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
         reason="revoked" if has_record else "unlinked",
         ephemeral=True,
     )
+    if request.response_url:
+        await clear_slack_command_message(request.response_url)
     return None
 
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
+    if request.response_url:
+        await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
     if not channel_context.allows_operations:
         await _refuse(request, _CHANNEL_REFUSAL)
@@ -203,14 +214,14 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_thread": slack_thread.dump(),
         "source": "slack",
         "slack_ask": True,
-        "plan_mode": False,
+        "slack_ask_response_url": request.response_url,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,
         "environment": workspace,
     }
-    prompt = render_prompt(
-        "runs/slack-ask.md",
+    run_prompt = prompt(
+        "runs/slack-ask",
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
@@ -218,7 +229,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         channel_name=_channel_label(channel_context),
         channel_context=await _channel_context(request.channel_id) or _NO_CHANNEL_CONTEXT,
     )
-    await dispatch_agent_run(thread_id, prompt, configurable, source="slack")
+    await dispatch_agent_run(thread_id, run_prompt, configurable, source="slack", thread_title=None)
     logger.info(
         "Started a Slack slash command run",
         extra={"agent_thread_id": thread_id, "slack_channel": request.channel_id},

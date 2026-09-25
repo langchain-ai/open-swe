@@ -52,6 +52,7 @@ from agent.github.comments import (
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
@@ -68,7 +69,7 @@ from agent.github.token import (
     is_bot_token_only_mode,
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -127,6 +128,7 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread, ensure_titled_thread
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
@@ -193,7 +195,6 @@ __all__ = [
     "get_thread_metadata_safe",
     "get_thread_workspace",
     "get_thread_model_choice",
-    "get_thread_plan_mode",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
     "is_repo_allowed",
@@ -207,7 +208,6 @@ __all__ = [
     "review_comment_reply_parent_id",
     "reviewer_token_for_repo",
     "run_id_for_logging",
-    "set_thread_plan_mode",
     "store_current_reviewer_run_id",
     "thread_exists",
     "trigger_or_queue_run",
@@ -228,6 +228,7 @@ __all__ = [
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
@@ -514,7 +515,7 @@ async def upsert_agent_thread_metadata(
     repo_config: dict[str, str] | None = None,
     github_login: str = "",
     user_email: str = "",
-    title: str = "",
+    title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
@@ -638,8 +639,12 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
-                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
             )
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
@@ -679,7 +684,7 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    OEP-0003 puts a named repository ahead of a Slack channel's workspace
+    A named repository takes precedence over a Slack channel's workspace
     binding and a deployment-wide default behind it, so routing needs to tell
     the two apart. ``explicit`` is true only for a repository the thread or the
     channel description named.
@@ -810,31 +815,14 @@ async def thread_exists(thread_id: str) -> bool:
 
 
 async def ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
         return False
-
-
-async def get_thread_plan_mode(thread_id: str) -> bool | None:
-    """Return the persisted plan-mode flag for a thread, or ``None`` if unset."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        thread = await langgraph_client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            return None
-        logger.warning("Failed to fetch plan-mode metadata for thread %s", thread_id)
-        return None
-    metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    if not isinstance(metadata, dict):
-        return None
-    value = metadata.get("plan_mode")
-    return value if isinstance(value, bool) else None
 
 
 async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
@@ -888,27 +876,6 @@ async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
     return (
         await workspace_for_repo(repo_config["owner"], repo_config["name"])
     ) or DEFAULT_WORKSPACE_SLUG
-
-
-async def set_thread_plan_mode(thread_id: str, enabled: bool) -> None:
-    """Persist the plan-mode flag onto thread metadata."""
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"plan_mode": bool(enabled)}
-        )
-    except Exception as exc:  # noqa: BLE001
-        if is_not_found_error(exc):
-            try:
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
-                    if_exists="do_nothing",
-                    metadata={"plan_mode": bool(enabled)},
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to create thread %s while persisting plan_mode", thread_id)
-            return
-        logger.exception("Failed to persist plan_mode for thread %s", thread_id)
 
 
 async def post_account_link_prompt(
@@ -1094,7 +1061,7 @@ async def trigger_or_queue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=f"PR #{pr_number}" if pr_number else "",
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
     )
@@ -1112,6 +1079,7 @@ async def trigger_or_queue_run(
             "environment": workspace,
         },
         source="github",
+        thread_title=None,
         input=input,
         metadata=AGENT_VERSION_METADATA,
     )
@@ -1541,8 +1509,8 @@ def build_queued_finding_reply_prompt(
 ) -> str:
     safe_body = _escape_review_reply_data(reply_body)
     safe_author = _escape_review_reply_attr(reply_author)
-    return render_prompt(
-        "reviewer/queued-finding-reply.md",
+    return prompt(
+        "reviewer/queued-finding-reply",
         reply_author=reply_author,
         finding_id=finding_id,
         pr_number=pr_number,

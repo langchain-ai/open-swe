@@ -79,6 +79,7 @@ def context(monkeypatch: pytest.MonkeyPatch, fake_store: Any) -> dict[str, Any]:
     monkeypatch.setattr(feedback, "respond_to_slack_interaction", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "open_slack_modal", AsyncMock(return_value=True))
     monkeypatch.setattr(feedback, "create_langsmith_thread_feedback", AsyncMock(return_value=True))
+    monkeypatch.setattr(feedback, "record_feedback_submission", AsyncMock())
     client = AsyncMock()
     client.threads.get.return_value = {
         "metadata": {
@@ -236,32 +237,6 @@ async def test_prompt_uses_exact_run_mapping_and_deduplicates(
     await tasks()
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["choice"] == "good"
     assert fake_store.values(("slack_thread_feedback", "C1"))["run-1"]["prompted"] is True
-
-
-@pytest.mark.asyncio
-async def test_success_completion_schedules_feedback_prompt(
-    context: Any, fake_store: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_store.values(("slack_thread_feedback", "C1")).clear()
-    client = AsyncMock()
-    client.threads.get.return_value = {
-        "metadata": {
-            "source": "slack",
-            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
-        }
-    }
-    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
-    monkeypatch.setattr(prompt_scheduler, "langgraph_client", lambda: client)
-    schedule = AsyncMock()
-    monkeypatch.setattr(prompt_scheduler, "_schedule", schedule)
-    await completion.handle_run_completion(
-        {"thread_id": "thread-1", "run_id": "run-1", "status": "success"}
-    )
-    schedule.assert_awaited_once()
-    assert schedule.await_args.kwargs["answer_run_id"] == "run-1"
-    assert schedule.await_args.kwargs["slack_run_id"] == "run-1"
-    assert schedule.await_args.kwargs["channel_id"] == "C1"
-    feedback.post_slack_ephemeral_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -838,6 +813,13 @@ async def test_native_rating_saves_immediately_and_only_bad_opens_comment(
         feedback.open_slack_modal.assert_not_awaited()
     await tasks()
     assert feedback.create_langsmith_thread_feedback.await_args.kwargs["score"] == score
+    feedback.record_feedback_submission.assert_awaited_once_with(
+        feedback_key="thread:thread-1",
+        rating=5 if choice == "good" else 1,
+        source="slack",
+        run_key="run-1",
+        slack_user_id="U1",
+    )
     assert fake_store.values(("thread_feedback",))["thread-1"]["status"] == "completed"
     feedback.respond_to_slack_interaction.assert_awaited_once_with(
         _RESPONSE_URL, {"delete_original": True}

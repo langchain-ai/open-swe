@@ -16,12 +16,13 @@ import {
   RefreshCw,
   RotateCcw,
 } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
@@ -94,6 +95,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     refetchInterval: 5000,
     retry: false,
   })
+  const incidentTitle = detail.data?.incident.title
+  const documentTitle = pageTitle(incidentTitle ?? "Incident")
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   const command = useMutation({
     mutationFn: ({
       action,
@@ -112,6 +118,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         text
       )
     },
+    meta: { errorTitle: "Couldn't send incident request" },
     onSuccess: (_result, variables) => {
       setNotice(variables.action)
       requestIdentity.current = null
@@ -211,14 +218,6 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         <p role="alert" className="mb-5 text-sm text-warning-foreground">
           {detail.error.message}
         </p>
-      )}
-      {command.error && (
-        <div
-          role="alert"
-          className="mb-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive-foreground"
-        >
-          {command.error.message}
-        </div>
       )}
       {notice && (
         <div
