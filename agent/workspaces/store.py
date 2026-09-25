@@ -37,7 +37,7 @@ import logging
 import re
 import shlex
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Literal, TypedDict
 from uuid import UUID
 
@@ -55,7 +55,10 @@ from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
     WorkspaceSlackChannelRow,
+    apply_definition,
+    apply_state,
     apply_workspace,
+    stamp_updated,
     to_workspace,
 )
 
@@ -796,30 +799,50 @@ class WorkspaceStore:
                 )
         return records
 
-    async def put(self, slug: str, record: Workspace, *, create_only: bool = False) -> Workspace:
+    async def put(
+        self,
+        slug: str,
+        record: Workspace,
+        *,
+        create_only: bool = False,
+        definition_only: bool = False,
+    ) -> Workspace:
         """Write the row and replace its bindings, in one transaction.
 
         Returns the stored view rather than the record it was handed: a
         repository already known under another capitalization keeps the casing
         its ``repository`` row carries, which is what :meth:`get` reads back.
+        With ``definition_only`` the snapshot and refresh state already stored
+        is kept, and the returned record carries it.
         """
         try:
             async with postgres.session() as session:
                 row = (
                     None
                     if create_only
-                    else await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                    else await session.scalar(
+                        select(WorkspaceRow).where(WorkspaceRow.slug == slug).with_for_update()
+                    )
                 )
                 if row is None:
+                    if definition_only:
+                        raise ValueError(f"no workspace named {slug!r}")
                     row = WorkspaceRow(slug=slug, name=record.name)
                     session.add(row)
-                apply_workspace(row, record)
+                if definition_only:
+                    apply_definition(row, record)
+                    stamp_updated(row, record)
+                else:
+                    apply_workspace(row, record)
                 await session.flush()
                 await _bind_repos(session, row.id, record.repos)
                 await _bind_channels(session, row.id, record.slack_channel_ids)
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
+                if definition_only:
+                    await session.refresh(row)
+                    return to_workspace(row, stored_repos, stored_channels)
             return record.model_copy(
                 update={"repos": stored_repos, "slack_channel_ids": stored_channels}
             )
@@ -1032,7 +1055,32 @@ class WorkspaceStore:
             raise ValueError(f"no workspace named {slug!r}")
         record = _apply(record, update)
         await self._assert_bindings_free(record)
-        return await self.save(record)
+        record.updated_at = now_iso()
+        return await self.put(slug, record, definition_only=True)
+
+    async def update_state(
+        self, slug: str, change: Callable[[Workspace], None]
+    ) -> Workspace | None:
+        """Change a workspace's snapshot and refresh state under a row lock.
+
+        Only the state columns are written, so a refresh that runs for minutes
+        never writes back a definition it read before an admin edited it, such
+        as repository access the admin has since revoked.
+        """
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(WorkspaceRow).where(WorkspaceRow.slug == slug).with_for_update()
+            )
+            if row is None:
+                return None
+            record = to_workspace(
+                row, await _bound_repos(session, row.id), await _bound_channels(session, row.id)
+            )
+            change(record)
+            record.updated_at = now_iso()
+            apply_state(row, record)
+            stamp_updated(row, record)
+            return record
 
     async def assert_publishable(
         self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate
@@ -1096,23 +1144,22 @@ class WorkspaceStore:
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.snapshot_status = "capturing"
-        record.status_message = None
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.snapshot_status = "capturing"
+            record.status_message = None
+
+        return await self.update_state(slug, change)
 
     async def mark_capture_settled(
         self, slug: str, status: SnapshotStatus, message: str
     ) -> Workspace | None:
         """Land a failed capture on ``status``, keeping a previously ready snapshot."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.snapshot_status = status
-        record.status_message = message
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.snapshot_status = status
+            record.status_message = message
+
+        return await self.update_state(slug, change)
 
     async def mark_captured(
         self,
@@ -1123,68 +1170,65 @@ class WorkspaceStore:
         source_sandbox_id: str,
         snapshot_tag: str = SNAPSHOT_TAG,
     ) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        _stamp_captured(
-            record,
-            snapshot_id=snapshot_id,
-            snapshot_name=snapshot_name,
-            source_sandbox_id=source_sandbox_id,
-            snapshot_tag=snapshot_tag,
-        )
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            _stamp_captured(
+                record,
+                snapshot_id=snapshot_id,
+                snapshot_name=snapshot_name,
+                source_sandbox_id=source_sandbox_id,
+                snapshot_tag=snapshot_tag,
+            )
+
+        return await self.update_state(slug, change)
 
     async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_status = "refreshing"
-        record.refresh_kind = kind
-        record.refresh_started_at = now_iso()
-        record.refresh_finished_at = None
-        record.refresh_log = None
-        record.refresh_error = None
-        record.refresh_steps = []
-        record.refresh_sandbox_id = None
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.refresh_status = "refreshing"
+            record.refresh_kind = kind
+            record.refresh_started_at = now_iso()
+            record.refresh_finished_at = None
+            record.refresh_log = None
+            record.refresh_error = None
+            record.refresh_steps = []
+            record.refresh_sandbox_id = None
+
+        return await self.update_state(slug, change)
 
     async def start_refresh_step(
         self, slug: str, label: str, *, log_path: str | None = None
     ) -> Workspace | None:
         """Open a step, replacing any earlier one with the same label."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_steps = [
-            *(step for step in record.refresh_steps if step.label != label),
-            RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
-        ]
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_steps = [
+                *(step for step in record.refresh_steps if step.label != label),
+                RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
+            ]
+
+        return await self.update_state(slug, change)
 
     async def finish_refresh_step(
         self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
     ) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_steps = [
-            step.model_copy(
-                update={"status": status, "finished_at": now_iso(), "exit_code": exit_code}
-            )
-            if step.label == label
-            else step
-            for step in record.refresh_steps
-        ]
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.refresh_steps = [
+                step.model_copy(
+                    update={"status": status, "finished_at": now_iso(), "exit_code": exit_code}
+                )
+                if step.label == label
+                else step
+                for step in record.refresh_steps
+            ]
+
+        return await self.update_state(slug, change)
 
     async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Workspace | None:
         """Publish (or clear) the builder a poll may read the live trace from."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_sandbox_id = sandbox_id
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_sandbox_id = sandbox_id
+
+        return await self.update_state(slug, change)
 
     async def mark_refresh_settled(
         self,
@@ -1200,23 +1244,37 @@ class WorkspaceStore:
         "did the last rebuild work". A failed refresh leaves the previous
         snapshot ``ready``, so the two must not share a field.
         """
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_status = status
-        record.refresh_finished_at = now_iso()
-        record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
-        record.refresh_error = error[:1000] if error else None
-        # The builder is released with the refresh, so its id stops being a
-        # readable source the moment this lands.
-        record.refresh_sandbox_id = None
-        record.refresh_steps = [
-            step.model_copy(update={"status": "failed", "finished_at": now_iso()})
-            if step.status == "running"
-            else step
-            for step in record.refresh_steps
-        ]
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_status = status
+            record.refresh_finished_at = now_iso()
+            record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
+            record.refresh_error = error[:1000] if error else None
+            # The builder is released with the refresh, so its id stops being a
+            # readable source the moment this lands.
+            record.refresh_sandbox_id = None
+            record.refresh_steps = [
+                step.model_copy(update={"status": "failed", "finished_at": now_iso()})
+                if step.status == "running"
+                else step
+                for step in record.refresh_steps
+            ]
+
+        return await self.update_state(slug, change)
+
+    async def set_refresh_run_id(self, slug: str, run_id: str) -> Workspace | None:
+        """Record the run a refresh is running in, so a poll can tell it from a later one."""
+
+        def change(record: Workspace) -> None:
+            record.refresh_run_id = run_id
+
+        return await self.update_state(slug, change)
+
+    async def set_refresh_cron_id(self, slug: str, cron_id: str) -> Workspace | None:
+        def change(record: Workspace) -> None:
+            record.refresh_cron_id = cron_id
+
+        return await self.update_state(slug, change)
 
 
 async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:

@@ -127,9 +127,6 @@ async def api_update_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     normalized = _normalized_slug(slug)
-    previous = await WORKSPACES.get(normalized)
-    if previous is not None and is_refresh_in_flight(previous):
-        raise HTTPException(409, "a refresh of this workspace is already running")
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:

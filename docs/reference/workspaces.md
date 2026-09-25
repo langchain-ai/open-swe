@@ -115,7 +115,9 @@ compatible upgrade behavior, or drop it, which a locked-down install should pref
 ### Repository access is independent of image setup
 
 Changing repository bindings or `all_repositories` updates permissions without rebuilding the
-image. Edits during an active refresh return a conflict and must wait until it finishes. Setup
+image. Edits are accepted during an active refresh: a refresh writes only snapshot and refresh
+state and an edit writes only the definition, so neither reverts the other. A refresh already
+running keeps the access its builder started with until it finishes. Setup
 scripts may install only tools, clone a selected subset, or preload no repositories at all. Runs can
 clone other permitted repositories on demand.
 `OPENSWE_WORKSPACE_REPOS` remains the explicit binding list for backward-compatible scripts;

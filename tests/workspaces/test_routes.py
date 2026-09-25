@@ -216,7 +216,7 @@ async def test_defaults_work_for_every_shared_binding_and_app_wide_workspace(
 
 
 @pytest.mark.parametrize("permission_update", [{"repos": []}, {"all_repositories": False}])
-async def test_permission_edits_wait_for_active_refresh_without_triggering_another(
+async def test_permission_edits_during_a_refresh_outlive_it_without_triggering_another(
     admin_client: httpx.AsyncClient, permission_update: dict[str, object]
 ) -> None:
     await admin_client.post(
@@ -231,17 +231,15 @@ async def test_permission_edits_wait_for_active_refresh_without_triggering_anoth
     await WORKSPACES.mark_refreshing("core")
     with patch.object(workspace_routes, "start_refresh_run", AsyncMock()) as start:
         response = await admin_client.put("/dashboard/api/workspaces/core", json=permission_update)
-        assert response.status_code == 409
-        assert response.json()["detail"] == "a refresh of this workspace is already running"
-        unchanged = (await admin_client.get("/dashboard/api/workspaces/core")).json()
-        assert unchanged["repos"] == ["acme/api"]
-        assert unchanged["all_repositories"] is True
-
-        await WORKSPACES.mark_refresh_settled("core", "success")
-        response = await admin_client.put("/dashboard/api/workspaces/core", json=permission_update)
-
     assert response.status_code == 200
-    assert response.json()["setup_script"] == "echo tools"
+    assert response.json()["refresh_status"] == "refreshing"
+
+    await WORKSPACES.start_refresh_step("core", "capture")
+    await WORKSPACES.mark_refresh_settled("core", "success")
+
+    stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
+    assert stored["refresh_status"] == "success"
+    assert stored["setup_script"] == "echo tools"
     for field, value in permission_update.items():
-        assert response.json()[field] == value
+        assert stored[field] == value
     start.assert_not_awaited()
