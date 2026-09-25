@@ -10,6 +10,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.prompts import render_prompt
 from agent.run_config import RunConfig
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
@@ -178,6 +179,12 @@ async def slack_start_new_thread(
     current_thread_ts = current_slack_thread.get("thread_ts")
     if not isinstance(channel_id, str) or not channel_id.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
+    channel = await SlackChannel.load(channel_id.strip(), use_cache=False)
+    if channel is None or not channel.public:
+        return {
+            "success": False,
+            "error": "Breakout threads can only be started in public channels; do not retry.",
+        }
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -391,7 +398,9 @@ async def slack_start_new_thread(
     if isinstance(current_thread_ts, str) and current_thread_ts:
         request_ts = breakout_from["message_ts"]
         if request_ts:
-            await mark_broken_out(clean_channel_id, request_ts)
+            await mark_broken_out(
+                clean_channel_id, current_thread_ts, request_ts, clean_channel_id, message_ts
+            )
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )
