@@ -61,6 +61,8 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 
 from agent.analytics.usage import record_agent_invocation_usage
+from agent.bridge.cli_result import cli_result
+from agent.bridge.store import Bridge
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -123,6 +125,7 @@ from agent.middleware import (
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -157,7 +160,7 @@ from agent.sandboxes.state import (
 from agent.sandboxes.tool_access import tools_base_url
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
-from agent.slack.dm import is_dm_channel, is_dm_session
+from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
@@ -658,6 +661,23 @@ async def _private_thread(thread_id: str | None) -> bool:
     return thread_is_private(thread_metadata(thread))
 
 
+async def _bridged_thread(thread_id: str | None) -> bool:
+    """Whether this thread's sandbox is a CLI bridge on the user's machine."""
+    if not thread_id:
+        return False
+    try:
+        thread = await client.threads.get(thread_id=thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the thread's sandbox; omitting cli_result",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )
+        return False
+    sandbox_id = thread_metadata(thread).get("sandbox_id")
+    return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+
+
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
     async def load_with_timeout() -> list[Any]:
         return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
@@ -747,12 +767,12 @@ def _slack_ask_mode(cfg: RunConfig) -> bool:
     )
 
 
-def _slack_dm_run(cfg: RunConfig) -> bool:
-    """Whether this run answers in a bot DM the owner runs as one session."""
+def _slack_concierge_run(cfg: RunConfig) -> bool:
+    """Whether this run answers in a bot DM its owner runs in concierge mode."""
     return (
         _slack_tools_enabled(cfg)
         and cfg.slack_thread is not None
-        and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+        and is_concierge_thread(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
     )
 
 
@@ -957,6 +977,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         del github_token
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -1076,6 +1097,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
+                local_checkout=bridged,
                 recent_thread_context=recent_thread_context,
             ),
         }
@@ -1354,6 +1376,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         private_thread = await _private_thread(thread_id)
 
     stop_summary_mode = cfg.stop_summary is True
+    async with aphase(thread_id, "factory.bridged_thread"):
+        cli_result_required = (
+            not local_run and not stop_summary_mode and await _bridged_thread(thread_id)
+        )
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
@@ -1431,6 +1457,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_thread_feedback,
         submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
+        *((cli_result,) if cli_result_required else ()),
         *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
     ]
     if credential_login is None:
@@ -1446,7 +1473,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
-    elif _slack_dm_run(cfg):
+    elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
@@ -1658,6 +1685,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         initial_surface=(
                             _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
                         ),
+                    ),
+                    *(
+                        [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
+                        if cli_result_required
+                        else []
                     ),
                     notify_step_limit_reached,
                     record_run_usage,

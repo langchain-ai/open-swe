@@ -40,6 +40,7 @@ function PullRequestReviewLinkPage() {
   const triggerRef = useRef<string | null>(null)
   const triggerReview = useMutation({
     mutationFn: () => api.reReview(owner, repo, prNumber),
+    meta: { silent: true },
   })
   const { mutate: triggerReviewMutate } = triggerReview
 

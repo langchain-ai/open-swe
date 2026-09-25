@@ -29,7 +29,7 @@ class SlackRequest(BaseModel):
     treat_all_messages_as_mentions: bool = False
     message_update: bool = False
     code_channel: bool = False
-    dm_session: bool = False
+    concierge_mode: bool = False
     explicit_request: bool = False
 
     @property

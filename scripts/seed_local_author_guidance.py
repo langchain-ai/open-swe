@@ -1,13 +1,13 @@
-"""Seed one PR's human turns into a local thread, so the reviewer has steering to read.
+"""Seed one PR's human turns into a local thread, so the review scout has human input to read.
 
 A local checkout has never run an agent, so no thread carries the messages
-:class:`SteeringHistory` looks for and the guidance card can never populate.
+:class:`SteeringHistory` looks for and the human input card can never populate.
 This writes them straight into a thread's checkpoint through the public SDK,
 wrapped in the same ``<input-message>`` envelope a dashboard message carries,
 and links that thread to a real pull request.
 
-Extraction is not done here — the reviewer decides which turns changed the pull
-request, through ``record_guidance``.
+Summarising is not done here — the review scout does that through
+``record_human_input``.
 
     uv run --env-file .env python scripts/seed_local_author_guidance.py \
         <owner> <repo> <number> <turns.json> [langgraph_url]

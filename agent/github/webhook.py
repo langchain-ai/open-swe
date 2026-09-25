@@ -23,7 +23,6 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.prompts import load_prompt, render_prompt
-from agent.review.author_guidance import GuidanceReview
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
@@ -695,17 +694,16 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         if postgres.configured():
             try:
-                for carry in (Walkthrough.carry_forward, GuidanceReview.carry_forward):
-                    await carry(
-                        repo_config["owner"],
-                        repo_config["name"],
-                        pr_number,
-                        from_sha=last_reviewed_sha,
-                        to_sha=head_sha,
-                    )
+                await Walkthrough.carry_forward(
+                    repo_config["owner"],
+                    repo_config["name"],
+                    pr_number,
+                    from_sha=last_reviewed_sha,
+                    to_sha=head_sha,
+                )
             except Exception:
                 common.logger.warning(
-                    "Could not carry the review walkthrough and guidance forward",
+                    "Could not carry the review walkthrough forward",
                     exc_info=True,
                     extra={"pr_number": pr_number, "scout_head_sha": head_sha},
                 )

@@ -1,4 +1,4 @@
-"""Mark ready, Approve and Dismiss clicks on an expedited review card.
+"""Mark ready, Approve, Broadcast and Dismiss clicks on an expedited review card.
 
 A voter is a person (``users`` row) reached through their Slack identity whose
 GitHub identity has write access to the repository. Only the author may mark a
@@ -15,7 +15,13 @@ from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
 from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
-from agent.expedited_review.lifecycle import notify_agent, refresh_card, repo_token, retire
+from agent.expedited_review.lifecycle import (
+    broadcast_card,
+    notify_agent,
+    refresh_card,
+    repo_token,
+    retire,
+)
 from agent.github.ci import has_repo_write_permission
 from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.input_messages import PersonIdentity, split_person_id
@@ -28,7 +34,7 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 VoteAction = Literal["approve", "ready"]
-CardAction = VoteAction | Literal["dismiss"]
+CardAction = VoteAction | Literal["dismiss", "broadcast"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +94,7 @@ async def handle_vote(
     *,
     decision: VoteAction,
     user: User | None,
+    broadcast: bool = False,
 ) -> VoteOutcome:
     """Record one click. Slow work runs unlocked; the row lock covers only the write."""
     if approval.state != "open":
@@ -99,7 +106,7 @@ async def handle_vote(
             return author
         if not approval.is_author(author.user.id, author.github_login):
             return VoteOutcome("Only the pull request's author can mark it ready for review.")
-        return await _mark_ready(approval, voter=author)
+        return await _mark_ready(approval, voter=author, broadcast=broadcast)
     voter = await _resolve_voter(approval, user)
     if isinstance(voter, VoteOutcome):
         return voter
@@ -143,7 +150,7 @@ async def handle_vote(
     return VoteOutcome(recorded)
 
 
-async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutcome:
+async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter, broadcast: bool) -> VoteOutcome:
     """Undraft the PR as its author, then open the card for approval."""
     if not approval.awaiting_ready:
         return VoteOutcome("This pull request is already ready for review.")
@@ -164,10 +171,27 @@ async def _mark_ready(approval: ExpeditedApproval, *, voter: Voter) -> VoteOutco
         if row is None or row.state != "open":
             return VoteOutcome("This expedited review closed before it was marked ready.")
         row.awaiting_ready = False
+    marked = "Marked ready for review. Someone else can approve it now."
     current = await ExpeditedApproval.get(approval.id)
-    if current is not None:
-        await refresh_card(current)
-    return VoteOutcome("Marked ready for review. Someone else can approve it now.")
+    if current is None:
+        return VoteOutcome(marked)
+    if broadcast and await broadcast_card(current):
+        return VoteOutcome(f"{marked} Sent to the channel too.")
+    await refresh_card(current)
+    if broadcast:
+        return VoteOutcome(f"{marked} It could not be sent to the channel.")
+    return VoteOutcome(marked)
+
+
+async def request_broadcast(approval: ExpeditedApproval) -> VoteOutcome:
+    """Anyone in the thread may send an open card to the channel."""
+    if approval.state != "open" or approval.approved:
+        return VoteOutcome("This expedited review is no longer waiting for approval.")
+    if approval.slack_broadcast:
+        return VoteOutcome("This expedited review is already in the channel.")
+    if not await broadcast_card(approval):
+        return VoteOutcome("Open SWE could not send this expedited review to the channel.")
+    return VoteOutcome("Sent to the channel.")
 
 
 async def dismiss(approval: ExpeditedApproval, slack_user_id: str) -> VoteOutcome:
@@ -184,6 +208,7 @@ async def process_vote(
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
+    broadcast_requested: bool = False,
 ) -> None:
     """Background entry point for a Slack click; answers the clicker ephemerally."""
     slack_user_id = split_person_id(person)[1]
@@ -200,13 +225,18 @@ async def process_vote(
         async with slack_thread_mutation_lock(
             langgraph_client(), channel_id, thread_ts, purpose=f"expedited:{approval_id}"
         ):
-            outcome = (
-                await dismiss(approval, slack_user_id)
-                if decision == "dismiss"
-                else await handle_vote(
-                    approval, decision=decision, user=await User.for_person(person)
-                )
-            )
+            match decision:
+                case "dismiss":
+                    outcome = await dismiss(approval, slack_user_id)
+                case "broadcast":
+                    outcome = await request_broadcast(approval)
+                case _:
+                    outcome = await handle_vote(
+                        approval,
+                        decision=decision,
+                        user=await User.for_person(person),
+                        broadcast=broadcast_requested,
+                    )
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})
         outcome = VoteOutcome("Something went wrong recording your vote. Try again.")

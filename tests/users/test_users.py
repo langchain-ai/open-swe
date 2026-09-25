@@ -3,10 +3,10 @@
 import asyncio
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from agent.database import postgres
-from agent.users import UnauthorizedUser, User
+from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -163,3 +163,37 @@ async def test_the_github_email_is_used_when_no_slack_account_is_linked() -> Non
     await User.sign_in("github", "1001", login="OctoCat", email="octo@personal.example")
 
     assert await User.email_for_login("OctoCat") == "octo@personal.example"
+
+
+async def test_concierge_mode_is_off_until_its_owner_turns_it_on() -> None:
+    user = await User.sign_in("github", "7", login="ada")
+    await user.link("slack", "U7")
+    assert await User.concierge_mode_for_slack("U7") is False
+
+    saved = await User.update_preferences("Ada", UserPreferencesPatch(concierge_mode=True))
+
+    assert saved == UserPreferences(concierge_mode=True)
+    assert await User.concierge_mode_for_slack("U7") is True
+    assert await User.preferences_for_login("ada") == UserPreferences(concierge_mode=True)
+
+
+async def test_preference_patches_merge_and_skip_unset_fields() -> None:
+    await User.sign_in("github", "8", login="bob")
+    async with postgres.session() as session:
+        await session.execute(
+            update(User).values(preferences={"concierge_mode": True, "future": "kept"})
+        )
+
+    unchanged = await User.update_preferences("bob", UserPreferencesPatch())
+    turned_off = await User.update_preferences("bob", UserPreferencesPatch(concierge_mode=False))
+
+    assert unchanged == UserPreferences(concierge_mode=True)
+    assert turned_off == UserPreferences(concierge_mode=False)
+    stored = await User.for_login("github", "bob")
+    assert stored is not None and stored.preferences == {"concierge_mode": False, "future": "kept"}
+
+
+async def test_preferences_for_an_unknown_login_are_defaults_and_cannot_be_saved() -> None:
+    assert await User.preferences_for_login("carol") == UserPreferences()
+    assert await User.update_preferences("carol", UserPreferencesPatch(concierge_mode=True)) is None
+    assert await User.concierge_mode_for_slack("U404") is False
