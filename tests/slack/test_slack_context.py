@@ -793,14 +793,11 @@ def test_with_slack_session_cost_replaces_usage_only_pending_footer(label: str) 
     assert updated_blocks[0] == blocks[0]
     assert updated_blocks[1]["elements"][0]["text"] == "model-a • $0.42"
 
-    assert slack_utils.with_slack_pending_session_cost(text, blocks) == (text, blocks)
-    cleared_text, cleared_blocks = slack_utils.with_slack_pending_session_cost(
-        text, blocks, clear=True
-    )
+    cleared_text, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
     assert cleared_text == "Done <https://app.example/agents/t1|Open in Web>"
     assert cleared_blocks[1]["elements"][0]["text"] == "model-a"
     blocks[1]["elements"][0]["text"] = label
-    _, cleared_blocks = slack_utils.with_slack_pending_session_cost(text, blocks, clear=True)
+    _, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
     assert cleared_blocks[1]["elements"][0]["text"] == "Cost unavailable"
 
 
@@ -2486,36 +2483,39 @@ def test_deferred_cost_updates_footer_without_placeholder(linked_in_body: bool) 
     )
 
 
-def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
+def test_feedback_and_web_usage_share_one_actions_block() -> None:
+    from agent.slack.run_feedback import feedback_block
+
     url = "https://app.example/agents/t1"
     usage = RunUsageSummary(models=("model-a",), total_tokens=123)
     blocks = slack_utils._with_slack_web_link_context_block(
-        "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
+        "Done",
+        [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
+            feedback_block("run-1"),
+        ],
+        url,
+        usage,
     )
+    assert blocks is not None
+    assert [block["type"] for block in blocks] == ["section", "actions"]
+    actions = blocks[-1]["elements"]
+    assert [action["text"]["text"] for action in actions] == ["↗ model-a", "👍", "👎"]
+    assert actions[0]["url"] == url
+    assert actions[0]["accessibility_label"] == "Open in Web"
+
     text = slack_utils.append_slack_web_link_footer("Done", url, usage)
-    assert "calculating cost" not in text
-
-    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
-    assert pending_text.endswith("model-a • calculating cost...")
-    assert pending_blocks is not None
-    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost...")
-
-    # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
-    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
-        pending_text,
-        pending_blocks,
-    )
-    final_text, final_blocks = slack_utils.with_slack_session_cost(
-        pending_text, pending_blocks, 0.42
-    )
-    assert final_text.endswith("model-a • $0.42")
-    assert final_blocks is not None
-    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
-
-    # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
-    assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
-        "Working on it",
-        None,
+    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+    assert updated_text.endswith("model-a • $0.42")
+    assert updated_blocks is not None
+    assert [action["text"]["text"] for action in updated_blocks[-1]["elements"]] == [
+        "↗ model-a • $0.42",
+        "👍",
+        "👎",
+    ]
+    assert slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42) == (
+        updated_text,
+        updated_blocks,
     )
 
 
@@ -2526,18 +2526,10 @@ def test_cost_enrichment_without_model_metadata(usage: RunUsageSummary | None) -
     blocks = slack_utils._with_slack_web_link_context_block(
         text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], url, usage
     )
-    for pending in (False, True):
-        initial_text, initial_blocks = (
-            slack_utils.with_slack_pending_session_cost(text, blocks) if pending else (text, blocks)
-        )
-        final_text, final_blocks = slack_utils.with_slack_session_cost(
-            initial_text, initial_blocks, 0.42
-        )
-        assert final_text.endswith("$0.42")
-        assert final_blocks[-1]["elements"][0]["text"] == "$0.42"
-        assert final_blocks[0] == blocks[0]
-    cleared_text, cleared_blocks = slack_utils.with_slack_pending_session_cost(
-        initial_text, initial_blocks, clear=True
-    )
+    final_text, final_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
+    assert final_text.endswith("$0.42")
+    assert final_blocks[-1]["elements"][0]["text"] == "$0.42"
+    assert final_blocks[0] == blocks[0]
+    cleared_text, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
     assert "calculating cost" not in cleared_text
     assert "calculating cost" not in str(cleared_blocks)

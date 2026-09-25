@@ -170,6 +170,7 @@
                 const button = document.createElement("button");
                 button.type = "button";
                 button.textContent = action.text?.text || "Choose";
+                if (action.accessibility_label) button.setAttribute("aria-label", action.accessibility_label);
                 if (action.style === "primary") button.classList.add("primary");
                 button.addEventListener("click", () => sendAction(message, action, button));
                 actions.appendChild(button);

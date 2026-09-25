@@ -327,25 +327,10 @@ async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.Monk
             },
         ],
     }
-    pending = {
-        "text": f"{original['text']} • calculating cost...",
-        "blocks": [
-            original["blocks"][0],
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": "<https://app/agents/t1|Open in Web> • model-a • calculating cost...",
-                    }
-                ],
-            },
-        ],
-    }
     monkeypatch.setattr(
         session_cost,
         "fetch_slack_thread_message_by_ts",
-        AsyncMock(side_effect=[original, pending]),
+        AsyncMock(return_value=original),
     )
     update = AsyncMock(return_value=(True, None))
     monkeypatch.setattr(session_cost, "update_slack_message", update)
@@ -353,18 +338,9 @@ async def test_schedule_marks_mapped_reply_cost_pending(monkeypatch: pytest.Monk
     assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
 
     assert client.runs.created[0]["after_seconds"] == 15
-    update.assert_awaited_once()
-    args = update.await_args
-    assert args is not None
-    assert args.args[:2] == ("C1", "1.1")
-    assert (
-        args.args[2] == "Done <https://app/agents/t1|Open in Web> • model-a • calculating cost..."
-    )
-    footer = args.kwargs["blocks"][-1]["elements"][0]["text"]
-    assert footer == "<https://app/agents/t1|Open in Web> • model-a • calculating cost..."
+    update.assert_not_awaited()
 
-    # Re-marking the already-pending message is a no-op.
-    update.reset_mock()
+    # Re-scheduling leaves the reply untouched.
     assert await session_cost.schedule_session_cost_refresh(_state(0), client=client)
     update.assert_not_awaited()
 
