@@ -13,6 +13,7 @@ import type { DesktopCommandId } from "@/desktop"
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
+import { toggleFeatureFlagsPanel } from "@/lib/featureFlags"
 import {
   eventMatchesShortcut,
   isTypingContext,
@@ -144,6 +145,15 @@ export function AppCommandProvider({
         aliases: ["dark mode", "light mode", "appearance"],
         group: "General",
         run: toggleTheme,
+      },
+      {
+        id: "toggle-feature-flags",
+        label: "Toggle feature flags",
+        aliases: ["experiments", "flags"],
+        group: "General",
+        run: () => {
+          if (toggleFeatureFlagsPanel()) void navigate({ to: "/feature-flags" })
+        },
       },
       {
         id: "open-settings",
