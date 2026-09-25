@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 _NATIVE_MARKDOWN_MAX_CHARS = 12000
 
 
+def _usage_with_effort(
+    usage: RunUsageSummary | None, state: dict[str, Any] | None, cfg: RunConfig
+) -> RunUsageSummary | None:
+    state = state or {}
+    selected = state.get("selected_model_id")
+    model_id = selected or cfg.resolved_agent_model_id
+    if usage is None or len(usage.models) != 1 or not model_id:
+        return usage
+    reported_model = usage.models[0].rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+    if model_id.rsplit("/", 1)[-1].rsplit(":", 1)[-1] != reported_model:
+        return usage
+    effort = state.get("selected_effort") if selected else cfg.resolved_agent_effort
+    return replace(usage, reasoning_effort=effort)
+
+
 async def slack_reply(
     message: str,
     response_type: Literal["progress", "final"],
@@ -104,9 +119,7 @@ async def slack_reply(
                     ]
                 )
             slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
-        usage = summarize_run_usage(state)
-        if usage is not None:
-            usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
+        usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
             thread_ts,
@@ -175,9 +188,7 @@ async def _ephemeral_reply(
             blocks = _build_option_blocks(message, None)
         else:
             message = markdown_to_mrkdwn(message)
-    usage = summarize_run_usage(state)
-    if usage is not None:
-        usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
+    usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
     if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
         if await replace_slack_command_message(
