@@ -26,12 +26,14 @@ export function PullRequestActions({
   outcome,
   onSettled,
   onReady,
+  onReviewPage = false,
 }: {
   pr: OpenPullRequest
   login: string
   outcome?: PullRequestOutcome
   onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
+  onReviewPage?: boolean
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -65,7 +67,12 @@ export function PullRequestActions({
           </>
         )}
       </div>
-      <PullRequestLinks repo={pr.repo} number={pr.number} title={pr.title} />
+      <PullRequestLinks
+        repo={pr.repo}
+        number={pr.number}
+        title={pr.title}
+        onReviewPage={onReviewPage}
+      />
     </div>
   )
 }

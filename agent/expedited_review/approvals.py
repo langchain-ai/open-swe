@@ -82,6 +82,8 @@ class ExpeditedApproval(Base):
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
     # A draft PR's card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
+    # The posted card is a thread reply also sent to the channel.
+    slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     votes: Mapped[list[ApprovalVote]] = relationship(
         default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at

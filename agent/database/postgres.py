@@ -167,7 +167,7 @@ def upgrade(
     conn: Connection,
     migrations: ScriptDirectory,
     schema: str = SCHEMA,
-    revision: str = "head",
+    revision: str = "heads",
 ) -> None:
     conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}, public")
     upgrade_revisions = attrgetter("_upgrade_revs")(migrations)
