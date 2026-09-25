@@ -11,35 +11,10 @@ import { Badge } from "@/components/ui/badge"
 import { LoadError } from "@/components/LoadError"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
+import { asString } from "@/features/agents/components/subagents/SubagentCard"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import type { TranscriptToolCallState } from "@/features/agents/lib/transcript/reducer"
 import type { AgentThread, Message } from "@/features/agents/lib/types"
 import { cn } from "@/lib/utils"
-
-/** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
-function asString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : ""
-}
-
-function firstLine(text: string): string {
-  return text.split("\n", 1)[0]?.trim() ?? ""
-}
-
-/**
- * The task prompt as the human message that opened the subagent's run. The
- * transcript never records it as one — the model wrote it, not a person — so
- * the `task` call's input is where it lives.
- */
-function promptMessage(task: TranscriptToolCallState): Message | null {
-  const description = asString(task.input.description)
-  if (!description) return null
-  return {
-    id: `${task.toolCallId}:prompt`,
-    author: "user",
-    timestamp: task.startedAt,
-    chunks: [{ kind: "text", text: description }],
-  }
-}
 
 /**
  * A subagent viewed as a thread of its own: the task it was given, then
@@ -61,19 +36,23 @@ export function SubagentThreadView({
   const sidebarCollapsed = useSidebarCollapsed()
   const task =
     source.kind === "transcript" ? source.subagentTask(subagentId) : null
-  const namespace = useMemo(
-    () => (task ? [...task.namespace, task.toolCallId] : null),
-    [task]
-  )
-  const messages = useMemo(() => {
-    if (!task || !namespace || source.kind !== "transcript") return []
-    const prompt = promptMessage(task)
-    const own = source.subagentMessages(namespace)
-    return prompt ? [prompt, ...own] : own
-  }, [namespace, source, task])
-
   const description = task ? asString(task.input.description) : ""
-  const title = firstLine(description) || "Subagent"
+  const messages = useMemo(() => {
+    if (!task || source.kind !== "transcript") return []
+    const own = source.subagentMessages([...task.namespace, task.toolCallId])
+    if (!description) return own
+    // The transcript never records the task prompt as a human message — the
+    // model wrote it, not a person — so the `task` call's input stands in.
+    const prompt: Message = {
+      id: `${task.toolCallId}:prompt`,
+      author: "user",
+      timestamp: task.startedAt,
+      chunks: [{ kind: "text", text: description }],
+    }
+    return [prompt, ...own]
+  }, [description, source, task])
+
+  const title = description.split("\n", 1)[0]?.trim() || "Subagent"
   const subagentType = task ? asString(task.input.subagent_type) : ""
   const isRunning = task?.status === "in_progress"
   const backLink = (
@@ -126,16 +105,7 @@ export function SubagentThreadView({
         showUserNames={false}
         scrollKey={`${thread.id}:${subagentId}`}
         isStreaming={isRunning}
-        streamIsLoading={isRunning}
-        isThinking={isRunning}
         contentWidthClass="max-w-3xl"
-        emptyState={
-          <div className="flex min-h-60 items-center justify-center">
-            <p className="text-xs text-muted-foreground/70">
-              This subagent has not done anything yet.
-            </p>
-          </div>
-        }
         footer={
           !isRunning && (
             <p className="px-1 pt-2 pb-6 text-center text-xs text-muted-foreground/70">

@@ -2,13 +2,9 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 
-export interface AgentThreadSearch {
-  /** The `task` tool-call id of a subagent to view instead of the thread itself. */
-  subagent?: string
-}
-
 export const Route = createFileRoute("/agents/$threadId")({
-  validateSearch: (search: Record<string, unknown>): AgentThreadSearch => {
+  // `subagent` is the `task` call id of a subagent to view instead of the thread.
+  validateSearch: (search: Record<string, unknown>): { subagent?: string } => {
     const subagent = search["subagent"]
     return typeof subagent === "string" && subagent ? { subagent } : {}
   },

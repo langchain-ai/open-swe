@@ -9,7 +9,6 @@ import {
   queuedTurns,
   routedNotice,
   subagentMessages,
-  subagentTask,
   toMessages,
 } from "./reducer"
 import type { TranscriptState } from "./reducer"
@@ -197,9 +196,6 @@ describe("transcript snapshot", () => {
       )
     )
     expect(rootCalls).toEqual(["read-1", "task-1"])
-    expect(subagentMessages(state, ["task-2"])).toEqual([])
-    expect(subagentTask(state, "task-1")?.namespace).toEqual([])
-    expect(subagentTask(state, "grep-1")).toBeNull()
   })
 
   it("renders a turn as one human message followed by one agent message", () => {

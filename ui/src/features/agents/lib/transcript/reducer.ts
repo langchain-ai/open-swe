@@ -964,10 +964,6 @@ const turnCache = new WeakMap<
   Map<string, TurnCacheEntry>
 >()
 
-function namespaceKey(namespace: Namespace): string {
-  return namespace.join("\u0000")
-}
-
 function sameNamespace(left: Namespace, right: Namespace): boolean {
   return (
     left.length === right.length &&
@@ -988,7 +984,7 @@ function turnMessages(
   turn: TranscriptTurnState,
   namespace: Namespace
 ): Array<Message> {
-  const key = namespaceKey(namespace)
+  const key = namespace.join("\u0000")
   let perNamespace = turnCache.get(turn)
   const cached = perNamespace?.get(key)
   if (

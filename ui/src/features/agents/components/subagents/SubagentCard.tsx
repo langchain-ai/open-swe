@@ -8,7 +8,7 @@ import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsIn
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
-function asString(value: unknown): string {
+export function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
