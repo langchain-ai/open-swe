@@ -13,7 +13,7 @@ import type { DesktopCommandId } from "@/desktop"
 import { AppCommandPalette } from "@/components/AppCommandPalette"
 import { AppShortcutReference } from "@/components/AppShortcutReference"
 import { useSession } from "@/lib/session"
-import { canUseFeatureFlags, toggleFeatureFlagsPanel } from "@/lib/featureFlags"
+import { toggleFeatureFlagsPanel } from "@/lib/featureFlags"
 import {
   eventMatchesShortcut,
   isTypingContext,
@@ -151,7 +151,6 @@ export function AppCommandProvider({
         label: "Toggle feature flags",
         aliases: ["experiments", "flags"],
         group: "General",
-        available: canUseFeatureFlags(session.data),
         run: () => {
           if (toggleFeatureFlagsPanel()) void navigate({ to: "/feature-flags" })
         },
@@ -177,14 +176,7 @@ export function AppCommandProvider({
         desktopShortcuts: ["mod+/"],
       },
     ],
-    [
-      navigate,
-      chat.home,
-      openPalette,
-      openShortcutReference,
-      toggleTheme,
-      session.data,
-    ]
+    [navigate, chat.home, openPalette, openShortcutReference, toggleTheme]
   )
 
   const register = useCallback((commands: ReadonlyArray<AppCommand>) => {

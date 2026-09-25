@@ -72,7 +72,7 @@ const LINK_CLASS =
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
-  const showFeatureFlags = useFeatureFlagsPanel(user)
+  const showFeatureFlags = useFeatureFlagsPanel()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
