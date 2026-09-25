@@ -103,6 +103,8 @@ async def github_webhook(
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
+        if action == "closed":
+            background_tasks.add_task(service.settle_expedited_review_on_close, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
