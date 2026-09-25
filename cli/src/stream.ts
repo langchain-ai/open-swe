@@ -1,4 +1,5 @@
 import { ApiError, ProtocolError } from "./api.ts"
+import { CredentialError } from "./credentials.ts"
 import {
   errorMessage,
   isRecord,
@@ -81,6 +82,10 @@ export interface RunOutcome {
 export const RESULT_TOOL = "cli_result"
 const MAX_EXIT_CODE = 255
 
+function retryableStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429
+}
+
 const TERMINAL: ReadonlySet<string> = new Set([
   "completed",
   "failed",
@@ -130,7 +135,7 @@ export class RunCollector {
       const detail = stringAt(record, "detail") ?? frame.data
       const status = numberAt(record, "status")
       return this.finish(
-        status !== null && status >= 500 ? "closed" : "failed",
+        status !== null && retryableStatus(status) ? "closed" : "failed",
         detail
       )
     }
@@ -222,8 +227,8 @@ export interface FollowOptions {
 }
 
 function reconnectable(cause: unknown): boolean {
-  if (!(cause instanceof ApiError)) return !(cause instanceof ProtocolError)
-  return cause.status >= 500 || cause.status === 408 || cause.status === 429
+  if (cause instanceof ApiError) return retryableStatus(cause.status)
+  return !(cause instanceof ProtocolError || cause instanceof CredentialError)
 }
 
 /**

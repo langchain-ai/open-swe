@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { ApiError } from "../src/api.ts"
+import { CredentialError } from "../src/credentials.ts"
 import {
   followRun,
   lifecycleRunId,
@@ -156,7 +157,11 @@ describe("RunCollector", () => {
 })
 
 function sse(frames: readonly SseFrame[]): Response {
-  return new Response(frames.map((f) => `data: ${f.data}\n\n`).join(""))
+  return new Response(
+    frames
+      .map((f) => `${f.event ? `event: ${f.event}\n` : ""}data: ${f.data}\n\n`)
+      .join("")
+  )
 }
 
 describe("followRun", () => {
@@ -217,6 +222,41 @@ describe("followRun", () => {
     )
     expect(outcome.status).toBe("closed")
     expect(opened).toBe(11)
+  })
+
+  test("reconnects on a rate-limited error frame", async () => {
+    const streams = [
+      [
+        {
+          event: "error",
+          id: null,
+          data: JSON.stringify({ status: 429, detail: "slow down" }),
+        },
+      ],
+      [lifecycle("run-1", "running"), lifecycle("run-1", "completed")],
+    ]
+    let opened = 0
+    const outcome = await followRun(
+      async () => sse(streams[opened++] ?? []),
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome.status).toBe("completed")
+    expect(opened).toBe(2)
+  })
+
+  test("does not retry a credential the CLI could not obtain", async () => {
+    let opened = 0
+    const failing = followRun(
+      async () => {
+        opened += 1
+        throw new CredentialError("GitHub Actions refused an OIDC token")
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    await expect(failing).rejects.toBeInstanceOf(CredentialError)
+    expect(opened).toBe(1)
   })
 
   test("does not retry a rejected credential", async () => {
