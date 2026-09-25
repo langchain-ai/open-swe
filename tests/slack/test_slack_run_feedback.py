@@ -62,7 +62,10 @@ async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback:
         await run_feedback.process_feedback(payload, payload.actions[0])
 
     assert [call.args for call in saved_feedback.await_args_list] == [
-        ("run-1", "slack_reply:C1:U1:2.0")
+        ("run-1", "slack_reply_rating")
+    ] * 3
+    assert [call.kwargs["dedupe_key"] for call in saved_feedback.await_args_list] == [
+        "slack_reply:C1:U1:2.0"
     ] * 3
     assert [call.kwargs["score"] for call in saved_feedback.await_args_list] == [1.0, 0.0, 0.0]
     assert saved_feedback.await_args is not None

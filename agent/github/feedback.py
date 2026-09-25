@@ -188,7 +188,7 @@ async def process_github_reaction(
         added=added,
     )
 
-    key = _feedback_key(owner, repo_name, user_login, comment_id)
+    dedupe_key = _feedback_key(owner, repo_name, user_login, comment_id)
     source_info = {
         "source": "github_review_reaction",
         "owner": owner,
@@ -200,13 +200,18 @@ async def process_github_reaction(
     }
     score = _score_reactions(active_reactions)
     if score is None:
-        success = await delete_langsmith_feedback(run_id, key)
+        success = await delete_langsmith_feedback(
+            run_id,
+            "github_reaction_rating",
+            dedupe_key=dedupe_key,
+        )
     else:
         success = await create_langsmith_feedback(
             run_id,
-            key,
+            "github_reaction_rating",
             score=score,
             comment=f"GitHub review reaction feedback from {user_login}",
+            dedupe_key=dedupe_key,
             source_info={**source_info, "reactions": sorted(active_reactions)},
         )
     outcome = outcome_from_score(score, source="github")

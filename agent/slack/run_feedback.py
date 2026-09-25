@@ -63,7 +63,8 @@ async def process_feedback(interaction: SlackInteraction, action: SlackBlockActi
         context = await SlackChannel.context_for(channel_id, use_cache=False)
         if not context.allows_operations:
             return
-        key = f"slack_reply:{channel_id}:{user_id}:{message_ts}"
+        key = "slack_reply_rating"
+        dedupe_key = f"slack_reply:{channel_id}:{user_id}:{message_ts}"
         async with slack_thread_mutation_lock(
             client, channel_id, message_ts, purpose=f"run_feedback:{user_id}"
         ):
@@ -71,6 +72,7 @@ async def process_feedback(interaction: SlackInteraction, action: SlackBlockActi
                 selection.run_id,
                 key,
                 score=1.0 if selection.rating == "up" else 0.0,
+                dedupe_key=dedupe_key,
                 source_info={
                     "source": "slack_reply",
                     "channel_id": channel_id,

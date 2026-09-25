@@ -483,6 +483,7 @@ async def create_langsmith_feedback(
     score: float,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
+    dedupe_key: str | None = None,
 ) -> bool:
     """Create or update deterministic feedback on all configured LangSmith tenants."""
     configs = _build_langsmith_feedback_clients()
@@ -490,7 +491,7 @@ async def create_langsmith_feedback(
         logger.warning("No LangSmith API key configured, skipping feedback")
         return False
 
-    feedback_id = _feedback_id(run_id, key)
+    feedback_id = _feedback_id(run_id, dedupe_key or key)
     any_success = False
     for api_key, api_url in configs:
         try:
@@ -515,14 +516,19 @@ async def create_langsmith_feedback(
     return any_success
 
 
-async def delete_langsmith_feedback(run_id: str, key: str) -> bool:
+async def delete_langsmith_feedback(
+    run_id: str,
+    key: str,
+    *,
+    dedupe_key: str | None = None,
+) -> bool:
     """Delete deterministic feedback from all configured LangSmith tenants."""
     configs = _build_langsmith_feedback_clients()
     if not configs:
         logger.warning("No LangSmith API key configured, skipping feedback deletion")
         return False
 
-    feedback_id = _feedback_id(run_id, key)
+    feedback_id = _feedback_id(run_id, dedupe_key or key)
     any_success = False
     for api_key, api_url in configs:
         try:
