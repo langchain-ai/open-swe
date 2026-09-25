@@ -287,3 +287,35 @@ async def test_a_head_that_moves_after_the_checks_writes_nothing(
     assert result.status == "not_ready"
     assert (await _reload(approval)).state == "open"
     assert github.reviews == [] and github.merges == []
+
+
+async def test_someone_else_merging_on_github_only_marks_the_card_and_reacts(
+    github: _GitHub, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+    reactions = AsyncMock(return_value=True)
+    posts = AsyncMock()
+    wakes = AsyncMock()
+    monkeypatch.setattr(lifecycle, "add_slack_reaction", reactions)
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posts)
+    monkeypatch.setattr(lifecycle, "dispatch_agent_run", wakes)
+
+    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=True)
+    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=True)
+
+    assert (await _reload(approval)).state == "merged"
+    reactions.assert_awaited_once_with("C1", "1.0", "merged")
+    posts.assert_not_awaited()
+    wakes.assert_not_awaited()
+    assert github.dismissed == [] and github.merges == []
+
+
+async def test_a_pr_closed_unmerged_closes_the_card_and_keeps_its_reviews(
+    github: _GitHub, open_approval: OpenApproval
+) -> None:
+    approval = await _reviewed(await _approved(open_approval, "U_GRACE"), github)
+
+    await lifecycle.close_for_pull_request("lc", "repo", 7, merged=False)
+
+    assert (await _reload(approval)).state == "cancelled"
+    assert github.dismissed == []

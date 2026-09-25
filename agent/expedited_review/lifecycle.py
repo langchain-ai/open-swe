@@ -286,12 +286,14 @@ async def retire(
     approval: ExpeditedApproval,
     state: ApprovalState,
     outcome: str,
+    *,
+    dismiss_reviews: bool = True,
 ) -> ExpeditedApproval | None:
     """Close an open approval and mark its card; ``None`` if it was already closed."""
     updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
-    if state != "merged":
+    if state != "merged" and dismiss_reviews:
         pr = updated.pull_request
         token = await repo_token(pr.owner, pr.repo)
         if token is not None:
@@ -322,3 +324,18 @@ async def mark_merged(approval: ExpeditedApproval) -> None:
     if location is not None:
         if not await add_slack_reaction(location[0], location[1], "merged"):
             await add_slack_reaction(location[0], location[1], "white_check_mark")
+
+
+async def close_for_pull_request(owner: str, repo: str, number: int, *, merged: bool) -> None:
+    """Settle a PR's open card when the PR closes on GitHub, whoever closed it.
+
+    Only the card and the merged reaction change: nothing new is posted, the agent is
+    not woken, and a closed PR keeps its reviews.
+    """
+    approval = await ExpeditedApproval.active_for(owner, repo, number)
+    if approval is None:
+        return
+    if merged:
+        await mark_merged(approval)
+    else:
+        await retire(approval, "cancelled", "the pull request was closed", dismiss_reviews=False)

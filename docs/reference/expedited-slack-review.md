@@ -90,8 +90,8 @@ Anyone in Slack may dismiss an open card, with no GitHub link or write access ne
 The card is cancelled and its votes no longer count. Nothing is sent to the agent, and
 the GitHub reviews the votes submitted are dismissed: anyone who wants changes tags the
 agent in the thread like any other request, and it can post a fresh card afterwards.
-Every card that closes without a merge, superseded ones included, dismisses its reviews
-the same way.
+A superseded or cancelled card dismisses its reviews the same way, unless it closed
+because the PR did.
 
 ### Merge
 
@@ -120,6 +120,11 @@ card. The tool:
 
 On a confirmed merge: card → merged, merged reaction on the Slack root. The thread
 resolves through the existing merged-PR handling.
+
+When someone merges or closes the PR on GitHub themselves, the `pull_request` closed
+webhook settles an open card the same way: merged → card merged and the merged
+reaction; closed → card closed. Nothing new is posted, the agent is not woken, and
+no reviews are dismissed.
 
 ### Storage
 
