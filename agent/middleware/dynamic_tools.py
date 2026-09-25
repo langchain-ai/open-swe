@@ -1,6 +1,7 @@
 """Load optional integration tool schemas only when requested."""
 
 import asyncio
+import difflib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
@@ -63,6 +64,7 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         reserved_names: Collection[str] = (),
     ) -> None:
         reserved = {"load_integration_tools", *reserved_names}
+        self._reserved_names = set(reserved_names)
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
@@ -95,48 +97,50 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             tool_call_id: Annotated[str, InjectedToolCallId] = "",
         ) -> Command:
             normalized_names = [aliases.get(name, name) for name in tool_names]
-            unknown = sorted(set(normalized_names) - self._group_of.keys())
-            if unknown:
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                content=f"Unknown integration tools: {', '.join(unknown)}",
-                                tool_call_id=tool_call_id,
-                                status="error",
-                            )
-                        ]
-                    }
-                )
-            missing = await self._build(normalized_names)
-            if missing:
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                content=(
-                                    "These integration tools are unavailable right now: "
-                                    f"{', '.join(missing)}. Continue without them."
-                                ),
-                                tool_call_id=tool_call_id,
-                                status="error",
-                            )
-                        ]
-                    }
-                )
+            requested = set(normalized_names)
+            known = sorted(requested & self._group_of.keys())
+            already_bound = sorted(requested & self._reserved_names)
+            unknown = sorted(requested - self._group_of.keys() - self._reserved_names)
+            missing = await self._build(known)
+            loaded_names = sorted(set(known) - set(missing))
             loaded = set(state.get("loaded_integration_tools", [])) if state else set()
-            loaded.update(normalized_names)
+            loaded.update(loaded_names)
+            parts: list[str] = []
+            if loaded_names:
+                parts.append(
+                    "Loaded integration tool schemas: "
+                    f"{', '.join(loaded_names)}. Call these tools normally on your next turn."
+                )
+            if missing:
+                parts.append(
+                    "These integration tools are unavailable right now: "
+                    f"{', '.join(missing)}. Continue without them."
+                )
+            if already_bound:
+                parts.append(
+                    "These tools are already available; call them directly: "
+                    f"{', '.join(already_bound)}."
+                )
+            if unknown:
+                suggestions = {
+                    name: difflib.get_close_matches(name, self._group_of, n=3, cutoff=0.5)
+                    for name in unknown
+                }
+                details = ", ".join(
+                    f"{name} (did you mean: {', '.join(matches)})" if matches else name
+                    for name, matches in suggestions.items()
+                )
+                parts.append(f"Unknown integration tools: {details}")
+            usable = bool(loaded_names or already_bound)
+            message_kwargs = {"status": "error"} if missing or not usable else {}
             return Command(
                 update={
-                    "loaded_integration_tools": sorted(loaded),
+                    **({"loaded_integration_tools": sorted(loaded)} if loaded_names else {}),
                     "messages": [
                         ToolMessage(
-                            content=(
-                                "Loaded integration tool schemas: "
-                                f"{', '.join(sorted(normalized_names))}. "
-                                "Call these tools normally on your next turn."
-                            ),
+                            content=" ".join(parts),
                             tool_call_id=tool_call_id,
+                            **message_kwargs,
                         )
                     ],
                 }
