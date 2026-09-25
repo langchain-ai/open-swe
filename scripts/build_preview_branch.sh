@@ -9,7 +9,10 @@ PREVIEW_RESET_DAYS="${PREVIEW_RESET_DAYS:-7}"
 PREVIEW_RESET_HOUR="${PREVIEW_RESET_HOUR:-7}"
 PREVIEW_RESET_ZONE="${PREVIEW_RESET_ZONE:-America/New_York}"
 PREVIEW_URL="${PREVIEW_URL:-https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents}"
+PREVIEW_AGENT_TIMEOUT_SECONDS="${PREVIEW_AGENT_TIMEOUT_SECONDS:-1200}"
 CONFLICT_LIMIT=10
+RESOLVE_PROMPT=
+AGENT_RESOLVED=false
 
 summary() {
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -107,16 +110,63 @@ comment_and_unlabel() {
   return 1
 }
 
+restore_head() {
+  git rerere clear
+  git reset -q --hard "$1"
+  git clean -fdq
+}
+
+resolve_with_agent() {
+  local sha="$1" before="$2" message="$3" context path merge_head
+  [[ -n "$RESOLVE_PROMPT" ]] || return 1
+  context="Merge: ${message}"$'\n'"MERGE_HEAD: ${sha}"$'\n'"Conflicted files:"
+  for path in "${MERGE_CONFLICTS[@]}"; do context+=$'\n'"- ${path}"; done
+  printf 'resolving %d conflicted file(s) in %s with oswe\n' "${#MERGE_CONFLICTS[@]}" "$(short_sha "$sha")" >&2
+  if ! timeout -s INT -k 60 "$PREVIEW_AGENT_TIMEOUT_SECONDS" \
+    env -u GH_TOKEN -u GITHUB_TOKEN GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=rerere.enabled GIT_CONFIG_VALUE_0=false \
+    oswe run "$RESOLVE_PROMPT" <<<"$context" >&2; then
+    printf 'oswe did not resolve the conflicts in %s\n' "$(short_sha "$sha")" >&2
+    return 1
+  fi
+  merge_head="$(git rev-parse -q --verify MERGE_HEAD || true)"
+  if [[ "$(git rev-parse HEAD)" != "$before" || "$merge_head" != "$sha" ]]; then
+    printf 'oswe moved HEAD or ended the merge of %s\n' "$(short_sha "$sha")" >&2
+    return 1
+  fi
+  git --literal-pathspecs add -A -- "${MERGE_CONFLICTS[@]}"
+  if [[ -n "$(git diff --name-only --diff-filter=U)" ]] ||
+    git --literal-pathspecs grep -q --cached -E '^(<{7}|>{7})( |$)' -- "${MERGE_CONFLICTS[@]}"; then
+    printf 'oswe left conflicts in %s\n' "$(short_sha "$sha")" >&2
+    return 1
+  fi
+}
+
 merge_ref() {
-  local sha="$1" message="$2"
+  local sha="$1" message="$2" before
   MERGE_CONFLICTS=()
   MERGE_REASON=
+  MERGE_RESOLVED=
+  before="$(git rev-parse HEAD)"
   if output="$(git merge --no-ff -m "$message" "$sha" 2>&1)"; then
     return 0
   fi
   mapfile -d '' -t MERGE_CONFLICTS < <(git diff --name-only --diff-filter=U -z || true)
+  if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    if ((${#MERGE_CONFLICTS[@]} == 0)); then
+      MERGE_RESOLVED="conflicts resolved from the rerere cache"
+    elif resolve_with_agent "$sha" "$before" "$message"; then
+      MERGE_RESOLVED="conflicts resolved by oswe"
+      AGENT_RESOLVED=true
+    fi
+    if [[ -n "$MERGE_RESOLVED" ]] && git commit -q --no-edit; then
+      git reset -q --hard
+      git clean -fdq
+      return 0
+    fi
+    MERGE_RESOLVED=
+  fi
   if ((${#MERGE_CONFLICTS[@]})); then
-    git merge --abort
+    restore_head "$before"
     return 1
   fi
   if ! git merge-base HEAD "$sha" >/dev/null 2>&1; then
@@ -136,9 +186,14 @@ build() {
 
   git config user.name github-actions[bot]
   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+  git config rerere.enabled true
+  git config rerere.autoUpdate true
   fetch_main
   git checkout -B "$PREVIEW_BRANCH" origin/main
   base_sha="$(git rev-parse HEAD)"
+  if command -v oswe >/dev/null; then
+    RESOLVE_PROMPT="$(<.github/prompts/resolve_preview_conflict.md)"
+  fi
 
   set +e
   git ls-remote --exit-code --heads origin "refs/heads/${PREVIEW_MANUAL_BRANCH}" >/dev/null 2>&1
@@ -151,7 +206,7 @@ build() {
     else
       fetched="$(git rev-parse "$ref")"
       if merge_ref "$fetched" "preview: merge branch ${PREVIEW_MANUAL_BRANCH}"; then
-        included+=("\`${PREVIEW_MANUAL_BRANCH}\` — \`$(short_sha "$fetched")\`")
+        included+=("\`${PREVIEW_MANUAL_BRANCH}\` — \`$(short_sha "$fetched")\`${MERGE_RESOLVED:+ — ${MERGE_RESOLVED}}")
       else
         status=$?
         if ((status != 1)); then return 1; fi
@@ -197,7 +252,7 @@ build() {
       continue
     fi
     if merge_ref "$fetched" "preview: merge PR #${number} from @${login}"; then
-      included+=("[#${number} ${title}](${url}) — @${login} — \`$(short_sha "$fetched")\`")
+      included+=("[#${number} ${title}](${url}) — @${login} — \`$(short_sha "$fetched")\`${MERGE_RESOLVED:+ — ${MERGE_RESOLVED}}")
       continue
     else
       status=$?
@@ -214,6 +269,7 @@ build() {
     done
     ((${#MERGE_CONFLICTS[@]})) && conflicted=true
   done <<<"$pulls"
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'agent_resolved=%s\n' "$AGENT_RESOLVED" >>"$GITHUB_OUTPUT"
 
   summary "## Preview tree"
   summary ""

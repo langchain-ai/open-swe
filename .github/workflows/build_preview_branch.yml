@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
   issues: write
   pull-requests: write
 
@@ -53,10 +54,40 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: ./scripts/build_preview_branch.sh reset
+      - name: Install the latest oswe
+        if: vars.OPEN_SWE_BACKEND_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$(gh api "repos/${GH_REPO}/releases?per_page=30" --jq '[.[] | select(any(.assets[]; .name == "oswe-linux-x64.tar.gz"))][0].tag_name // ""')"
+          if [[ -z "$tag" ]]; then
+            echo "::warning::No release ships oswe yet; preview conflicts will not be resolved automatically."
+            exit 0
+          fi
+          dir="$RUNNER_TEMP/oswe"
+          gh release download "$tag" -p oswe-linux-x64.tar.gz -p oswe-SHA256SUMS -D "$dir"
+          (cd "$dir" && sha256sum --check --ignore-missing oswe-SHA256SUMS && tar -xzf oswe-linux-x64.tar.gz)
+          echo "$dir" >>"$GITHUB_PATH"
+          "$dir/oswe" --version
+      - name: Restore resolved conflicts
+        uses: actions/cache/restore@v6
+        with:
+          path: .git/rr-cache
+          key: preview-rerere-${{ github.run_id }}
+          restore-keys: preview-rerere-
       - name: Assemble and publish the preview tree
+        id: build
         env:
           EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
           FORCE: ${{ inputs.force }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          OPEN_SWE_BACKEND_URL: ${{ vars.OPEN_SWE_BACKEND_URL }}
         run: ./scripts/build_preview_branch.sh build
+      - name: Save resolved conflicts
+        if: steps.build.outputs.agent_resolved == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .git/rr-cache
+          key: preview-rerere-${{ github.run_id }}
