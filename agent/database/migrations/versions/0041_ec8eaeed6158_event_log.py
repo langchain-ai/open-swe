@@ -22,6 +22,7 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX event_log_delivery_idx ON event_log (source, delivery_id)")
+    op.execute("CREATE INDEX event_log_received_idx ON event_log (received_at, source, event_type)")
     for statement in (
         "COMMENT ON TABLE event_log IS 'Append-only log of every signature-verified inbound "
         "webhook. One partition per UTC day (event_log_YYYYMMDD); EventLog.ensure_partitions() "
