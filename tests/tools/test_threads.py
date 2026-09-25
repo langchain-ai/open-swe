@@ -923,6 +923,73 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
 
 
+async def test_manage_thread_rejects_any_action_on_current_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_thread_id = "thread-current"
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": current_thread_id}},
+    )
+    cancel = AsyncMock()
+    resolve = AsyncMock()
+    send = AsyncMock()
+    plan_api = AsyncMock()
+    monkeypatch.setattr(threads_tool, "cancel_dashboard_thread", cancel)
+    monkeypatch.setattr(threads_tool, "resolve_dashboard_thread", resolve)
+    monkeypatch.setattr(threads_tool, "_send_message", send)
+    monkeypatch.setattr(threads_tool, "plan_api", plan_api)
+
+    for action in (
+        "cancel",
+        "resolve",
+        "unresolve",
+        "delete",
+        "update_plan",
+        "add_plan_comment",
+    ):
+        result = await threads_tool.manage_thread(current_thread_id, action)
+
+        assert result == {
+            "success": False,
+            "error": (
+                "thread_id thread-current is the thread this tool call is executing inside; "
+                "manage_thread cannot operate on its own session. Reply to the user through "
+                "your normal response path (slack_thread_reply on Slack, or your response text) "
+                "instead of managing this thread."
+            ),
+        }, action
+    plan_api.post_plan_comment.assert_not_awaited()
+    plan_api.update_plan.assert_not_awaited()
+    plan_api.approve_plan.assert_not_awaited()
+    cancel.assert_not_awaited()
+    resolve.assert_not_awaited()
+    send.assert_not_awaited()
+
+
+async def test_manage_thread_allows_different_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {"configurable": {"thread_id": "thread-current"}},
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-other", "isOwner": True}),
+    )
+    cancel = AsyncMock(return_value={"id": "thread-other", "status": "cancelled"})
+    monkeypatch.setattr(threads_tool, "cancel_dashboard_thread", cancel)
+
+    result = await threads_tool.manage_thread("thread-other", "cancel")
+
+    assert result["success"] is True
+    cancel.assert_awaited_once_with("thread-other", "octocat", email="octocat@example.com")
+
+
 async def test_manage_thread_requires_delete_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
     delete = AsyncMock()
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))

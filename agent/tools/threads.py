@@ -18,6 +18,7 @@ from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
+from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
@@ -968,6 +969,14 @@ async def manage_thread(
     thread_id = thread_id.strip()
     if not thread_id:
         return _failure("thread_id is required")
+    executing_thread_id = RunConfig.from_config(_config()).thread_id
+    if executing_thread_id and thread_id == executing_thread_id:
+        return _failure(
+            f"thread_id {thread_id} is the thread this tool call is executing inside; "
+            "manage_thread cannot operate on its own session. Reply to the user through "
+            "your normal response path (slack_thread_reply on Slack, or your response text) "
+            "instead of managing this thread."
+        )
     unexpected = _unexpected_action_arguments(
         action,
         message=message,
