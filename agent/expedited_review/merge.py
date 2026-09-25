@@ -1,4 +1,4 @@
-"""Turn an expedited review's recorded approvals into GitHub reviews and a merge.
+"""Merge a pull request on its expedited approvals.
 
 The agent calls this once it believes the pull request is ready. Votes count
 for the current head only while the diff the card drew is unchanged; GitHub's
@@ -11,19 +11,17 @@ from typing import Any, Literal
 
 import httpx2
 
-from agent.dashboard.profiles import get_valid_access_token
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
 from agent.expedited_review.lifecycle import mark_merged, repo_token, retire
 from agent.expedited_review.readiness import assess_readiness
-from agent.expedited_review.voting import github_token_hint
+from agent.expedited_review.reviews import github_error, submit_approval
 from agent.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
 )
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.slack.client import get_slack_permalink
 
 logger = logging.getLogger(__name__)
 
@@ -44,70 +42,6 @@ _NO_APPROVALS = MergeResult(
     "needs_approvals",
     "Nobody has approved the Slack card yet. You will be woken when someone does.",
 )
-
-
-def _github_error(response: httpx2.Response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        body = None
-    message = body.get("message") if isinstance(body, dict) else None
-    text = message if isinstance(message, str) and message else response.text[:200]
-    return f"{response.status_code} {text}".strip()
-
-
-async def _submit_github_approval(
-    approval: ExpeditedApproval, login: str, head_sha: str
-) -> int | str:
-    """POST an ``APPROVE`` review as ``login``; the review id, or why it failed."""
-    user_token = await get_valid_access_token(login)
-    if not user_token:
-        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
-    pr = approval.pull_request
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews"
-    payload = {
-        "commit_id": head_sha,
-        "event": "APPROVE",
-        "body": "Approved via Open SWE expedited review in Slack.",
-    }
-    try:
-        async with github_client(token=user_token) as client:
-            response = await github_request(client, "POST", url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-    except httpx2.HTTPStatusError as exc:
-        return f"GitHub rejected @{login}'s review: {_github_error(exc.response)}"
-    except httpx2.HTTPError, ValueError:
-        return f"GitHub did not answer when submitting @{login}'s review."
-    review_id = data.get("id") if isinstance(data, dict) else None
-    if not isinstance(review_id, int):
-        return f"GitHub returned an unexpected review response for @{login}."
-    return review_id
-
-
-async def _comment_card_link(approval: ExpeditedApproval, token: str) -> None:
-    """Leave the Slack card's link on the PR so the approval is traceable from GitHub."""
-    permalink = await get_slack_permalink(approval.slack_channel_id, approval.slack_message_ts)
-    if permalink is None:
-        logger.warning(
-            "No Slack permalink for the expedited review card",
-            extra={"approval_id": str(approval.id)},
-        )
-        return
-    pr = approval.pull_request
-    approvers = " and ".join(f"@{login}" for login in approval.approvers)
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/issues/{pr.number}/comments"
-    body = f"Approved in Slack by {approvers} via [expedited review]({permalink})."
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "POST", url, json={"body": body})
-            response.raise_for_status()
-    except httpx2.HTTPError:
-        logger.warning(
-            "Failed to comment the expedited review link on the pull request",
-            extra={"approval_id": str(approval.id)},
-            exc_info=True,
-        )
 
 
 async def _merge_token(owner: str, repo: str) -> str | None:
@@ -183,19 +117,13 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
                 "The pull request's head changed while it was being checked. Call "
                 "`merge_expedited_pr` again.",
             )
-        reviewed_now = False
         for vote in row.approvals:
-            if vote.github_review_id is not None and vote.github_review_sha == snapshot.head_sha:
+            # An approval on an older head still counts unless GitHub dismissed it as stale.
+            if vote.github_review_id in snapshot.approved_review_ids:
                 continue
-            submitted = await _submit_github_approval(row, vote.github_login, snapshot.head_sha)
-            if isinstance(submitted, str):
-                return MergeResult("error", submitted)
-            vote.github_review_id = submitted
-            vote.github_review_sha = snapshot.head_sha
-            reviewed_now = True
-        # A retry after GitHub refused the merge has already left the link.
-        if reviewed_now:
-            await _comment_card_link(row, token)
+            failed = await submit_approval(row, vote, snapshot.head_sha)
+            if failed is not None:
+                return MergeResult("error", failed)
         result = await _merge(row, snapshot.head_sha, snapshot.allowed_merge_methods, token)
     if result.status == "merged":
         await mark_merged(approval)
@@ -224,6 +152,6 @@ async def _merge(
         return MergeResult("merged", f"Merged {pr.url}.")
     return MergeResult(
         "refused",
-        f"GitHub refused the merge: {_github_error(response)}. Open SWE never bypasses branch "
+        f"GitHub refused the merge: {github_error(response)}. Open SWE never bypasses branch "
         "protection; ask a maintainer if the rules need someone else's approval.",
     )

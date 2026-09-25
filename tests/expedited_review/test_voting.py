@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from agent.expedited_review import lifecycle, voting
-from agent.expedited_review.approvals import ExpeditedApproval
+from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
 from agent.users import User
 from tests.expedited_review.conftest import OpenApproval
 
@@ -17,6 +17,9 @@ class _Harness:
         self.agent_prompts: list[str] = []
         self.marked_ready: list[str] = []
         self.wake_succeeds = True
+        self.reviews: list[tuple[str, str]] = []
+        self.review_error: str | None = None
+        self.diff_unchanged = True
 
     async def notify_agent(self, approval: ExpeditedApproval, prompt: str) -> bool:
         self.agent_prompts.append(prompt)
@@ -24,6 +27,16 @@ class _Harness:
 
     async def mark_ready(self, owner: str, repo: str, number: int, action: object, token: str):
         self.marked_ready.append(token)
+
+    async def submit_approval(
+        self, approval: ExpeditedApproval, vote: ApprovalVote, head_sha: str
+    ) -> str | None:
+        if self.review_error is not None:
+            return self.review_error
+        self.reviews.append((vote.github_login, head_sha))
+        vote.github_review_id = 100 + len(self.reviews)
+        vote.github_review_sha = head_sha
+        return None
 
 
 @pytest.fixture
@@ -39,8 +52,13 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
+    monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
+    monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(voting, "fingerprint_matches", lambda files, fp: h.diff_unchanged)
+    monkeypatch.setattr(voting, "submit_approval", h.submit_approval)
     monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
     monkeypatch.setattr(lifecycle, "notify_agent", h.notify_agent)
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     return h
 
 
@@ -93,21 +111,55 @@ async def _stored(approval: ExpeditedApproval) -> ExpeditedApproval:
     return stored
 
 
-async def test_one_non_author_approval_approves_and_wakes_the_agent_once(
+async def test_each_approval_reaches_github_on_click_and_wakes_the_agent_once(
     harness: _Harness, open_approval: OpenApproval
 ) -> None:
     approval = await open_approval()
 
-    await _click(approval, "U_GRACE")
+    grace = await _click(approval, "U_GRACE")
     await _click(approval, "U_LINUS")
 
     stored = await _stored(approval)
     assert stored.state == "open"
-    assert stored.approved
     assert sorted(stored.approvers) == ["grace", "linus"]
-    assert all(vote.github_review_id is None for vote in stored.votes)
+    assert "Approved on GitHub" in grace.message
+    assert harness.reviews == [("grace", "def456"), ("linus", "def456")]
+    assert sorted((v.github_review_id, v.github_review_sha) for v in stored.votes) == [
+        (101, "def456"),
+        (102, "def456"),
+    ]
     assert len(harness.agent_prompts) == 1
     assert "@grace" in harness.agent_prompts[0]
+
+
+async def test_a_click_on_a_card_whose_diff_changed_records_the_vote_without_a_review(
+    harness: _Harness, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval()
+    harness.diff_unchanged = False
+
+    outcome = await _click(approval, "U_GRACE")
+
+    stored = await _stored(approval)
+    assert "changed the diff" in outcome.message
+    assert stored.approvers == ["grace"]
+    assert harness.reviews == []
+    assert stored.votes[0].github_review_id is None
+
+
+async def test_a_review_github_refuses_stays_recorded_for_the_merge(
+    harness: _Harness, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval()
+    harness.review_error = "GitHub rejected @grace's review: 422 nope"
+
+    outcome = await _click(approval, "U_GRACE")
+
+    stored = await _stored(approval)
+    assert "422 nope" in outcome.message and "when it merges" in outcome.message
+    assert stored.approvers == ["grace"]
+    assert stored.votes[0].github_review_id is None
+    assert len(harness.agent_prompts) == 1
 
 
 async def test_the_author_cannot_approve_their_own_pull_request(

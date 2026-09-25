@@ -16,6 +16,7 @@ from agent.expedited_review import card
 from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
+from agent.expedited_review.reviews import dismiss_approvals
 from agent.github.app import (
     get_github_app_installation_id_for_repo,
     get_github_app_installation_token,
@@ -290,6 +291,11 @@ async def retire(
     updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
+    if state != "merged":
+        pr = updated.pull_request
+        token = await repo_token(pr.owner, pr.repo)
+        if token is not None:
+            await dismiss_approvals(updated, token, outcome)
     # A closed card leaves the channel and stays in the thread only.
     if not updated.slack_broadcast or not await _repost(updated, broadcast=False, outcome=outcome):
         await refresh_card(updated, outcome=outcome)
