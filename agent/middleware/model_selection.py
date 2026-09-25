@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
 PersistedRoute = Route | Literal["fast_alt"]
-RoutingMode = Literal["auto", "fast"]
 
 _CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 
@@ -86,11 +85,9 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         classifier: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
-        routing_mode: RoutingMode = "auto",
     ) -> None:
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
-        self._routing_mode = routing_mode
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
         hidden_classifier = classifier.model_copy(
@@ -107,8 +104,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         """Select the model route for a turn."""
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
-        if self._routing_mode == "fast":
-            return "fast"
         messages = state.get("messages", [])
         task = _latest_human_task(messages)
         route: Route = "balanced"
@@ -129,8 +124,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, Route]:
         del runtime
         route = await self.select_route(state)
-        if self._routing_mode == "auto":
-            await _emit_routed_model(self._models, self._route_model_ids, route)
+        await _emit_routed_model(self._models, self._route_model_ids, route)
         return {"model_route": route}
 
     async def awrap_model_call(
