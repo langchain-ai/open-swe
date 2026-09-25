@@ -231,6 +231,21 @@ async def test_history_tools_read_other_incidents_as_cited_context(incident):
     assert "Disk filled up" in read["observation"]
 
 
+async def test_read_incident_unknown_id_returns_not_found(incident):
+    session = await runtime.load_incident_session(config())
+
+    result = await session._read_incident("unknown")
+
+    assert result == {
+        "found": False,
+        "incident_id": "unknown",
+        "error": (
+            "No readable incident with that id. Use an id from search_incidents items[].id - "
+            "incident.io references like INC-1234 and incident.io ULIDs are not valid here."
+        ),
+    }
+
+
 async def test_excluded_channels_stop_the_session(incident):
     session = await runtime.load_incident_session(config())
     await service.POLICIES.put(
