@@ -122,4 +122,7 @@ async def search_history(
         item = history.model_dump(exclude={"workspace_id", "channel_id"})
         item["status"] = record.status
         items.append(item)
-    return service.paginate(service.sort_newest_first(items), cursor, limit)
+    page = service.paginate(service.sort_newest_first(items), cursor, limit)
+    if not items:
+        page["note"] = "No readable past incidents; read_incident will not resolve any id."
+    return page

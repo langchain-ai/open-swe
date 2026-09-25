@@ -87,7 +87,10 @@ async def test_curated_history_keeps_titles_but_follows_channel_access(record):
         "API availability"
     )
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
-    assert (await documents.search_history())["items"] == []
+    history = await documents.search_history()
+    assert history["items"] == []
+    assert history["next_cursor"] is None
+    assert history["note"] == "No readable past incidents; read_incident will not resolve any id."
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == 404

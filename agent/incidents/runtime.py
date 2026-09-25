@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import langgraph_sdk
+from fastapi import HTTPException
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -126,13 +127,19 @@ class IncidentSession:
             StructuredTool.from_function(
                 coroutine=self._search_incidents,
                 name="search_incidents",
-                description="Find readable past incidents and their curated postmortems.",
+                description=(
+                    "Find readable past incidents and their curated postmortems. This is the only "
+                    "source of valid read_incident ids; an empty items list means no past incident "
+                    "is readable for this workspace."
+                ),
             ),
             StructuredTool.from_function(
                 coroutine=self._read_incident,
                 name="read_incident",
                 description=(
-                    "Read the postmortem of another accessible incident as historical context."
+                    "Read the postmortem of another accessible incident as historical context. "
+                    "incident_id must be an id returned by search_incidents (items[].id); "
+                    "incident.io references such as INC-1234 and incident.io ULIDs are not accepted."
                 ),
             ),
         ]
@@ -228,7 +235,20 @@ class IncidentSession:
 
     async def _read_incident(self, incident_id: str) -> dict[str, Any]:
         await self.check()
-        context = await documents.document_context(incident_id)
+        try:
+            context = await documents.document_context(incident_id)
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+            return {
+                "found": False,
+                "incident_id": incident_id,
+                "error": (
+                    "No readable incident with that id. Use an id from search_incidents "
+                    "items[].id - incident.io references like INC-1234 and incident.io ULIDs "
+                    "are not valid here."
+                ),
+            }
         return self.collector.record_observation(
             source="incident",
             url="",
