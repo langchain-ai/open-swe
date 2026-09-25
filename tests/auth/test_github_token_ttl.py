@@ -27,7 +27,6 @@ from agent.webhooks import common as webhook_common
 @pytest.fixture(autouse=True)
 def _clear_token_cache() -> None:
     github_token._GITHUB_TOKEN_CACHE.clear()
-    github_token._BOT_TOKEN_SCOPES.clear()
 
 
 # (a) expired-cache reads -----------------------------------------------------
@@ -101,21 +100,23 @@ def test_cached_token_expires_after_max_ttl() -> None:
     far_future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
     old_cached_at = datetime.now(UTC) - timedelta(hours=25)
     github_token._GITHUB_TOKEN_CACHE[("tid", github_token._BOT_PRINCIPAL)] = (
-        "ghp_secret",
-        far_future,
-        old_cached_at,
+        github_token._CachedToken("ghp_secret", far_future, old_cached_at)
     )
     assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
 
 
 def test_cache_write_sweeps_other_expired_entries() -> None:
-    """Writing one entry evicts unrelated entries that have passed their expiry."""
+    """Writing one entry evicts expired user tokens and bot tokens past the 24h cap."""
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     github_token.cache_github_token_for_thread(
-        "stale", "ghp_stale", expires_at=past, is_bot_token=True
+        "stale", "ghp_stale", expires_at=past, principal="login:alice"
+    )
+    github_token._GITHUB_TOKEN_CACHE[("old", github_token._BOT_PRINCIPAL)] = (
+        github_token._CachedToken("ghp_old", None, datetime.now(UTC) - timedelta(hours=25))
     )
     github_token.cache_github_token_for_thread("fresh", "ghp_fresh", is_bot_token=True)
-    assert ("stale", github_token._BOT_PRINCIPAL) not in github_token._GITHUB_TOKEN_CACHE
+    assert ("stale", "login:alice") not in github_token._GITHUB_TOKEN_CACHE
+    assert ("old", github_token._BOT_PRINCIPAL) not in github_token._GITHUB_TOKEN_CACHE
     assert ("fresh", github_token._BOT_PRINCIPAL) in github_token._GITHUB_TOKEN_CACHE
 
 
