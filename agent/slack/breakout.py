@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from agent.slack import webhook as service
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
@@ -192,6 +193,13 @@ async def process_slack_breakout(
             )
             return
         target = command.target_channel(request)
+        channel = await SlackChannel.load(target, use_cache=False)
+        if channel is None or not channel.public:
+            await _tell_sender(
+                request,
+                f"<#{target}> is not a public channel. Breakouts only go to public channels.",
+            )
+            return
         if command.instruction:
             await _start(request, command.instruction, target, repo)
         else:
