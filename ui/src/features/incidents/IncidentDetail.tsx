@@ -292,7 +292,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               />
                             </p>
                           </div>
-                        ),
+                        )
                     )}
                     {Boolean(report.next_steps?.length) && (
                       <div className="mt-5 rounded-lg border border-info/20 bg-info/5 p-4">
