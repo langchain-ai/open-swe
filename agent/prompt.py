@@ -54,7 +54,7 @@ def _render_source_guidance(
     source: str, slack_context: bool, slack_ask: bool = False, slack_breakout: bool = False
 ) -> str:
     if source == "slack" and slack_context and not slack_ask:
-        guidance = render_template("system/source-slack.md", breakout=slack_breakout)
+        guidance = render_template("system/source-slack.md.jinja", breakout=slack_breakout)
         return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
     if source == "background_task":
         name = "background-task"
