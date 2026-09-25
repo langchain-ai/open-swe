@@ -302,7 +302,8 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     assert dispatch.await_args is not None
     assert "checks are green" in dispatch.await_args.args[1]
     notify.assert_not_awaited()
-    assert watch_client.store.values == {}
+    assert await baby_sit.ready_wakeup_head("acme/repo#7") == "head-1"
+    assert await baby_sit.WATCHES.get("acme/repo#7") is None
 
 
 async def test_github_notification_uses_source_repository(

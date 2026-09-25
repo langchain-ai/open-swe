@@ -1,13 +1,21 @@
 """Tool for managing durable `/baby-sit` PR watches."""
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any, Literal
 
 from langgraph.config import get_config
 
-from agent.baby_sit import record_retry, start_watch, stop_watch, watch_key
+from agent.baby_sit import (
+    aggregate_check_state,
+    ready_wakeup_head,
+    record_retry,
+    start_watch,
+    stop_watch,
+    watch_key,
+)
 from agent.github.app import get_github_app_installation_id_for_repo
-from agent.github.ci import fetch_pr
+from agent.github.ci import fetch_pr, list_check_runs, list_commit_statuses
 from agent.github.token import resolve_github_token
 from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
@@ -122,6 +130,31 @@ async def manage_baby_sit(
         return {"success": False, "error": "Pull request head SHA is unavailable"}
     if not isinstance(pr_head_ref, str) or not pr_head_ref:
         return {"success": False, "error": "Pull request head branch is unavailable"}
+
+    check_runs, statuses = await asyncio.gather(
+        list_check_runs(owner=pr_ref.owner, repo=pr_ref.repo, ref=pr_head_sha, token=token),
+        list_commit_statuses(owner=pr_ref.owner, repo=pr_ref.repo, ref=pr_head_sha, token=token),
+    )
+    if check_runs is None or statuses is None:
+        return {"success": False, "error": "Pull request checks are unavailable"}
+    check_state, failures = aggregate_check_state(check_runs, statuses)
+    if check_state in {"success", "blocked"}:
+        return {
+            "success": False,
+            "already_green": True,
+            "state": check_state,
+            "error": "All checks on this pull request are already terminal and non-failing; "
+            "there is nothing to watch. If the merge is blocked on a human action, report it "
+            "and stop.",
+        }
+    if await ready_wakeup_head(key) == pr_head_sha and not failures:
+        return {
+            "success": False,
+            "already_ready": True,
+            "state": check_state,
+            "error": "A ready wakeup was already dispatched for this pull request head; "
+            "do not re-arm the watch unless a check starts failing.",
+        }
 
     installation_id = await get_github_app_installation_id_for_repo(pr_ref.owner, pr_ref.repo)
     if installation_id is None:

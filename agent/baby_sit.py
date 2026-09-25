@@ -36,6 +36,7 @@ from agent.thread_ids import baby_sit_lock_thread_id
 logger = logging.getLogger(__name__)
 
 WATCH_NAMESPACE = ["baby_sit_watches"]
+WATCH_STATE_NAMESPACE = ["baby_sit_watch_state"]
 WATCH_CRON_KIND = "baby_sit_watch"
 WATCH_SCHEDULE = "*/10 * * * *"
 MAX_RETRIES_PER_HEAD = 3
@@ -145,8 +146,32 @@ class BabySitWatchStore(TypedStore[BabySitWatch]):
 WATCHES = BabySitWatchStore()
 
 
+class BabySitWatchState(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    ready_head_sha: str = ""
+
+
+class BabySitWatchStateStore(TypedStore[BabySitWatchState]):
+    def __init__(self) -> None:
+        super().__init__(WATCH_STATE_NAMESPACE, BabySitWatchState)
+
+
+WATCH_STATE = BabySitWatchStateStore()
+
+
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
+
+
+async def ready_wakeup_head(key: str) -> str | None:
+    state = await WATCH_STATE.get(f"ready:{key}")
+    return state.ready_head_sha if state else None
+
+
+async def record_ready_wakeup(key: str, head_sha: str) -> None:
+    await WATCH_STATE.put(f"ready:{key}", BabySitWatchState(key=key, ready_head_sha=head_sha))
 
 
 async def _create_watch_cron(key: str) -> str:
@@ -343,6 +368,7 @@ async def _finish_ready(watch: BabySitWatch) -> str:
         else "runs/baby-sit-ready.md"
     )
     try:
+        await record_ready_wakeup(watch.key, watch.head_sha)
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
