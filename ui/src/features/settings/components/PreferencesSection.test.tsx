@@ -23,7 +23,6 @@ afterEach(() => {
 
 it("keeps preference labels when closed and saves workspace values, not labels", async () => {
   let stored: UserPreferences = {
-    default_visibility: "private",
     default_workspace: null,
     follow_up_behavior: "queue",
     local_tracing_project: null,
@@ -58,13 +57,13 @@ it("keeps preference labels when closed and saves workspace values, not labels",
       <PreferencesSection />
     </QueryClientProvider>
   )
-  const workspace = screen.getAllByRole("combobox")[2]!
+  const workspace = screen.getAllByRole("combobox")[1]!
 
   await waitFor(() => expect(workspace.hasAttribute("disabled")).toBe(false))
   expect(
     screen.getAllByRole("combobox").map((element) => element.textContent)
   ).toEqual(
-    ["System", "Private · only me", "Workspace default", "Queue"].map((label) =>
+    ["System", "Workspace default", "Queue"].map((label) =>
       expect.stringContaining(label)
     )
   )
