@@ -25,6 +25,18 @@ PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
 MERGED_LINE = re.compile(r"merged:((?: \d+)*)")
 LEFT_OUT_LINE = re.compile(r"#(\d+): (.+)")
 AGENT_INTERRUPT_GRACE_SECONDS = 60
+# oswe needs the OIDC request pair to authenticate and strips it from the agent's shell itself.
+AGENT_ENV = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "LANG",
+        "TMPDIR",
+        "OPEN_SWE_BACKEND_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    }
+)
 RERERE_NOTE = "conflicts resolved from the rerere cache"
 AGENT_NOTE = "conflicts resolved by oswe"
 RESET_REF_PREFIX = "refs/preview-reset/"
@@ -278,7 +290,10 @@ async def resolve_with_agent(
     before = await rev_parse("HEAD")
     listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
     print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
-    proc = await asyncio.create_subprocess_exec("oswe", "run", prompt, stdin=PIPE, stdout=PIPE)
+    env = {name: value for name, value in os.environ.items() if name in AGENT_ENV}
+    proc = await asyncio.create_subprocess_exec(
+        "oswe", "run", prompt, stdin=PIPE, stdout=PIPE, env=env
+    )
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(listing.encode()), timeout)
     except TimeoutError:
