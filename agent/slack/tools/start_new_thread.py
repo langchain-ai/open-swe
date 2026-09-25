@@ -391,7 +391,9 @@ async def slack_start_new_thread(
     if isinstance(current_thread_ts, str) and current_thread_ts:
         request_ts = breakout_from["message_ts"]
         if request_ts:
-            await mark_broken_out(clean_channel_id, request_ts)
+            await mark_broken_out(
+                clean_channel_id, current_thread_ts, request_ts, clean_channel_id, message_ts
+            )
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )

@@ -6,24 +6,34 @@ import pytest
 from agent.slack import breakout
 from agent.slack.request import SlackRequest
 
+Command = breakout.BreakoutCommand
+
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("<@U0BOT> /breakout", ""),
-        ("<@U0BOT>   /breakout  ", ""),
+        ("<@U0BOT> /breakout", Command("")),
+        ("<@U0BOT>   /breakout  ", Command("")),
         (
             "<@U0BOT> /breakout fix the flaky test\nand add a regression",
-            "fix the flaky test\nand add a regression",
+            Command("fix the flaky test\nand add a regression"),
         ),
-        ("<@U0BOT> /BREAKOUT do it", "do it"),
+        ("<@U0BOT> /BREAKOUT do it", Command("do it")),
+        ("<@U0BOT> /breakout <#C2|eng>", Command("", "<#C2|eng>", "C2")),
+        (
+            "<@U0BOT> /breakout <#C2|eng> fix it\nnow",
+            Command("fix it\nnow", "<#C2|eng>", "C2"),
+        ),
+        ("<@U0BOT> /breakout <#G9>  go", Command("go", "<#G9>", "G9")),
+        ("<@U0BOT> /breakout #nope fix it", Command("fix it", "#nope", "")),
+        ("<@U0BOT> /breakout fix #1", Command("fix #1")),
         ("<@U0BOT> please /breakout this", None),
         ("<@U0BOT> /breakouts", None),
         ("<@U0BOT> break out", None),
     ],
 )
 def test_parse_breakout_command(text, expected):
-    assert breakout.parse_breakout_command(text, "U0BOT") == expected
+    assert Command.parse(text, "U0BOT") == expected
 
 
 def _request() -> SlackRequest:
@@ -47,7 +57,7 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     )
     monkeypatch.setattr(breakout, "source_thread_line", posted.source_line)
     monkeypatch.setattr(breakout, "mark_broken_out", posted.reactions)
-    monkeypatch.setattr(breakout, "post_slack_ephemeral_reply", posted.ephemeral)
+    monkeypatch.setattr(breakout, "post_slack_ephemeral_message", posted.ephemeral)
     return posted
 
 
@@ -63,13 +73,13 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
-    await breakout.process_slack_breakout(_request(), "fix it", None)
+    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
 
     assert root.await_args.args[1] == (
         "*Breakout thread:* fix it · <https://slack/p105|from this thread> · <@U_ALICE>"
     )
     posted.source_line.assert_awaited_once_with("C1", "105.0")
-    posted.reactions.assert_awaited_once_with("C1", "105.0")
+    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", "C1", "200.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
@@ -98,7 +108,7 @@ async def test_bare_breakout_moves_the_existing_thread(monkeypatch):
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
-    await breakout.process_slack_breakout(_request(), "", None)
+    await breakout.process_slack_breakout(_request(), Command(""), None)
 
     _, thread_id, _, channel, message = move.await_args.args
     assert (thread_id, channel) == ("old-thread", "C1")
@@ -107,7 +117,7 @@ async def test_bare_breakout_moves_the_existing_thread(monkeypatch):
         == "*Breakout thread:* Flaky test · <https://slack/p105|from this thread> · <@U_ALICE>"
     )
     posted.source_line.assert_awaited_once_with("C1", "105.0")
-    posted.reactions.assert_awaited_once_with("C1", "105.0")
+    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", "C1", "200.0")
     mention.assert_not_awaited()
 
 
@@ -126,8 +136,66 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
     move = AsyncMock()
     monkeypatch.setattr(breakout, "move_slack_thread", move)
 
-    await breakout.process_slack_breakout(_request(), "", None)
+    await breakout.process_slack_breakout(_request(), Command(""), None)
 
     move.assert_not_awaited()
     posted.reactions.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_breakout_to_channel_starts_there_with_source_transcript(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    root = AsyncMock(return_value=("200.0", None))
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    resolve = AsyncMock(return_value="new-thread")
+    monkeypatch.setattr(breakout.common, "resolve_slack_thread_id", resolve)
+    mention = AsyncMock()
+    monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2|eng>", "C2"), None)
+
+    assert root.await_args.args[0] == "C2"
+    resolve.assert_awaited_once_with(resolve.await_args.args[0], "C2", "200.0")
+    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", "C2", "200.0")
+    sent = mention.await_args.args[0]
+    assert (sent.channel_id, sent.thread_ts, sent.context_channel_id, sent.context_thread_ts) == (
+        "C2",
+        "200.0",
+        "C1",
+        "100.0",
+    )
+    posted.ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_breakout_to_unknown_channel_errors_in_thread(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    root = AsyncMock()
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", "#nope", ""), None)
+
+    root.assert_not_awaited()
+    posted.reactions.assert_not_awaited()
+    channel, user, text, thread_ts = posted.ephemeral.await_args.args
+    assert (channel, user, thread_ts) == ("C1", "U_ALICE", "100.0")
+    assert "`#nope`" in text
+
+
+@pytest.mark.asyncio
+async def test_breakout_to_channel_without_bot_errors_in_thread(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    monkeypatch.setattr(
+        breakout,
+        "post_slack_top_level_message_with_ts",
+        AsyncMock(return_value=(None, "not_in_channel")),
+    )
+
+    await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
+
+    posted.reactions.assert_not_awaited()
+    channel, _, text, thread_ts = posted.ephemeral.await_args.args
+    assert (channel, thread_ts) == ("C1", "100.0")
+    assert "<#C2>" in text

@@ -211,7 +211,7 @@ async def test_slack_start_new_thread_success(
         "*Breakout thread:* Investigate follow-up · <https://p/src|from this thread> · <@U1>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
-    react.assert_awaited_once_with("C1", "1700000000.000002")
+    react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", "C1", new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
         "channel_id": "C1",
