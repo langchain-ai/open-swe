@@ -35,7 +35,15 @@ def _run_process(
     captured: dict[str, Any] = {}
 
     async def fake_dispatch(
-        thread_id, content, configurable, *, source, input=None, metadata=None, client=None
+        thread_id,
+        content,
+        configurable,
+        *,
+        source,
+        thread_title,
+        input=None,
+        metadata=None,
+        client=None,
     ):
         captured["content"] = input or content
         captured["configurable"] = configurable
