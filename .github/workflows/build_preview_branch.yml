@@ -71,14 +71,7 @@ jobs:
           (cd "$dir" && sha256sum --check --ignore-missing oswe-SHA256SUMS && tar -xzf oswe-linux-x64.tar.gz)
           echo "$dir" >>"$GITHUB_PATH"
           "$dir/oswe" --version
-      - name: Restore resolved conflicts
-        uses: actions/cache/restore@v6
-        with:
-          path: .git/rr-cache
-          key: preview-rerere-${{ github.run_id }}
-          restore-keys: preview-rerere-
       - name: Assemble and publish the preview tree
-        id: build
         env:
           EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
           FORCE: ${{ inputs.force }}
@@ -86,9 +79,3 @@ jobs:
           GH_REPO: ${{ github.repository }}
           OPEN_SWE_BACKEND_URL: ${{ vars.OPEN_SWE_BACKEND_URL }}
         run: uv run scripts/build_preview_branch.py build
-      - name: Save resolved conflicts
-        if: steps.build.outputs.agent_resolved == 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: .git/rr-cache
-          key: preview-rerere-${{ github.run_id }}
