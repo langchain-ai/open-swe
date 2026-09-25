@@ -296,10 +296,18 @@ async def retire(
         return None
     if state != "merged":
         await withdraw_reviews(updated)
-    # A closed card leaves the channel and stays in the thread only.
-    if not updated.slack_broadcast or not await _repost(updated, broadcast=False, outcome=outcome):
-        await refresh_card(updated, outcome=outcome)
+    await refresh_card_in_thread(updated, outcome=outcome)
     return updated
+
+
+async def refresh_card_in_thread(
+    approval: ExpeditedApproval, *, outcome: str | None = None
+) -> None:
+    """Re-render a card that no longer needs votes, reposting it out of the channel if broadcast."""
+    if not approval.slack_broadcast or not await _repost(
+        approval, broadcast=False, outcome=outcome
+    ):
+        await refresh_card(approval, outcome=outcome)
 
 
 async def remove_superseded_cards(approval: ExpeditedApproval) -> None:
