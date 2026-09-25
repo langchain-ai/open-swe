@@ -1,5 +1,4 @@
 import logging
-import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
 
@@ -15,7 +14,7 @@ from pydantic import BaseModel
 from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import render_prompt
 from agent.utils.gateway import gateway_base_url
 
 logger = logging.getLogger(__name__)
@@ -23,8 +22,6 @@ logger = logging.getLogger(__name__)
 Route = Literal["fast", "balanced", "performance"]
 PersistedRoute = Route | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
-
-_CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:
@@ -55,11 +52,11 @@ class RouteDecision(BaseModel):
     model_route: Route
 
 
-async def _select_jev_route(task: str) -> Route | None:
+async def _select_jev_route(task: str) -> Route:
     api_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
     if not api_key:
-        logger.info("Jev routing has no gateway key; using fallback classifier")
-        return None
+        logger.warning("Jev routing has no gateway key; using balanced route")
+        return "balanced"
     try:
         async with httpx2.AsyncClient(timeout=3.0) as client:
             classifier = TypeSafeClassifier(
@@ -81,24 +78,16 @@ async def _select_jev_route(task: str) -> Route | None:
                 config={"tags": ["nostream"]},
             )
             answer = response.choices["route"]
-        probabilities = answer.probabilities
-        if (
-            set(probabilities) != {"fast", "balanced", "performance"}
-            or any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities.values())
-            or abs(sum(probabilities.values()) - 1) > 0.01
-            or probabilities[answer.choice] != max(probabilities.values())
-        ):
-            raise ValueError("Invalid Jev routing probabilities")
         if answer.confidence < 0.6:
             logger.info(
-                "Jev routing confidence below threshold; using fallback classifier",
+                "Jev routing confidence below threshold; using balanced route",
                 extra={"confidence": answer.confidence},
             )
-            return None
+            return "balanced"
         return RouteDecision.model_validate({"model_route": answer.choice}).model_route
     except Exception:
-        logger.exception("Jev routing failed; using fallback classifier")
-        return None
+        logger.exception("Jev routing failed; using balanced route")
+        return "balanced"
 
 
 class ModelSelectionState(AgentState):
@@ -134,7 +123,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     def __init__(
         self,
         models: Mapping[str, BaseChatModel],
-        classifier: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode = "auto",
@@ -142,14 +130,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         self._models = dict(models)
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
-        # `nostream` keeps the routing decision out of the user-facing message
-        # stream; it stays visible in traces, unlike the offloading summarizer.
-        hidden_classifier = classifier.model_copy(
-            update={"tags": [*(classifier.tags or []), "nostream"]}
-        )
-        self._classifier = hidden_classifier.with_structured_output(
-            RouteDecision, method="json_schema"
-        )
 
     async def select_route(
         self,
@@ -162,18 +142,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "fast"
         messages = state.get("messages", [])
         task = _latest_human_task(messages)[-8_000:]
-        if jev_route := await _select_jev_route(task):
-            return jev_route
-        route: Route = "balanced"
-        try:
-            decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
-            )
-            if isinstance(decision, RouteDecision):
-                route = decision.model_route
-        except Exception:  # noqa: BLE001
-            logger.exception("Model routing classifier failed")
-        return route
+        return await _select_jev_route(task)
 
     async def abefore_model(
         self,

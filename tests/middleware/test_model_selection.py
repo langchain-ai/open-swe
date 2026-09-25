@@ -7,11 +7,7 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
 
-from agent.middleware.model_selection import (
-    ModelSelectionMiddleware,
-    ModelSelectionState,
-    RouteDecision,
-)
+from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
 
 
 @pytest.fixture(autouse=True)
@@ -21,30 +17,17 @@ def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _middleware(
-    route: Literal["fast", "balanced", "performance"] = "fast",
-    *,
     route_model_ids: dict[str, str] | None = None,
     routing_mode: Literal["auto", "fast"] = "auto",
-) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
+) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock]]:
     profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in profiles}
-    structured = AsyncMock(return_value=RouteDecision(model_route=route))
-    classifier = MagicMock()
-    classifier.tags = None
-    tagged = classifier.model_copy.return_value
-    tagged.with_structured_output.return_value.ainvoke = structured
     middleware = ModelSelectionMiddleware(
         cast(Any, models),
-        classifier,
         route_model_ids=route_model_ids,
         routing_mode=routing_mode,
     )
-    classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
-    tagged.with_structured_output.assert_called_once_with(
-        RouteDecision,
-        method="json_schema",
-    )
-    return middleware, models, structured
+    return middleware, models
 
 
 async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
@@ -64,15 +47,19 @@ async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -
 
 
 @pytest.mark.asyncio
-async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
-    middleware, models, classifier = _middleware()
+async def test_route_is_stored_in_state_and_used_for_model_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jev = AsyncMock(return_value="fast")
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
-    classifier.assert_awaited_once()
+    jev.assert_awaited_once_with("Update the README")
 
 
 @pytest.mark.asyncio
@@ -86,7 +73,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, models, classifier = _middleware(routing_mode="fast")
+    middleware, models = _middleware(routing_mode="fast")
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     if existing_route is not None:
@@ -97,24 +84,25 @@ async def test_fast_mode_skips_classifier_and_routing_event(
     expected_route = existing_route or "fast"
     assert state["model_route"] == expected_route
     assert (await _invoke(middleware, state)).model is models[expected_route]
-    classifier.assert_not_awaited()
     assert events == []
 
 
 @pytest.mark.asyncio
-async def test_routing_decision_only_runs_once() -> None:
-    middleware, _, classifier = _middleware()
+async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    jev = AsyncMock(return_value="balanced")
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
-    classifier.assert_awaited_once()
+    jev.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_existing_route_is_reused_without_classifier() -> None:
-    middleware, models, classifier = _middleware()
+    middleware, models = _middleware()
     state = {
         "messages": [HumanMessage(content="Follow up on the task")],
         "model_route": "performance",
@@ -124,12 +112,11 @@ async def test_existing_route_is_reused_without_classifier() -> None:
 
     assert state["model_route"] == "performance"
     assert (await _invoke(middleware, state)).model is models["performance"]
-    classifier.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_persisted_fast_alt_route_is_migrated_to_fast() -> None:
-    middleware, models, classifier = _middleware()
+    middleware, models = _middleware()
     state = {
         "messages": [HumanMessage(content="Follow up on the task")],
         "model_route": "fast_alt",
@@ -139,12 +126,11 @@ async def test_persisted_fast_alt_route_is_migrated_to_fast() -> None:
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
 
     assert state["model_route"] == "fast"
-    classifier.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_legacy_plan_state_does_not_override_existing_route() -> None:
-    middleware, models, classifier = _middleware()
+    middleware, models = _middleware()
     state = {
         "messages": [HumanMessage(content="Plan the next change")],
         "model_route": "fast",
@@ -155,22 +141,9 @@ async def test_legacy_plan_state_does_not_override_existing_route() -> None:
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
-    classifier.assert_not_awaited()
 
     state["plan_mode"] = False
     assert (await _invoke(middleware, state)).model is models["fast"]
-
-
-@pytest.mark.asyncio
-async def test_classifier_failure_falls_back_to_balanced_route() -> None:
-    middleware, models, classifier = _middleware()
-    classifier.side_effect = RuntimeError("unavailable")
-    state = {"messages": [HumanMessage(content="Do the task")]}
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "balanced"
-    assert (await _invoke(middleware, state)).model is models["balanced"]
 
 
 @pytest.mark.asyncio
@@ -180,7 +153,10 @@ async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.Monkey
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, _, _ = _middleware(route_model_ids={"fast": "openai:gpt-5.6-sol"})
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="fast")
+    )
+    middleware, _ = _middleware(route_model_ids={"fast": "openai:gpt-5.6-sol"})
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
@@ -203,7 +179,10 @@ async def test_routed_model_event_omitted_without_a_known_model_id(
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, _, _ = _middleware()
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="fast")
+    )
+    middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
@@ -225,36 +204,23 @@ _PERSON_BLOCK = (
 
 
 @pytest.mark.asyncio
-async def test_classifier_sees_the_human_request_not_injected_context() -> None:
-    middleware, _, classifier = _middleware()
+async def test_jev_sees_the_human_request_not_injected_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jev = AsyncMock(return_value="balanced")
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    middleware, _ = _middleware()
     state = {
-        "messages": [
-            HumanMessage(content=_HUMAN_ENVELOPE),
-            HumanMessage(content=_PERSON_BLOCK),
-        ]
+        "messages": [HumanMessage(content=_HUMAN_ENVELOPE), HumanMessage(content=_PERSON_BLOCK)]
     }
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
-    prompt = classifier.await_args.args[0]
-    assert "how's the weather in sf today" in prompt
-    assert "workspace_admin" not in prompt
+    jev.assert_awaited_once_with("how's the weather in sf today")
 
 
 @pytest.mark.asyncio
-async def test_plain_human_message_without_an_envelope_is_still_classified() -> None:
-    middleware, _, classifier = _middleware()
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    await middleware.abefore_model(cast(Any, state), MagicMock())
-
-    assert "Update the README" in classifier.await_args.args[0]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure", [None, "timeout", "http", "malformed", "confidence", "nan", "probabilities"]
-)
+@pytest.mark.parametrize("failure", [None, "timeout", "http", "malformed", "confidence", "nan"])
 async def test_jev_routes_or_falls_back(
     monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
@@ -282,7 +248,7 @@ async def test_jev_routes_or_falls_back(
                         if failure == "confidence"
                         else 0.9,
                         "probabilities": {
-                            "fast": 0.1 if failure == "probabilities" else 0.9,
+                            "fast": 0.9,
                             "balanced": 0.05,
                             "performance": 0.05,
                         },
@@ -299,20 +265,16 @@ async def test_jev_routes_or_falls_back(
         "agent.middleware.model_selection.httpx2.AsyncClient",
         lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
     )
-    middleware, _, fallback = _middleware(route="performance")
+    middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
     route = await middleware.select_route(state)
-    assert route == ("performance" if failure else "fast")
+    assert route == ("balanced" if failure else "fast")
     assert len(requests) == 1
     assert requests[0].url == "https://gateway.example.com/v1/systemone"
     assert requests[0].headers["Authorization"] == "Bearer gateway-key"
     payload = json.loads(requests[0].read())
     assert payload["state"] == "x" * 8_000
     assert payload["model"] == "typesafe/jev-1.13.0"
-    if failure:
-        fallback.assert_awaited_once()
-    else:
-        fallback.assert_not_awaited()
     state["model_route"] = route
     assert await middleware.select_route(state) == route
     assert len(requests) == 1

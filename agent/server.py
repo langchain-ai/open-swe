@@ -1573,7 +1573,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,
-            routing_models["fast"],
             route_model_ids={
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
