@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import load_prompt, prompt
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +113,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         task = _latest_human_task(messages)
         route: Route = "balanced"
         try:
-            decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
-            )
+            decision = await self._classifier.ainvoke(prompt("model-selection", task=task[-8_000:]))
             if isinstance(decision, RouteDecision):
                 route = decision.model_route
         except Exception:  # noqa: BLE001

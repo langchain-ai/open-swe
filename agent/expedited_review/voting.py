@@ -32,7 +32,7 @@ from agent.github.ci import fetch_pr, has_repo_write_permission
 from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequestPayload
 from agent.input_messages import PersonIdentity, split_person_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
 from agent.users import User
 from agent.utils.thread_ops import langgraph_client
@@ -139,8 +139,8 @@ async def handle_vote(
     )
     if first_approval and not await notify_agent(
         current,
-        render_prompt(
-            "runs/expedited-review-approved.md",
+        prompt(
+            "runs/expedited-review-approved",
             pr_url=current.pull_request.url,
             approvers=", ".join(f"@{login}" for login in current.approvers),
         ),

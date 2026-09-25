@@ -69,7 +69,7 @@ from agent.github.token import (
     is_bot_token_only_mode,
 )
 from agent.linear.comments import get_recent_comments  # noqa: F401
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -1503,8 +1503,8 @@ def build_queued_finding_reply_prompt(
 ) -> str:
     safe_body = _escape_review_reply_data(reply_body)
     safe_author = _escape_review_reply_attr(reply_author)
-    return render_prompt(
-        "reviewer/queued-finding-reply.md",
+    return prompt(
+        "reviewer/queued-finding-reply",
         reply_author=reply_author,
         finding_id=finding_id,
         pr_number=pr_number,

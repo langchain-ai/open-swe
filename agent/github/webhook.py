@@ -23,7 +23,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import load_prompt, prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
@@ -67,8 +67,8 @@ def build_github_issue_prompt(
     formatted_body = common.format_github_comment_body_for_prompt(
         issue_author or github_login, body, trusted=trusted
     )
-    return render_prompt(
-        "runs/github-issue.md",
+    return prompt(
+        "runs/github-issue",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
         triggered_by_line=triggered_by_line,
         issue_number=issue_number,

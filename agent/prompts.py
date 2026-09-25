@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from string import Template
 from typing import Any
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, FunctionLoader, StrictUndefined
 from langchain_core.tools import BaseTool
 
 _PROMPT_ROOT = resources.files("agent.resources").joinpath("prompts")
@@ -25,21 +25,27 @@ def load_prompt(name: str) -> str:
     return resource.read_text(encoding="utf-8").strip()
 
 
-def render_prompt(name: str, values: Mapping[str, object] | None = None, **kwargs: object) -> str:
-    substitutions = {**(values or {}), **kwargs}
-    return Template(load_prompt(name)).substitute(substitutions)
-
-
 _JINJA = Environment(
-    autoescape=False, undefined=StrictUndefined, trim_blocks=True, lstrip_blocks=True
+    loader=FunctionLoader(load_prompt),
+    autoescape=False,
+    undefined=StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
 )
 
 
-def render_template(name: str, **values: object) -> str:
-    """Render a ``.md.jinja`` prompt."""
-    if not name.endswith(".md.jinja"):
-        raise ValueError(f"Jinja prompts must end in .md.jinja: {name!r}")
-    return _JINJA.from_string(load_prompt(name)).render(values).strip()
+@cache
+def _is_template(name: str) -> bool:
+    path = _prompt_path(f"{name}.md.jinja")
+    return _PROMPT_ROOT.joinpath(*path.parts).is_file()
+
+
+def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: object) -> str:
+    """Render ``<name>.md.jinja`` with Jinja if it exists, else ``<name>.md`` with ``$`` placeholders."""
+    substitutions = {**(values or {}), **kwargs}
+    if _is_template(name):
+        return _JINJA.get_template(f"{name}.md.jinja").render(substitutions).strip()
+    return Template(load_prompt(f"{name}.md")).substitute(substitutions)
 
 
 def apply_tool_descriptions(
@@ -56,7 +62,7 @@ def apply_tool_descriptions(
         substitutions = (values or {}).get(name)
         try:
             description = (
-                render_prompt(f"tools/{name}.md", substitutions)
+                prompt(f"tools/{name}", substitutions)
                 if substitutions is not None
                 else load_prompt(f"tools/{name}.md")
             )
