@@ -1,9 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { useFeatureFlagsPanel } from "@/lib/featureFlags"
+import { useIsHydrated } from "@/lib/hydration"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
@@ -14,6 +16,8 @@ export const Route = createFileRoute("/feature-flags")({
 
 function FeatureFlagsPage() {
   const session = useSession()
+  const visible = useFeatureFlagsPanel()
+  const hydrated = useIsHydrated()
 
   if (session.isLoading) {
     return (
@@ -23,6 +27,7 @@ function FeatureFlagsPage() {
     )
   }
   if (!session.data) return <RequireLogin />
+  if (hydrated && !visible) return <Navigate to="/my-settings" replace />
 
   return (
     <AppShell
