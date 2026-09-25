@@ -54,13 +54,14 @@ from agent.github.comments import PrState, derive_pr_state
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
-from agent.users.models import UserIdentity
+from agent.users.models import User, UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
 ThreadRole = Literal["primary", "secondary"]
+AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
@@ -211,6 +212,27 @@ class PullRequest(Base):
     @property
     def primary_thread_id(self) -> str | None:
         return next((link.thread_id for link in self.threads if link.role == "primary"), None)
+
+    @property
+    def agent_thread_id(self) -> str | None:
+        """The agent thread that created this PR; ``None`` for PRs it only linked or reused."""
+        if not self.opening_head_sha:
+            return None
+        return next(
+            (link.thread_id for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE),
+            None,
+        )
+
+    async def is_authored_by(self, login: str) -> bool:
+        """Whether ``login`` resolves to the same Open SWE user as this PR's author."""
+        commenter = await User.for_login("github", login)
+        if commenter is None:
+            return False
+        author_id = self.author_user_id
+        if author_id is None and self.author:
+            author = await User.for_login("github", self.author)
+            author_id = author.id if author is not None else None
+        return author_id is not None and commenter.id == author_id
 
     @property
     def thread_ids(self) -> list[str]:
