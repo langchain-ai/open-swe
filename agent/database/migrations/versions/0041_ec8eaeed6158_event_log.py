@@ -13,7 +13,7 @@ def upgrade() -> None:
         """
         CREATE TABLE event_log (
             received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-            source text NOT NULL CHECK (source IN ('github', 'slack', 'linear')),
+            source text NOT NULL,
             endpoint text NOT NULL,
             event_type text NOT NULL DEFAULT '',
             delivery_id text NOT NULL DEFAULT '',
