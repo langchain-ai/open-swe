@@ -187,7 +187,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="Alice"
+            "thread-id", source="slack", visibility="private", owner_login="Alice", title="Thread"
         )
     )
     assert created["visibility"] == "private"
@@ -195,7 +195,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="public", owner_login="bob"
+            "thread-id", source="slack", visibility="public", owner_login="bob", title="Thread"
         )
     )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -212,7 +212,7 @@ def test_upsert_keeps_original_github_initiator(
     for login in ("FirstUser", "second-user"):
         asyncio.run(
             webhook_common.upsert_agent_thread_metadata(
-                "thread-id", source=source, github_login=login
+                "thread-id", source=source, github_login=login, title="Thread"
             )
         )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -226,7 +226,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
 
@@ -238,7 +238,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(legacy))
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
     assert "visibility" not in cast(dict, legacy.thread)["metadata"]
@@ -2084,6 +2084,7 @@ def test_thread_workspace_round_trips_through_metadata(
             "thread-id",
             source="slack",
             workspace="staging",
+            title="Thread",
         )
     )
     assert threads.thread is not None

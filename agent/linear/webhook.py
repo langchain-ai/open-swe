@@ -17,7 +17,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.thread_ids import linear_issue_thread_id
 from agent.users import User
@@ -167,20 +167,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
     ticket_url = full_issue.get("url", "") or issue_data.get("url", "")
-    ticket_url_line = f"## Linear Ticket URL: {ticket_url}\n\n" if ticket_url else ""
-
-    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
-    prompt = render_prompt(
-        "runs/linear-issue.md",
+    issue_prompt = prompt(
+        "runs/linear-issue",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
         title=title,
-        triggered_by_line=triggered_by_line,
+        triggered_by=user_name,
         identifier=identifier,
         issue_id=issue_id,
-        ticket_url_line=ticket_url_line,
+        ticket_url=ticket_url,
         description=description,
     )
-    description_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(prompt))]
+    description_blocks: list[dict[str, Any]] = [
+        cast(dict[str, Any], create_text_block(issue_prompt))
+    ]
     image_blocks_by_url: dict[str, dict[str, Any]] = {}
 
     # Resolve the GitHub login from the Linear email the same way Slack does, so
@@ -266,7 +265,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             {"id": "system:linear-issue", "display_name": "Linear issue", "platform": "linear"}
         ),
         system_input(
-            description_blocks if len(description_blocks) > 1 else prompt,
+            description_blocks if len(description_blocks) > 1 else issue_prompt,
             {
                 "sender_id": "system:linear-issue",
                 "surface": "linear",
@@ -324,6 +323,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         None,
         configurable,
         source="linear",
+        thread_title=None,
         input=run_input,
         metadata=common.AGENT_VERSION_METADATA,
     )

@@ -598,17 +598,16 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
+The system prompt is the template `agent/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `agent/prompt.py`. It includes each section from its own file under `agent/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
 
-| Section | What it controls |
+| File | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
-| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
-| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
-| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
-
-> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
+| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
+| `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
+| `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `dependencies.md` | Installing, vetting, and managing project dependencies |
+| `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |
+| `shared-base.md` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
 
 ### Default prompt file
 

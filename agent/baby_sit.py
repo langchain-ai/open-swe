@@ -27,11 +27,12 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.github.pull_requests import PullRequestPayload
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
+from agent.threads.creation import create_lock_thread
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,7 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
     client = get_client()
     lock_id = baby_sit_lock_thread_id(key)
     try:
-        await client.threads.create(
-            thread_id=lock_id, if_exists="raise", ttl=WATCH_LOCK_TTL_MINUTES
-        )
+        await create_lock_thread(client, lock_id, ttl_minutes=WATCH_LOCK_TTL_MINUTES)
     except ConflictError:
         yield False
         return
@@ -113,8 +112,8 @@ class BabySitWatch(BaseModel):
             conclusion = _prompt_scalar(failure.get("conclusion") or "failure", 50)
             url = _prompt_scalar(failure.get("url") or "", 500)
             lines.append(f"- {name} ({conclusion})" + (f" — {url}" if url else ""))
-        return render_prompt(
-            "runs/baby-sit-failure.md",
+        return prompt(
+            "runs/baby-sit-failure",
             pr_url=self.pr_url,
             head_sha=self.head_sha,
             retry_count=self.retry_count,
@@ -315,6 +314,7 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
                 f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                thread_title=None,
                 metadata={},
                 multitask_strategy="enqueue",
             )
@@ -337,18 +337,20 @@ async def _has_expedited_card(watch: BabySitWatch) -> bool:
 
 async def _finish_ready(watch: BabySitWatch) -> str:
     """Hand a green PR back to its agent thread, which decides whether to merge or report."""
-    prompt = (
-        "runs/baby-sit-ready-expedited.md"
-        if await _has_expedited_card(watch)
-        else "runs/baby-sit-ready.md"
-    )
+    expedited = await _has_expedited_card(watch)
     try:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            render_prompt(prompt, pr_url=watch.pr_url, head_sha=watch.head_sha),
+            prompt(
+                "runs/baby-sit-ready",
+                pr_url=watch.pr_url,
+                head_sha=watch.head_sha,
+                expedited=expedited,
+            ),
             configurable,
             source=str(configurable.get("source") or "github"),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )
@@ -527,6 +529,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
             watch.failure_prompt(failures),
             configurable,
             source=str(configurable.get("source") or "github"),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )

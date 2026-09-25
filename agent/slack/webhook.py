@@ -111,6 +111,7 @@ async def _dispatch_or_queue_slack_run(
             None,
             configurable,
             source="slack",
+            thread_title=None,
             input=run_input,
             metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
             client=client,
@@ -1052,6 +1053,8 @@ async def _process_slack_mention_impl(
     # admins, and a non-admin's DM gets nothing extra.
     if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
+    if request.context_thread_ts:
+        configurable["slack_breakout"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
