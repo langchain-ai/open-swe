@@ -39,23 +39,16 @@ _NATIVE_MARKDOWN_MAX_CHARS = 12000
 def _usage_with_effort(
     usage: RunUsageSummary | None, state: dict[str, Any] | None, cfg: RunConfig
 ) -> RunUsageSummary | None:
-    if usage is None or len(usage.models) != 1:
-        return usage
-    selected_model = state.get("selected_model_id") if isinstance(state, dict) else None
-    if isinstance(state, dict) and state.get("model_route") and not isinstance(selected_model, str):
-        return usage
-    model_id = selected_model if isinstance(selected_model, str) else cfg.resolved_agent_model_id
-    if not model_id:
+    state = state or {}
+    selected = state.get("selected_model_id")
+    model_id = selected or cfg.resolved_agent_model_id
+    if usage is None or len(usage.models) != 1 or not model_id:
         return usage
     reported_model = usage.models[0].rsplit("/", 1)[-1].rsplit(":", 1)[-1]
     if model_id.rsplit("/", 1)[-1].rsplit(":", 1)[-1] != reported_model:
         return usage
-    effort = (
-        state.get("selected_effort")
-        if isinstance(selected_model, str) and isinstance(state, dict)
-        else cfg.resolved_agent_effort
-    )
-    return replace(usage, reasoning_effort=effort if isinstance(effort, str) else None)
+    effort = state.get("selected_effort") if selected else cfg.resolved_agent_effort
+    return replace(usage, reasoning_effort=effort)
 
 
 async def slack_reply(

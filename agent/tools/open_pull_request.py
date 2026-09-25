@@ -913,17 +913,15 @@ async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = No
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    selected = state.get("selected_model_id") if isinstance(state, dict) else None
-    if isinstance(selected, str) and selected:
-        model_id = selected
-        effort = state.get("selected_effort") if isinstance(state, dict) else None
+    state = state or {}
+    if selected := state.get("selected_model_id"):
+        model_id, effort = selected, state.get("selected_effort")
         usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
-        if usage is not None and usage.models:
-            reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in usage.models}
-            if reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
-                model_id = ", ".join(usage.models)
-                effort = None
-    if cfg.thread_id and not selected:
+        models = usage.models if usage else ()
+        reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in models}
+        if models and reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+            model_id, effort = ", ".join(models), None
+    elif cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None

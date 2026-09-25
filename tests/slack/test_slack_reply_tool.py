@@ -627,18 +627,18 @@ async def test_slack_reply_uses_selected_route_effort(
 
     config = _config()
     config["configurable"].update(
-        resolved_agent_model_id="glm-5p3-flash",
+        resolved_agent_model_id="model-balanced",
         resolved_agent_effort="max",
     )
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     state = {
         "model_route": "balanced",
-        "selected_model_id": "openai:gpt-6-sol",
+        "selected_model_id": "model-balanced",
         "selected_effort": "high",
         "messages": [
             HumanMessage(content="request"),
-            AIMessage(content="answer", response_metadata={"model_name": "gpt-6-sol"}),
+            AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),
         ],
     }
 

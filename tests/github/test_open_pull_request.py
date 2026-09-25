@@ -631,7 +631,7 @@ def test_footer_names_the_model_that_opened_the_pr(
 @pytest.mark.parametrize(
     ("selected", "expected"),
     [
-        (None, "fireworks:accounts/fireworks/models/glm-5p3-flash (max)"),
+        (None, "openai:balanced (high)"),
         (
             {"selected_model_id": "openai:gpt-6-sol", "selected_effort": "high"},
             "openai:gpt-6-sol (high)",
@@ -659,8 +659,8 @@ def test_footer_uses_selected_route_when_thread_metadata_is_missing(
         {
             "source": "dashboard",
             "thread_id": "thread-1",
-            "resolved_agent_model_id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
-            "resolved_agent_effort": "max",
+            "resolved_agent_model_id": "openai:balanced",
+            "resolved_agent_effort": "high",
         },
     )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
