@@ -139,6 +139,28 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     return text
 
 
+_SLACK_USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+
+
+def slack_mentioned_user_ids(text: str) -> list[str]:
+    """The user ids in bare `<@USER_ID>` mentions."""
+    return _SLACK_USER_MENTION_RE.findall(text)
+
+
+def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+
+    def label(match: re.Match[str]) -> str:
+        user_id = match[1]
+        name = user_names_by_id.get(user_id, "")
+        if not name or name == user_id:
+            return match[0]
+        escaped = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<@{user_id}|{escaped}>"
+
+    return _SLACK_USER_MENTION_RE.sub(label, text)
+
+
 def convert_mentions_to_slack_format(text: str) -> str:
     """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
     return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
@@ -349,10 +371,13 @@ def format_slack_messages_for_prompt(
     lines: list[str] = []
     for message in messages:
         forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
-        text = replace_bot_mention_with_username(
-            str(message.get("text", "")),
-            bot_user_id=bot_user_id,
-            bot_username=bot_username,
+        text = label_slack_user_mentions(
+            replace_bot_mention_with_username(
+                str(message.get("text", "")),
+                bot_user_id=bot_user_id,
+                bot_username=bot_username,
+            ),
+            user_names_by_id or {},
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):

@@ -2152,12 +2152,27 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
-        request_text="do the thing",
+        request_text=cast(str, kwargs.get("request_text", "do the thing")),
         request_blocks=[{"type": "text", "text": "do the thing"}],
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_slack_context_labels_mentioned_people_with_their_names() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "cc <@U456> for viz", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> and <@U789>", "user": "U123"},
+        ],
+        user_names_by_id={"U123": "Alice", "U456": "Bob <B>", "U789": "Carol"},
+        request_text="and <@U789> and <@U000>",
+    )
+
+    rendered = str(contents)
+    assert "cc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; for viz" in rendered
+    assert "and &lt;@U789|Carol&gt; and &lt;@U000&gt;" in rendered
 
 
 def test_slack_context_never_replays_open_swes_own_replies(

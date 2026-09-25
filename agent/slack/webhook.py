@@ -376,12 +376,16 @@ def _slack_sender(
     return person["id"], person, "human"
 
 
-def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
+def _slack_message_text(
+    message: dict[str, Any], bot_user_id: str, user_names_by_id: dict[str, str]
+) -> str:
     forwarded = common.format_slack_messages_for_prompt(
         [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
     )
     _, separator, content = forwarded.partition(": ")
-    return content if separator else forwarded
+    return slack_utils.label_slack_user_mentions(
+        content if separator else forwarded, user_names_by_id
+    )
 
 
 def _slack_context_input(
@@ -466,7 +470,7 @@ def _slack_context_input(
             "kind": kind,
             "data": {"timestamp": timestamp},
         }
-        text = _slack_message_text(message, bot_user_id)
+        text = _slack_message_text(message, bot_user_id, user_names_by_id)
         run_messages.append(
             human_input(text, message_context)
             if kind == "human"
@@ -505,8 +509,9 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(current_message, bot_user_id)
+    rendered_request = _slack_message_text(current_message, bot_user_id, user_names_by_id)
     _, separator, forwarded_context = rendered_request.partition("\n")
+    request_text = slack_utils.label_slack_user_mentions(request_text, user_names_by_id)
     if separator and forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
@@ -828,7 +833,12 @@ async def _process_slack_mention_impl(
         for value in (message.get("user") for message in context_messages)
         if isinstance(value, str) and value
     ]
-    user_names_by_id = await common.get_slack_user_names(context_user_ids)
+    mentioned_user_ids = [
+        mentioned
+        for message_text in (text, *(str(message.get("text", "")) for message in context_messages))
+        for mentioned in slack_utils.slack_mentioned_user_ids(message_text)
+    ]
+    user_names_by_id = await common.get_slack_user_names([*context_user_ids, *mentioned_user_ids])
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
