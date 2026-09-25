@@ -1,8 +1,8 @@
 """Append-only log of verified GitHub, Slack, and Linear webhook deliveries."""
 
-import asyncio
 import json
 import logging
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from urllib.parse import parse_qs
@@ -21,8 +21,7 @@ RETAINED_DAYS = 2
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 
-_STOP = asyncio.Event()
-_TASK: asyncio.Task[None] | None = None
+_ROTATED_AT: float | None = None
 
 
 class EventLog:
@@ -39,6 +38,10 @@ class EventLog:
         """Never raises: a delivery that cannot be logged is still handled."""
         if not configured():
             return
+        try:
+            await cls.ensure_partitions()
+        except Exception:  # noqa: BLE001
+            logger.warning("Rotating event log partitions failed", exc_info=True)
         try:
             async with transaction() as conn:
                 await conn.execute(
@@ -61,6 +64,20 @@ class EventLog:
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
+
+    @classmethod
+    async def ensure_partitions(cls) -> None:
+        """Rotate at most once an hour per process; call before every read or write."""
+        global _ROTATED_AT
+        now = time.monotonic()
+        if _ROTATED_AT is not None and now - _ROTATED_AT < _ROTATE_INTERVAL_SECONDS:
+            return
+        _ROTATED_AT = now
+        try:
+            await cls.rotate_partitions()
+        except Exception:
+            _ROTATED_AT = None
+            raise
 
     @classmethod
     async def rotate_partitions(cls, today: date | None = None) -> None:
@@ -100,38 +117,3 @@ class EventLog:
             return json.loads(decoded)
         except json.JSONDecodeError:
             return decoded
-
-
-async def start() -> None:
-    """Rotate once before serving, then hourly; a failed rotation is logged and retried."""
-    global _TASK
-    if not configured() or (_TASK is not None and not _TASK.done()):
-        return
-    _STOP.clear()
-    try:
-        await EventLog.rotate_partitions()
-    except Exception:  # noqa: BLE001
-        logger.warning("Rotating event log partitions failed", exc_info=True)
-    _TASK = asyncio.create_task(_rotate_forever(), name="event-log-partitions")
-
-
-async def stop() -> None:
-    global _TASK
-    _STOP.set()
-    if _TASK is not None:
-        await _TASK
-    _TASK = None
-
-
-async def _rotate_forever() -> None:
-    while True:
-        try:
-            await asyncio.wait_for(_STOP.wait(), timeout=_ROTATE_INTERVAL_SECONDS)
-        except TimeoutError:
-            pass
-        else:
-            return
-        try:
-            await EventLog.rotate_partitions()
-        except Exception:  # noqa: BLE001
-            logger.warning("Rotating event log partitions failed", exc_info=True)

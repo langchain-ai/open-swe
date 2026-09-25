@@ -1,9 +1,11 @@
-from datetime import UTC, date, datetime
+from datetime import date
 
+import pytest
 from sqlalchemy import text
 from starlette.requests import Request
 
 from agent.database import transaction
+from agent.webhooks import event_log
 from agent.webhooks.event_log import EventLog
 
 
@@ -30,8 +32,10 @@ async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) ->
     }
 
 
-async def test_record_stores_form_bodies_as_objects(registry_db: None) -> None:
-    await EventLog.rotate_partitions(datetime.now(UTC).date())
+async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     request = Request(
         {
             "type": "http",
