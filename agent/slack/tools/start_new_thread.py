@@ -98,7 +98,7 @@ def _truncate_for_slack(text: str) -> str:
 
 
 def _visible_message(title: str) -> str:
-    return f"*Breakout thread:* {title}"
+    return f"`/breakout`: {title}"
 
 
 def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
@@ -358,6 +358,7 @@ async def slack_start_new_thread(
     new_configurable: dict[str, Any] = {
         "slack_thread": new_slack_thread,
         "source": "slack",
+        "slack_breakout": True,
     }
     if repo:
         new_configurable["repo"] = repo

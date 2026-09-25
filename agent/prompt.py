@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent.config import ENV
 from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import load_prompt, render_prompt, render_template
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -50,11 +50,16 @@ def render_open_swe_shared_base(*, sandbox_file_downloads: bool) -> str:
     return f"{OPEN_SWE_SHARED_BASE}\n\n{load_prompt('system/sandbox-file-downloads.md')}"
 
 
-def _render_source_guidance(source: str, slack_context: bool, slack_ask: bool = False) -> str:
+def _render_source_guidance(
+    source: str, slack_context: bool, slack_ask: bool = False, slack_breakout: bool = False
+) -> str:
+    if source == "slack" and slack_context and not slack_ask:
+        guidance = render_template("system/source-slack.md.jinja", breakout=slack_breakout)
+        return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "slack-ask" if slack_ask else "slack"
+        name = "slack-ask"
     elif source == "linear":
         name = "linear"
     elif source == "github":
@@ -129,6 +134,7 @@ def construct_system_prompt(
     source: str = "dashboard",
     slack_context: bool = False,
     slack_ask: bool = False,
+    slack_breakout: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
@@ -167,7 +173,9 @@ def construct_system_prompt(
         ),
         source_guidance_section=render_prompt(
             "system/source-context.md",
-            source_guidance=_render_source_guidance(source, slack_context, slack_ask),
+            source_guidance=_render_source_guidance(
+                source, slack_context, slack_ask, slack_breakout
+            ),
         ),
         self_awareness_section=load_prompt("system/self-awareness.md"),
         default_prompt_section=default_prompt_section,

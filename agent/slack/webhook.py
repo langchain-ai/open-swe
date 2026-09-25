@@ -1052,6 +1052,8 @@ async def _process_slack_mention_impl(
     # admins, and a non-admin's DM gets nothing extra.
     if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
+    if request.context_thread_ts:
+        configurable["slack_breakout"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace

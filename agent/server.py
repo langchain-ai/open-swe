@@ -1095,6 +1095,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
+                slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
