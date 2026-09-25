@@ -8,6 +8,9 @@ import textwrap
 import uuid
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
+from agent.dashboard.profiles import get_profile
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
@@ -38,13 +41,14 @@ def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
-def _runner(task_id: str, command: str, timeout: int) -> str:
+def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
     return textwrap.dedent(
         f"""
         import base64, json, os, selectors, signal, subprocess, time
 
         root = {TASK_ROOT!r}
         task_id = {task_id!r}
+        callback = {callback!r}
         task_dir = os.path.join(root, task_id)
         state_path = os.path.join(task_dir, "state.json")
         output_path = os.path.join(task_dir, "output.log")
@@ -63,6 +67,8 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         omitted = 0
 
         def callback_url(event):
+            if not callback:
+                return None
             base = os.environ.get({TOOLS_URL_ENV!r})
             query = ""
             if not base:
@@ -202,15 +208,20 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
     ).strip()
 
 
-def _launch_command(task_id: str, command: str, timeout: int) -> str:
+def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = encoded(_runner(task_id, command, timeout))
+    runner = encoded(_runner(task_id, command, timeout, callback))
     lock = shlex.quote(LAUNCH_LOCK)
-    return (
-        "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
+    callback_checks = (
         "command -v curl >/dev/null || { echo 'background execution requires curl' >&2; exit 74; }; "
         f'{{ [ -n "${TOOLS_URL_ENV}" ] || [ -s {shlex.quote(TOOLS_URL_FILE)} ]; }} || '
         "{ echo 'background execution needs the sandbox callback URL, which this deployment does not provide' >&2; exit 75; }; "
+        if callback
+        else ""
+    )
+    return (
+        "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
+        f"{callback_checks}"
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
         f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
         "[ \"$acquired\" ] || { echo 'background launch is busy' >&2; exit 71; }; "
@@ -276,9 +287,10 @@ def control_script(action: str, task_id: str | None) -> str:
         if action == "list":
             states = []
             if os.path.isdir(root):
-                lock = os.path.join(root, ".launch-lock")
-                if os.path.isdir(lock) and time.time() - os.path.getmtime(lock) > 30:
-                    shutil.rmtree(lock, ignore_errors=True)
+                for lock, stale_after in ((".launch-lock", 30), ("monitor.lock", 300)):
+                    path = os.path.join(root, lock)
+                    if os.path.isdir(path) and time.time() - os.path.getmtime(path) > stale_after:
+                        shutil.rmtree(path, ignore_errors=True)
                 for name in sorted(os.listdir(root)):
                     task_dir = os.path.join(root, name)
                     state = load(os.path.join(task_dir, "state.json"))
@@ -354,18 +366,83 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = _current_backend()
-        task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-        state = await execute(backend, _launch_command(task_id, command, timeout))
-        try:
-            await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
-        except Exception:
-            logger.warning(
-                "Could not track background command", extra={"task_id": task_id}, exc_info=True
-            )
-        return {"success": True, **state}
+        if await _uses_completion_callback():
+            return await _launch_with_callback(thread_id, backend, command, timeout)
+        return await _launch_with_cron(thread_id, backend, command, timeout)
     except Exception as exc:
         logger.exception("Failed to start background command")
         return {"success": False, "error": str(exc)}
+
+
+class _CallbackFlag(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    experimental_background_callbacks: bool | None = None
+
+
+async def _uses_completion_callback() -> bool:
+    """The triggering person's opt-in to sandbox completion callbacks instead of polling crons."""
+    login = RunConfig.from_runtime().github_login
+    if not login:
+        return False
+    profile = await get_profile(login)
+    return bool(profile and _CallbackFlag.model_validate(profile).experimental_background_callbacks)
+
+
+async def _track(thread_id: str, task_id: str) -> None:
+    try:
+        await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
+    except Exception:
+        logger.warning(
+            "Could not track background command", extra={"task_id": task_id}, exc_info=True
+        )
+
+
+async def _launch_with_callback(
+    thread_id: str, backend: Any, command: str, timeout: int
+) -> dict[str, Any]:
+    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
+    state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+    await _track(thread_id, task_id)
+    return {"success": True, **state}
+
+
+async def _launch_with_cron(
+    thread_id: str, backend: Any, command: str, timeout: int
+) -> dict[str, Any]:
+    script = control_script("list", None)
+    current = await execute(
+        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
+    )
+    active = sum(task.get("status") == "running" for task in current.get("tasks", []))
+    if active >= MAX_ACTIVE_TASKS:
+        return {"success": False, "error": "active task limit reached"}
+    from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
+
+    wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
+    wait = await backend.aexecute(wait_for_monitor, timeout=15)
+    if getattr(wait, "exit_code", None) != 0:
+        raise RuntimeError("background-task monitor is busy")
+    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
+    state = await execute(backend, _launch_command(task_id, command, timeout, callback=False))
+    await _track(thread_id, task_id)
+    wait = await backend.aexecute(wait_for_monitor, timeout=15)
+    if getattr(wait, "exit_code", None) != 0:
+        return {
+            "success": False,
+            **state,
+            "error": "command started, but automatic completion monitoring is busy",
+        }
+    try:
+        await ensure_background_task_cron(thread_id)
+    except Exception:
+        logger.warning("Failed to schedule background-task monitor", exc_info=True)
+        return {
+            "success": False,
+            **state,
+            "error": "command started, but automatic completion monitoring could not be scheduled",
+        }
+    return {"success": True, **state}
 
 
 def owns_task(task_id: str) -> bool:

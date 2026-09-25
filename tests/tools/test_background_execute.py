@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 
 from agent import background_tasks
-from agent.background_tasks import reconcile_background_tasks, run_legacy_cron_tick
+from agent.background_tasks import monitor_background_tasks, reconcile_background_tasks
 from agent.sandboxes import tool_access, tool_routes
 from agent.slack import thinking as slack_thinking
 from agent.tools.background_execute import (
@@ -64,9 +64,12 @@ def _run_control(action: str, task_id: str) -> dict:
     return json.loads(result.stdout)
 
 
-@pytest.mark.parametrize(("codes", "calls"), [(["503", "000", "204"], 3), (["401"], 1)])
+@pytest.mark.parametrize(
+    ("callback", "codes", "calls"),
+    [(True, ["503", "000", "204"], 3), (True, ["401"], 1), (False, [], 0)],
+)
 def test_runner_calls_back_on_completion_until_accepted(
-    fake_curl: Path, monkeypatch: pytest.MonkeyPatch, codes: list[str], calls: int
+    fake_curl: Path, monkeypatch: pytest.MonkeyPatch, callback: bool, codes: list[str], calls: int
 ) -> None:
     (fake_curl / "codes").write_text("\n".join(codes))
     module = importlib.import_module("agent.tools.background_execute")
@@ -75,13 +78,15 @@ def test_runner_calls_back_on_completion_until_accepted(
     task_dir = Path(TASK_ROOT, task_id)
     task_dir.mkdir(parents=True)
     runner = task_dir / "runner.py"
-    runner.write_text(_runner(task_id, "echo hi", 10))
+    runner.write_text(_runner(task_id, "echo hi", 10, callback))
     try:
         subprocess.run(["python3", str(runner)], check=True, timeout=10)
 
         assert json.loads((task_dir / "state.json").read_text())["status"] == "completed"
         url = f"{TOOLS_URL}/background-tasks/{task_id}/complete"
-        assert (fake_curl / "calls").read_text().splitlines() == [f'url = "{url}"'] * calls
+        calls_file = fake_curl / "calls"
+        recorded = calls_file.read_text().splitlines() if calls_file.exists() else []
+        assert recorded == [f'url = "{url}"'] * calls
     finally:
         shutil.rmtree(task_dir, ignore_errors=True)
 
@@ -94,7 +99,7 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
     task_id = f"test-{uuid.uuid4().hex}"
     try:
         result = subprocess.run(
-            ["/bin/sh", "-c", _launch_command(task_id, "true", 10)],
+            ["/bin/sh", "-c", _launch_command(task_id, "true", 10, callback=True)],
             capture_output=True,
             text=True,
             timeout=3,
@@ -113,7 +118,7 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
     try:
         started = time.monotonic()
         launched = subprocess.run(
-            ["/bin/sh", "-c", _launch_command(task_id, command, 10)],
+            ["/bin/sh", "-c", _launch_command(task_id, command, 10, callback=True)],
             capture_output=True,
             check=True,
             text=True,
@@ -145,7 +150,11 @@ def test_background_command_active_limit(fake_curl: Path) -> None:
             task_dir.mkdir(parents=True)
             task_dir.joinpath("state.json").write_text('{"status": "running"}')
         result = subprocess.run(
-            ["/bin/sh", "-c", _launch_command(f"test-{uuid.uuid4().hex}", "true", 10)],
+            [
+                "/bin/sh",
+                "-c",
+                _launch_command(f"test-{uuid.uuid4().hex}", "true", 10, callback=True),
+            ],
             capture_output=True,
             text=True,
             timeout=3,
@@ -164,7 +173,7 @@ def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
         task_dir = Path(TASK_ROOT, task_id)
         try:
             subprocess.run(
-                ["/bin/sh", "-c", _launch_command(task_id, "sleep 30", timeout)],
+                ["/bin/sh", "-c", _launch_command(task_id, "sleep 30", timeout, callback=False)],
                 capture_output=True,
                 check=True,
                 text=True,
@@ -247,20 +256,135 @@ async def test_heartbeat_callback_touches_the_callers_sandbox(
 
 
 @pytest.mark.parametrize(
-    ("status", "deleted"), [("running", False), ("idle", True), ("missing_sandbox", True)]
+    ("status", "has_sandbox", "tracked", "relisted", "deleted"),
+    [
+        ("missing_sandbox", False, True, [], True),
+        ("idle", True, True, [], True),
+        ("idle", True, False, [], False),
+        ("running", True, True, [], False),
+        ("idle", True, True, [{"task_id": "cmd-new", "status": "running"}], False),
+    ],
 )
-async def test_legacy_cron_deletes_itself_once_nothing_is_running(
-    monkeypatch: pytest.MonkeyPatch, status: str, deleted: bool
+async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    has_sandbox: bool,
+    tracked: bool,
+    relisted: list[dict[str, str]],
+    deleted: bool,
 ) -> None:
-    monkeypatch.setattr(
-        background_tasks, "reconcile_background_tasks", AsyncMock(return_value={"status": status})
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    reconciled = background_tasks._Reconciled(
+        {"status": status}, backend if has_sandbox else None, tracked
     )
+    monkeypatch.setattr(background_tasks, "_reconcile", AsyncMock(return_value=reconciled))
+    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=relisted))
     delete_crons = AsyncMock()
     monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
 
-    await run_legacy_cron_tick("thread-1")
+    assert await monitor_background_tasks("thread-1") == {"status": status}
 
     assert delete_crons.await_count == int(deleted)
+
+
+async def test_background_task_cron_search_uses_metadata_not_graph_name() -> None:
+    client = AsyncMock()
+    client.crons.search.return_value = []
+    client.crons.create.return_value = {"cron_id": "cron-1"}
+
+    with patch("agent.background_tasks._client", return_value=client):
+        cron_id = await background_tasks.ensure_background_task_cron("thread-1")
+
+    assert cron_id == "cron-1"
+    client.crons.search.assert_awaited_once_with(
+        metadata={"kind": "background_tasks", "agent_thread_id": "thread-1"}, limit=10
+    )
+    assert client.crons.create.await_args.args == ("scheduler",)
+
+
+@pytest.mark.parametrize(
+    ("login", "profile", "enabled"),
+    [
+        ("alice", {"experimental_background_callbacks": True}, True),
+        ("alice", {"experimental_background_callbacks": False}, False),
+        ("alice", {"default_model": "openai:test"}, False),
+        ("alice", None, False),
+        (None, {"experimental_background_callbacks": True}, False),
+    ],
+)
+async def test_callbacks_follow_the_triggering_persons_flag(
+    login: str | None, profile: dict[str, object] | None, enabled: bool
+) -> None:
+    module = importlib.import_module("agent.tools.background_execute")
+    get_profile = AsyncMock(return_value=profile)
+    with (
+        patch.object(module, "get_profile", get_profile),
+        patch.object(
+            module.RunConfig, "from_runtime", return_value=SimpleNamespace(github_login=login)
+        ),
+    ):
+        assert await module._uses_completion_callback() is enabled
+    if login:
+        get_profile.assert_awaited_once_with(login)
+
+
+@pytest.mark.parametrize("callback", [False, True])
+async def test_background_execute_schedules_a_cron_only_without_callbacks(callback: bool) -> None:
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+    launches = [{"task_id": "cmd-1", "status": "running"}]
+    with (
+        patch(
+            "agent.tools.background_execute._uses_completion_callback",
+            AsyncMock(return_value=callback),
+        ),
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+        ),
+        patch(
+            "agent.tools.background_execute.execute",
+            AsyncMock(side_effect=launches if callback else [{"tasks": []}, *launches]),
+        ),
+        patch("agent.tools.background_execute.update_background_task_state", AsyncMock()),
+        patch("agent.background_tasks.ensure_background_task_cron", AsyncMock()) as ensure_cron,
+    ):
+        result = await background_execute("sleep 10")
+
+    assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
+    assert ensure_cron.await_count == int(not callback)
+
+
+async def test_background_execute_reports_monitor_scheduling_failure() -> None:
+    backend = AsyncMock()
+    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
+
+    with (
+        patch(
+            "agent.tools.background_execute._uses_completion_callback",
+            AsyncMock(return_value=False),
+        ),
+        patch("agent.tools.background_execute.update_background_task_state", AsyncMock()),
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
+        ),
+        patch(
+            "agent.tools.background_execute.execute",
+            AsyncMock(side_effect=[{"tasks": []}, {"task_id": "task-1", "status": "running"}]),
+        ),
+        patch(
+            "agent.background_tasks.ensure_background_task_cron",
+            AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
+        ),
+    ):
+        result = await background_execute("sleep 10")
+
+    assert result == {
+        "success": False,
+        "task_id": "task-1",
+        "status": "running",
+        "error": "command started, but automatic completion monitoring could not be scheduled",
+    }
 
 
 def _cron(cron_id: str, thread_id: str, metadata: dict[str, str]) -> dict[str, object]:
@@ -448,6 +572,10 @@ async def test_background_launch_registers_running_task() -> None:
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     with (
+        patch(
+            "agent.tools.background_execute._uses_completion_callback",
+            AsyncMock(return_value=True),
+        ),
         patch(
             "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
         ),
