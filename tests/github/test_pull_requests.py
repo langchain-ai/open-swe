@@ -84,6 +84,41 @@ async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_
     assert saved.created_at is not None and saved.updated_at is not None
 
 
+async def test_opening_origin_fills_once_and_survives_later_saves() -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, title="From webhook").save()
+    await PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        opening_model_id="claude-opus-5-5",
+        opening_effort="high",
+        langsmith_run_id="run-1",
+        slack_team_id="T1",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+        slack_message_ts="1.5",
+    ).save()
+    await PullRequest(
+        owner="lc",
+        repo="repo",
+        number=7,
+        slack_channel_id="C2",
+        opening_model_id="other",
+        langsmith_run_id="run-2",
+    ).save()
+    saved = await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+
+    assert (
+        saved.opening_model_id,
+        saved.opening_effort,
+        saved.langsmith_run_id,
+        saved.slack_team_id,
+        saved.slack_channel_id,
+        saved.slack_thread_ts,
+        saved.slack_message_ts,
+    ) == ("claude-opus-5-5", "high", "run-1", "T1", "C1", "1.0", "1.5")
+
+
 async def test_later_saves_refresh_line_counts_and_keep_them_when_omitted() -> None:
     await PullRequest(
         owner="lc", repo="repo", number=7, additions=2, deletions=1, changed_files=1
