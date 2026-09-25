@@ -1079,6 +1079,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "selected_model_id": attribution_model_id,
+            "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
             **({"model_route": attribution_route} if attribution_route else {}),
             "rendered_system_prompt": construct_system_prompt(
