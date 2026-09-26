@@ -102,7 +102,7 @@ task_wakeup                    dedupe + retry budget
 
 ### Membership
 
-- The agent creates a task explicitly with `create_task(title, goal)` as soon as
+- The agent creates a task explicitly with `create_task(title, goal, owners)` as soon as
   it decides the work will change code, before any PR exists. The calling thread
   becomes the root and the driver. A takeover also creates a task when the PR is
   not being added to an existing one.
@@ -124,10 +124,17 @@ task_wakeup                    dedupe + retry budget
   timeline, cost, and `get_task`.
 - `pull_request_thread` links are unchanged. `task_pull_request` records
   ownership; `pull_request_thread` still records which threads touched a PR.
-- The first owner is the person who started the root thread (or took the PR
-  over). Any owner can add or remove owners from the task panel, from chat or
-  Slack through `set_task_options`, or with `@open-swe owner add|remove @login`
-  on a PR. The last owner cannot be removed.
+- `create_task` requires `owners`: one or more of the thread's verified
+  participants (`participant_logins` and `participant_emails` in
+  `agent/utils/thread_participants.py`), each resolving to a registered user.
+  The tool rejects anyone outside that roster, so the agent can never make an
+  outsider accountable. Usually that is just the person who asked; the agent
+  adds others only when they asked to share the work.
+- A takeover makes the person who took the PR over the owner of the new task.
+- Owners added later by the agent (`set_task_options`) must also be thread
+  participants. People can add any registered user as an owner from the task
+  panel or with `@open-swe owner add|remove @login` on a PR. The last owner
+  cannot be removed.
 - `PullRequest.agent_thread_id` callers move to the task's driver thread, so
   adopted PRs behave the same as agent-opened ones.
 
@@ -446,12 +453,12 @@ row, records a `task_event`, and posts a PR comment.
 
 | Tool | Behaviour |
 |---|---|
-| `create_task` | `title`, `goal`; creates the thread's open task. Fails if one is already open |
+| `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); creates the thread's open task. Fails if one is already open |
 | `close_task` | `reason: completed \| abandoned` |
 | `get_task` | Task, PRs with stage and blockers, recent timeline |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
-| `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login], remove: [login]}` |
+| `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
 | `request_human` | `ask`, `pull_request?`, `assignees?: [login]`; blocks the task (or one PR) with `agent_request`, assigns it, and ends the run |
 | `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| manual`, `pull_request?`; `review` also requests review on GitHub |
 
