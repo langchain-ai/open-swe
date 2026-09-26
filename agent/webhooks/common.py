@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -68,6 +68,7 @@ from agent.github.thread_token import (
 from agent.github.token import (
     is_bot_token_only_mode,
 )
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from agent.linear.comments import get_recent_comments  # noqa: F401
 from agent.prompts import prompt
 from agent.review.enabled_repos import is_review_repo_enabled
@@ -524,6 +525,7 @@ async def upsert_agent_thread_metadata(
     owner_login: str = "",
     owner_type: str = "user",
     unlisted: bool = False,
+    token_repositories: Sequence[str] | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -532,7 +534,9 @@ async def upsert_agent_thread_metadata(
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
     sender onto the thread's participants here. ``visibility`` and ``owner_login``
-    are stamped once, when the thread is created, and never changed afterwards.
+    are stamped once, when the thread is created, and never changed afterwards, as
+    is ``token_repositories``, the repositories the thread's GitHub token is
+    narrowed to (see :mod:`agent.github.token_scope`).
     Slack events on an existing thread also pass ``slack_participant_user_ids`` so
     every linked human in the Slack thread becomes an Open SWE participant of the
     agent thread.
@@ -633,6 +637,8 @@ async def upsert_agent_thread_metadata(
     ):
         metadata["visibility"] = visibility
         metadata["owner_type"] = owner_type
+        if token_repositories is not None:
+            metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(token_repositories)
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
@@ -684,10 +690,10 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    A named repository takes precedence over a Slack channel's workspace
-    binding and a deployment-wide default behind it, so routing needs to tell
-    the two apart. ``explicit`` is true only for a repository the thread or the
-    channel description named.
+    A named repository may pick the workspace when no Slack channel is bound,
+    while a deployment-wide default behind it never does, so routing needs to
+    tell the two apart. ``explicit`` is true only for a repository the thread
+    or the channel description named.
     """
 
     repo: Repo | None = None
@@ -1047,8 +1053,13 @@ async def trigger_or_queue_run(
     github_user_id: int | None,
     repo_config: dict[str, str],
     pr_number: int,
+    token_repositories: Sequence[str] | None = None,
 ) -> None:
-    """Create a new agent run or queue the message if the thread is busy."""
+    """Create a new agent run or queue the message if the thread is busy.
+
+    ``token_repositories`` is recorded if this creates the thread; a thread that
+    must be narrowed but could not record it is not started.
+    """
     await authorize_github_thread(thread_id, github_login)
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
@@ -1056,7 +1067,7 @@ async def trigger_or_queue_run(
     workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
         repo_config
     )
-    await upsert_agent_thread_metadata(
+    persisted = await upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
@@ -1064,7 +1075,14 @@ async def trigger_or_queue_run(
         title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
+        token_repositories=token_repositories,
     )
+    if not persisted and token_repositories is not None:
+        logger.error(
+            "Not starting a GitHub run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
@@ -1128,6 +1146,17 @@ def repo_private_from_payload(payload: dict[str, Any]) -> bool | None:
     repo = payload.get("repository")
     private = repo.get("private") if isinstance(repo, dict) else None
     return private if isinstance(private, bool) else None
+
+
+def event_thread_token_repositories(
+    repo_config: dict[str, str], payload: dict[str, Any]
+) -> list[str] | None:
+    """The token scope for a thread a GitHub event on ``repo_config`` starts."""
+    return event_token_repositories(
+        repo_config.get("owner", ""),
+        repo_config.get("name", ""),
+        private=repo_private_from_payload(payload),
+    )
 
 
 def repo_id_from_payload(payload: dict[str, Any]) -> int | None:

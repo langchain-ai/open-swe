@@ -272,7 +272,7 @@ describe("WorkspacesSection", () => {
     fireEvent.mouseMove(repositoryHelp)
     expect(
       await screen.findByText(
-        /dashboard, Slack, GitHub issues, or pull requests/
+        /routes its GitHub issues, pull requests, Linear tickets/
       )
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))

@@ -431,8 +431,22 @@ describe("WorkspaceSettingsPanel", () => {
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("offers only the workspace's own repositories as its default", async () => {
+  it("offers every accessible repository as its default", async () => {
     mockApis()
+    // The repository list loads for a signed-in user.
+    vi.spyOn(api, "me").mockResolvedValue({
+      login: "alice",
+      email: null,
+      avatar_url: null,
+      is_admin: true,
+    })
+    vi.spyOn(api, "repos").mockResolvedValue({
+      installations: [],
+      repositories: [
+        { full_name: "acme/oss", private: false },
+        { full_name: "acme/api", private: true },
+      ],
+    })
     renderPage()
 
     // The selector stays disabled until the workspace's settings have loaded.
@@ -442,11 +456,10 @@ describe("WorkspaceSettingsPanel", () => {
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
 
-    // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    const option = screen.getByRole("button", { name: "acme/oss" })
+    // Core prefers acme/api, and OSS can still default to it.
+    const option = await screen.findByRole("button", { name: "acme/api" })
     expect(option.closest("section")).toBeNull()
-    expect(screen.queryByText("acme/api")).toBeNull()
+    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
   })
 
   it("turns an inherited setting into an override and resets it back", async () => {

@@ -126,7 +126,8 @@ async def test_options_carry_each_workspace_default_repository(
 ) -> None:
     """The composer preselects a workspace's default repository when the workspace is picked first.
 
-    An inherited default is withheld from a workspace that does not own it.
+    Every workspace can use every repository, so an inherited default applies
+    even where another workspace prefers that repository.
     """
     await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
     await admin_client.post(
@@ -143,14 +144,13 @@ async def test_options_carry_each_workspace_default_repository(
     by_slug = {item["slug"]: item for item in body["workspaces"]}
     assert by_slug["oss"]["default_repo"] == "acme/oss"
     assert by_slug["core"]["default_repo"] == "acme/api"
-    assert by_slug["default"]["default_repo"] is None
+    assert by_slug["default"]["default_repo"] == "acme/oss"
 
 
-async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
-    """Only `default` may claim nothing; a malformed definition is not a conflict."""
+async def test_a_workspace_may_prefer_no_repository(admin_client: httpx.AsyncClient) -> None:
     response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
-    assert response.status_code == 400
-    assert "at least one repository" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["repos"] == []
 
 
 @pytest.mark.parametrize("stale_precheck", [False, True])
@@ -188,3 +188,23 @@ async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
     assert sorted([first.status_code, second.status_code]) == [200, 409]
     conflict = first if first.status_code == 409 else second
     assert "already" in conflict.json()["detail"]
+
+
+async def test_a_prompt_edit_during_a_refresh_outlives_it(
+    admin_client: httpx.AsyncClient,
+) -> None:
+    await admin_client.post(
+        "/dashboard/api/workspaces",
+        json={"name": "Core", "repos": ["acme/api"], "setup_script": "echo tools"},
+    )
+    await WORKSPACES.mark_refreshing("core")
+    response = await admin_client.put("/dashboard/api/workspaces/core", json={"prompt": "new"})
+    assert response.status_code == 200
+    assert response.json()["refresh_status"] == "refreshing"
+
+    await WORKSPACES.start_refresh_step("core", "capture")
+    await WORKSPACES.mark_refresh_settled("core", "success")
+
+    stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
+    assert stored["prompt"] == "new"
+    assert stored["refresh_status"] == "success"

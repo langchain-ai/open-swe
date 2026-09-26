@@ -652,7 +652,7 @@ export interface WorkspaceOption {
   slug: string
   name: string
   repos: Array<string>
-  /** Effective default repository, withheld when another workspace owns it. */
+  /** Effective default repository, from the workspace's settings tiers. */
   default_repo: string | null
   slack_channel_ids: Array<string>
   is_default: boolean

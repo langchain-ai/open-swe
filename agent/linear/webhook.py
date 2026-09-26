@@ -185,9 +185,12 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # Resolve the GitHub login from the Linear email the same way Slack does, so
     # PRs open *as the triggering user* and the thread is tagged for the dashboard.
     mapped_login = await User.login_for_email(user_email) if user_email else None
-    # The repository's workspace is the one this run lands in, so its
-    # default model and Fable flag are the ones the vision fallback checks.
-    workspace = await common.workspace_for_repo_config(repo_config)
+    # A follow-up stays in its thread's workspace; a new issue lands in the
+    # repository's preferred one. Either way its default model and Fable flag
+    # are the ones the vision fallback checks.
+    workspace = await common.get_thread_workspace(
+        thread_id
+    ) or await common.workspace_for_repo_config(repo_config)
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
