@@ -14,16 +14,19 @@ for human review, someone to resolve it when it is `blocked`, and the owners whe
 it is ready to merge with auto-merge off. `blocked` is its own state, separate
 from waiting for review.
 
-An always-on, model-free **shepherd** tracks each of the task's pull requests from
-open to merge. It recomputes a stage for every PR from GitHub state on each
-relevant webhook, keeps one timeline per task, wakes the task's driver thread only
-when there is work the agent can do, and merges (or announces readiness) once
-every PR in the task is ready.
+The task has one state. Its pull requests only contribute conditions (CI failing,
+review needed, conflict) that the task's state is derived from.
+
+An always-on, model-free **shepherd** carries the task from its first PR to merge.
+On each relevant webhook it rereads the affected PR's conditions from GitHub,
+recomputes the task's state, keeps one timeline per task, wakes the task's driver
+thread only when there is work the agent can do, and merges (or announces
+readiness) once every PR in the task is mergeable.
 
 The shepherd replaces `/baby-sit` and the dead auto-fix plumbing entirely. Any
 human-authored PR can be taken over and enter the same cycle.
 
-Deployment, post-deploy verification, and rollback are a later phase. The stage
+Deployment, post-deploy verification, and rollback are a later phase. The state
 model leaves room for them (see [Later](#later)).
 
 ## Why
@@ -53,9 +56,11 @@ task
   goal              text      what done looks like, from create_task
   driver_thread_id  text      thread the shepherd wakes
   auto_merge        bool null null = use the owners' preferences
-  stage             text      derived, cached (see Task stage)
+  state             text      derived, cached (see Task state)
   created_at, closed_at
   close_reason      completed | abandoned | null
+  last_progress_at  timestamptz drives staleness
+  stale_at          timestamptz null
 
 task_thread
   task_id           uuid
@@ -70,8 +75,7 @@ task_pull_request
   source            opened | takeover
   added_by_user_id  uuid null
   merge_after       uuid[]    pull_request_ids that must merge first
-  stage             text
-  blockers          jsonb     typed list, see Stages
+  conditions        jsonb     typed list, see PR conditions; not a state
   evaluated_sha     text
   evaluated_at      timestamptz
 
@@ -92,7 +96,7 @@ task_assignee                  who must act now; no rows = the agent has it
   unique (task_id, user_id, reason, pull_request_id)
 
 task_event                     append-only timeline
-  id, task_id, pull_request_id null, kind, from_stage, to_stage,
+  id, task_id, pull_request_id null, kind, from_state, to_state,
   head_sha, detail jsonb, created_at
 
 task_wakeup                    dedupe + retry budget
@@ -138,38 +142,54 @@ task_wakeup                    dedupe + retry budget
 - `PullRequest.agent_thread_id` callers move to the task's driver thread, so
   adopted PRs behave the same as agent-opened ones.
 
-## Stages (`agent/tasks/stages.py`)
+## Task state (`agent/tasks/state.py`)
 
-A pure function evaluates a PR snapshot into a stage plus a blocker list. The
-snapshot generalizes `PullRequestSnapshot` from `expedited_review/readiness.py`
-(state, draft, mergeability, check runs, commit statuses, required checks,
-reviews, unresolved review threads) and adds the latest Open SWE review for the
-head SHA from `pull_request_review`.
+The task has the state. Pull requests have no state of their own in this model;
+each contributes **conditions**, facts read from GitHub, and the task's state is
+derived from the conditions of all its PRs plus task-level facts (a block, an
+active merge, whether it is closed).
 
-Blockers (all that apply, not just the first):
+### PR conditions
 
-| Blocker | Actionable by agent | Source |
+A pure function turns a PR snapshot into its list of conditions. The snapshot
+generalizes `PullRequestSnapshot` from `expedited_review/readiness.py` (GitHub
+open/merged/closed, draft, mergeability, check runs, commit statuses, required
+checks, reviews, unresolved review threads) and adds the latest Open SWE review
+for the head SHA from `pull_request_review`. Every condition that applies is
+listed, not just the first.
+
+| Condition | Who acts | Source |
 |---|---|---|
-| `conflict` | yes | mergeability |
-| `ci_failed` (check names, URLs) | yes | failing required checks, or any failing check the agent can reproduce |
-| `bot_findings` (finding ids) | yes | unresolved Open SWE findings on the head SHA |
-| `changes_requested` (reviewers) | via existing comment wake-ups | latest human review state |
-| `unresolved_threads` | via existing comment wake-ups | review threads |
-| `ci_pending` | no | running or unreported required checks |
-| `bot_review_pending` | no | repo reviewed by Open SWE and no review for head SHA |
-| `human_review_pending` (reviewers) | no | a requested or assigned reviewer has not reviewed the head, or branch protection requires approvals not yet given |
+| `conflict` | agent (shepherd wake-up) | mergeability |
+| `ci_failed` (check names, URLs) | agent (shepherd wake-up) | failing required checks, or any failing check the agent can reproduce |
+| `bot_findings` (finding ids) | agent (shepherd wake-up) | unresolved Open SWE findings on the head SHA |
+| `changes_requested` (reviewers) | agent (existing comment wake-ups) | latest human review state |
+| `unresolved_threads` | agent (existing comment wake-ups) | review threads |
+| `ci_pending` | nobody, waiting on automation | running or unreported required checks |
+| `bot_review_pending` | nobody, waiting on automation | repo reviewed by Open SWE and no review for the head SHA |
+| `review_needed` (reviewers) | assigned reviewers | an assigned reviewer has not reviewed the head, or branch protection requires approvals not yet given |
 
-Stage is the highest-priority label: `merged`, `closed`, `blocked`, `conflict`,
-`ci_failed`, `changes_requested`, `ci_pending`, `bot_review_pending`,
-`human_review_pending`, `ready`. Drafts evaluate the same way except that review
-blockers are dropped.
+Drafts drop the review conditions. A PR with no conditions is mergeable. Merged
+and closed PRs contribute no conditions.
 
-### Task stage
+### States
 
-`in_progress` while the task has no PRs. After that it is derived from its open
-PRs: `ready` when every PR is `ready`, `merged` when every PR is merged or closed
-with at least one merged, otherwise the worst PR stage. The UI shows the
-breakdown ("2 of 3 ready").
+The task's state is the first rule that matches:
+
+| State | When | Assignees |
+|---|---|---|
+| `completed` / `abandoned` | the task is closed | none |
+| `stale` | no progress for 2 working days (see [Stale](#stale)) | none |
+| `blocked` | the task has an open block | whoever must resolve it |
+| `merging` | an auto-merge sequence is running | none |
+| `in_progress` | the task has no PRs yet, or any PR has an agent-actionable condition | none, the agent has it |
+| `in_review` | any PR has `review_needed` | the reviewers |
+| `waiting_on_checks` | any PR has `ci_pending` or `bot_review_pending` | none |
+| `ready_to_merge` | every open PR is mergeable | the owners, when auto-merge is off |
+| `merged` | every PR is merged or closed, and at least one merged | none |
+
+The task panel shows the state once, with each PR's conditions underneath, for
+example "In review: sdk#41 waiting on @alex; app#88 CI running".
 
 A task closes as `completed` when it reaches `merged` and the agent does not
 open another PR within its run, or explicitly through `close_task(reason)`
@@ -180,42 +200,44 @@ close or release them first.
 
 ### Triggers
 
-`reevaluate(pull_request_id)` runs under the existing per-PR state lock and is
-called from:
+`reevaluate(pull_request_id)` recomputes that PR's conditions under the existing
+per-PR lock, then recomputes its task's state. It is called from:
 
 - `pull_request` webhooks (every action), `push` to a task PR's head ref,
   `GITHUB_CI_EVENTS`, `pull_request_review`, `pull_request_review_comment`
 - `publish_review` right after the reviewer posts, so bot findings are seen
   without depending on a bot-authored webhook
 - takeover and release
-- one global sweep cron (every 10 minutes) over open task PRs whose
-  `evaluated_at` is older than 10 minutes. This catches base-branch changes that
-  alter mergeability and any lost webhook. Unchanged state costs no model tokens
+- one global sweep cron (every 10 minutes) over PRs of open, non-stale tasks
+  whose `evaluated_at` is older than 10 minutes. This catches base-branch changes
+  that alter mergeability and any lost webhook. Unchanged state costs no model
+  tokens. The same sweep enforces review `due_at` and marks tasks stale
 
-Each evaluation writes `stage`, `blockers`, `evaluated_sha`, and a `task_event`
-when the stage changes.
+Each evaluation writes the PR's `conditions` and `evaluated_sha`, the task's
+`state`, and a `task_event` when either changes.
 
 ### Wake-ups
 
-When actionable blockers (`conflict`, `ci_failed`, `bot_findings`) appear for a
-head SHA, the shepherd inserts `task_wakeup(pr, sha, reason)` and, only if the
-insert succeeded, dispatches one run to the driver thread through the normal
-queue. The prompt (`agent/resources/prompts/runs/task-wakeup.md.jinja`) names the
-repo, PR, head SHA, and every actionable blocker at once, so a PR failing CI with
-open findings gets one wake-up, not two.
+When shepherd-actionable conditions (`conflict`, `ci_failed`, `bot_findings`)
+appear on a PR's head SHA, the shepherd inserts `task_wakeup(pr, sha, reason)`
+and, only if the insert succeeded, dispatches one run to the driver thread
+through the normal queue. The prompt
+(`agent/resources/prompts/runs/task-wakeup.md.jinja`) names the repo, PR, head
+SHA, and every actionable condition at once, so a PR failing CI with open
+findings gets one wake-up, not two.
 
 Human comments and reviews keep flowing through the existing untagged-comment
-path, which already carries the text. The shepherd only records their effect on
-the stage.
+path, which already carries the text. The shepherd only records the resulting
+conditions.
 
-Retry budget: after 5 wake-ups on one PR without the stage improving (a new head
-SHA alone is not progress), the PR becomes `blocked` with reason
-`retry_budget_exhausted`.
+Retry budget: after 5 wake-ups on one PR without any of its actionable conditions
+clearing (a new head SHA alone is not progress), the task is blocked with reason
+`retry_budget_exhausted` on that PR.
 
 ### Blocked
 
 `blocked` means something went wrong or is missing, and the task cannot move
-until a person resolves it. It is separate from `human_review_pending`, which is
+until a person resolves it. It is separate from `in_review`, which is
 the expected hand-off to reviewers.
 
 A block records `reason`, a one-paragraph `ask` addressed to the person, and the
@@ -246,6 +268,38 @@ A block clears when:
 Clearing a block resets the PR's retry budget, removes the `blocked` assignments,
 and records a `task_event`.
 
+### Stale
+
+A task that has not made progress for **2 working days** becomes `stale`, and the
+shepherd forgets it. This is deliberately aggressive: a task nobody is moving
+should stop generating noise.
+
+Progress is any of: a PR condition clearing, a review submitted, a PR merged, a
+block answered, a new PR added, or a message from an owner or assignee on the
+task. Wake-ups, new head SHAs that clear nothing, reassignments, and nudges are
+not progress. So a task sitting in `in_review` with no review for 2 working days
+goes stale, as does a `blocked` task nobody answered, and an agent stuck in
+`in_progress` without clearing anything.
+
+Working days are weekdays in the owners' time zones, from the stored working
+hours. `task.last_progress_at` records the latest progress event, and the global
+sweep marks tasks stale.
+
+Once stale:
+
+- no reevaluation from webhooks or the sweep, no wake-ups, no review requests,
+  reassignments, nudges, or notifications
+- all assignments are removed and the task's GitHub review requests are withdrawn
+- the owners get one notification that it went stale, with a Resume link
+- it still owns its threads and PRs, and still counts as the thread's task, so
+  `create_task` in that thread fails until an owner resumes or abandons it
+
+Only an owner can bring it back, explicitly: the Resume button in the task panel,
+`@open-swe resume` on one of its PRs, or asking the agent in the thread, which
+calls `resume_task` and is rejected unless the requester is an owner. Resuming
+reevaluates every PR, resets retry budgets, restarts the 2-day clock, and picks
+reviewers afresh. An owner can also abandon it instead.
+
 ### Assignment
 
 A task has zero or more assignees: the people who must act next. With none, the
@@ -256,19 +310,21 @@ PR and to unblock another).
 The task's **authors** are every owner, every PR author, and whoever took a PR
 over. Authors are never assigned to review.
 
-Automatic assignment, applied on stage transitions:
+Automatic assignment, applied on task state transitions:
 
-| Stage | Assignees | Reason |
+| Task state | Assignees | Reason |
 |---|---|---|
-| `human_review_pending` | the PR's reviewers, excluding authors | `review` |
+| `in_review` | the reviewers of each PR with `review_needed`, excluding authors | `review` |
 | `blocked` | the people named in `request_human`; otherwise the owners, plus the PR author for a block on a taken-over PR | `blocked` |
-| `ready` with auto-merge off | the owners | `merge` |
+| `ready_to_merge` with auto-merge off | the owners | `merge` |
 | anything else | none from the shepherd | |
 
 #### Picking reviewers (`agent/tasks/reviewers.py`)
 
-The shepherd picks reviewers itself when a PR first reaches
-`human_review_pending`. It does not use GitHub's team auto-assignment or reviewer
+The shepherd picks reviewers for a PR once it has no agent-actionable or
+automation conditions left (CI green, Open SWE review done, nothing for the agent
+to fix) and still lacks the approvals it needs. From then on the PR carries
+`review_needed` with those reviewers. It does not use GitHub's team auto-assignment or reviewer
 suggestions. A reviewer a person explicitly requested (on GitHub, in the panel,
 or through `assign_task`) is always kept, and the picker only fills the remaining
 slots.
@@ -360,7 +416,7 @@ each has reviewed.
 Manual assignment: anyone who can see the task can add or remove assignees from
 the task panel, from chat or Slack ("have @alex and @sam review this") through
 `assign_task`, or with `@open-swe assign @login` on a PR. Manual assignments
-(`reason = manual`) survive stage transitions until the person acts (reviews,
+(`reason = manual`) survive task state transitions until the person acts (reviews,
 replies, unblocks, merges) or is removed. Assigning a person while the agent is
 working does not stop the agent.
 
@@ -371,16 +427,16 @@ affected PR.
 
 ### Merge
 
-When the task stage becomes `ready`:
+When the task state becomes `ready_to_merge`:
 
 - `auto_merge = task.auto_merge ?? all(o.preferences.auto_merge_shepherded_prs for o in owners)`.
   With several owners and no override, every owner must have opted in.
 - Off: assign the task to the owners and post "ready to merge" once to the task
   thread, Slack thread, and each PR.
-- On: merge PRs in `merge_after` order (topological; independent PRs in any
+- On: the task moves to `merging` and merges PRs in `merge_after` order (topological; independent PRs in any
   order) using each repo's merge method, via the merge code generalized out of
   `expedited_review/merge.py`. Re-evaluate each PR immediately before merging it.
-  If a merge fails or a PR stops being ready mid-sequence, stop and block the
+  If a merge fails or a PR gains a condition mid-sequence, stop and block the
   task with `merge_failed`, listing which PRs merged.
 
 ## Entry points
@@ -455,7 +511,8 @@ row, records a `task_event`, and posts a PR comment.
 |---|---|
 | `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); creates the thread's open task. Fails if one is already open |
 | `close_task` | `reason: completed \| abandoned` |
-| `get_task` | Task, PRs with stage and blockers, recent timeline |
+| `get_task` | Task state, PRs with their conditions, recent timeline |
+| `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
@@ -469,11 +526,12 @@ Tool descriptions live under `agent/resources/prompts/tools/`.
 - Router in `agent/tasks/routes.py` under `/dashboard/api/tasks`: get task,
   timeline, set options, assign, unblock, takeover, release, and "assigned to
   me" listing.
-- Thread right panel gets a Task section: each PR with repo, stage chip, and
-  blockers; the task stage; the timeline; the auto-merge toggle; assignees with
-  their reasons and a multi-person picker. A blocked task shows the `ask` as a
-  banner with an Unblock button.
-- Sidebar thread rows show the task stage chip and assignee avatars (none when the
+- Thread right panel gets a Task section: the task state chip; each PR with repo,
+  GitHub open/merged/closed, and its conditions; the timeline; the auto-merge
+  toggle; assignees with their reasons and a multi-person picker. A blocked task
+  shows the `ask` as a banner with an Unblock button; a stale task shows a Resume
+  button to its owners.
+- Sidebar thread rows show the task state chip and assignee avatars (none when the
   agent has it). Tasks assigned to the viewer count toward their attention
   indicator, and the sidebar gets an "Assigned to me" filter.
 - A standalone tasks list is out of scope for the first pass.
@@ -500,7 +558,7 @@ edit and gets the `create_task` error, which is the intended path.
 
 ## Later
 
-Stages extend past `merged` without changing the model: `deploying`, `deployed`,
+Task states extend past `merged` without changing the model: `deploying`, `deployed`,
 `verified`, driven by GitHub `deployment_status` or a configured deploy workflow
 per repo. A rollback is a revert PR added to the same task, which then runs the
 same cycle.
@@ -508,8 +566,8 @@ same cycle.
 ## Rollout
 
 1. Backend core: schema and migration, `create_task` / `close_task` / `get_task`,
-   the tool gate, stage evaluation, shepherd triggers, wake-ups and budget,
-   backfill, deletions. About 3 days.
+   the tool gate, PR conditions and task state, shepherd triggers, wake-ups and
+   budget, staleness, backfill, deletions. About 3 days.
 2. Merge: shared readiness, auto-merge preference and override, merge ordering,
    `set_task_options`. About 1 day.
 3. Takeover and release across dashboard, GitHub, and tools. About 1 day.
@@ -524,5 +582,3 @@ same cycle.
   review requests work for them, but they get no Slack DM or dashboard view.
 - Should reviewer scoring also skip people who are away (Slack status, calendar),
   and learn from how quickly each person has reviewed before?
-- Should a block that nobody answers escalate (for example, re-notify after a
-  day, or notify the workspace channel)?
