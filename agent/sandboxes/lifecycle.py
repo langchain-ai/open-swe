@@ -505,9 +505,16 @@ async def ensure_sandbox_for_thread(
     # so a backend published before this point would be used by the rest of the
     # run while the initialization that failed is only logged.
     from agent.sandboxes.tool_access import provision_tool_url
+    from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
     await provision_tool_url(thread_id, sandbox_backend)
-    return set_sandbox_backend(thread_id, sandbox_backend)
+    published = set_sandbox_backend(thread_id, sandbox_backend)
+    if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+        from agent.background_tasks import reconcile_background_tasks
+
+        # A runner killed with its sandbox never calls back; this is where its task turns up lost.
+        _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
+    return published
 
 
 async def recreate_sandbox_for_thread(

@@ -1,8 +1,15 @@
-"""Model-free monitoring for sandbox background commands."""
+"""Model-free completion delivery for sandbox background commands.
+
+Two triggers, chosen per launch by the triggering person's
+``experimental_background_callbacks`` flag: the runner calling back through the
+sandbox tools channel when its command exits, or a per-thread cron polling every
+minute. Either one reconciles every task's state from the sandbox, and claims
+keep a completion from being delivered twice.
+"""
 
 import logging
 import shlex
-from typing import Any
+from typing import Any, NamedTuple
 
 from langgraph_sdk import get_client
 
@@ -21,6 +28,7 @@ from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
 
+# Threads whose triggering person has not opted into callbacks poll with a per-thread cron.
 CRON_KIND = "background_tasks"
 CRON_SCHEDULE = "* * * * *"
 # The server drops a `thread_id` key from cron metadata, so crons are tagged with this instead.
@@ -172,7 +180,17 @@ async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
     return tasks if isinstance(tasks, list) else []
 
 
-async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
+class _Reconciled(NamedTuple):
+    result: dict[str, Any]
+    backend: Any | None
+    tracked: bool
+
+
+async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
+    return (await _reconcile(thread_id)).result
+
+
+async def _reconcile(thread_id: str) -> _Reconciled:
     client = _client()
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -188,8 +206,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         if tracked_ids:
             metadata = await update_background_task_state(client, thread_id, reset=True)
         await sync_slack_background_status(client, thread_id, metadata=metadata)
-        await _delete_crons(thread_id)
-        return {"status": "missing_sandbox"}
+        return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await create_sandbox(sandbox_id)
     tasks = await _list_tasks(backend)
     running = [task for task in tasks if task.get("status") == "running"]
@@ -200,7 +217,7 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     ]
     tracked_successfully = False
     status_metadata: dict[str, object] | None = None
-    # This runs every minute per thread; only take the thread lock when the tracked set changes.
+    # Only take the thread lock when the tracked set changes.
     if set(running_ids) - set(finished_ids) == set(tracked_ids):
         status_metadata = metadata
         tracked_successfully = True
@@ -254,8 +271,33 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
         except Exception:
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
-    pending = any(task.get("notification") != "done" for task in terminal)
-    if not running and not pending and tracked_successfully:
+    pending = sum(task.get("notification") != "done" for task in terminal)
+    await sync_slack_background_status(
+        client, thread_id, metadata=status_metadata, source_context=status_context
+    )
+    result = {
+        "status": "running" if running or pending else "idle",
+        "delivered": delivered,
+        "pending": pending,
+    }
+    return _Reconciled(result, backend, tracked_successfully)
+
+
+async def keep_sandbox_alive(sandbox_id: str) -> None:
+    """Count as sandbox activity so the provider's idle stop spares a running command."""
+    backend = await create_sandbox(sandbox_id)
+    response = await backend.aexecute("true", timeout=10)
+    if response.exit_code != 0:
+        raise RuntimeError(f"sandbox keepalive exited {response.exit_code}")
+
+
+async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
+    """One polling-cron tick: deliver completions, then delete the cron once nothing is left."""
+    reconciled = await _reconcile(thread_id)
+    backend = reconciled.backend
+    if backend is None:
+        await _delete_crons(thread_id)
+    elif reconciled.result["status"] == "idle" and reconciled.tracked:
         lock = await backend.aexecute(
             f"mkdir -p {shlex.quote(TASK_ROOT)} && mkdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null",
             timeout=10,
@@ -275,7 +317,4 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                 await backend.aexecute(
                     f"rmdir {shlex.quote(MONITOR_LOCK)} 2>/dev/null || true", timeout=10
                 )
-    await sync_slack_background_status(
-        client, thread_id, metadata=status_metadata, source_context=status_context
-    )
-    return {"status": "running" if running or pending else "idle", "delivered": delivered}
+    return reconciled.result

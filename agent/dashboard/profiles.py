@@ -64,6 +64,7 @@ class ProfileUpdate(BaseModel):
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = None
+    experimental_background_callbacks: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -197,6 +198,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "experimental_background_callbacks": (
+            update.experimental_background_callbacks
+            if update.experimental_background_callbacks is not None
+            else existing.get("experimental_background_callbacks")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed

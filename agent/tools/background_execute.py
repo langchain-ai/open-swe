@@ -8,8 +8,12 @@ import textwrap
 import uuid
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
+from agent.dashboard.profiles import get_profile
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
+from agent.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 from agent.utils.background_task_state import update_background_task_state
 from agent.utils.thread_ops import langgraph_client
 
@@ -27,19 +31,24 @@ MAX_ACTIVE_TASKS = 4
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_INLINE_OUTPUT_BYTES = 65_536
 TASK_TTL_SECONDS = 604_800
+# Detached processes do not count as sandbox activity, so without a heartbeat
+# the provider's idle stop kills long commands.
+HEARTBEAT_SECONDS = 900
+CALLBACK_RETRY_DELAYS = (0, 5, 15, 30, 60, 120, 300, 300, 300)
 
 
 def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
-def _runner(task_id: str, command: str, timeout: int) -> str:
+def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
     return textwrap.dedent(
         f"""
         import base64, json, os, selectors, signal, subprocess, time
 
         root = {TASK_ROOT!r}
         task_id = {task_id!r}
+        callback = {callback!r}
         task_dir = os.path.join(root, task_id)
         state_path = os.path.join(task_dir, "state.json")
         output_path = os.path.join(task_dir, "output.log")
@@ -56,6 +65,52 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         head = bytearray()
         tail = bytearray()
         omitted = 0
+
+        def callback_url(event):
+            if not callback:
+                return None
+            base = os.environ.get({TOOLS_URL_ENV!r})
+            query = ""
+            if not base:
+                try:
+                    with open({TOOLS_URL_FILE!r}) as handle:
+                        base, _, query = handle.read().strip().partition("?")
+                except OSError:
+                    return None
+            url = base.rstrip("/") + "/background-tasks/" + task_id + "/" + event
+            return url + "?" + query if query else url
+
+        def post(event):
+            url = callback_url(event)
+            if not url:
+                return None
+            # The URL goes through stdin so a file-provisioned token never shows in ps.
+            proc = subprocess.Popen(
+                ["curl", "-sS", "-o", "/dev/null", "-w", "%{{http_code}}", "-X", "POST",
+                 "--max-time", "60", "-K", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            proc.stdin.write('url = "' + url + '"\\n')
+            proc.stdin.close()
+            return proc
+
+        def notify_complete():
+            for delay in {CALLBACK_RETRY_DELAYS!r}:
+                time.sleep(delay)
+                proc = post("complete")
+                if proc is None:
+                    return
+                try:
+                    proc.wait(90)
+                    code = int(proc.stdout.read() or 0)
+                except (subprocess.TimeoutExpired, ValueError):
+                    proc.kill()
+                    code = 0
+                if 200 <= code < 300 or (400 <= code < 500 and code not in (408, 429)):
+                    return
 
         def write_state(status, pid=None, exit_code=None):
             payload = {{
@@ -106,7 +161,13 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         selector.register(process.stdout, selectors.EVENT_READ)
         status = None
         last_flush = 0.0
+        last_heartbeat = time.monotonic()
+        heartbeat = None
         while status is None:
+            if time.monotonic() - last_heartbeat >= {HEARTBEAT_SECONDS}:
+                last_heartbeat = time.monotonic()
+                if heartbeat is None or heartbeat.poll() is not None:
+                    heartbeat = post("heartbeat")
             for key, _ in selector.select(0.25):
                 chunk = os.read(key.fileobj.fileno(), 65536)
                 if chunk:
@@ -142,16 +203,25 @@ def _runner(task_id: str, command: str, timeout: int) -> str:
         exit_code = process.wait()
         flush()
         write_state(status, process.pid, exit_code)
+        notify_complete()
         """
     ).strip()
 
 
-def _launch_command(task_id: str, command: str, timeout: int) -> str:
+def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = encoded(_runner(task_id, command, timeout))
+    runner = encoded(_runner(task_id, command, timeout, callback))
     lock = shlex.quote(LAUNCH_LOCK)
+    callback_checks = (
+        "command -v curl >/dev/null || { echo 'background execution requires curl' >&2; exit 74; }; "
+        f'{{ [ -n "${TOOLS_URL_ENV}" ] || [ -s {shlex.quote(TOOLS_URL_FILE)} ]; }} || '
+        "{ echo 'background execution needs the sandbox callback URL, which this deployment does not provide' >&2; exit 75; }; "
+        if callback
+        else ""
+    )
     return (
         "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
+        f"{callback_checks}"
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
         f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
         "[ \"$acquired\" ] || { echo 'background launch is busy' >&2; exit 71; }; "
@@ -296,47 +366,83 @@ async def background_execute(
         return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
     try:
         thread_id, backend = _current_backend()
-        script = control_script("list", None)
-        current = await execute(
-            backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
-        )
-        active = sum(task.get("status") == "running" for task in current.get("tasks", []))
-        if active >= MAX_ACTIVE_TASKS:
-            return {"success": False, "error": "active task limit reached"}
-        from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
-
-        wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
-        wait = await backend.aexecute(wait_for_monitor, timeout=15)
-        if getattr(wait, "exit_code", None) != 0:
-            raise RuntimeError("background-task monitor is busy")
-        task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-        state = await execute(backend, _launch_command(task_id, command, timeout))
-        try:
-            await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
-        except Exception:
-            logger.warning(
-                "Could not track background command", extra={"task_id": task_id}, exc_info=True
-            )
-        wait = await backend.aexecute(wait_for_monitor, timeout=15)
-        if getattr(wait, "exit_code", None) != 0:
-            return {
-                "success": False,
-                **state,
-                "error": "command started, but automatic completion monitoring is busy",
-            }
-        try:
-            await ensure_background_task_cron(thread_id)
-        except Exception:
-            logger.warning("Failed to schedule background-task monitor", exc_info=True)
-            return {
-                "success": False,
-                **state,
-                "error": "command started, but automatic completion monitoring could not be scheduled",
-            }
-        return {"success": True, **state}
+        if await _uses_completion_callback():
+            return await _launch_with_callback(thread_id, backend, command, timeout)
+        return await _launch_with_cron(thread_id, backend, command, timeout)
     except Exception as exc:
         logger.exception("Failed to start background command")
         return {"success": False, "error": str(exc)}
+
+
+class _CallbackFlag(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    experimental_background_callbacks: bool | None = None
+
+
+async def _uses_completion_callback() -> bool:
+    """The triggering person's opt-in to sandbox completion callbacks instead of polling crons."""
+    login = RunConfig.from_runtime().github_login
+    if not login:
+        return False
+    profile = await get_profile(login)
+    return bool(profile and _CallbackFlag.model_validate(profile).experimental_background_callbacks)
+
+
+async def _track(thread_id: str, task_id: str) -> None:
+    try:
+        await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
+    except Exception:
+        logger.warning(
+            "Could not track background command", extra={"task_id": task_id}, exc_info=True
+        )
+
+
+async def _launch_with_callback(
+    thread_id: str, backend: Any, command: str, timeout: int
+) -> dict[str, Any]:
+    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
+    state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+    await _track(thread_id, task_id)
+    return {"success": True, **state}
+
+
+async def _launch_with_cron(
+    thread_id: str, backend: Any, command: str, timeout: int
+) -> dict[str, Any]:
+    script = control_script("list", None)
+    current = await execute(
+        backend, f"printf %s {shlex.quote(encoded(script))} | base64 -d | python3"
+    )
+    active = sum(task.get("status") == "running" for task in current.get("tasks", []))
+    if active >= MAX_ACTIVE_TASKS:
+        return {"success": False, "error": "active task limit reached"}
+    from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
+
+    wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
+    wait = await backend.aexecute(wait_for_monitor, timeout=15)
+    if getattr(wait, "exit_code", None) != 0:
+        raise RuntimeError("background-task monitor is busy")
+    task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
+    state = await execute(backend, _launch_command(task_id, command, timeout, callback=False))
+    await _track(thread_id, task_id)
+    wait = await backend.aexecute(wait_for_monitor, timeout=15)
+    if getattr(wait, "exit_code", None) != 0:
+        return {
+            "success": False,
+            **state,
+            "error": "command started, but automatic completion monitoring is busy",
+        }
+    try:
+        await ensure_background_task_cron(thread_id)
+    except Exception:
+        logger.warning("Failed to schedule background-task monitor", exc_info=True)
+        return {
+            "success": False,
+            **state,
+            "error": "command started, but automatic completion monitoring could not be scheduled",
+        }
+    return {"success": True, **state}
 
 
 def owns_task(task_id: str) -> bool:
