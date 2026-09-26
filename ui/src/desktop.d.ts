@@ -47,6 +47,13 @@ export interface DesktopProjectRef {
 }
 
 export type DesktopLocalActivity = Record<string, "running" | "error">
+export type DesktopThreadFeedbackRating = "bad" | "good"
+
+export interface DesktopThreadFeedback {
+  threadId: string
+  rating: DesktopThreadFeedbackRating
+  comment: string
+}
 
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
@@ -206,6 +213,9 @@ declare global {
         canSignIn?: boolean
       }>
       openLocalTrace: (threadId: string) => Promise<boolean>
+      submitThreadFeedback: (
+        input: DesktopThreadFeedback
+      ) => Promise<{ exported: boolean }>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
       startLocalThread: (
         input: DesktopLocalPromptInput & {

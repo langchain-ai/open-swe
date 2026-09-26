@@ -678,6 +678,25 @@ function configureDesktopIpc() {
     }
   });
 
+  ipcMain.handle("desktop:submit-thread-feedback", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const threadId = typeof input?.threadId === "string" ? input.threadId : "";
+    const rating = input?.rating;
+    const comment =
+      typeof input?.comment === "string" ? input.comment.trim() : "";
+    if (!localThreadStore.get(threadId))
+      throw new Error("Local thread not found");
+    if (rating !== "good" && rating !== "bad")
+      throw new Error("Invalid feedback rating");
+    if (comment.length > 3_000) throw new Error("Feedback comment is too long");
+    const response = await backendSupervisor.request("/open-swe/feedback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ thread_id: threadId, rating, comment }),
+    });
+    if (!response.ok) throw new Error("Could not save feedback");
+    return response.json();
+  });
   ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
     requireTrustedDesktopIpc(event);
     if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
