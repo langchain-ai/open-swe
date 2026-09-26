@@ -8,7 +8,6 @@ the agent itself is stateless.
 """
 
 # ruff: noqa: E402
-import hashlib
 import logging
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -18,8 +17,6 @@ from typing import Any, cast
 from agent.config import ENV
 
 logger = logging.getLogger(__name__)
-
-_MODEL_ROUTING_SPLIT = 0.5
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -123,7 +120,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionState, RoutingMode
+from agent.middleware.model_selection import ModelSelectionState
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
@@ -776,12 +773,6 @@ def _slack_concierge_run(cfg: RunConfig) -> bool:
     )
 
 
-def _model_routing_mode(thread_id: str) -> RoutingMode:
-    digest = hashlib.sha256(thread_id.encode()).hexdigest()
-    bucket = int(digest[:8], 16) / float(0xFFFF_FFFF)
-    return "auto" if bucket < _MODEL_ROUTING_SPLIT else "fast"
-
-
 def _make_model_or_defer(
     model_id: str,
     *,
@@ -1316,11 +1307,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if slack_ask_mode:
         adaptive_model_routing = False
 
-    model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
-        **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1560,7 +1549,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
-        assert model_routing_mode is not None
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
@@ -1579,7 +1567,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             route_model_ids={
                 route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
             },
-            routing_mode=model_routing_mode,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
