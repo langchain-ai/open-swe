@@ -146,11 +146,13 @@ task_wakeup                    dedupe + retry budget
   `create_task`; new work starts in a new thread.
 - The thread's task is "in scope" for its runs. Subthreads, fix threads, reviewer
   and scout threads are members, never the coordinator.
-- **Concierge threads are never in a task.** They coordinate at a higher level:
-  `create_task` called from a concierge thread starts a new coordinator thread for
-  the task (the concierge's requester and any named participants become its
-  participants), and the concierge can read and steer tasks through `get_task`
-  and messages to their coordinator threads. A concierge thread is never a
+- **Concierge threads are never in a task.** They coordinate at a higher level
+  with their own tool, `start_task_thread`, instead of `create_task`, which is not
+  loaded there. It creates a new thread, creates the task with that thread as
+  coordinator, and dispatches the first run with the concierge's instructions.
+  The concierge's requester and any named participants become the new thread's
+  participants. The concierge then reads and steers tasks through `get_task` and
+  messages to their coordinator threads. A concierge thread is never a
   coordinator, never a member, and never assigned. Other surfaces that should
   behave this way get the same treatment by thread kind.
 - A subthread (`parent_thread_id` set) joins its parent's task as `sub`.
@@ -719,7 +721,8 @@ exportable as JSON.
 
 | Tool | Behaviour |
 |---|---|
-| `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); binds the calling thread as coordinator, permanently. From a concierge thread, starts a new coordinator thread instead. Fails if the calling thread already belongs to a task |
+| `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); binds the calling thread as coordinator, permanently. Fails if the calling thread already belongs to a task. Not loaded in concierge threads |
+| `start_task_thread` | Concierge threads only. `title`, `goal`, `owners`, `instructions`, `repos`; creates a new coordinator thread and its task, and dispatches the first run |
 | `close_task` | `reason: completed \| abandoned` |
 | `get_task` | Task state, PRs with their conditions, recent audit trail |
 | `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
