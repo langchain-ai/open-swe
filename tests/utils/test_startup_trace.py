@@ -12,7 +12,7 @@ from typing_extensions import TypedDict
 
 from agent.middleware.prepare_run import BasePrepareRunMiddleware
 from agent.utils import startup_trace
-from agent.utils.startup_trace import aphase, flush_phases
+from agent.utils.startup_trace import aphase, asubphase, flush_phases
 
 
 class _FakeClient:
@@ -70,6 +70,19 @@ async def test_phase_emits_apm_span(monkeypatch: pytest.MonkeyPatch) -> None:
         "agent.startup.factory.graph_assembly",
         {"startup.thread_id": "thread-apm", "startup.model": "openai:gpt-5"},
     )
+
+
+async def test_subphase_records_only_inside_a_phase() -> None:
+    async with aphase("thread-sub", "sandbox.git_identity"):
+        async with asubphase("sandbox.exec.result", sandbox_id="sb-1"):
+            pass
+    async with asubphase("sandbox.exec.result", sandbox_id="sb-1"):
+        pass
+
+    assert [phase.name for phase in startup_trace._PHASES["thread-sub"]] == [
+        "sandbox.git_identity",
+        "sandbox.git_identity/sandbox.exec.result",
+    ]
 
 
 async def test_phase_works_without_apm(monkeypatch: pytest.MonkeyPatch) -> None:

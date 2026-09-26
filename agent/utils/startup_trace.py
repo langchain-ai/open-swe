@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,7 @@ class _Phase:
 
 
 _PHASES: dict[str, list[_Phase]] = {}
+_CURRENT: ContextVar[tuple[str, str] | None] = ContextVar("startup_phase", default=None)
 
 
 def apm_span(name: str, tags: dict[str, Any]):
@@ -89,6 +91,7 @@ async def aphase(thread_id: str | None, name: str, **metadata: Any) -> AsyncIter
         yield
         return
     phase = _open(thread_id, name, metadata)
+    token = _CURRENT.set((thread_id, name))
     try:
         tags = {
             f"startup.{key}": value for key, value in {"thread_id": thread_id, **metadata}.items()
@@ -100,6 +103,21 @@ async def aphase(thread_id: str | None, name: str, **metadata: Any) -> AsyncIter
         raise
     else:
         _close(phase, None)
+    finally:
+        _CURRENT.reset(token)
+
+
+@asynccontextmanager
+async def asubphase(name: str, **metadata: Any) -> AsyncIterator[None]:
+    """Time a step as a child of the enclosing startup phase; outside one, only trace it in APM."""
+    current = _CURRENT.get()
+    if current is None:
+        with apm_span(name, metadata):
+            yield
+        return
+    thread_id, parent = current
+    async with aphase(thread_id, f"{parent}/{name}", **metadata):
+        yield
 
 
 def _parent_run_tree() -> RunTree | None:

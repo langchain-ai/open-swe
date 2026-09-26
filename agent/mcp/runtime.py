@@ -1,6 +1,7 @@
 """MCP discovery and execution over ordered, caller-authorized connection sources."""
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -28,7 +29,7 @@ from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
 from agent.utils import ttl_cache
-from agent.utils.startup_trace import apm_span
+from agent.utils.startup_trace import asubphase
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)
@@ -201,7 +202,7 @@ def _wrap_tool(
 async def _discover_and_store(
     record: MCPConnection, namespace: tuple[str, ...], *, background: bool
 ) -> list[Tool]:
-    with apm_span("mcp.discover", {"mcp.name": record.name, "mcp.background": background}):
+    async with asubphase("mcp.discover", mcp_name=record.name, background=background):
         definitions = await discover_tools(record, namespace)
     try:
         await MCPToolCatalog.save(
@@ -230,7 +231,8 @@ def _schedule_refresh(record: MCPConnection, namespace: tuple[str, ...]) -> None
     running = _REFRESHES.get(key)
     if running is not None and not running.done():
         return
-    task = asyncio.create_task(_refresh(record, namespace))
+    # A fresh context, so the refresh never records phases onto the run that scheduled it.
+    task = asyncio.create_task(_refresh(record, namespace), context=contextvars.Context())
     _REFRESHES[key] = task
     task.add_done_callback(lambda _: _REFRESHES.pop(key, None))
 
