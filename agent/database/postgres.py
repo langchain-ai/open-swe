@@ -149,6 +149,9 @@ async def migrate() -> None:
         await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK})
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
         await conn.run_sync(upgrade, migrations)
+    from agent.database.analytics_indexes import ensure_indexes
+
+    await ensure_indexes()
     logger.info(
         "Database initialized",
         extra={"database_setting": "POSTGRES_URI", "database_schema": SCHEMA},
