@@ -54,6 +54,7 @@ def _backend(
     handle: _FakeHandle, *, run_raises: Exception | None = None
 ) -> TimeoutLangSmithSandbox:
     sb = TimeoutLangSmithSandbox.__new__(TimeoutLangSmithSandbox)
+    object.__setattr__(sb, "_sandbox", SimpleNamespace(name="sandbox-test"))
     object.__setattr__(sb, "_async_sandbox", _FakeSandbox(handle, run_raises=run_raises))
     object.__setattr__(sb, "_async_client", None)
     sb._default_timeout = 30 * 60
