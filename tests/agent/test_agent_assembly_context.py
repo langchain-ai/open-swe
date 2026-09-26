@@ -775,6 +775,7 @@ async def test_dashboard_agent_excludes_slack_tools() -> None:
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     assert tool_names.isdisjoint(SLACK_TOOL_NAMES)
+    assert "slack_lookup_github_user" in tool_names
 
 
 @pytest.mark.asyncio
