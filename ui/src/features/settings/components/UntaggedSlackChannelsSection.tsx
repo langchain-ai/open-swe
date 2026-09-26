@@ -56,6 +56,7 @@ export function UntaggedSlackChannelsSection() {
               (channel) =>
                 channel.is_member &&
                 !channel.is_ext_shared &&
+                !channel.is_pending_ext_shared &&
                 !enabled.has(channel.id)
             )
             .map((channel) => (

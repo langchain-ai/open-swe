@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from agent.dashboard.deps import ADMIN_DEP
 from agent.slack.allowed_bots import (
@@ -14,6 +14,7 @@ from agent.slack.allowed_bots import (
     list_slack_bots,
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
+from agent.slack.channels import SlackChannel
 from agent.slack.connect import router as connect_router
 from agent.slack.untagged_channels import (
     UNTAGGED_CHANNELS,
@@ -52,6 +53,13 @@ async def api_enable_untagged_channel(
     body: SetUntaggedChannel,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> UntaggedChannel:
+    channel = await SlackChannel.load(body.channel_id, use_cache=False)
+    if (
+        channel is None
+        or not channel.context.allows_operations
+        or channel.payload.get("is_member") is not True
+    ):
+        raise HTTPException(400, "Choose an internal Slack channel that Open SWE has joined.")
     return await UNTAGGED_CHANNELS.put(body.channel_id, UntaggedChannel(channel_id=body.channel_id))
 
 

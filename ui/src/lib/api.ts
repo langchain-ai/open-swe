@@ -672,6 +672,7 @@ export interface SlackChannelOption {
   is_private: boolean
   is_member: boolean
   is_ext_shared: boolean
+  is_pending_ext_shared?: boolean
   num_members: number | null
 }
 
