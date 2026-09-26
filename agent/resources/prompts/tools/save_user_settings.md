@@ -6,7 +6,8 @@ Supported profile fields:
 - `default_model`, `reasoning_effort`: the main-agent model and effort.
 - `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
-- `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
+- `auto_fix_ci`, `recent_thread_context_enabled`, `experimental_assistant_ui`: boolean preferences. The experimental assistant UI is a server-backed feature flag; the Feature Flags tab's visibility is browser-local and cannot be changed here.
+- `preserve_sandbox_memory`: boolean preference stored on the user account; retain sandbox RAM between idle stops. Requires an existing Open SWE user record.
 - `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 

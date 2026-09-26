@@ -171,6 +171,8 @@ async def test_unavailable_thread_scope_fails_closed(
             "subagent_reasoning_effort": "high",
         },
         {"branch_prefix": "new/", "default_visibility": "invalid"},
+        {"preserve_sandbox_memory": None, "auto_fix_ci": False},
+        {"experimental_assistant_ui": "yes", "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -244,6 +246,47 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         **fake_store.values(["user_preferences"])["alice"],
     }
     assert {key: saved[key] for key in patch_values} == patch_values
+
+
+async def test_private_feature_flag_round_trip(
+    fake_store: FakeStore, requester: dict[str, object], saved_scope: dict[str, object]
+) -> None:
+    fake_store.seed(["profiles"], "Alice", {"default_repo": "org/repo"})
+    fake_store.seed(["profiles"], "bob", {"experimental_assistant_ui": False})
+    for enabled in (True, False):
+        result = await save_user_settings({"experimental_assistant_ui": enabled})
+        assert result["updated"] == {"experimental_assistant_ui": enabled}
+        read = await read_user_settings()
+        assert read["participants"][0]["profile"]["experimental_assistant_ui"] is enabled
+    assert fake_store.values(["profiles"])["Alice"]["default_repo"] == "org/repo"
+    assert fake_store.values(["profiles"])["bob"]["experimental_assistant_ui"] is False
+
+
+async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
+    fake_store: FakeStore, requester: dict[str, object], saved_scope: dict[str, object]
+) -> None:
+    from agent.users import User, UserPreferences
+
+    with patch.object(
+        User, "update_preferences", new_callable=AsyncMock, return_value=None
+    ) as save:
+        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+            "ok"
+        ] is False
+        save.assert_awaited_once()
+    assert not fake_store.items
+    with patch.object(
+        User,
+        "update_preferences",
+        new_callable=AsyncMock,
+        return_value=UserPreferences(preserve_sandbox_memory=True),
+    ) as save:
+        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+            "updated"
+        ] == {"preserve_sandbox_memory": True, "auto_fix_ci": False}
+        assert save.await_args.args[0] == "Alice"
+        assert save.await_args.args[1].preserve_sandbox_memory is True
+    assert fake_store.values(["profiles"])["Alice"]["auto_fix_ci"] is False
 
 
 async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: FakeStore) -> None:
@@ -330,7 +373,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
     assert result["participants"] == [
         {
             "login": "Alice",
-            "profile": {**ordinary, "concierge_mode": False},
+            "profile": {**ordinary, "concierge_mode": False, "preserve_sandbox_memory": False},
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",
