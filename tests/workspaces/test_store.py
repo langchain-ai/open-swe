@@ -698,11 +698,9 @@ async def test_update_rejects_slack_channel_owned_by_another_workspace() -> None
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_non_default_workspace_requires_a_repo() -> None:
-    with pytest.raises(ValueError, match="at least one repository"):
-        await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
-    record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
-    assert record.slug == "default" and record.repos == []
+async def test_any_workspace_may_prefer_no_repository() -> None:
+    record = await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
+    assert record.slug == "empty" and record.repos == []
 
 
 @pytest.mark.usefixtures("registry_db")

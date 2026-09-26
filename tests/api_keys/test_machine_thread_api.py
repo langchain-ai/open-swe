@@ -125,20 +125,18 @@ async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -
     assert machine.threads.created[0]["metadata"]["started_by_id"] == "github_actions:acme/api"
 
 
-async def test_a_repository_in_another_workspace_is_refused(machine: _FakeClient) -> None:
+async def test_a_repository_another_workspace_prefers_is_usable(machine: _FakeClient) -> None:
     principal = await _key_caller()
 
-    with pytest.raises(HTTPException) as refused:
-        await runs._enrich_system_run_start_command(
-            "thread-3",
-            principal,
-            _command("Upgrade the linter", thread_type="system", repo="acme/oss"),
-            metadata={},
-            creating=True,
-        )
+    await runs._enrich_system_run_start_command(
+        "thread-3",
+        principal,
+        _command("Upgrade the linter", thread_type="system", repo="acme/oss"),
+        metadata={},
+        creating=True,
+    )
 
-    assert refused.value.status_code == 403
-    assert machine.threads.created == []
+    assert machine.threads.created[0]["metadata"]["repo_name"] == "oss"
 
 
 @pytest.mark.parametrize("requested", ["workspace", "private"])

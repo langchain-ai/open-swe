@@ -1014,8 +1014,6 @@ class WorkspaceStore:
             )
 
     async def _assert_unique(self, record: Workspace) -> None:
-        if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
-            raise ValueError("a workspace must list at least one repository")
         await self._assert_bindings_free(record)
 
     async def _assert_bindings_free(self, record: Workspace) -> None:

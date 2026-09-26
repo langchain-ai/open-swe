@@ -126,7 +126,8 @@ async def test_options_carry_each_workspace_default_repository(
 ) -> None:
     """The composer preselects a workspace's default repository when the workspace is picked first.
 
-    An inherited default is withheld from a workspace that does not own it.
+    Every workspace can use every repository, so an inherited default applies
+    even where another workspace prefers that repository.
     """
     await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
     await admin_client.post(
@@ -143,14 +144,13 @@ async def test_options_carry_each_workspace_default_repository(
     by_slug = {item["slug"]: item for item in body["workspaces"]}
     assert by_slug["oss"]["default_repo"] == "acme/oss"
     assert by_slug["core"]["default_repo"] == "acme/api"
-    assert by_slug["default"]["default_repo"] is None
+    assert by_slug["default"]["default_repo"] == "acme/oss"
 
 
-async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
-    """Only `default` may claim nothing; a malformed definition is not a conflict."""
+async def test_a_workspace_may_prefer_no_repository(admin_client: httpx.AsyncClient) -> None:
     response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
-    assert response.status_code == 400
-    assert "at least one repository" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["repos"] == []
 
 
 @pytest.mark.parametrize("stale_precheck", [False, True])
