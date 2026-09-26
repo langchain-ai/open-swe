@@ -15,6 +15,7 @@ import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
 
 from agent.analytics.usage import update_agent_pr_usage_from_webhook
 from agent.config import ENV
@@ -210,6 +211,7 @@ __all__ = [
     "run_id_for_logging",
     "store_current_reviewer_run_id",
     "thread_exists",
+    "track_review_check_run",
     "trigger_or_queue_run",
     "append_finding_interaction",
     "build_pr_prompt",
@@ -1155,6 +1157,36 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
+
+
+class _TrackedReviewCheck(BaseModel):
+    review_check_run_id: int | None = None
+
+
+async def track_review_check_run(
+    thread_id: str, *, owner: str, repo: str, token: str, check_run_id: int
+) -> None:
+    """Track ``check_run_id`` as the thread's review check, closing the one it supersedes.
+
+    The run that owned the previous check is interrupted by the new one and never
+    settles it, so it would otherwise stay "in progress" on its commit forever.
+    """
+    metadata = await get_thread_metadata_safe(thread_id) or {}
+    previous = _TrackedReviewCheck.model_validate(metadata).review_check_run_id
+    if previous is not None and previous != check_run_id:
+        await complete_review_check_run(
+            owner=owner,
+            repo=repo,
+            check_run_id=previous,
+            token=token,
+            conclusion="neutral",
+            title="Superseded by a newer review",
+            summary="A newer Open SWE review run replaced this one.",
+        )
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={"review_check_run_id": check_run_id, "review_check_pending_result": None},
+    )
 
 
 async def build_reviewer_configurable(
