@@ -3,7 +3,7 @@
 ## Decision
 
 A **task** is a new first-class entity above threads and pull requests. It owns
-every thread about it (root thread, subthreads, coordinators, fix and follow-up
+every thread about it (its coordinator thread, subthreads, fix and follow-up
 threads, and each PR's reviewer and review scout threads) and every pull request it produces or adopts, across any
 number of repositories.
 
@@ -21,7 +21,7 @@ review needed, conflict) that the task's state is derived from.
 
 An always-on, model-free **shepherd** carries the task from its first PR to merge.
 On each relevant webhook it rereads the affected PR's conditions from GitHub,
-recomputes the task's state, records it in the task's audit trail, wakes the task's driver
+recomputes the task's state, records it in the task's audit trail, wakes the task's coordinator
 thread only when there is work the agent can do, and merges (or announces
 readiness) once every PR in the task is mergeable.
 
@@ -45,7 +45,7 @@ Today each step has its own mechanism, its own state, and its own gaps:
 | Status | Thread metadata, store namespaces, crons, Slack card state | No single answer to "where is this work?" for the UI, Slack, or the agent |
 
 A PR is also the wrong unit. One task routinely spans repos (an SDK change plus
-its consumer), and with subthreads and coordinators ([async subagents plan](https://github.com/langchain-ai/open-swe/pull/3074))
+its consumer), and with subthreads ([async subagents plan](https://github.com/langchain-ai/open-swe/pull/3074))
 one task spans threads too. Merge and readiness have to be decided for the whole
 task.
 
@@ -56,7 +56,7 @@ task
   id                uuid7
   title             text
   goal              text      what done looks like, from create_task
-  driver_thread_id  text      thread the shepherd wakes
+  coordinator_thread_id text not null; the one thread that coordinates the task
   auto_merge        bool null null = use the owners' preferences
   state             text      derived, cached (see Task state)
   created_at, closed_at
@@ -64,17 +64,19 @@ task
   last_progress_at  timestamptz drives staleness
   stale_at          timestamptz null
 
-task_thread
+task_thread                    permanent; rows are never deleted or moved
+  thread_id         text PK   zero or one task per thread: no row = a free thread;
+                              the primary key makes more than one impossible
   task_id           uuid
-  thread_id         text      at most one open task per thread
-  primary key (task_id, thread_id)
-  role              root | sub | coordinator | fix | followup | reviewer | review_scout
+  role              coordinator | sub | fix | followup | reviewer | review_scout
+                              exactly one coordinator row, matching task.coordinator_thread_id
   pull_request_id   uuid null the PR a reviewer or review_scout thread belongs to
 
 task_pull_request
-  pull_request_id   uuid PK   -> pull_request; a PR belongs to at most one task
+  pull_request_id   uuid PK   -> pull_request; a PR belongs to at most one task, forever
   task_id           uuid
   source            opened | takeover
+  released_at       timestamptz null set when handed back; the row stays
   added_by_user_id  uuid null
   merge_after       uuid[]    pull_request_ids that must merge first
   conditions        jsonb     typed list, see PR conditions; not a state
@@ -131,21 +133,34 @@ task_wakeup                    dedupe + retry budget
 ### Membership
 
 - The agent creates a task explicitly with `create_task(title, goal, owners)` as soon as
-  it decides the work will change code, before any PR exists. The calling thread
-  becomes the root and the driver. A takeover also creates a task when the PR is
-  not being added to an existing one.
-- A thread has at most one open task. Once it closes (completed or abandoned),
-  the same thread can create another, so a long-lived Slack or concierge thread
-  can carry several tasks in sequence.
-- The thread's open task is "in scope" for its runs, and for its subthreads.
+  it decides the work will change code, before any PR exists. A takeover also
+  creates a task when the PR is not being added to an existing one.
+- Every task has exactly one **coordinator thread**, stored as
+  `task.coordinator_thread_id`. It is the thread the shepherd wakes, the one that
+  makes the agent's assignment decisions, and the one that answers for the task.
+  It is the thread that called `create_task` (or, for a takeover, the thread the
+  takeover started or ran in), and it never changes.
+- **Membership is permanent.** A thread belongs to at most one task, and once it
+  joins one it stays in that task forever, including after the task completes,
+  is abandoned, or goes stale. A thread already in a task cannot call
+  `create_task`; new work starts in a new thread.
+- The thread's task is "in scope" for its runs. Subthreads, fix threads, reviewer
+  and scout threads are members, never the coordinator.
+- **Concierge threads are never in a task.** They coordinate at a higher level:
+  `create_task` called from a concierge thread starts a new coordinator thread for
+  the task (the concierge's requester and any named participants become its
+  participants), and the concierge can read and steer tasks through `get_task`
+  and messages to their coordinator threads. A concierge thread is never a
+  coordinator, never a member, and never assigned. Other surfaces that should
+  behave this way get the same treatment by thread kind.
 - A subthread (`parent_thread_id` set) joins its parent's task as `sub`.
 - A thread started from the dashboard PR actions (`agent/threads/pr_fixes.py`)
   joins the PR's task as `fix` when one exists.
 - Each PR's reviewer thread (`reviewer_thread_id`) and review scout thread
   (`review_scout_thread_id`) join the task as `reviewer` and `review_scout` when
-  the PR joins, or when they are created later for a PR already in a task. They
-  leave with the PR on release. Reviewer and scout threads for PRs outside any
-  task are unchanged.
+  the PR joins, or when they are created later for a PR already in a task. Like
+  every member, they stay in the task, including after the PR is released.
+  Reviewer and scout threads for PRs outside any task are unchanged.
 - The shepherd never wakes a `reviewer` or `review_scout` thread; the existing
   review triggers keep driving them. Owning them puts every thread about the task
   (building, reviewing, and explaining it) in one place: the task panel, the
@@ -163,7 +178,7 @@ task_wakeup                    dedupe + retry budget
   participants. People can add any registered user as an owner from the task
   panel or with `@open-swe owner add|remove @login` on a PR. The last owner
   cannot be removed.
-- `PullRequest.agent_thread_id` callers move to the task's driver thread, so
+- `PullRequest.agent_thread_id` callers move to the task's coordinator thread, so
   adopted PRs behave the same as agent-opened ones.
 
 ## Task state (`agent/tasks/state.py`)
@@ -244,7 +259,7 @@ Each evaluation writes the PR's `conditions` and `evaluated_sha`, the task's
 
 When shepherd-actionable conditions (`conflict`, `ci_failed`, `bot_findings`)
 appear on a PR's head SHA, the shepherd inserts `task_wakeup(pr, sha, reason)`
-and, only if the insert succeeded, dispatches one run to the driver thread
+and, only if the insert succeeded, dispatches one run to the coordinator thread
 through the normal queue. The prompt
 (`agent/resources/prompts/runs/task-wakeup.md.jinja`) names the repo, PR, head
 SHA, and every actionable condition at once, so a PR failing CI with open
@@ -285,7 +300,7 @@ does not run.
 A block clears when:
 
 - an assignee or an owner replies in the task's thread, Slack thread, or on
-  the PR. The reply wakes the driver thread with the block's `ask` and the answer
+  the PR. The reply wakes the coordinator thread with the block's `ask` and the answer
 - the person clicks "Unblock" in the task panel, optionally with a note
 - the cause goes away on its own (for example, a human pushes a fix that turns
   CI green, or a permission is granted), which the next evaluation detects. The
@@ -320,8 +335,7 @@ Once stale:
   decisions), nudges, or notifications
 - all assignments are removed and the task's GitHub review requests are withdrawn
 - the owners get one notification that it went stale, with a Resume link
-- it still owns its threads and PRs, and still counts as the thread's task, so
-  `create_task` in that thread fails until an owner resumes or abandons it
+- it still owns its threads and PRs
 
 Only an owner can bring it back, explicitly: the Resume button in the task panel,
 `@open-swe resume` on one of its PRs, or asking the agent in the thread, which
@@ -365,7 +379,7 @@ over.
 
 #### When the agent is asked to decide
 
-The shepherd wakes the driver thread with an assignment wake-up at these moments.
+The shepherd wakes the coordinator thread with an assignment wake-up at these moments.
 They are deduped through `task_wakeup` and do not count toward the retry budget.
 
 | Moment | Decision asked for |
@@ -628,7 +642,7 @@ the agent:
   #123 to this task" works from Slack and chat
 
 On takeover the shepherd posts a PR comment naming who handed it over and how to
-release it, then evaluates immediately. The driver thread's first wake-up
+release it, then evaluates immediately. The coordinator thread's first wake-up
 includes the full current state (CI, findings, unresolved threads) so it can
 catch up in one run.
 
@@ -641,8 +655,10 @@ A takeover is refused, with the reason, when:
 ### Release
 
 `@open-swe release`, a dashboard button, or `release_pull_request`. The PR author
-and any task owner can always release. Release removes the `task_pull_request`
-row, is recorded in the audit trail, and posts a PR comment.
+and any task owner can always release. Release sets `released_at`: the shepherd
+stops tracking the PR and ends its assignments, but the PR stays in the task's
+record, like its threads. It is recorded in the audit trail and posts a PR
+comment. A released PR can only be taken over again into the same task.
 
 ## Settings
 
@@ -703,12 +719,12 @@ exportable as JSON.
 
 | Tool | Behaviour |
 |---|---|
-| `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); creates the thread's open task. Fails if one is already open |
+| `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); binds the calling thread as coordinator, permanently. From a concierge thread, starts a new coordinator thread instead. Fails if the calling thread already belongs to a task |
 | `close_task` | `reason: completed \| abandoned` |
 | `get_task` | Task state, PRs with their conditions, recent audit trail |
 | `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
-| `release_pull_request` | Remove a PR from the task |
+| `release_pull_request` | Stop shepherding a PR; it stays in the task's record |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
 | `request_human` | `ask`, `assignees: [login]`, `rationale`, `reason: agent_request \| no_reviewer`, `pull_request?`; blocks the task (or one PR), assigns it, and ends the run |
 | `review_candidates` | `pull_request`; review requirements and candidates with raw signals, review load, and suggestions (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
@@ -733,7 +749,7 @@ Tool descriptions live under `agent/resources/prompts/tools/`.
   review keeps its voting and card and reads readiness from the shepherd
 
 Migration: backfill a task for every open PR with an `open_pull_request` link,
-with its linked agent thread as root and driver, then drop the baby-sit crons.
+with its linked agent thread as coordinator, then drop the baby-sit crons.
 Active watches need no conversion because the backfilled task covers the same PR.
 A thread that is mid-change without a PR at deploy time hits the gate on its next
 edit and gets the `create_task` error, which is the intended path.
