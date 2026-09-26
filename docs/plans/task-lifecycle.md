@@ -7,10 +7,10 @@ every thread working on it (root thread, subthreads, coordinators, fix and
 follow-up threads) and every pull request it produces or adopts, across any
 number of repositories.
 
-A task has an owner, who is accountable, and zero or more assignees, who must act
+A task has one or more owners (usually one), who are accountable, and zero or more assignees, who must act
 next. There are no assignees while the agent is handling things. People are
 assigned when the task needs them: reviewers (never the authors) while it waits
-for human review, someone to resolve it when it is `blocked`, and the owner when
+for human review, someone to resolve it when it is `blocked`, and the owners when
 it is ready to merge with auto-merge off. `blocked` is its own state, separate
 from waiting for review.
 
@@ -50,9 +50,8 @@ task.
 task
   id                uuid7
   title             text
-  owner_user_id     uuid      -> user; accountable, whose preferences apply
   driver_thread_id  text      thread the shepherd wakes
-  auto_merge        bool null null = use owner's preference
+  auto_merge        bool null null = use the owners' preferences
   stage             text      derived, cached (see Task stage)
   created_at, closed_at
 
@@ -71,6 +70,13 @@ task_pull_request
   blockers          jsonb     typed list, see Stages
   evaluated_sha     text
   evaluated_at      timestamptz
+
+task_owner                     accountable people; at least one, usually one
+  task_id           uuid
+  user_id           uuid      -> user
+  added_by          uuid null
+  added_at          timestamptz
+  primary key (task_id, user_id)
 
 task_assignee                  who must act now; no rows = the agent has it
   task_id           uuid
@@ -100,6 +106,10 @@ task_wakeup                    dedupe + retry budget
   joins the PR's task as `fix` when one exists.
 - `pull_request_thread` links are unchanged. `task_pull_request` records
   ownership; `pull_request_thread` still records which threads touched a PR.
+- The first owner is the person who started the root thread (or took the PR
+  over). Any owner can add or remove owners from the task panel, from chat or
+  Slack through `set_task_options`, or with `@open-swe owner add|remove @login`
+  on a PR. The last owner cannot be removed.
 - `PullRequest.agent_thread_id` callers move to the task's driver thread, so
   adopted PRs behave the same as agent-opened ones.
 
@@ -195,7 +205,7 @@ does not run.
 
 A block clears when:
 
-- the assignee (or the owner) replies in the task's thread, Slack thread, or on
+- an assignee or an owner replies in the task's thread, Slack thread, or on
   the PR. The reply wakes the driver thread with the block's `ask` and the answer
 - the person clicks "Unblock" in the task panel, optionally with a note
 - the cause goes away on its own (for example, a human pushes a fix that turns
@@ -208,11 +218,11 @@ and records a `task_event`.
 ### Assignment
 
 A task has zero or more assignees: the people who must act next. With none, the
-agent has it. The owner stays fixed; assignees come and go. Each assignment has a
+agent has it. Owners change only when someone edits them; assignees come and go. Each assignment has a
 reason, so one person can be assigned twice for different things (to review one
 PR and to unblock another).
 
-The task's **authors** are the owner, every PR author, and whoever took a PR
+The task's **authors** are every owner, every PR author, and whoever took a PR
 over. Authors are never assigned to review.
 
 Automatic assignment, applied on stage transitions:
@@ -220,15 +230,15 @@ Automatic assignment, applied on stage transitions:
 | Stage | Assignees | Reason |
 |---|---|---|
 | `human_review_pending` | the PR's reviewers, excluding authors | `review` |
-| `blocked` | the people named in `request_human`; otherwise the owner, plus the PR author for a block on a taken-over PR | `blocked` |
-| `ready` with auto-merge off | the owner | `merge` |
+| `blocked` | the people named in `request_human`; otherwise the owners, plus the PR author for a block on a taken-over PR | `blocked` |
+| `ready` with auto-merge off | the owners | `merge` |
 | anything else | none from the shepherd | |
 
 Reviewers for a PR, in order:
 
 1. Reviewers already requested on GitHub.
 2. Otherwise, owners of the changed paths from `CODEOWNERS`.
-3. Otherwise, the task is blocked with `no_reviewer`, assigned to the owner, whose
+3. Otherwise, the task is blocked with `no_reviewer`, assigned to the owners, whose
    answer (or a manual assignment) picks the reviewers.
 
 Assignment and GitHub review requests stay in sync in both directions. Assigning a
@@ -256,8 +266,9 @@ affected PR.
 
 When the task stage becomes `ready`:
 
-- `auto_merge = task.auto_merge ?? owner.preferences.auto_merge_shepherded_prs`
-- Off: assign the task to the owner and post "ready to merge" once to the task
+- `auto_merge = task.auto_merge ?? all(o.preferences.auto_merge_shepherded_prs for o in owners)`.
+  With several owners and no override, every owner must have opted in.
+- Off: assign the task to the owners and post "ready to merge" once to the task
   thread, Slack thread, and each PR.
 - On: merge PRs in `merge_after` order (topological; independent PRs in any
   order) using each repo's merge method, via the merge code generalized out of
@@ -293,7 +304,7 @@ takeover is refused with that reason.
 ### Release
 
 `@open-swe release`, a dashboard button, or `release_pull_request`. The PR author
-and the task owner can always release. Release removes the `task_pull_request`
+and any task owner can always release. Release removes the `task_pull_request`
 row, records a `task_event`, and posts a PR comment.
 
 ## Settings
@@ -303,7 +314,8 @@ row, records a `task_event`, and posts a PR comment.
 - Per-task override `task.auto_merge`, set from the task panel toggle, from chat
   ("merge when ready", "don't auto-merge") through `set_task_options`, or with
   `@open-swe automerge on|off` on any of the task's PRs.
-- For a taken-over PR, the task owner is the user who took it over.
+- Taking a PR over into a new task makes the person who took it over the owner;
+  adding it to an existing task leaves that task's owners unchanged.
 
 ## Agent tools (`agent/tools/tasks.py`)
 
@@ -312,7 +324,7 @@ row, records a `task_event`, and posts a PR comment.
 | `get_task` | Task, PRs with stage and blockers, recent timeline |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
-| `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}` |
+| `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login], remove: [login]}` |
 | `request_human` | `ask`, `pull_request?`, `assignees?: [login]`; blocks the task (or one PR) with `agent_request`, assigns it, and ends the run |
 | `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| manual`, `pull_request?`; `review` also requests review on GitHub |
 
