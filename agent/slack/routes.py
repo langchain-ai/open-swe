@@ -584,6 +584,7 @@ async def slack_webhook(
                 or in_code_channel
                 or in_untagged_channel
                 or solo_followup,
+                untagged_channel=in_untagged_channel,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",

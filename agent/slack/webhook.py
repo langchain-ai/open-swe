@@ -1124,7 +1124,8 @@ async def _process_slack_mention_impl(
     explicitly_tagged = concierge_mode or _interrupts_active_run(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions
+        and not request.untagged_channel,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,

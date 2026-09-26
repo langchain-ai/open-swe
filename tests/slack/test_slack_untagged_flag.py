@@ -186,6 +186,7 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
     request = cast(SlackRequest, background_tasks.tasks[0][1][0])
     assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
     assert request.treat_all_messages_as_mentions is True
+    assert request.untagged_channel is True
 
 
 async def test_kitchen_name_without_opt_in_does_not_trigger(
