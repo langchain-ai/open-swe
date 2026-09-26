@@ -156,6 +156,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"notion_token": "secret"},
         {"admin": True},
         {"gateway_enabled": True},
+        {"slack_onboarding_dismissed": True},
         {"instructions": "new"},
         {"theme": "dark"},
         {"default_visibility": "everyone"},

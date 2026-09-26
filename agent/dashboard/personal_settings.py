@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from agent.dashboard.feature_flags import feature_flag_names
 from agent.dashboard.options import default_model_pair
 from agent.dashboard.profiles import (
     PROFILES_NAMESPACE,
@@ -17,7 +18,7 @@ from agent.dashboard.user_preferences import (
 from agent.store import get_value, now_iso, put_value
 from agent.users import User, UserPreferencesPatch
 
-SQL_SETTING_KEYS = frozenset({"preserve_sandbox_memory"})
+SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
 
 PROFILE_SETTING_KEYS = frozenset(
     {
@@ -31,11 +32,10 @@ PROFILE_SETTING_KEYS = frozenset(
         "auto_fix_ci",
         "model_routing_enabled",
         "recent_thread_context_enabled",
-        "experimental_assistant_ui",
         "draft_prs",
         "review_draft_prs",
     }
-)
+) | feature_flag_names(ProfileUpdate)
 PREFERENCE_SETTING_KEYS = frozenset(
     {
         "default_visibility",
@@ -61,12 +61,13 @@ async def patch_personal_settings(
         key: value for key, value in settings.items() if key in PREFERENCE_SETTING_KEYS
     }
     sql_patch = {key: value for key, value in settings.items() if key in SQL_SETTING_KEYS}
-    if sql_patch and not isinstance(sql_patch["preserve_sandbox_memory"], bool):
-        raise ValueError("preserve_sandbox_memory must be true or false")
-    if "experimental_assistant_ui" in profile_patch and not isinstance(
-        profile_patch["experimental_assistant_ui"], bool
-    ):
-        raise ValueError("experimental_assistant_ui must be true or false")
+    flag_patch = {
+        key: value
+        for key, value in settings.items()
+        if key in feature_flag_names(ProfileUpdate) | SQL_SETTING_KEYS
+    }
+    if invalid := [key for key, value in flag_patch.items() if not isinstance(value, bool)]:
+        raise ValueError(f"Feature flags must be true or false: {', '.join(sorted(invalid))}")
     sql_update = UserPreferencesPatch.model_validate(sql_patch) if sql_patch else None
     profile = None
     preferences = None
@@ -107,11 +108,11 @@ async def patch_personal_settings(
             }
         )
     result: dict[str, object] = {}
-    if sql_update is not None and sql_update.preserve_sandbox_memory is not None:
+    if sql_update is not None:
         saved_sql = await User.update_preferences(login, sql_update)
         if saved_sql is None:
             raise ValueError("No Open SWE user record for this login yet")
-        result["preserve_sandbox_memory"] = saved_sql.preserve_sandbox_memory
+        result.update({key: getattr(saved_sql, key) for key in sql_patch})
     if profile is not None:
         await put_value(
             PROFILES_NAMESPACE,

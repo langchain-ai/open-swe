@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from agent.dashboard.feature_flags import feature_flag_names
 from agent.dashboard.workspace_settings import (
     INSTANCE_SETTINGS_KEY,
     INSTANCE_SETTINGS_NAMESPACE,
@@ -16,17 +17,7 @@ from agent.store import get_value
 from agent.tools.admin_gate import require_private_admin_surface
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
-FEATURE_FLAGS = frozenset(
-    {
-        "review_draft_prs",
-        "pr_summaries",
-        "review_trace_links",
-        "model_routing_enabled",
-        "gateway_enabled",
-        "fable_enabled",
-        "expedited_review_enabled",
-    }
-)
+FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
 
 
 async def manage_feature_flags(

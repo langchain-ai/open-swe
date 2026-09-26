@@ -1,6 +1,6 @@
 """Per-person preferences stored on the ``users`` row."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserPreferences(BaseModel):
@@ -14,4 +14,6 @@ class UserPreferences(BaseModel):
 
 class UserPreferencesPatch(BaseModel):
     concierge_mode: bool | None = None
-    preserve_sandbox_memory: bool | None = None
+    preserve_sandbox_memory: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )

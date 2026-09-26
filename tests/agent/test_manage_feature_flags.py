@@ -60,7 +60,10 @@ async def test_workspace_flags_inherit_and_keep_other_overrides(fake_store: Fake
         assert fake_store.values(["workspace_settings"])["team"]["org_guidelines"] == "Keep me"
 
 
-@pytest.mark.parametrize("flags", [{"review_auto_approve": True}, {"pr_summaries": "yes"}, {}])
+@pytest.mark.parametrize(
+    "flags",
+    [{"review_auto_approve": True}, {"org_guidelines": True}, {"pr_summaries": "yes"}, {}],
+)
 async def test_invalid_flags_do_not_write(fake_store: FakeStore, flags: dict[str, object]) -> None:
     before = deepcopy(fake_store.items)
     with (
