@@ -137,9 +137,8 @@ The Environments page becomes the Workspaces page, with repositories and Slack c
 The composer picks the workspace first and the repository second: every workspace lists every
 accessible repository, and choosing a workspace preselects its default repository. A repository
 named from outside — a link or the profile default — selects the workspace that prefers it. The
-dashboard has no separate "project" notion: the sidebar groups each thread under its own
-workspace, then its repository, so threads from two workspaces on one repository appear under
-both. Admin
+dashboard has no separate "project" notion: the sidebar nests each repository folder under the
+workspace that prefers it, and `default` for one no workspace prefers. Admin
 settings and MCP connections gain a workspace selector.
 
 ### Migration
@@ -225,6 +224,11 @@ Known gaps this design leaves open, so they survive outside the pull requests th
 - **The Linear default repository reads the default workspace.** A Linear issue with no repository
   in it falls back to `default`'s configured repository rather than the resolved workspace's, unlike
   the Slack path, which scopes a defaulted repository to the workspace that won.
+- **The sidebar files a repository under its preferred workspace only.** A thread that ran in
+  another workspace on that repository still appears in the preferred workspace's folder. Grouping
+  by each thread's own workspace needs `/threads/repos` to return one entry per repository and
+  thread workspace, a workspace filter on `/threads/page`, and folder keys (and the pin and
+  collapse preferences stored under them) that include the workspace.
 - **Unfinished dashboard pieces.** The review page's guidelines and toggles are
   per workspace, but the repository list above them is still every installed repository grouped by
   GitHub owner, which does not say which workspace each one belongs to.

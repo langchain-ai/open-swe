@@ -106,11 +106,11 @@ export function WorkspaceEditor({
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
-              Assigning a repository makes this the workspace for requests
-              targeting that repository, whether submitted from the dashboard,
-              Slack, GitHub issues, or pull requests. Runs use this
-              workspace&apos;s sandbox, instructions, settings, and connections.
-              Each repository can belong to only one workspace.
+              Threads in any workspace can use any repository the GitHub App can
+              access. Preferring a repository routes its GitHub issues, pull
+              requests, Linear tickets, and automations to this workspace and
+              preloads it into this workspace&apos;s sandbox image. Each
+              repository can be preferred by only one workspace.
             </TooltipPopup>
           </Tooltip>
         </span>

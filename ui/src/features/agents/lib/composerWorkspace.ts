@@ -3,7 +3,7 @@ import type { WorkspaceOption } from "@/lib/api"
 export interface ComposerWorkspaceInputs {
   /** The user's explicit pick in this composer, if any. */
   override: string | null
-  /** The workspace owning the selected repository, if any. */
+  /** The workspace preferring the selected repository, if any. */
   repoWorkspace: string | null
   /** The signed-in user's saved default workspace. */
   userDefault: string | null | undefined
@@ -14,7 +14,8 @@ export interface ComposerWorkspaceInputs {
 
 /**
  * The workspace a new thread is composed in, mirroring the backend's routing:
- * an explicit pick, else the repository's owner, else the user's default, else
+ * an explicit pick, else the repository's preferred workspace, else the user's
+ * default, else
  * the instance default. A default only counts when it names a listed
  * workspace, so a deleted one falls through instead of being sent to the run.
  */
@@ -36,33 +37,6 @@ export function pickComposerWorkspace({
 
 type RepoOption = { full_name: string }
 
-/**
- * The repositories a thread composed in `slug` may work in: the ones the
- * workspace owns plus its default repository, and for the default workspace
- * every accessible repository no other workspace claims. With no matching
- * workspace, everything accessible is offered.
- */
-export function reposForWorkspace(
-  slug: string | null,
-  workspaces: ReadonlyArray<
-    Pick<WorkspaceOption, "slug" | "repos" | "is_default" | "default_repo">
-  >,
-  accessible: ReadonlyArray<RepoOption>
-): Array<RepoOption> {
-  const workspace = workspaces.find((candidate) => candidate.slug === slug)
-  if (!workspace) return [...accessible]
-  const lower = (name: string) => name.toLowerCase()
-  const claimed = new Set(workspaces.flatMap((w) => w.repos.map(lower)))
-  const own = new Set(
-    [...workspace.repos, workspace.default_repo ?? ""].map(lower)
-  )
-  return accessible.filter(
-    ({ full_name }) =>
-      own.has(lower(full_name)) ||
-      (workspace.is_default && !claimed.has(lower(full_name)))
-  )
-}
-
 export interface ComposerRepoInputs {
   /** The user's pick in this composer: a repository, `null` for none, `undefined` for untouched. */
   override: string | null | undefined
@@ -70,7 +44,7 @@ export interface ComposerRepoInputs {
   userDefault: string | null
   /** The selected workspace's effective default repository. */
   workspaceDefault: string | null
-  /** What the selected workspace may work in; see {@link reposForWorkspace}. */
+  /** The repositories the composer offers: every one the GitHub App can reach. */
   offered: ReadonlyArray<RepoOption>
 }
 
