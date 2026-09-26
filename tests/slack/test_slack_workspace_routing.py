@@ -232,6 +232,48 @@ async def test_an_inherited_default_repository_owned_elsewhere_is_not_used(
 
 
 @_needs_workspace_rows
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<@UBOT> fix acme/internal via repo:acme/internal",
+        "<@UBOT> fix https://github.com/acme/internal/issues/42",
+    ],
+)
+async def test_an_explicit_repo_in_the_opening_message_routes_to_its_workspace(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, text: str
+) -> None:
+    captured: dict[str, Any] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+
+    await WORKSPACES.create(WorkspaceCreate(name="Internal", repos=["acme/internal"]), "alice")
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
+    )
+
+    request = SlackRequest.model_validate(
+        {
+            "channel_id": "C0SS",
+            "thread_ts": "1700000000.000100",
+            "event_ts": "1700000000.000200",
+            "user_id": "U123",
+            "text": text,
+            "bot_user_id": "UBOT",
+        }
+    )
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
+    assert configurable["workspace"] == "internal"
+    assert configurable["repo"] == {"owner": "acme", "name": "internal"}
+
+
+@_needs_workspace_rows
 async def test_a_named_repository_still_outranks_a_bound_channel(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:

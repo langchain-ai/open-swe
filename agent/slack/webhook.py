@@ -848,6 +848,11 @@ async def _process_slack_mention_impl(
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)
+    if is_first_mention:
+        message_repo = common.extract_repo_from_text(clean_text, default_owner="")
+        if message_repo:
+            repo = Repo.model_validate(message_repo)
+            resolution = common.SlackRepoResolution(repo, explicit=True)
     # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
     # a thread is one input to which workspace its sandbox boots from — resolved
     # below, once the triggering user's GitHub login is known. Only the opening
