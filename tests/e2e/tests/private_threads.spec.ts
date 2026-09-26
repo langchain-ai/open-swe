@@ -39,14 +39,16 @@ test("private threads are owner-only and visibility is fixed at creation", async
     });
     expect(seeded.ok()).toBeTruthy();
 
-    // Alice starts a new thread; the composer defaults to private and the
-    // server records an immutable owner.
+    // Alice explicitly chooses private for this thread; the server records
+    // an immutable owner.
     await page.request.post("/control/login", { data: { login: "alice" } });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
     await expect(
       page.getByRole("button", { name: "Thread visibility" }),
-    ).toHaveText(/Private/);
+    ).toHaveText(/Workspace/);
+    await page.getByRole("button", { name: "Thread visibility" }).click();
+    await page.getByRole("menuitemradio", { name: "Private" }).click();
     const editor = page.getByTestId("composer-editor");
     await editor.fill("Private planning notes");
     await editor.press("Enter");

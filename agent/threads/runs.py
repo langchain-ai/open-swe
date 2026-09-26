@@ -24,7 +24,6 @@ from agent.dashboard.options import (
 )
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.repo_access import require_repo_access_for_workspace
-from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
@@ -562,13 +561,13 @@ def requested_thread_type(configurable: Mapping[str, Any]) -> ThreadType | None:
 
 
 async def _requested_visibility(
-    configurable: Mapping[str, Any], *, login: str
+    configurable: Mapping[str, Any],
 ) -> Literal["public", "private"]:
     """How visible a person's new thread is, from the kind they asked for.
 
     ``workspace`` and ``private`` are the two a person may create, and they are
     what "public" and "private" have always meant here. A client that names
-    neither falls back to their saved default.
+    neither starts a workspace thread.
     """
     requested = requested_thread_type(configurable)
     if requested == "system":
@@ -577,9 +576,7 @@ async def _requested_visibility(
         raise HTTPException(500, "system threads are not created as a person's thread")
     if requested is not None:
         return "private" if requested == "private" else "public"
-    visibility = (
-        configurable.get("visibility") or (await get_user_preferences(login))["default_visibility"]
-    )
+    visibility = configurable.get("visibility") or "public"
     if visibility not in ("public", "private"):
         raise HTTPException(422, "visibility must be public or private")
     return cast(Literal["public", "private"], visibility)
@@ -718,7 +715,7 @@ async def _enrich_run_start_command(
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
-        visibility = await _requested_visibility(client_configurable, login=login)
+        visibility = await _requested_visibility(client_configurable)
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
         thread = await _create_dashboard_thread_record(
             thread_id,

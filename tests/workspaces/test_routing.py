@@ -17,9 +17,7 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 
 async def test_default_workspace_preference_round_trips(fake_store: FakeStore) -> None:
     assert (await get_user_preferences("alice"))["default_workspace"] is None
-    await set_user_preferences(
-        "alice", UserPreferencesUpdate(default_visibility="public", default_workspace=" OSS ")
-    )
+    await set_user_preferences("alice", UserPreferencesUpdate(default_workspace=" OSS "))
     assert (await get_user_preferences("alice"))["default_workspace"] == "oss"
 
 
@@ -40,9 +38,7 @@ async def test_thread_wins_over_everything() -> None:
 
 async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStore) -> None:
     await _seed()
-    await set_user_preferences(
-        "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="oss")
-    )
+    await set_user_preferences("alice", UserPreferencesUpdate(default_workspace="oss"))
     assert (await routing.resolve_workspace(tag="oss")).resolved_by == "tag"
     assert (
         await routing.resolve_workspace(tag="missing", repo=("acme", "oss"))
@@ -59,9 +55,7 @@ async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStor
 
 async def test_unknown_user_default_is_ignored(fake_store: FakeStore) -> None:
     await _seed()
-    await set_user_preferences(
-        "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="gone")
-    )
+    await set_user_preferences("alice", UserPreferencesUpdate(default_workspace="gone"))
     assert (await routing.resolve_workspace(login="alice")).resolved_by == "instance_default"
 
 

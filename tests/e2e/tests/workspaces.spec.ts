@@ -319,9 +319,9 @@ test.describe("Workspaces", () => {
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
-    await expect(
-      page.getByRole("button", { name: "Thread visibility" }),
-    ).toContainText("Private");
+    // Admins need the admin_thread flag, which only private threads carry.
+    await page.getByRole("button", { name: "Thread visibility" }).click();
+    await page.getByRole("menuitemradio", { name: "Private" }).click();
 
     await typeIntoComposer(
       page,

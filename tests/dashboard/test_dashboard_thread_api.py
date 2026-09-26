@@ -327,6 +327,36 @@ async def test_enrich_run_start_command_creates_and_stamps_new_thread(monkeypatc
     assert enriched["params"]["assistant_id"] == "agent"
 
 
+@pytest.mark.parametrize(
+    ("requested_visibility", "expected_visibility"),
+    [(None, "public"), ("private", "private")],
+)
+async def test_new_thread_visibility_ignores_saved_default(
+    monkeypatch, fake_store: FakeStore, requested_visibility: str | None, expected_visibility: str
+) -> None:
+    created: dict[str, object] = {}
+    fake_store.seed(["user_preferences"], "octocat", {"default_visibility": "private"})
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    configurable = {"visibility": requested_visibility} if requested_visibility else {}
+    await thread_runs._enrich_run_start_command(
+        "new-tid",
+        "octocat",
+        {
+            "method": "run.start",
+            "params": {
+                "input": {"messages": [{"type": "human", "content": "Hello"}]},
+                "config": {"configurable": configurable},
+            },
+        },
+        metadata={},
+        creating=True,
+    )
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["visibility"] == expected_visibility
+
+
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
     monkeypatch, fake_store: FakeStore, registry_db
 ) -> None:

@@ -74,7 +74,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "email": "alice@example.com",
     }
     prefs = {
-        "default_visibility": "public",
         "local_tracing_project": "keep-project",
         "default_workspace": "keep-workspace",
     }
@@ -170,7 +169,7 @@ async def test_unavailable_thread_scope_fails_closed(
             "default_subagent_model": "anthropic:claude-haiku-4-5",
             "subagent_reasoning_effort": "high",
         },
-        {"branch_prefix": "new/", "default_visibility": "invalid"},
+        {"branch_prefix": "new/", "default_visibility": "private"},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -234,7 +233,6 @@ async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeSt
         "branch_prefix": None,
         "auto_fix_ci": False,
         "draft_prs": False,
-        "default_visibility": "private",
         "local_tracing_project": None,
         "default_workspace": None,
     }
@@ -254,7 +252,7 @@ async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: F
     assert "reasoning_effort" not in profile
     await patch_personal_settings("alice", {"local_tracing_project": "  project  "})
     prefs = fake_store.values(["user_preferences"])["alice"]
-    assert prefs["default_visibility"] == "private"
+    assert "default_visibility" not in prefs
     assert prefs["local_tracing_project"] == "project"
 
 
@@ -321,7 +319,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         "Alice",
         {
             "default_workspace": "mine",
-            "default_visibility": "private",
             "local_tracing_project": "tracing",
         },
     )
@@ -333,7 +330,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {**ordinary, "concierge_mode": False},
             "preferences": {
                 "default_workspace": "mine",
-                "default_visibility": "private",
                 "local_tracing_project": "tracing",
                 "follow_up_behavior": "steer",
             },

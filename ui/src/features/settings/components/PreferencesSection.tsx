@@ -26,22 +26,13 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { api } from "@/lib/api"
-import type {
-  FollowUpBehavior,
-  ThreadVisibility,
-  UserPreferences,
-} from "@/lib/api"
+import type { FollowUpBehavior, UserPreferences } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
-]
-
-const VISIBILITIES: Array<{ value: ThreadVisibility; label: string }> = [
-  { value: "private", label: "Private · only me" },
-  { value: "public", label: "Workspace" },
 ]
 
 const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
@@ -150,34 +141,6 @@ export function PreferencesSection() {
               {THEMES.map((t) => (
                 <SelectItem key={t.value} value={t.value}>
                   {t.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        }
-      />
-      <SettingsRow
-        label="Default thread visibility"
-        description="Preselected when you start a cloud thread. Private threads can use your personal integrations and only you can prompt them; workspace threads are open to everyone and run without personal credentials. Visibility cannot change after a thread is created."
-        control={
-          <Select
-            items={VISIBILITIES}
-            value={preferences.data?.default_visibility ?? "private"}
-            onValueChange={(v) =>
-              v &&
-              savePreferences.mutate({
-                default_visibility: v,
-              })
-            }
-            disabled={preferences.isLoading}
-          >
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {VISIBILITIES.map((v) => (
-                <SelectItem key={v.value} value={v.value}>
-                  {v.label}
                 </SelectItem>
               ))}
             </SelectContent>
