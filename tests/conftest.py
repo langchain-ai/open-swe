@@ -257,12 +257,17 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 def _reset_ttl_cache() -> Iterator[None]:
     """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
     from langgraph_api import cache
+    from langgraph_api.feature_flags import IS_POSTGRES_OR_GRPC_BACKEND
 
-    ttl_cache.clear()
-    cache._CACHE.clear()
+    def clear() -> None:
+        ttl_cache.clear()
+        # The postgres edition caches over gRPC and has no in-process store to clear.
+        if not IS_POSTGRES_OR_GRPC_BACKEND:
+            cache._CACHE.clear()
+
+    clear()
     yield
-    ttl_cache.clear()
-    cache._CACHE.clear()
+    clear()
 
 
 @pytest.fixture(autouse=True)
