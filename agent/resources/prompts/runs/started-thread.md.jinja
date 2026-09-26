@@ -1,0 +1,5 @@
+{{ instructions }}
+{% if other_repos %}
+
+This task also covers these repositories; clone them with `gh repo clone` as needed: {{ other_repos | join(", ") }}
+{% endif %}
