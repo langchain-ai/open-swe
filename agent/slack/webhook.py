@@ -547,13 +547,13 @@ async def process_slack_mention(
     request: SlackRequest, repo: common.SlackRepoResolution | None
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
-    status_ts = (
-        (request.reply_thread_ts or request.original_message_ts or request.event_ts)
-        if request.concierge_mode
-        else request.thread_ts
-    )
+    status_ts = request.thread_ts
     show_status = bool(
-        request.channel_id and status_ts and not request.code_channel and not request.message_update
+        request.channel_id
+        and status_ts
+        and not request.code_channel
+        and not request.concierge_mode
+        and not request.message_update
     )
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
@@ -1124,7 +1124,8 @@ async def _process_slack_mention_impl(
     explicitly_tagged = concierge_mode or _interrupts_active_run(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions
+        and not request.kitchen_channel,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,

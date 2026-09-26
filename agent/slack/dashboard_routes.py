@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from agent.dashboard.deps import ADMIN_DEP
 from agent.slack.allowed_bots import (
@@ -14,7 +14,13 @@ from agent.slack.allowed_bots import (
     list_slack_bots,
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
+from agent.slack.channels import SlackChannel
 from agent.slack.connect import router as connect_router
+from agent.slack.kitchen_channels import (
+    KITCHEN_CHANNELS,
+    KitchenChannel,
+    SetKitchenChannel,
+)
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
@@ -33,6 +39,37 @@ async def api_list_slack_channels(
 ) -> SlackChannelDirectory:
     """The channels a workspace can be bound to, for the picker on the Workspaces page."""
     return await list_slack_channels()
+
+
+@router.get("/slack/kitchen-channels")
+async def api_list_kitchen_channels(
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[KitchenChannel]:
+    return await KITCHEN_CHANNELS.search_all()
+
+
+@router.post("/slack/kitchen-channels")
+async def api_enable_kitchen_channel(
+    body: SetKitchenChannel,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> KitchenChannel:
+    channel = await SlackChannel.load(body.channel_id, use_cache=False)
+    if (
+        channel is None
+        or not channel.context.allows_operations
+        or channel.payload.get("is_member") is not True
+    ):
+        raise HTTPException(400, "Choose an internal Slack channel that Open SWE has joined.")
+    return await KITCHEN_CHANNELS.put(body.channel_id, KitchenChannel(channel_id=body.channel_id))
+
+
+@router.delete("/slack/kitchen-channels/{channel_id}")
+async def api_disable_kitchen_channel(
+    channel_id: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, bool]:
+    await KITCHEN_CHANNELS.delete(SetKitchenChannel(channel_id=channel_id).channel_id)
+    return {"ok": True}
 
 
 @router.get("/slack/allowed-bots")
