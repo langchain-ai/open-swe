@@ -1,14 +1,18 @@
 """Durable projections reconcile duplicate and out-of-order events."""
 
 import asyncio
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics import emitter, identity, ingestion
 from agent.analytics.events import (
+    EventEnvelope,
     EventName,
     FeedbackSubmittedPayload,
     FeedbackWithdrawnPayload,
@@ -1061,3 +1065,63 @@ async def test_historical_opener_migration_is_scoped_and_idempotent(
         )
         for table in preserved_tables:
             assert (await conn.execute(text(f"SELECT * FROM {table}"))).all() == before[table]
+
+
+async def test_slow_projection_does_not_block_independent_ingestion(
+    analytics_db: tuple[UUID, Callable[[], AbstractAsyncContextManager[AsyncConnection]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, transaction = analytics_db
+    await ingestion.ingest(
+        event(
+            workspace,
+            EventName.RUN_STARTED,
+            RunStartedPayload(model_attribution_quality="unavailable"),
+            run_id=uuid4(),
+            day=-1,
+        )
+    )
+    slow = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=uuid4(),
+    )
+    independent = event(
+        workspace,
+        EventName.RUN_STARTED,
+        RunStartedPayload(model_attribution_quality="unavailable"),
+        run_id=uuid4(),
+    )
+    projecting = asyncio.Event()
+    release_projection = asyncio.Event()
+    project = ingestion._project
+
+    async def pause_projection(conn: AsyncConnection, item: EventEnvelope) -> None:
+        await project(conn, item)
+        if item.event_id == slow.event_id:
+            projecting.set()
+            await release_projection.wait()
+
+    monkeypatch.setattr(ingestion, "_project", pause_projection)
+    pending = asyncio.create_task(ingestion.ingest(slow))
+    try:
+        await asyncio.wait_for(projecting.wait(), timeout=5)
+        assert await asyncio.wait_for(ingestion.ingest(independent), timeout=2)
+    finally:
+        release_projection.set()
+        await pending
+    assert not await ingestion.ingest(slow)
+    assert not await ingestion.ingest(independent)
+    async with transaction() as conn:
+        assert (
+            await conn.scalar(
+                text(
+                    "SELECT event_count FROM additive_event_projection "
+                    "WHERE partition_date = :day AND event_name = 'run.started'"
+                ),
+                {"day": DAY.date()},
+            )
+            == 2
+        )
+        assert await conn.scalar(text("SELECT count(*) FROM run_projection")) == 3
