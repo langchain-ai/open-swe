@@ -30,6 +30,7 @@ from agent.github.ci import fetch_pr
 from agent.github.comments import post_github_comment
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_request_status import fetch_unresolved_review_threads
+from agent.github.squash_message import SquashSource
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,11 @@ async def _merge(
     payload: dict[str, Any] = {"sha": head_sha, "merge_method": methods[0]}
     try:
         async with github_client(token=merge_token) as client:
+            if methods[0] == "squash":
+                source = await SquashSource.fetch(client, pr.owner, pr.repo, pr.number)
+                message = source.message() if source is not None else None
+                if message is not None:
+                    payload["commit_message"] = message
             response = await github_request(client, "PUT", url, json=payload)
     except httpx2.HTTPError:
         logger.warning(
