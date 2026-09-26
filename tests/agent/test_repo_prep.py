@@ -1,8 +1,9 @@
+from pathlib import Path
 from typing import cast
 
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from agent.sandboxes.repo_prep import _prep_command, materialize_trusted_skills, prepare_review_repo
 
 
 class _FakeSandboxBackend:
@@ -50,13 +51,44 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
     assert len(backend.commands) == 1
     cmd = backend.commands[0]
     assert "gh repo clone acme/widget" in cmd
-    assert "/work/widget/.git" in cmd
+    assert "git -C /work/widget rev-parse --git-dir" in cmd
     assert "git fetch origin def456" in cmd
     assert "git fetch origin refs/pull/42/head" in cmd
     assert "git checkout --force abc123 --quiet" in cmd
     assert "git checkout --force abc123 --quiet 2>/dev/null || true" not in cmd
     assert '[ "$(git rev-parse HEAD)" = abc123 ]' in cmd
     assert "git fetch --all --quiet || true" in cmd
+
+
+def test_prep_command_uses_fetch_for_existing_git_repository() -> None:
+    command = _prep_command("/work", "acme", "widget", "abc123", None, "")
+
+    assert "if git -C /work/widget rev-parse --git-dir >/dev/null 2>&1; then" in command
+    assert "git fetch --all --quiet || true" in command
+    assert "elif [ -d /work/widget ]; then" in command
+
+
+def test_prep_command_initializes_existing_non_repository_directory() -> None:
+    command = _prep_command("/work", "acme", "widget", "abc123", None, "")
+
+    assert "cd /work/widget && git init --quiet" in command
+    assert "git remote set-url origin https://github.com/acme/widget.git" in command
+    assert "git remote add origin https://github.com/acme/widget.git" in command
+
+
+def test_prep_command_clones_absent_repository_directory() -> None:
+    command = _prep_command("/work", "acme", "widget", "abc123", None, "")
+
+    assert "cd /work && gh repo clone acme/widget && cd widget" in command
+
+
+def test_repo_not_ready_prompt_checks_git_validity() -> None:
+    prompt = Path("agent/resources/prompts/reviewer/repo-not-ready.md").read_text()
+
+    assert "git -C $working_dir rev-parse --git-dir >/dev/null 2>&1" in prompt
+    assert "cd $working_dir ||" not in prompt
+    assert "git init --quiet" in prompt
+    assert "gh repo clone $repo_owner/$repo_name" in prompt
 
 
 async def test_prepare_review_repo_skips_pull_ref_without_pr_number() -> None:
