@@ -110,6 +110,7 @@ task_reviewer_suggestion       input to the agent's reviewer choice
   user_id           uuid      -> user; the suggested reviewer
   suggested_by      uuid      -> user
   source            chat | slack | pr_comment | github_request
+  strength          preferred | required
   created_at        timestamptz
   outcome           assigned | declined | null
 
@@ -375,12 +376,26 @@ Each is stored in `task_reviewer_suggestion` with who suggested whom for which
 PR, and shows up in `review_candidates` as `suggested_by`. A GitHub review request
 a person made also wakes the agent to decide on it.
 
-The agent weighs the suggestion against the suggested person's review load and
-the alternatives. It honours the suggestion unless that person is clearly more
-loaded than comparable candidates, or cannot be assigned under the rules. When it
-declines, it assigns someone else, withdraws the GitHub request if there was one,
-and tells the suggester why in the thread, Slack thread, or PR, for example "Alex
-has 4 open reviews and took 3 today; asked Sam, who also owns `agent/tasks/`".
+Each suggestion has a strength:
+
+- `preferred`: the default. The agent weighs it against the suggested person's
+  review load and the alternatives, and honours it unless that person is clearly
+  more loaded than comparable candidates. When it declines, it assigns someone
+  else, withdraws the GitHub request if there was one, and tells the suggester why
+  in the thread, Slack thread, or PR, for example "Alex has 4 open reviews and
+  took 3 today; asked Sam, who also owns `agent/tasks/`".
+- `required`: the suggester has said this specific person is the right reviewer
+  ("this really needs Alex", "Alex has to look at this"). The agent infers the
+  strength from the wording and records it. It assigns that person regardless of
+  load. It does not assign them only when a rule in `assign_task` forbids it, or
+  when they passed on this PR. When the person is away or outside working hours,
+  it still assigns them and tells the suggester when they are likely to pick it
+  up. A missed acknowledgement deadline on a `required` reviewer gets a nudge and
+  a note to the suggester instead of a replacement; the agent reassigns only if
+  the suggester agrees.
+
+GitHub review requests arrive as `preferred`, since GitHub carries no way to say
+more; the requester can follow up in words to make it `required`.
 
 #### Rules `assign_task` enforces
 
@@ -412,8 +427,9 @@ These go in the assignment wake-up prompt and the `assign_task` description
 - Weigh review load heavily: both what someone holds now and what they took in
   their last working day. Spread reviews rather than piling onto the obvious
   expert.
-- Honour suggested reviewers unless they are clearly more loaded than comparable
-  candidates; say why when declining.
+- Honour `preferred` suggestions unless the person is clearly more loaded than
+  comparable candidates; say why when declining. Assign `required` suggestions
+  regardless of load.
 - Prefer people inside their working hours now; do not pick anyone marked away.
 - After changes were requested and fixed, usually re-request the same reviewers.
 - For a block, assign whoever can actually answer the `ask`: normally the owners,
@@ -615,7 +631,7 @@ row, records a `task_event`, and posts a PR comment.
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
 | `request_human` | `ask`, `assignees: [login]`, `rationale`, `reason: agent_request \| no_reviewer`, `pull_request?`; blocks the task (or one PR), assigns it, and ends the run |
 | `review_candidates` | `pull_request`; review requirements and candidates with raw signals, review load, and suggestions (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
-| `suggest_reviewer` | `pull_request`, `reviewer: login`, `suggested_by: login`; records a suggestion a participant made in conversation |
+| `suggest_reviewer` | `pull_request`, `reviewer: login`, `suggested_by: login`, `strength: preferred \| required`; records a suggestion a participant made in conversation |
 | `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the only way anyone is assigned. `review` also requests review on GitHub |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
