@@ -441,11 +441,20 @@ WITH runs AS (
     SELECT person_id FROM run_totals UNION SELECT person_id FROM pr_totals
     UNION SELECT person_id FROM feedback_totals
 ), metrics AS (
-    SELECT p.person_id, d.github_login, d.email,
-        COALESCE(NULLIF(d.display_name, ''), NULLIF(d.github_login, ''),
-            NULLIF(split_part(d.email, '@', 1), ''), 'Open SWE user') AS name,
+    SELECT p.person_id, d.display_name, d.github_login, d.email,
         ((:current_login <> '' AND lower(d.github_login) = :current_login)
           OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE AS is_current,
+        -- An email prefix never lands here: it is only the disclosed label
+        -- for an identity-less row with the policy off.
+        NULLIF(d.display_name, '') AS stored_name,
+        CASE WHEN :anonymize_others AND NOT :admin AND NOT (((:current_login <> ''
+                  AND lower(d.github_login) = :current_login)
+              OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE)
+            THEN NULL ELSE d.github_login END AS disclosed_login,
+        :anonymize_others AND NOT :admin AND NOT (((:current_login <> ''
+            AND lower(d.github_login) = :current_login)
+        OR (:current_email <> '' AND lower(d.email) = :current_email)) IS TRUE)
+            AS anonymized,
         COALESCE(r.invocations, 0) AS invocations,
         COALESCE(r.threads, 0) AS threads,
         CASE WHEN COALESCE(r.threads, 0) > 0
@@ -487,8 +496,20 @@ WITH runs AS (
             AS is_top_feedback_contributor,
         -- Sorting and disclosure must agree, so derive each displayed label once here
         -- and let both the ordering and the emitted row read the same column.
-        CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
-            THEN name ELSE 'Open SWE user' END AS display_name,
+        -- Anonymous rows share the generic label (so ties order by rank,
+        -- never a hidden name); identified rows show the stored display name
+        -- or login; an identity-less row falls back to the email prefix, but
+        -- only where a login would already be shown (policy off, admin, or
+        -- the viewer's own row).
+        CASE WHEN anonymized
+            THEN 'Open SWE user'
+            WHEN NULLIF(COALESCE(disclosed_login, ''), '') IS NOT NULL
+            THEN COALESCE(stored_name, disclosed_login)
+            ELSE COALESCE(stored_name,
+                CASE WHEN NOT :anonymize_others OR :admin OR is_current
+                    THEN NULLIF(split_part(email, '@', 1), '') END,
+                'Open SWE user')
+        END AS disclosed_name,
         -- Mirrors safeModelLabel in ui/src/lib/modelLabel.ts and the usage table's
         -- empty-label fallback.
         COALESCE(NULLIF(btrim(left(
@@ -497,14 +518,17 @@ WITH runs AS (
             48
         ), '-'), ''), 'Unavailable') AS favorite_model_label,
         row_number() OVER (
-            ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
+            ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC,
+                COALESCE(NULLIF(display_name, ''), NULLIF(github_login, ''),
+                    NULLIF(split_part(email, '@', 1), '')) NULLS LAST,
+                person_id
         ) AS rank FROM labeled
 ), keyed AS (
     SELECT *,
         -- One key per sortable type: the inactive key is NULL for every row, so it
         -- ties and drops out of the ordering. Adding a column is a single line.
         CASE :sort
-            WHEN 'user' THEN lower(display_name)
+            WHEN 'user' THEN lower(disclosed_name)
             WHEN 'favorite_model' THEN lower(favorite_model_label)
         END AS text_key,
         CASE :sort
@@ -536,11 +560,13 @@ WITH runs AS (
         jsonb_build_object(
             'rank', rank,
             'user', jsonb_build_object(
-                'name', display_name,
-                'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
+                'name', disclosed_name,
+                'github_login', CASE WHEN :admin OR is_current THEN NULLIF(disclosed_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
-                'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
-                    THEN 'https://github.com/' || github_login || '.png?size=80' END),
+                'avatar_url', CASE WHEN NOT :anonymize_others OR :admin OR is_current
+                    THEN CASE WHEN NULLIF(disclosed_login, '') IS NOT NULL
+                        THEN 'https://github.com/' || disclosed_login || '.png?size=80' END
+                END),
             'favorite_model', favorite_model,
             'favorite_model_effort', favorite_model_effort,
             'avg_invocation_seconds', avg_invocation_seconds,
@@ -615,6 +641,7 @@ async def usage_leaderboard(
     sort: UsageSort = "rank",
     direction: SortDirection = "asc",
     admin: bool = False,
+    anonymize_others: bool = False,
 ) -> dict[str, Any]:
     """Read usage and review cohorts from one bounded PostgreSQL snapshot."""
     normalized = period if period in {"24h", "7d", "30d", "all"} else "30d"
@@ -632,6 +659,7 @@ async def usage_leaderboard(
         "current_login": (current_login or "").strip().lower(),
         "current_email": (current_email or "").strip().lower(),
         "admin": admin,
+        "anonymize_others": anonymize_others,
         "sort": sort,
         "direction": direction,
     }

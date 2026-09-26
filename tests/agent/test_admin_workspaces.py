@@ -162,6 +162,43 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         }
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
+        from agent.tools import (
+            get_usage_leaderboard_privacy,
+            set_usage_leaderboard_privacy,
+        )
+
+        assert (await get_usage_leaderboard_privacy())["ok"] is False
+        assert (await set_usage_leaderboard_privacy(True)) == {
+            "ok": False,
+            "error": "Only workspace admins can change the usage leaderboard privacy setting.",
+        }
+
+
+@pytest.mark.asyncio
+async def test_privacy_tools_read_and_write_the_instance_toggle(
+    monkeypatch: pytest.MonkeyPatch, fake_store
+) -> None:
+    from agent.tools import (
+        get_usage_leaderboard_privacy,
+        set_usage_leaderboard_privacy,
+    )
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    with patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")):
+        read = await get_usage_leaderboard_privacy()
+        assert read == {
+            "ok": True,
+            "usage_leaderboard_privacy_enabled": False,
+            "updated_at": None,
+        }
+
+        saved = await set_usage_leaderboard_privacy(False)
+        assert saved["ok"] is True
+        assert saved["usage_leaderboard_privacy_enabled"] is False
+        assert isinstance(saved["updated_at"], str)
+
+        read_again = await get_usage_leaderboard_privacy()
+        assert read_again["usage_leaderboard_privacy_enabled"] is False
 
 
 # --- publish: capture this sandbox, then record ---
@@ -486,6 +523,13 @@ def test_person_block_includes_workspace_admin_status() -> None:
 
     assert admin.as_person()["workspace_admin"] == "yes"
     assert member.as_person()["workspace_admin"] == "no"
+
+
+def test_admin_threads_get_the_privacy_tools() -> None:
+    from agent import tools
+
+    assert tools.get_usage_leaderboard_privacy in server.ADMIN_TOOLS
+    assert tools.set_usage_leaderboard_privacy in server.ADMIN_TOOLS
 
 
 def test_workspace_instructions_render_in_system_prompt() -> None:

@@ -194,6 +194,70 @@ async def test_options_refuse_a_workspace_name_that_does_not_slugify() -> None:
     assert refused.value.status_code == 400
 
 
+async def test_usage_leaderboard_privacy_defaults_off_and_inherits(
+    fake_store: FakeStore,
+) -> None:
+    for slug in ("default", "oss"):
+        assert (await get_workspace_settings(slug)).usage_leaderboard_privacy_enabled is False
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(usage_leaderboard_privacy_enabled=True))
+    assert (await get_instance_settings()).usage_leaderboard_privacy_enabled is True
+    assert (await get_workspace_settings("oss")).usage_leaderboard_privacy_enabled is True
+
+
+async def test_a_partial_instance_update_preserves_unrelated_fields(
+    fake_store: FakeStore,
+) -> None:
+    """The privacy tool writes only its own field; it must not blank the record."""
+    await upsert_instance_settings(
+        WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
+    )
+
+    await workspace_settings.api_put_usage_leaderboard_privacy(
+        workspace_settings.UsageLeaderboardPrivacyUpdate(usage_leaderboard_privacy_enabled=False),
+        _admin={"sub": "alice"},
+    )
+
+    settings = await get_instance_settings()
+    assert settings.usage_leaderboard_privacy_enabled is False
+    assert settings["org_guidelines"] == "internal only"
+    assert settings.fable_enabled is True
+
+
+async def test_the_privacy_endpoints_read_and_write_the_instance_record(
+    fake_store: FakeStore,
+) -> None:
+    read = await workspace_settings.api_get_usage_leaderboard_privacy(_session={"sub": "alice"})
+    assert read == {"usage_leaderboard_privacy_enabled": False}
+
+    saved = await workspace_settings.api_put_usage_leaderboard_privacy(
+        workspace_settings.UsageLeaderboardPrivacyUpdate(usage_leaderboard_privacy_enabled=False),
+        _admin={"sub": "alice"},
+    )
+    assert saved["usage_leaderboard_privacy_enabled"] is False
+    assert isinstance(saved["updated_at"], str)
+    assert (
+        await workspace_settings.api_get_usage_leaderboard_privacy(_session={"sub": "alice"})
+    ) == {"usage_leaderboard_privacy_enabled": False}
+
+
+async def test_invalidate_settings_cache_drops_cached_workspace_and_instance_reads(
+    fake_store: FakeStore,
+) -> None:
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="v1"))
+    assert (await workspace_settings_cache.cached_instance_settings()).org_review_guidelines == "v1"
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="v2"))
+    # Cached: the write alone does not refresh readers within the TTL.
+    assert (await workspace_settings_cache.cached_instance_settings()).org_review_guidelines == "v1"
+
+    workspace_settings_cache.invalidate_settings_cache()
+
+    assert (await workspace_settings_cache.cached_instance_settings()).org_review_guidelines == "v2"
+    assert (await workspace_settings_cache.cached_workspace_settings("default"))[
+        "org_guidelines"
+    ] == "v2"
+
+
 async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
     fake_store: FakeStore, registry_db
 ) -> None:

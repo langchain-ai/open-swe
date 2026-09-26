@@ -25,12 +25,17 @@ async def api_agent_usage_leaderboard(
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
 
+    from agent.dashboard.workspace_settings import get_instance_settings
     from agent.database import configured
 
     try:
         if not configured():
             raise HTTPException(503, "Usage analytics is unavailable on this deployment.")
-        return await usage_leaderboard(
+        # Read the instance record on every request: a toggle an admin just
+        # saved must take effect at once, not after a settings cache expires.
+        privacy = (await get_instance_settings()).usage_leaderboard_privacy_enabled
+        admin = session_is_admin(session)
+        result = await usage_leaderboard(
             period=period,
             limit=limit,
             cursor=cursor,
@@ -38,8 +43,11 @@ async def api_agent_usage_leaderboard(
             direction=direction,
             current_login=session["sub"],
             current_email=session.get("email"),
-            admin=session_is_admin(session),
+            admin=admin,
+            anonymize_others=privacy and not admin,
         )
+        result["usage_leaderboard_privacy_enabled"] = privacy
+        return result
     except InvalidUsageCursor as exc:
         logger.info(
             "Usage analytics request rejected",

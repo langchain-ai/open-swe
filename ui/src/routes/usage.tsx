@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowClockwiseIcon,
   CaretDownIcon,
@@ -81,6 +81,11 @@ type PROutcomesSort =
   | "merge_rate"
   | "avg_delivery_seconds"
   | "avg_merge_seconds"
+
+interface Audience {
+  privacy: boolean
+  isAdmin: boolean
+}
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "24h": "Last 24h",
@@ -211,29 +216,67 @@ function UsageAnalyticsPeriod({
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
+  // Keyed alongside the leaderboard queries: rows fetched under one identity
+  // policy (or viewer role) are never served to another audience, and the
+  // notice renders from the same payload field the rows were read with.
+  const queryClient = useQueryClient()
+  const [audience, setAudience] = useState<Audience | null>(null)
   const leaderboard = useQuery({
     queryKey: [
       "usageLeaderboard",
       activePeriod,
       login,
       isAdmin,
+      audience,
       leaderboardPage,
       leaderboardPageSize,
       leaderboardCursors[leaderboardPage - 1],
       sort,
       direction,
     ],
-    queryFn: () =>
-      api.usageLeaderboard(
+    queryFn: async () => {
+      const payload = await api.usageLeaderboard(
         activePeriod,
         leaderboardPageSize,
         leaderboardCursors[leaderboardPage - 1],
         sort,
         direction
-      ),
+      )
+      // The payload was read under the policy in effect when the server
+      // answered, so it is always safe to render; cache it under the audience
+      // it describes so a policy flip or role change can never serve rows
+      // fetched for the other audience.
+      const next: Audience = {
+        privacy: payload.usage_leaderboard_privacy_enabled,
+        isAdmin,
+      }
+      if (next.privacy && !isAdmin) {
+        queryClient.removeQueries({
+          queryKey: ["usageLeaderboard"],
+          predicate: (query) => {
+            const data = query.state.data as
+              | { usage_leaderboard_privacy_enabled?: boolean }
+              | undefined
+            return data?.usage_leaderboard_privacy_enabled === false
+          },
+        })
+      }
+      if (
+        audience?.privacy !== next.privacy ||
+        audience?.isAdmin !== next.isAdmin
+      ) {
+        setAudience(next)
+      }
+      return payload
+    },
+    // Placeholder rows are only retained for the same viewer and role. An
+    // audience change re-keys the query, and an admin's privacy toggle purges
+    // the cache, so identified rows are never served to another audience.
     placeholderData: (previousData, previousQuery) =>
       previousQuery?.queryKey[2] === login &&
-      previousQuery.queryKey[3] === isAdmin
+      previousQuery.queryKey[3] === isAdmin &&
+      (audience?.privacy !== true ||
+        previousData?.usage_leaderboard_privacy_enabled === true)
         ? previousData
         : undefined,
     staleTime: 60 * 1000,
@@ -387,6 +430,14 @@ function UsageAnalyticsPeriod({
             }}
           />
         )}
+        <LeaderboardPrivacyNotice
+          isAdmin={isAdmin}
+          privacy={
+            leaderboard.data?.usage_leaderboard_privacy_enabled ??
+            audience?.privacy ??
+            null
+          }
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -1542,6 +1593,26 @@ function CounterList({
         <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
       )}
     </div>
+  )
+}
+
+function LeaderboardPrivacyNotice({
+  isAdmin,
+  privacy,
+}: {
+  isAdmin: boolean
+  privacy: boolean | null
+}) {
+  // Unknown policy: say nothing rather than promise anonymity that may not hold.
+  if (privacy === null) return null
+  return (
+    <p className="border-t border-border px-4 py-2.5 text-[11px] text-muted-foreground">
+      {privacy
+        ? isAdmin
+          ? "Leaderboard privacy is on: you see every member because you are an admin. Non-admins see other members as anonymous and always see their own name. An admin can change this in Admin settings."
+          : "Leaderboard privacy is on: other members are anonymous — no names, handles, avatars, or profile links are shown. You always see your own name. No member's email is shown to anyone but them."
+        : "Leaderboard privacy is off: names, GitHub handles, and avatars are visible to everyone who can sign in. No member's email is shown to anyone but them. An admin can change this in Admin settings."}
+    </p>
   )
 }
 

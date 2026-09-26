@@ -15,6 +15,7 @@ _TOOL_MODULES = {
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_thread": ".threads",
+    "get_usage_leaderboard_privacy": ".leaderboard_privacy",
     "http_request": ".http_request",
     "list_automations": ".automations",
     "list_workspaces": ".workspaces",
@@ -52,6 +53,7 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_repo_code": "agent.github.tools.search_repo_code",
+    "set_usage_leaderboard_privacy": ".leaderboard_privacy",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_list_channels": "agent.slack.tools.channels",
@@ -82,6 +84,7 @@ __all__ = [
     "fetch_review_diff",
     "fetch_url",
     "get_thread",
+    "get_usage_leaderboard_privacy",
     "http_request",
     "list_automations",
     "list_workspaces",
@@ -119,6 +122,7 @@ __all__ = [
     "delete_user_skill",
     "schedule_thread_wakeup",
     "search_repo_code",
+    "set_usage_leaderboard_privacy",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_list_channels",
@@ -167,6 +171,10 @@ if TYPE_CHECKING:
     from agent.tools.fetch_review_diff import fetch_review_diff
     from agent.tools.fetch_url import fetch_url
     from agent.tools.http_request import http_request
+    from agent.tools.leaderboard_privacy import (
+        get_usage_leaderboard_privacy,
+        set_usage_leaderboard_privacy,
+    )
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.manage_baby_sit import manage_baby_sit
