@@ -7,12 +7,14 @@ every thread about it (root thread, subthreads, coordinators, fix and follow-up
 threads, and each PR's reviewer and review scout threads) and every pull request it produces or adopts, across any
 number of repositories.
 
-A task has one or more owners (usually one), who are accountable, and zero or more assignees, who must act
-next. There are no assignees while the agent is handling things. People are
-assigned when the task needs them: reviewers (never the authors) while it waits
-for human review, someone to resolve it when it is `blocked`, and the owners when
-it is ready to merge with auto-merge off. `blocked` is its own state, separate
-from waiting for review.
+A task has one or more owners (usually one), who are accountable, and zero or
+more assignees, who must act next. There are no assignees while the agent is
+handling things. The agent assigns people when the task needs them, with an
+explicit `assign_task` call and its own judgment, guided by rules and facts the
+system supplies: reviewers (never the authors) while it waits for human review,
+someone to resolve it when it is `blocked`, and someone to merge when auto-merge
+is off. There is no auto-assignment. `blocked` is its own state, separate from
+waiting for review.
 
 The task has one state. Its pull requests only contribute conditions (CI failing,
 review needed, conflict) that the task's state is derived from.
@@ -86,14 +88,20 @@ task_owner                     accountable people; at least one, usually one
   added_at          timestamptz
   primary key (task_id, user_id)
 
-task_assignee                  who must act now; no rows = the agent has it
+task_assignee                  who must act now; no active rows = the agent has it
+  id                uuid7
   task_id           uuid
   user_id           uuid      -> user
   reason            review | blocked | merge | manual
   pull_request_id   uuid null the PR it concerns
-  assigned_by       uuid null null = the shepherd
+  rationale         text      the agent's one-line reason, from assign_task
+  requested_by      uuid null the person whose request the agent acted on
   assigned_at       timestamptz
-  unique (task_id, user_id, reason, pull_request_id)
+  due_at            timestamptz null acknowledgement deadline, review only
+  acknowledged_at   timestamptz null
+  ended_at          timestamptz null
+  end_reason        reviewed | passed | timed_out | removed | done | stale | null
+  unique active (task_id, user_id, reason, pull_request_id) where ended_at is null
 
 task_event                     append-only timeline
   id, task_id, pull_request_id null, kind, from_state, to_state,
@@ -176,17 +184,17 @@ and closed PRs contribute no conditions.
 
 The task's state is the first rule that matches:
 
-| State | When | Assignees |
+| State | When | Who is usually assigned (by the agent) |
 |---|---|---|
-| `completed` / `abandoned` | the task is closed | none |
-| `stale` | no progress for 2 working days (see [Stale](#stale)) | none |
-| `blocked` | the task has an open block | whoever must resolve it |
-| `merging` | an auto-merge sequence is running | none |
-| `in_progress` | the task has no PRs yet, or any PR has an agent-actionable condition | none, the agent has it |
-| `in_review` | any PR has `review_needed` | the reviewers |
-| `waiting_on_checks` | any PR has `ci_pending` or `bot_review_pending` | none |
-| `ready_to_merge` | every open PR is mergeable | the owners, when auto-merge is off |
-| `merged` | every PR is merged or closed, and at least one merged | none |
+| `completed` / `abandoned` | the task is closed | nobody |
+| `stale` | no progress for 2 working days (see [Stale](#stale)) | nobody |
+| `blocked` | the task has an open block | whoever can resolve it |
+| `merging` | an auto-merge sequence is running | nobody |
+| `in_progress` | the task has no PRs yet, or any PR has an agent-actionable condition | nobody, the agent has it |
+| `in_review` | any PR has `review_needed` | its reviewers |
+| `waiting_on_checks` | any PR has `ci_pending` or `bot_review_pending` | nobody |
+| `ready_to_merge` | every open PR is mergeable | whoever merges, when auto-merge is off |
+| `merged` | every PR is merged or closed, and at least one merged | nobody |
 
 The task panel shows the state once, with each PR's conditions underneath, for
 example "In review: sdk#41 waiting on @alex; app#88 CI running".
@@ -242,8 +250,9 @@ until a person resolves it. It is separate from `in_review`, which is
 the expected hand-off to reviewers.
 
 A block records `reason`, a one-paragraph `ask` addressed to the person, and the
-PR it applies to (or none for a task-wide block). Entering `blocked` assigns the
-task (see [Assignment](#assignment)). Reasons:
+PR it applies to (or none for a task-wide block). The agent assigns who resolves
+it: directly through `request_human`, or on the wake-up that follows a block the
+shepherd entered (see [Assignment](#assignment)). Reasons:
 
 | Reason | Entered by |
 |---|---|
@@ -251,7 +260,7 @@ task (see [Assignment](#assignment)). Reasons:
 | `retry_budget_exhausted` | The shepherd, after 5 wake-ups without progress |
 | `merge_failed` | The shepherd, when an auto-merge sequence stops partway |
 | `permission_denied` | The shepherd, when a push, merge, or check read fails on GitHub permissions (a fork without `maintainer_can_modify`, a protected branch, a missing App permission) |
-| `no_reviewer` | The shepherd, when a PR needs human review and no eligible reviewer can be found (see [Assignment](#assignment)) |
+| `no_reviewer` | The agent, via `request_human`, when a PR needs review and no candidate fits (see [Assignment](#assignment)) |
 
 While blocked, the shepherd keeps evaluating and recording the timeline but sends
 no wake-ups for the blocked PR (all PRs, for a task-wide block), and auto-merge
@@ -266,7 +275,7 @@ A block clears when:
   CI green, or a permission is granted), which the next evaluation detects. The
   shepherd never clears an `agent_request` block on its own
 
-Clearing a block resets the PR's retry budget, removes the `blocked` assignments,
+Clearing a block resets the PR's retry budget, ends the `blocked` assignments,
 and records a `task_event`.
 
 ### Stale
@@ -291,8 +300,8 @@ sweep marks tasks stale.
 
 Once stale:
 
-- no reevaluation from webhooks or the sweep, no wake-ups, no review requests,
-  reassignments, nudges, or notifications
+- no reevaluation from webhooks or the sweep, no wake-ups (so no assignment
+  decisions), nudges, or notifications
 - all assignments are removed and the task's GitHub review requests are withdrawn
 - the owners get one notification that it went stale, with a Resume link
 - it still owns its threads and PRs, and still counts as the thread's task, so
@@ -301,101 +310,122 @@ Once stale:
 Only an owner can bring it back, explicitly: the Resume button in the task panel,
 `@open-swe resume` on one of its PRs, or asking the agent in the thread, which
 calls `resume_task` and is rejected unless the requester is an owner. Resuming
-reevaluates every PR, resets retry budgets, restarts the 2-day clock, and picks
-reviewers afresh. An owner can also abandon it instead.
+reevaluates every PR, resets retry budgets, restarts the 2-day clock, and wakes
+the agent to make review assignments afresh. An owner can also abandon it
+instead.
 
 ### Assignment
 
+Assigning is always the agent's judgment call, made with one tool call:
+`assign_task`. There is no auto-assignment. The shepherd never picks a person; it
+supplies the facts, wakes the agent when an assignment decision is due, and keeps
+the bookkeeping (GitHub review requests, acknowledgement deadlines, ending an
+assignment once its job is done).
+
 A task has zero or more assignees: the people who must act next. With none, the
-agent has it. Owners change only when someone edits them; assignees come and go. Each assignment has a
-reason, so one person can be assigned twice for different things (to review one
-PR and to unblock another).
+agent has it. Owners change only when someone edits them; assignees come and go.
+Each assignment has a reason (`review`, `blocked`, `merge`, `manual`), so one
+person can be assigned twice for different things (to review one PR and to
+unblock another).
 
 The task's **authors** are every owner, every PR author, and whoever took a PR
-over. Authors are never assigned to review.
+over.
 
-Automatic assignment, applied on task state transitions:
+#### When the agent is asked to decide
 
-| Task state | Assignees | Reason |
-|---|---|---|
-| `in_review` | the reviewers of each PR with `review_needed`, excluding authors | `review` |
-| `blocked` | the people named in `request_human`; otherwise the owners, plus the PR author for a block on a taken-over PR | `blocked` |
-| `ready_to_merge` with auto-merge off | the owners | `merge` |
-| anything else | none from the shepherd | |
+The shepherd wakes the driver thread with an assignment wake-up at these moments.
+They are deduped through `task_wakeup` and do not count toward the retry budget.
 
-#### Picking reviewers (`agent/tasks/reviewers.py`)
+| Moment | Decision asked for |
+|---|---|
+| A PR has no agent-actionable or automation conditions left (CI green, Open SWE review done, nothing to fix) and lacks the approvals it needs | who reviews it |
+| A reviewer passed, or missed the acknowledgement deadline | who reviews instead |
+| GitHub requested a team on a PR (for example a `CODEOWNERS` auto-request) | which one member to request instead |
+| The shepherd entered a block (`retry_budget_exhausted`, `merge_failed`, `permission_denied`) | who resolves it, and the `ask` |
+| The task reached `ready_to_merge` with auto-merge off | who merges |
+| An owner resumed a stale task | review assignments afresh |
 
-The shepherd picks reviewers for a PR once it has no agent-actionable or
-automation conditions left (CI green, Open SWE review done, nothing for the agent
-to fix) and still lacks the approvals it needs. From then on the PR carries
-`review_needed` with those reviewers. It does not use GitHub's team auto-assignment or reviewer
-suggestions. A reviewer a person explicitly requested (on GitHub, in the panel,
-or through `assign_task`) is always kept, and the picker only fills the remaining
-slots.
+The agent can also assign at any other time, typically because a person asked in
+chat, in Slack, or with an `@open-swe assign @login` comment. People do not assign
+directly; they ask the agent, so every assignment goes through the same call and
+the same rules.
 
-A review is always assigned to an individual, never to a team. A team in
-`CODEOWNERS` expands to its members, who are scored like anyone else. When GitHub
-requests a team (for example through `CODEOWNERS` auto-requests), the shepherd
-replaces the team request with a request to the one member it picks; that
-member's approval still satisfies code owner review. By default a PR gets one
-reviewer, and more only when the rules below require them.
+#### Rules `assign_task` enforces
 
-Candidates are registered Open SWE users with write access to the repo who are
-not authors, drawn from `CODEOWNERS` entries for the changed paths and from recent
-committers and reviewers of the changed files. Only registered users can get the
-Slack DM and acknowledge, so nobody else is picked. A required code-owner slot
-whose owners include no registered user blocks the task with `no_reviewer`.
+Violations return an error that names the rule.
 
-Anyone whose Slack presence or status marks them away (vacation, out sick, away)
-is skipped. Presence is read from Slack at pick time for the top candidates only,
-since it changes too often to store.
+- Individuals only, never a team.
+- Registered Open SWE users only, since only they can get the Slack DM and
+  acknowledge.
+- Reviewers have write access to the repo and are not authors.
+- A review slot has one assignee at a time; reassigning a slot replaces its
+  assignee.
+- Someone who passed or timed out on a PR's review cannot be assigned to review
+  that PR again.
+- Every call carries a one-line `rationale`, shown to the assignee and in the
+  timeline, for example "code owner of `agent/tasks/`, 14 commits to these files
+  in 90 days, 2 open reviews".
 
-Each candidate is scored on:
+#### Judgment the agent applies
+
+These go in the assignment wake-up prompt and the `assign_task` description
+(under `agent/resources/prompts/`). They are guidance, not code:
+
+- Pick reviewers from `review_candidates`, never from GitHub's suggestions or team
+  auto-assignment.
+- One reviewer by default. Add more only when branch protection requires more
+  approvals or code owner review needs another person; prefer one person who
+  covers several owned paths.
+- Prefer code owners and people who recently changed or reviewed the files.
+- Prefer lighter review load.
+- Prefer people inside their working hours now; do not pick anyone marked away.
+- After changes were requested and fixed, usually re-request the same reviewers.
+- For a block, assign whoever can actually answer the `ask`: normally the owners,
+  the PR author for a taken-over PR, or a person a reviewer pointed to.
+- For a merge, normally the owners.
+- When no candidate fits, call `request_human` to the owners with reason
+  `no_reviewer` and say why.
+
+#### Reviewer candidates (`review_candidates`, `agent/tasks/reviewers.py`)
+
+For a PR, the tool returns its review requirements (required approval count,
+whether code owner review is required, owned paths and their owners) and a list of
+candidates with raw signals. It never scores or picks.
+
+Candidates are registered Open SWE users with write access who are not authors,
+drawn from `CODEOWNERS` entries for the changed paths (teams expanded to their
+members) and from recent committers and reviewers of the changed files.
 
 | Signal | Source |
 |---|---|
-| Code ownership | `CODEOWNERS` match on changed paths, weighted by lines changed under each path |
-| Change history | commits to the changed files in the last 180 days, weighted by recency and lines touched, from the GitHub commits API per path (top 20 files by lines changed) |
-| Review history | reviews on earlier PRs touching the same files |
-| Load | open review requests across the org plus active `review` assignments in Open SWE; each one lowers the score |
+| Code ownership | `CODEOWNERS` paths they own among the changed files, with lines changed under each |
+| Change history | their commits to the changed files in the last 180 days, from the GitHub commits API per path (top 20 files by lines changed) |
+| Review history | their reviews on earlier PRs touching the same files |
+| Load | their open review requests across the org plus active `review` assignments in Open SWE |
+| Working hours | whether they are inside working hours now, and when their next working hour starts |
+| Away | Slack presence or status marking them away (vacation, out sick, away), read live at call time |
+| History on this PR | whether they already reviewed, passed, or timed out |
 
-The pick is the smallest set that:
+History signals are cached per repo and path for an hour. Presence is not cached.
 
-- includes a code owner for every owned path when branch protection requires
-  code owner review, preferring one person who covers several paths
-- meets the repo's required approval count (1 when the repo requires none)
-- takes the highest-scoring remaining candidates to fill any remaining slots
+#### Acknowledgement
 
-Every pick carries a one-line rationale built from its signals, shown in the task
-panel and in the assignment notification, for example "code owner of
-`agent/tasks/`, 14 commits to these files in 90 days, 2 open reviews". Scores are
-cached per repo and path for an hour. When no candidate qualifies, the task is
-blocked with `no_reviewer`, assigned to the owners, whose answer (or a manual
-assignment) picks the reviewers.
-
-#### Acknowledgement and reassignment
-
-Each review slot has exactly one assignee at a time. The assignee must
-acknowledge within **2 working hours** or the slot moves to the next-best
-candidate.
+Each review slot has exactly one assignee at a time, who must acknowledge within
+**2 working hours**.
 
 - Acknowledging means clicking "Start review" in the Slack DM or task panel, or
   any review activity on the PR: a review comment, a submitted review, or opening
   the PR's Open SWE review page.
-- "Pass" in the Slack DM or task panel reassigns immediately.
-- On timeout or pass, the shepherd picks the next candidate from the same pool
-  (the same code-owner team, for a code-owner slot), moves the GitHub review
-  request, notifies both people, and records a `task_event`. Someone who timed out
-  or passed is not picked again for that PR.
+- "Pass" in the Slack DM or task panel ends the assignment immediately.
+- On pass or a missed deadline, the assignment ends, its GitHub review request is
+  withdrawn, the person is told, and the agent gets a wake-up to choose someone
+  else.
 - The 2-hour clock counts only the assignee's working hours (see
-  [Working hours](#working-hours)), so a review assigned overnight does not
-  rotate through the team before anyone is awake.
-- Once acknowledged, the slot is no longer reassigned automatically. If no review
-  arrives within 1 working day, the shepherd nudges the reviewer once and
-  notifies the owners.
-- When the pool runs out, the task is blocked with `no_reviewer`.
+  [Working hours](#working-hours)), so a review assigned overnight does not time
+  out before anyone is awake.
+- Once acknowledged, the deadline no longer applies. If no review arrives within
+  1 working day, the shepherd nudges the reviewer once and tells the owners.
 
-`task_assignee` gains `acknowledged_at`, `due_at`, and `passed_user_ids` for this.
 #### Working hours
 
 Each user row stores `time_zone` (IANA name), `time_zone_synced_at`, and
@@ -408,32 +438,31 @@ review load.
   Slack webhook already reads `tz` on every mention), and on assignment when
   `time_zone_synced_at` is older than 7 days. No separate polling.
 - A user without a linked Slack account uses the workspace time zone.
-- The picker prefers candidates inside working hours right now, so a review goes
-  to someone who can pick it up. When nobody in the pool is working, it picks
-  the best candidate anyway and the clock starts at their next working hour.
-- `due_at` is computed once at assignment from the stored values; the sweep only
-  compares `due_at`.
+- `review_candidates` reports each candidate's working-hours status from the
+  stored values. When the agent assigns someone outside working hours, the clock
+  starts at their next working hour.
+- `due_at` is computed once by `assign_task` from the stored values; the sweep
+  only compares `due_at`.
 
-Assignment and GitHub review requests stay in sync in both directions. Assigning a
-reviewer in Open SWE requests their review on the PR, and a review request a
-person makes on GitHub adds the assignment. A reviewer's `review` assignment ends when they
-submit a review on the current head: an approval removes it, and a
-changes-requested review removes it and returns the PR to the agent. When the
-agent pushes a fix, the shepherd re-requests review from those reviewers and they
-are assigned again. A PR with several reviewers keeps all of them assigned until
-each has reviewed.
+#### Bookkeeping
 
-Manual assignment: anyone who can see the task can add or remove assignees from
-the task panel, from chat or Slack ("have @alex and @sam review this") through
-`assign_task`, or with `@open-swe assign @login` on a PR. Manual assignments
-(`reason = manual`) survive task state transitions until the person acts (reviews,
-replies, unblocks, merges) or is removed. Assigning a person while the agent is
-working does not stop the agent.
+The shepherd keeps assignments consistent with GitHub without choosing anyone:
+
+- A `review` assignment requests the review on GitHub; ending it withdraws the
+  request.
+- A review request a person makes directly on GitHub is recorded as that person's
+  assignment of the reviewer, subject to the same rules. A team request is not
+  recorded; it triggers the "which member" wake-up above.
+- An assignment ends when its job is done: the reviewer submits a review on the
+  current head (approval or changes requested), the block clears, or the PR
+  merges. A stale task ends all of them. Ending is not reassigning; if another
+  decision is needed, the agent gets a wake-up.
+- Assigning a person while the agent is working does not stop the agent.
 
 Every change records a `task_event`. Each new assignee is notified once, through a
-Slack DM and a banner in the task panel carrying the reason: the block's `ask`,
-"review <PR>", or "ready to merge". A blocked task also gets a comment on the
-affected PR.
+Slack DM and a banner in the task panel carrying the reason and the agent's
+rationale: the block's `ask`, "review <PR>", or "ready to merge". A blocked task
+also gets a comment on the affected PR.
 
 ### Merge
 
@@ -441,8 +470,8 @@ When the task state becomes `ready_to_merge`:
 
 - `auto_merge = task.auto_merge ?? all(o.preferences.auto_merge_shepherded_prs for o in owners)`.
   With several owners and no override, every owner must have opted in.
-- Off: assign the task to the owners and post "ready to merge" once to the task
-  thread, Slack thread, and each PR.
+- Off: post "ready to merge" once to the task thread, Slack thread, and each PR,
+  and wake the agent to assign who merges.
 - On: the task moves to `merging` and merges PRs in `merge_after` order (topological; independent PRs in any
   order) using each repo's merge method, via the merge code generalized out of
   `expedited_review/merge.py`. Re-evaluate each PR immediately before merging it.
@@ -529,8 +558,9 @@ row, records a `task_event`, and posts a PR comment.
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
-| `request_human` | `ask`, `pull_request?`, `assignees?: [login]`; blocks the task (or one PR) with `agent_request`, assigns it, and ends the run |
-| `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| manual`, `pull_request?`; `review` also requests review on GitHub |
+| `request_human` | `ask`, `assignees: [login]`, `rationale`, `reason: agent_request \| no_reviewer`, `pull_request?`; blocks the task (or one PR), assigns it, and ends the run |
+| `review_candidates` | `pull_request`; review requirements and candidates with raw signals (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
+| `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the only way anyone is assigned. `review` also requests review on GitHub |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
 
