@@ -405,6 +405,25 @@ class User(Base):
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
 
+    async def assign_slack_member(self, slack_user_id: str) -> None:
+        """Assign a Slack member without carrying a previous owner's identity fields."""
+        upsert = insert(UserIdentity).values(
+            user_id=self.id, provider="slack", external_id=slack_user_id
+        )
+        async with postgres.session() as session:
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[UserIdentity.provider, UserIdentity.external_id],
+                    set_={
+                        "user_id": self.id,
+                        "login": "",
+                        "email": "",
+                        "team_id": "",
+                        "last_seen_at": func.clock_timestamp(),
+                    },
+                )
+            )
+
     async def rename(self, display_name: str) -> None:
         """Replace a person's display name, for the one backfill that knows better."""
         cls = type(self)
