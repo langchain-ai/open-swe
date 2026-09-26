@@ -84,6 +84,7 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
         score: float,
         comment: str | None = None,
         source_info: dict[str, Any] | None = None,
+        dedupe_key: str | None = None,
     ) -> bool:
         created.update(
             {
@@ -92,6 +93,7 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
                 "score": score,
                 "comment": comment,
                 "source_info": source_info,
+                "dedupe_key": dedupe_key,
             }
         )
         return True
@@ -102,9 +104,16 @@ async def test_reaction_added_creates_feedback(monkeypatch: pytest.MonkeyPatch) 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
 
     assert created["run_id"] == "run-1"
-    assert created["key"] == "slack_reaction:C123:U123:2.000"
+    assert created["key"] == "slack_reaction_rating"
+    assert created["dedupe_key"] == "slack_reaction:C123:U123:2.000"
     assert created["score"] == 1.0
-    assert created["source_info"]["reactions"] == ["thumbsup"]
+    assert created["source_info"] == {
+        "source": "slack_reaction",
+        "channel_id": "C123",
+        "message_ts": "2.000",
+        "user_id": "U123",
+        "reactions": ["thumbsup"],
+    }
     assert (("slack_reaction_events", "C123"), "Ev1") in client.store.items
 
 
@@ -137,11 +146,12 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
             "reactions": ["thumbsup"],
         }
     }
-    deleted: dict[str, str] = {}
+    deleted: dict[str, Any] = {}
 
-    async def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str, *, dedupe_key: str | None = None) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
+        deleted["dedupe_key"] = dedupe_key
         return True
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
@@ -149,7 +159,11 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
 
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
 
-    assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
+    assert deleted == {
+        "run_id": "run-1",
+        "key": "slack_reaction_rating",
+        "dedupe_key": "slack_reaction:C123:U123:2.000",
+    }
     state = client.store.items[(("slack_reaction_state", "C123"), "run-1:U123:2.000")]
     assert state["value"]["reactions"] == []
 
@@ -199,14 +213,15 @@ async def test_conflicting_reactions_clear_feedback(
             "reactions": ["thumbsup"],
         }
     }
-    deleted: dict[str, str] = {}
+    deleted: dict[str, Any] = {}
 
     async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
         raise AssertionError("conflicting reactions must not record a numeric score")
 
-    async def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str, *, dedupe_key: str | None = None) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
+        deleted["dedupe_key"] = dedupe_key
         return True
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
@@ -217,7 +232,11 @@ async def test_conflicting_reactions_clear_feedback(
     event = {**_reaction_event("thumbsdown"), "type": "reaction_added"}
     await process_slack_reaction_added(event, event_id="EvConflict")
 
-    assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
+    assert deleted == {
+        "run_id": "run-1",
+        "key": "slack_reaction_rating",
+        "dedupe_key": "slack_reaction:C123:U123:2.000",
+    }
 
 
 @pytest.mark.asyncio

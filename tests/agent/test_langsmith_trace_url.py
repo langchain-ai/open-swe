@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 from agent.utils import langsmith as ls_utils
@@ -175,6 +177,47 @@ async def test_create_thread_feedback_posts_thread_scope(
             },
         )
     ]
+
+
+async def test_run_feedback_dedupe_key_preserves_feedback_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feedback_ids: list[uuid.UUID] = []
+
+    class _FakeClient:
+        async def create_feedback(self, **kwargs: object) -> None:
+            feedback_ids.append(kwargs["feedback_id"])
+
+        async def delete_feedback(self, feedback_id: uuid.UUID) -> None:
+            feedback_ids.append(feedback_id)
+
+    client = _FakeClient()
+    monkeypatch.setattr(ls_utils, "_build_langsmith_feedback_clients", lambda: (("key", "url"),))
+    monkeypatch.setattr(ls_utils, "async_langsmith_client", lambda api_key, api_url: client)
+
+    run_id = "run-1"
+    dedupe_key = "slack_reply:C1:U1:2.0"
+    expected_id = uuid.uuid5(uuid.NAMESPACE_URL, f"langsmith-feedback:{run_id}:{dedupe_key}")
+
+    assert (
+        await ls_utils.create_langsmith_feedback(
+            run_id,
+            "slack_reply_rating",
+            score=1.0,
+            dedupe_key=dedupe_key,
+        )
+        is True
+    )
+    assert (
+        await ls_utils.delete_langsmith_feedback(
+            run_id,
+            "slack_reply_rating",
+            dedupe_key=dedupe_key,
+        )
+        is True
+    )
+
+    assert feedback_ids == [expected_id, expected_id]
 
 
 async def test_trace_url_none_when_tenant_unset(monkeypatch: pytest.MonkeyPatch) -> None:

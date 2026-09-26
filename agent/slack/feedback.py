@@ -179,7 +179,7 @@ async def process_slack_reaction(
         added=added,
     )
 
-    key = _feedback_key(channel_id, user_id, message_ts)
+    dedupe_key = _feedback_key(channel_id, user_id, message_ts)
     source_info = {
         "source": "slack_reaction",
         "channel_id": channel_id,
@@ -188,13 +188,18 @@ async def process_slack_reaction(
     }
     score = _score_reactions(active_reactions)
     if score is None:
-        success = await delete_langsmith_feedback(run_id, key)
+        success = await delete_langsmith_feedback(
+            run_id,
+            "slack_reaction_rating",
+            dedupe_key=dedupe_key,
+        )
     else:
         success = await create_langsmith_feedback(
             run_id,
-            key,
+            "slack_reaction_rating",
             score=score,
             comment=f"Slack reaction feedback from user {user_id}",
+            dedupe_key=dedupe_key,
             source_info={**source_info, "reactions": sorted(active_reactions)},
         )
 

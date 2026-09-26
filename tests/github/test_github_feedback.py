@@ -78,6 +78,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
         score: float,
         comment: str | None = None,
         source_info: dict[str, Any] | None = None,
+        dedupe_key: str | None = None,
     ) -> bool:
         created.update(
             {
@@ -86,6 +87,7 @@ async def test_github_reaction_added_creates_langsmith_feedback(
                 "score": score,
                 "comment": comment,
                 "source_info": source_info,
+                "dedupe_key": dedupe_key,
             }
         )
         return True
@@ -111,9 +113,19 @@ async def test_github_reaction_added_creates_langsmith_feedback(
     await process_github_reaction_added(_reaction_payload(), delivery_id="delivery-1")
 
     assert created["run_id"] == "run-1"
-    assert created["key"] == "github_reaction:langchain-ai/open-swe:reviewer:123"
+    assert created["key"] == "github_reaction_rating"
+    assert created["dedupe_key"] == "github_reaction:langchain-ai/open-swe:reviewer:123"
     assert created["score"] == 1.0
-    assert created["source_info"]["finding_id"] == "f1"
+    assert created["source_info"] == {
+        "source": "github_review_reaction",
+        "owner": "langchain-ai",
+        "repo": "open-swe",
+        "pr_number": 7,
+        "comment_id": 123,
+        "finding_id": "f1",
+        "user_login": "reviewer",
+        "reactions": ["+1"],
+    }
     assert (("github_reaction_events", "langchain-ai/open-swe"), "delivery-1") in client.store.items
 
 
@@ -132,11 +144,12 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
             "reactions": ["+1"],
         }
     }
-    deleted: dict[str, str] = {}
+    deleted: dict[str, Any] = {}
 
-    async def fake_delete_feedback(run_id: str, key: str) -> bool:
+    async def fake_delete_feedback(run_id: str, key: str, *, dedupe_key: str | None = None) -> bool:
         deleted["run_id"] = run_id
         deleted["key"] = key
+        deleted["dedupe_key"] = dedupe_key
         return True
 
     monkeypatch.setattr(github_feedback, "get_client", lambda url: client)
@@ -163,7 +176,8 @@ async def test_github_reaction_removed_deletes_langsmith_feedback(
 
     assert deleted == {
         "run_id": "run-1",
-        "key": "github_reaction:langchain-ai/open-swe:reviewer:123",
+        "key": "github_reaction_rating",
+        "dedupe_key": "github_reaction:langchain-ai/open-swe:reviewer:123",
     }
     assert (
         ("github_reaction_state", "langchain-ai/open-swe"),
