@@ -161,6 +161,31 @@ async def test_untagged_thread_message_is_ignored(subtype: str) -> None:
     assert background_tasks.tasks == []
 
 
+@pytest.mark.parametrize("reply", [False, True])
+async def test_kitchen_messages_start_and_continue_threads_without_tag(
+    monkeypatch: pytest.MonkeyPatch, reply: bool
+) -> None:
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(
+            name="team-kitchen", is_ext_shared=False, is_pending_ext_shared=False
+        )
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}")
+    if not reply:
+        del payload["event"]["thread_ts"]
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+
+    assert response["status"] == "accepted"
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
+    assert request.treat_all_messages_as_mentions is True
+
+
 async def test_message_update_queues_only_the_new_text() -> None:
     background_tasks = _FakeBackgroundTasks()
 

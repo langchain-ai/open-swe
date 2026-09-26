@@ -452,6 +452,11 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
+    in_kitchen_channel = bool(
+        not in_code_channel
+        and channel_context
+        and channel_context.label.lower().endswith("-kitchen")
+    )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
@@ -499,6 +504,11 @@ async def slack_webhook(
         explicit_mention
         or is_message_update
         or in_code_channel
+        or (
+            in_kitchen_channel
+            and event.type == "message"
+            and event.subtype in {"", "file_share", "thread_broadcast"}
+        )
         or allowed_bot is not None
         or is_direct_message
         or solo_followup
@@ -568,6 +578,7 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
+                or in_kitchen_channel
                 or solo_followup,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
