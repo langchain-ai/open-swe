@@ -945,9 +945,26 @@ async def test_manage_thread_rejects_contradictory_arguments_before_mutation(
 
     assert result == {
         "success": False,
-        "error": "Unexpected arguments for cancel: comment",
+        "error": "Unexpected arguments for cancel: comment (cancel accepts: none)",
     }
     cancel.assert_not_awaited()
+
+
+async def test_manage_thread_rejects_send_message_content_with_expected_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+
+    result = await threads_tool.manage_thread(
+        "thread-1",
+        "send_message",
+        content="not a message",
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Unexpected arguments for send_message: content (send_message accepts: message, model_id, effort)",
+    }
 
 
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1008,6 +1025,32 @@ async def test_manage_thread_queues_message_for_busy_thread(
     assert result["success"] is True
     assert result["mode"] == "queued"
     proxy.assert_not_awaited()
+
+
+async def test_manage_thread_sends_message_with_markdown_content_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "planMode": False}),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "send_dashboard_message",
+        AsyncMock(return_value={"id": "thread-1", "status": "running", "messages": []}),
+    )
+
+    result = await threads_tool.manage_thread(
+        "thread-1",
+        "send_message",
+        message="Continue",
+        content_format="markdown",
+    )
+
+    assert result["success"] is True
+    assert result["mode"] == "queued"
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(
@@ -1098,6 +1141,35 @@ async def test_manage_thread_rejects_plan_format_conversion(
 
     assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()
+
+
+async def test_manage_thread_update_plan_accepts_markdown_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "isOwner": True}),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_plan_content",
+        AsyncMock(return_value={"status": "ready", "markdown": "# Old plan"}),
+    )
+    update = AsyncMock(return_value={"status": "ready", "markdown": "# New plan"})
+    monkeypatch.setattr(threads_tool.plan_api, "update_plan", update)
+
+    result = await threads_tool.manage_thread(
+        "thread-1",
+        "update_plan",
+        content="# New plan",
+        content_format="markdown",
+    )
+
+    assert result["success"] is True
+    assert result["format"] == "markdown"
+    update.assert_awaited_once()
 
 
 async def test_manage_thread_delegates_workflow_actions(

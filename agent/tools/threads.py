@@ -908,24 +908,24 @@ def _unexpected_action_arguments(
     comment: str | None,
     comment_id: str | None,
     content: str | None,
-    content_format: PlanFormat,
+    content_format: PlanFormat | None,
     fingerprint: str | None,
-    confirm: bool,
+    confirm: bool | None,
     model_id: str | None,
     effort: str | None,
 ) -> list[str]:
     allowed = {
-        "send_message": {"message", "model_id", "effort"},
-        "cancel": set(),
-        "admin_cancel": set(),
-        "resolve": set(),
-        "unresolve": set(),
-        "delete": {"confirm"},
-        "add_plan_comment": {"comment"},
-        "delete_plan_comment": {"comment_id"},
-        "update_plan": {"content", "content_format"},
-        "approve_workflow_push": {"fingerprint"},
-        "reject_workflow_push": {"fingerprint"},
+        "send_message": ("message", "model_id", "effort"),
+        "cancel": (),
+        "admin_cancel": (),
+        "resolve": (),
+        "unresolve": (),
+        "delete": ("confirm",),
+        "add_plan_comment": ("comment",),
+        "delete_plan_comment": ("comment_id",),
+        "update_plan": ("content", "content_format"),
+        "approve_workflow_push": ("fingerprint",),
+        "reject_workflow_push": ("fingerprint",),
     }.get(action, set())
     provided = {
         key
@@ -938,13 +938,13 @@ def _unexpected_action_arguments(
             "model_id": model_id,
             "effort": effort,
         }.items()
-        if isinstance(value, str) and value.strip()
+        if value is not None
     }
-    if confirm:
-        provided.add("confirm")
-    if content_format != "html":
-        provided.add("content_format")
-    return sorted(provided - allowed)
+    unexpected = sorted(provided - set(allowed))
+    if unexpected:
+        accepted = ", ".join(allowed) if allowed else "none"
+        return [f"{', '.join(unexpected)} ({action} accepts: {accepted})"]
+    return unexpected
 
 
 async def manage_thread(
@@ -954,14 +954,14 @@ async def manage_thread(
     comment: str | None = None,
     comment_id: str | None = None,
     content: str | None = None,
-    content_format: PlanFormat = "html",
+    content_format: PlanFormat | None = None,
     fingerprint: str | None = None,
-    confirm: bool = False,
+    confirm: bool | None = None,
     model_id: str | None = None,
     effort: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `manage_thread` tool."""
+    """Manage a thread: send_message(message, model_id, effort); cancel(); admin_cancel(); resolve(); unresolve(); delete(confirm); add_plan_comment(comment); delete_plan_comment(comment_id); update_plan(content, content_format); approve_workflow_push(fingerprint); reject_workflow_push(fingerprint)."""
     actor = await _actor(state)
     if actor is None:
         return _failure("No verified triggering user is available")
@@ -984,7 +984,7 @@ async def manage_thread(
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
     if action == "admin_cancel" and not actor.admin:
         return _failure("Only workspace admins can cancel another user's thread")
-    if action == "delete" and not confirm:
+    if action == "delete" and confirm is not True:
         return _failure("delete requires confirm=true")
     if action == "send_message":
         validated = _message_args(message or "", model_id, effort)
@@ -1051,6 +1051,7 @@ async def manage_thread(
             )
             return {"success": True, **result}
         if action == "update_plan":
+            content_format = content_format or "html"
             if error := _required(content, "content", action):
                 return error
             if len(content or "") > _MAX_PLAN_CHARS:
