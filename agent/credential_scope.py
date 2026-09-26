@@ -74,16 +74,22 @@ async def private_credential_login(
 
 
 async def pr_author_login(requested: str | None = None) -> str | None:
-    """The account a PR is opened as: the run requester, or a named participant.
+    """The account a PR is opened as: a named participant, or the run requester.
 
-    ``requested`` only reaches here from a shared, user-owned thread, and only a
-    login that has posted in it is honored — someone who could have opened the
-    same PR by triggering their own run. Private threads stay pinned to their
+    In a shared, user-owned thread any login that has posted in it is honored,
+    whoever or whatever started the run. Private threads stay pinned to their
     owner and system threads to the App, so neither can borrow an account.
     """
     cfg, metadata = await _thread_scope()
     owner = metadata.get("owner_login")
     has_owner = isinstance(owner, str) and bool(owner.strip())
+    shared_user_thread = (
+        metadata.get("visibility", "public") != "private"
+        and metadata.get("owner_type") != "system"
+        and (has_owner or metadata.get("owner_type") == "user")
+    )
+    if shared_user_thread and (participant := _requested_participant(requested, metadata)):
+        return participant
     if (
         cfg.background_task_completion
         and metadata.get("owner_type") != "system"
@@ -94,7 +100,8 @@ async def pr_author_login(requested: str | None = None) -> str | None:
         )
     ):
         raise RuntimeError(
-            "Background completion cannot identify the PR requester; start a direct user run to publish"
+            "Background completion cannot identify the PR requester; pass `author` naming a "
+            "thread participant"
         )
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
@@ -104,9 +111,10 @@ async def pr_author_login(requested: str | None = None) -> str | None:
         login = (cfg.github_login or "").strip()
         if not login:
             raise RuntimeError(
-                "User-owned thread requires an authenticated requester for PR creation"
+                "User-owned thread requires an authenticated requester or a named participant "
+                "for PR creation"
             )
-        return _requested_participant(requested, metadata) or login
+        return login
     if metadata.get("owner_type") == "user":
         raise RuntimeError("User-owned thread has no GitHub owner for PR creation")
     return None
