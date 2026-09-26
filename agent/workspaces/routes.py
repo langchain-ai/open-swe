@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from agent.slack.channels import SlackChannel
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
@@ -51,6 +52,20 @@ def _save_conflict(error: ValueError) -> HTTPException:
     return HTTPException(400, str(error))
 
 
+async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
+    """Reject newly enabled kitchen channels Slack would not deliver messages from."""
+    channels = await asyncio.gather(
+        *(SlackChannel.load(channel_id, use_cache=False) for channel_id in channel_ids)
+    )
+    for channel_id, channel in zip(channel_ids, channels, strict=True):
+        if channel is None or not channel.can_be_kitchen:
+            raise HTTPException(
+                400,
+                f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
+                "Slack channel that Open SWE has joined.",
+            )
+
+
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -66,6 +81,7 @@ async def api_create_workspace(
     body: WorkspaceCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -133,6 +149,11 @@ async def api_update_workspace(
     )
     if repos_changed and is_refresh_in_flight(previous):
         raise HTTPException(409, "a refresh of this workspace is already running")
+    if body.kitchen_channel_ids is not None:
+        already = set(previous.kitchen_channel_ids) if previous is not None else set()
+        await _require_kitchen_eligible(
+            [channel for channel in body.kitchen_channel_ids if channel not in already]
+        )
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:

@@ -32,6 +32,7 @@ const RECORD: WorkspaceRecord = {
   prompt: "Run make test.",
   repos: ["acme/oss"],
   slack_channel_ids: ["C1"],
+  kitchen_channel_ids: [],
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
@@ -67,6 +68,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "OSS",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         is_default: true,
         default_repo: null,
         has_snapshot: true,
@@ -76,6 +78,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "Core",
         repos: ["acme/api"],
         slack_channel_ids: [],
+        kitchen_channel_ids: [],
         is_default: false,
         default_repo: null,
         has_snapshot: false,
@@ -215,6 +218,7 @@ describe("WorkspaceSettingsPanel", () => {
         name: "OSS support",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         prompt: "Run make test.",
       })
     )

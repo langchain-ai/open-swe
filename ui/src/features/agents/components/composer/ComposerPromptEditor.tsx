@@ -34,7 +34,7 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
 } from "lexical"
-import { File as FileIcon } from "lucide-react"
+import { File as FileIcon, Hash } from "lucide-react"
 
 import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
@@ -244,11 +244,114 @@ function $createComposerSkillNode(
   return $applyNodeReplacement(new ComposerSkillNode(name, source))
 }
 
+type SerializedComposerChannelNode = Spread<
+  {
+    channelId: string
+    name: string
+    source: string
+    type: "composer-channel"
+    version: 1
+  },
+  SerializedLexicalNode
+>
+
+/** A Slack channel reference; the chip shows `#name` over Slack's `<#id|name>`. */
+class ComposerChannelNode extends DecoratorNode<React.ReactElement> {
+  __channelId: string
+  __name: string
+  __source: string
+
+  static override getType(): string {
+    return "composer-channel"
+  }
+
+  static override clone(node: ComposerChannelNode): ComposerChannelNode {
+    return new ComposerChannelNode(
+      node.__channelId,
+      node.__name,
+      node.__source,
+      node.__key
+    )
+  }
+
+  static override importJSON(
+    serialized: SerializedComposerChannelNode
+  ): ComposerChannelNode {
+    return $createComposerChannelNode(
+      serialized.channelId,
+      serialized.name,
+      serialized.source
+    ).updateFromJSON(serialized)
+  }
+
+  constructor(channelId: string, name: string, source: string, key?: NodeKey) {
+    super(key)
+    this.__channelId = channelId
+    this.__name = name
+    this.__source = source
+  }
+
+  override exportJSON(): SerializedComposerChannelNode {
+    return {
+      ...super.exportJSON(),
+      channelId: this.__channelId,
+      name: this.__name,
+      source: this.__source,
+      type: "composer-channel",
+      version: 1,
+    }
+  }
+
+  override createDOM(): HTMLElement {
+    const dom = document.createElement("span")
+    dom.className = "relative inline-flex align-middle leading-none"
+    return dom
+  }
+
+  override updateDOM(): false {
+    return false
+  }
+
+  override getTextContent(): string {
+    return this.__source
+  }
+
+  override isInline(): true {
+    return true
+  }
+
+  override decorate(): React.ReactElement {
+    return (
+      <span
+        className={MENTION_CHIP_CLASS_NAME}
+        contentEditable={false}
+        spellCheck={false}
+        title={this.__channelId}
+      >
+        <Hash className="size-3.5 shrink-0 opacity-70" aria-hidden />
+        <span className="truncate leading-tight select-none">
+          {this.__name}
+        </span>
+      </span>
+    )
+  }
+}
+
+function $createComposerChannelNode(
+  channelId: string,
+  name: string,
+  source: string
+): ComposerChannelNode {
+  return $applyNodeReplacement(new ComposerChannelNode(channelId, name, source))
+}
+
 function isDecoratorNode(
   node: unknown
-): node is ComposerMentionNode | ComposerSkillNode {
+): node is ComposerMentionNode | ComposerSkillNode | ComposerChannelNode {
   return (
-    node instanceof ComposerMentionNode || node instanceof ComposerSkillNode
+    node instanceof ComposerMentionNode ||
+    node instanceof ComposerSkillNode ||
+    node instanceof ComposerChannelNode
   )
 }
 
@@ -432,6 +535,14 @@ function $setComposerPrompt(
       $appendTextWithLineBreaks(paragraph, segment.text)
     } else if (segment.type === "mention") {
       paragraph.append($createComposerMentionNode(segment.path, segment.source))
+    } else if (segment.type === "channel") {
+      paragraph.append(
+        $createComposerChannelNode(
+          segment.channelId,
+          segment.name,
+          segment.source
+        )
+      )
     } else {
       paragraph.append($createComposerSkillNode(segment.name, segment.source))
     }
@@ -671,7 +782,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     () => ({
       namespace: "open-swe-composer",
       editable: true,
-      nodes: [ComposerMentionNode, ComposerSkillNode],
+      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerChannelNode],
       editorState: () => {
         $setComposerPrompt(
           initialValueRef.current,
