@@ -232,7 +232,10 @@ export interface LocalRepo {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger = "schedule" | "github_issue_opened"
+export type AutomationTrigger =
+  | "schedule"
+  | "github_issue_opened"
+  | "slack_channel_message"
 
 export interface AgentSchedule {
   id: string
@@ -244,6 +247,7 @@ export interface AgentSchedule {
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
+  messagePattern?: string | null
   adminThread: boolean
   model: string
   effort?: string | null

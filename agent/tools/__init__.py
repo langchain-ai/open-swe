@@ -30,6 +30,7 @@ _TOOL_MODULES = {
     "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
+    "preview_automation_matches": ".automations",
     "publish_review": ".publish_review",
     "read_only_sql": ".read_only_sql",
     "read_repo_file": "agent.github.tools.read_repo_file",
@@ -97,6 +98,7 @@ __all__ = [
     "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
+    "preview_automation_matches",
     "publish_review",
     "read_only_sql",
     "read_repo_file",
@@ -156,6 +158,7 @@ if TYPE_CHECKING:
         create_automation,
         delete_automation,
         list_automations,
+        preview_automation_matches,
         trigger_automation,
         update_automation,
     )

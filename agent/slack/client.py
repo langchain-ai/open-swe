@@ -1417,6 +1417,46 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     return messages
 
 
+class SlackChannelHistoryError(Exception):
+    """Slack refused a channel history read; ``code`` is Slack's error code."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+async def fetch_slack_channel_history(
+    channel_id: str, *, days: int, limit: int
+) -> list[dict[str, Any]]:
+    """Fetch up to ``limit`` top-level channel messages from the last ``days``, newest first."""
+    if not SLACK_BOT_TOKEN:
+        raise SlackChannelHistoryError("slack_not_configured")
+    oldest = f"{time.time() - days * 86_400:.6f}"
+    messages: list[dict[str, Any]] = []
+    cursor: str | None = None
+    async with SlackClient.bot() as client:
+        while len(messages) < limit:
+            try:
+                payload = await client.conversations_history(
+                    channel=channel_id,
+                    oldest=oldest,
+                    limit=min(200, limit - len(messages)),
+                    cursor=cursor,
+                )
+            except SLACK_REQUEST_ERRORS as exc:
+                raise SlackChannelHistoryError(slack_error(exc)) from exc
+            batch = payload.get("messages", [])
+            if isinstance(batch, list):
+                messages.extend(item for item in batch if isinstance(item, dict))
+            response_metadata = payload.get("response_metadata", {})
+            cursor = (
+                response_metadata.get("next_cursor") if isinstance(response_metadata, dict) else ""
+            )
+            if not cursor:
+                break
+    return messages[:limit]
+
+
 @asynccontextmanager
 async def slack_thread_mutation_lock(
     langgraph_client: LangGraphClient,

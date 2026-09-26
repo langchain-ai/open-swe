@@ -192,6 +192,7 @@ from agent.tools import (
     notify_automation_channel,
     open_pull_request,
     output_iframe,
+    preview_automation_matches,
     publish_workspace,
     read_only_sql,
     read_user_settings,
@@ -621,6 +622,7 @@ def _general_purpose_subagent(
 # Added to an admin thread's tools; see the admin-thread section of the prompt.
 ADMIN_TOOLS = (
     list_automations,
+    preview_automation_matches,
     create_automation,
     update_automation,
     trigger_automation,

@@ -11,6 +11,7 @@ import { agentsApi } from "./api"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  SlackMessagePreviewRequest,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -894,6 +895,18 @@ export function useCreateAgentSchedule() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
     },
+  })
+}
+
+export function useSlackMessagePreview(
+  request: SlackMessagePreviewRequest | null
+) {
+  return useQuery({
+    queryKey: [...agentScheduleKeys.all, "slack-message-preview", request],
+    queryFn: () => agentsApi.previewSlackMessagePattern(request!),
+    enabled: request !== null,
+    staleTime: 60_000,
+    retry: false,
   })
 }
 

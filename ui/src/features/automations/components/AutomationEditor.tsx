@@ -13,6 +13,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { SlackMessageTriggerFields } from "@/features/automations/components/SlackMessageTriggerFields"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -88,6 +89,9 @@ export function AutomationEditor({
   )
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
+  const [messagePattern, setMessagePattern] = useState(
+    schedule?.messagePattern ?? ""
+  )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // undefined = untouched (derive from the schedule / default as models load).
@@ -108,6 +112,7 @@ export function AutomationEditor({
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
+      messagePattern !== (schedule?.messagePattern ?? "") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
@@ -119,7 +124,11 @@ export function AutomationEditor({
   const canSave =
     name.trim().length > 0 &&
     prompt.trim().length > 0 &&
-    (trigger === "github_issue_opened" ? !!repo : !!cron)
+    (trigger === "github_issue_opened"
+      ? !!repo
+      : trigger === "slack_channel_message"
+        ? !!slackChannelId.trim() && messagePattern.length > 0
+        : !!cron)
 
   const onPickTrigger = (value: string | null) => {
     if (value === null) {
@@ -147,6 +156,7 @@ export function AutomationEditor({
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          message_pattern: messagePattern || null,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -172,6 +182,7 @@ export function AutomationEditor({
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
+          message_pattern: messagePattern || null,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -292,8 +303,20 @@ export function AutomationEditor({
               <SelectItem value="github_issue_opened">
                 GitHub issue opened
               </SelectItem>
+              <SelectItem value="slack_channel_message">
+                Slack channel post matches
+              </SelectItem>
             </SelectContent>
           </Select>
+          {trigger === "slack_channel_message" && (
+            <SlackMessageTriggerFields
+              channelId={slackChannelId}
+              onChannelIdChange={setSlackChannelId}
+              pattern={messagePattern}
+              onPatternChange={setMessagePattern}
+              disabled={!canManage}
+            />
+          )}
           {trigger === "schedule" && cron && (
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
               <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -335,45 +358,49 @@ export function AutomationEditor({
           )}
         </div>
 
-        <SectionLabel>Slack destination</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-3">
-          <input
-            value={slackChannelId}
-            onChange={(e) => setSlackChannelId(e.target.value)}
-            disabled={!canManage}
-            placeholder="C0123456789"
-            spellCheck={false}
-            className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
-          />
-          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-            <span className="text-xs text-muted-foreground">
-              Notify channel
-            </span>
-            <Select
-              value={slackNotificationMode}
-              onValueChange={(value) =>
-                value && setSlackNotificationMode(value)
-              }
-              disabled={!canManage || !slackChannelId.trim()}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="always">Every run</SelectItem>
-                <SelectItem value="on_action">
-                  Only when action is taken
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground/70">
-            {slackNotificationMode === "on_action"
-              ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
-              : "Each run starts a new thread in the channel."}{" "}
-            The Open SWE bot must be a member of the channel.
-          </p>
-        </div>
+        {trigger !== "slack_channel_message" && (
+          <>
+            <SectionLabel>Slack destination</SectionLabel>
+            <div className="rounded-xl border border-border bg-card p-3">
+              <input
+                value={slackChannelId}
+                onChange={(e) => setSlackChannelId(e.target.value)}
+                disabled={!canManage}
+                placeholder="C0123456789"
+                spellCheck={false}
+                className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+              />
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+                <span className="text-xs text-muted-foreground">
+                  Notify channel
+                </span>
+                <Select
+                  value={slackNotificationMode}
+                  onValueChange={(value) =>
+                    value && setSlackNotificationMode(value)
+                  }
+                  disabled={!canManage || !slackChannelId.trim()}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">Every run</SelectItem>
+                    <SelectItem value="on_action">
+                      Only when action is taken
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground/70">
+                {slackNotificationMode === "on_action"
+                  ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
+                  : "Each run starts a new thread in the channel."}{" "}
+                The Open SWE bot must be a member of the channel.
+              </p>
+            </div>
+          </>
+        )}
 
         <SectionLabel>Agent Instructions</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
