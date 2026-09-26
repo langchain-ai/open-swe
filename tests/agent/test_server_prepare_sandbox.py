@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 from langsmith.sandbox import SandboxRetryableConnectionError
 
 import agent.server as server
@@ -23,6 +24,33 @@ def _middleware() -> server.PrepareAgentRunMiddleware:
         recent_thread_context_enabled=False,
         admin_workspaces=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_discover_repo_skill_sources_scans_nested_checkouts() -> None:
+    backend = MagicMock()
+    backend.aexecute = AsyncMock(
+        return_value=ExecuteResponse(
+            output="/workspace/repo/.agents/skills\n/workspace/nested/.claude/skills\n",
+            exit_code=0,
+        )
+    )
+
+    sources = await server._discover_repo_skill_sources(backend, "/workspace")
+
+    assert sources == ["/workspace/repo/.agents/skills/", "/workspace/nested/.claude/skills/"]
+    command = backend.aexecute.await_args.args[0]
+    assert "find /workspace -type d" in command
+    assert "*/.agents/skills" in command
+    assert "*/.claude/skills" in command
+
+
+@pytest.mark.asyncio
+async def test_discover_repo_skill_sources_tolerates_scan_failure() -> None:
+    backend = MagicMock()
+    backend.aexecute = AsyncMock(side_effect=RuntimeError("scan failed"))
+
+    assert await server._discover_repo_skill_sources(backend, "/workspace") == []
 
 
 @pytest.mark.asyncio
