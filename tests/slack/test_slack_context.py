@@ -9,6 +9,7 @@ from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     format_slack_messages_for_prompt,
@@ -2149,6 +2150,7 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         cast(dict, kwargs.get("user_names_by_id", {"U123": "Alice", "UBOT": "Open SWE"})),
         cast(dict, kwargs.get("logins_by_user_id", {})),
         person_ids_by_user_id=cast(dict, kwargs.get("person_ids_by_user_id", {})),
+        channel_names_by_id=cast(dict, kwargs.get("channel_names_by_id", {})),
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
@@ -2158,6 +2160,30 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_slack_context_labels_mentioned_people_with_their_names() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "cc <@U456> and <@U000> for viz", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> go", "user": "U123"},
+        ],
+        user_names_by_id={"U123": "Alice", "U456": "Bob <B>"},
+    )
+
+    assert "cc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; and &lt;@U000&gt; for viz" in str(contents)
+
+
+def test_slack_context_names_unnamed_channel_mentions() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "see <#C456|>, <#C789|old-name>, <#C000>", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> go", "user": "U123"},
+        ],
+        channel_names_by_id={"C456": "eng", "C789": "new-name"},
+    )
+
+    assert "see &lt;#C456|eng&gt;, &lt;#C789|old-name&gt;, &lt;#C000&gt;" in str(contents)
 
 
 def test_slack_context_never_replays_open_swes_own_replies(
@@ -2424,6 +2450,74 @@ def test_process_slack_mention_queues_a_message_edit_instead_of_running(
     )
     assert "actually use PR 5889" in text
     assert "edited" in text
+
+
+def test_queued_slack_edit_names_people_and_public_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    channels = {
+        "C9": SlackChannel(
+            id="C9",
+            name="eng",
+            payload={
+                "id": "C9",
+                "name": "eng",
+                "is_channel": True,
+                "is_private": False,
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            },
+        ),
+        "C8": SlackChannel(
+            id="C8",
+            name="secret",
+            payload={"id": "C8", "name": "secret", "is_channel": True, "is_private": True},
+        ),
+    }
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        captured["queued"] = content
+        return True
+
+    async def fake_load(channel_id: str) -> SlackChannel | None:
+        return channels.get(channel_id)
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(slack_webhooks.SlackChannel, "load", fake_load)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000300",
+                    "user_id": "U123",
+                    "text": "<@UBOT> ask <@U456> in <#C9|> not <#C8|>",
+                    "bot_user_id": "UBOT",
+                    "message_update": True,
+                    "attachments": [{"is_share": True, "text": "cc <@U777> in <#C9>"}],
+                }
+            ),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
+        )
+    )
+
+    text = "\n".join(
+        block["text"]
+        for block in cast(list, captured["queued"])
+        if isinstance(block, dict) and block.get("text")
+    )
+    assert "ask <@U456|Teammate> in <#C9|eng> not <#C8|>" in text
+    assert "U777" in cast(list, captured["user_ids"])
 
 
 def test_process_slack_mention_runs_an_edit_when_queueing_fails(
