@@ -16,12 +16,6 @@ FETCH = Tool(name="fetch", inputSchema={"type": "object"})
 @pytest.fixture(autouse=True)
 def encryption(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    monkeypatch.setenv("REDIS_URI", "_FAKE")
-    monkeypatch.setenv("DATABASE_URI", ":memory:")
-    from langgraph_api import cache
-
-    if hasattr(cache, "_CACHE"):
-        cache._CACHE.clear()
 
 
 async def save(**kwargs):
