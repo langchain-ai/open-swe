@@ -38,7 +38,8 @@ class _Phase:
 _PHASES: dict[str, list[_Phase]] = {}
 
 
-def _apm_span(name: str, metadata: dict[str, Any]):
+def apm_span(name: str, tags: dict[str, Any]):
+    """Open a Datadog APM span, or a no-op when ddtrace is not installed."""
     try:
         from ddtrace.trace import tracer  # pyright: ignore[reportMissingImports]
     except ImportError:
@@ -47,9 +48,9 @@ def _apm_span(name: str, metadata: dict[str, Any]):
         except ImportError:
             return nullcontext()
     span = tracer.trace(name, service="openswe", resource=name)
-    for key, value in metadata.items():
+    for key, value in tags.items():
         if value is not None:
-            span.set_tag(f"startup.{key}", value)
+            span.set_tag(key, value)
     return span
 
 
@@ -89,7 +90,10 @@ async def aphase(thread_id: str | None, name: str, **metadata: Any) -> AsyncIter
         return
     phase = _open(thread_id, name, metadata)
     try:
-        with _apm_span(f"agent.startup.{name}", {"thread_id": thread_id, **metadata}):
+        tags = {
+            f"startup.{key}": value for key, value in {"thread_id": thread_id, **metadata}.items()
+        }
+        with apm_span(f"agent.startup.{name}", tags):
             yield
     except BaseException as exc:
         _close(phase, exc)

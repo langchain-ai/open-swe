@@ -194,7 +194,7 @@ async def _load_tools(
     source: MCPSource, record: MCPConnection, sources: tuple[MCPSource, ...]
 ) -> list[BaseTool]:
     try:
-        definitions = await ttl_cache.cached(
+        definitions = await ttl_cache.cached_stale_while_revalidate(
             "mcp:" + json.dumps((source.namespace, record.name, record.revision)),
             600,
             partial(discover_tools, record, source.namespace),
