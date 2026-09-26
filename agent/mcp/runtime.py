@@ -5,10 +5,11 @@ import hashlib
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Any, Literal, get_args
 
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
@@ -21,14 +22,21 @@ from langchain_mcp_adapters.sessions import (
 )
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 
+from agent.database import postgres
+from agent.mcp.catalog import CATALOG_TTL, CatalogKey, MCPToolCatalog, catalog_key
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
 from agent.utils import ttl_cache
+from agent.utils.startup_trace import apm_span
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
+
+type CatalogOutcome = Literal["hit", "stale", "miss", "memory", "failed"]
+
+_REFRESHES: dict[CatalogKey, asyncio.Task[None]] = {}
 
 
 @dataclass(frozen=True)
@@ -190,25 +198,96 @@ def _wrap_tool(
     )
 
 
-async def _load_tools(
-    source: MCPSource, record: MCPConnection, sources: tuple[MCPSource, ...]
-) -> list[BaseTool]:
+async def _discover_and_store(
+    record: MCPConnection, namespace: tuple[str, ...], *, background: bool
+) -> list[Tool]:
+    with apm_span("mcp.discover", {"mcp.name": record.name, "mcp.background": background}):
+        definitions = await discover_tools(record, namespace)
     try:
-        definitions = await ttl_cache.cached_stale_while_revalidate(
-            "mcp:" + json.dumps((source.namespace, record.name, record.revision)),
-            600,
-            partial(discover_tools, record, source.namespace),
+        await MCPToolCatalog.save(catalog_key(namespace, record.name), record.revision, definitions)
+    except Exception:
+        logger.warning("MCP catalog save failed", extra={"mcp_name": record.name}, exc_info=True)
+    return definitions
+
+
+async def _refresh(record: MCPConnection, namespace: tuple[str, ...]) -> None:
+    try:
+        await _discover_and_store(record, namespace, background=True)
+    except Exception as exc:
+        # discover_tools already redacted the message.
+        logger.warning(
+            "MCP catalog refresh failed", extra={"mcp_name": record.name, "mcp_error": str(exc)}
         )
-        return [
+
+
+def _schedule_refresh(record: MCPConnection, namespace: tuple[str, ...]) -> None:
+    key = catalog_key(namespace, record.name)
+    running = _REFRESHES.get(key)
+    if running is not None and not running.done():
+        return
+    task = asyncio.create_task(_refresh(record, namespace))
+    _REFRESHES[key] = task
+    task.add_done_callback(lambda _: _REFRESHES.pop(key, None))
+
+
+async def _definitions(
+    source: MCPSource, record: MCPConnection, stored: MCPToolCatalog | None
+) -> tuple[list[Tool], CatalogOutcome]:
+    if stored is not None and stored.revision == record.revision:
+        if stored.stale:
+            _schedule_refresh(record, source.namespace)
+            return stored.definitions(), "stale"
+        return stored.definitions(), "hit"
+    return await _discover_and_store(record, source.namespace, background=False), "miss"
+
+
+async def _cached_definitions(source: MCPSource, record: MCPConnection) -> list[Tool]:
+    return await ttl_cache.cached_stale_while_revalidate(
+        "mcp:" + json.dumps((source.namespace, record.name, record.revision)),
+        CATALOG_TTL.total_seconds(),
+        partial(discover_tools, record, source.namespace),
+    )
+
+
+async def _load_tools(
+    source: MCPSource,
+    record: MCPConnection,
+    sources: tuple[MCPSource, ...],
+    stored: dict[CatalogKey, MCPToolCatalog] | None,
+) -> tuple[list[BaseTool], CatalogOutcome]:
+    try:
+        if stored is None:
+            definitions, outcome = await _cached_definitions(source, record), "memory"
+        else:
+            definitions, outcome = await _definitions(
+                source, record, stored.get(catalog_key(source.namespace, record.name))
+            )
+        tools = [
             _wrap_tool(
                 record.name, record.url, record.transport, definition, source.namespace, sources
             )
             for definition in definitions
             if definition.name in record.allowed_tools
         ]
+        return tools, outcome
     except Exception:
         logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
-        return []
+        return [], "failed"
+
+
+async def _stored_catalogs(
+    connections: list[tuple[MCPSource, MCPConnection]],
+) -> dict[CatalogKey, MCPToolCatalog] | None:
+    """Stored catalogs for these connections, or None to fall back to the process cache."""
+    if not postgres.configured():
+        return None
+    try:
+        return await MCPToolCatalog.load_all(
+            [catalog_key(source.namespace, record.name) for source, record in connections]
+        )
+    except Exception:
+        logger.warning("MCP catalog read failed", exc_info=True)
+        return None
 
 
 async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> list[BaseTool]:
@@ -224,13 +303,23 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
         return []
+    connections = [
+        (source, record)
+        for _, (source, record) in sorted(resolved.items())
+        if record.enabled
+        and record.allowed_tools
+        and (connection_name is None or record.name == connection_name)
+    ]
+    stored = await _stored_catalogs(connections)
     groups = await asyncio.gather(
-        *(
-            _load_tools(source, record, sources)
-            for _, (source, record) in sorted(resolved.items())
-            if record.enabled
-            and record.allowed_tools
-            and (connection_name is None or record.name == connection_name)
-        )
+        *(_load_tools(source, record, sources, stored) for source, record in connections)
     )
-    return [tool for group in groups for tool in group]
+    outcomes = Counter(outcome for _, outcome in groups)
+    logger.info(
+        "MCP catalogs resolved",
+        extra={
+            f"mcp_catalog_{outcome}": outcomes[outcome]
+            for outcome in get_args(CatalogOutcome.__value__)
+        },
+    )
+    return [tool for tools, _ in groups for tool in tools]
