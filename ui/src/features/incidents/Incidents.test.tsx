@@ -334,7 +334,10 @@ it("saves settings as a versioned request and preserves unsaved values on confli
   const prefix = await screen.findByRole("textbox", { name: "Channel prefix" })
   fireEvent.change(prefix, { target: { value: "incident-" } })
   const excluded = screen.getByRole("combobox", { name: "Excluded channels" })
+  excluded.focus()
+  fireEvent.keyDown(excluded, { key: "ArrowDown" })
   fireEvent.change(excluded, { target: { value: "C0000000001" } })
+  await screen.findByRole("option", { name: /C0000000001/ })
   fireEvent.keyDown(excluded, { key: "Enter" })
   fireEvent.click(screen.getByRole("button", { name: "Save settings" }))
   await waitFor(() =>

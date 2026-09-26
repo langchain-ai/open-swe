@@ -824,6 +824,7 @@ def _fully_populated(now: str) -> Workspace:
         base_snapshot_id="snap-base",
         repos=["acme/api"],
         slack_channel_ids=["C0API"],
+        kitchen_channel_ids=["C0API"],
         mem_bytes=8 * 1024**3,
         vcpus=4,
         fs_capacity_bytes=128 * 1024**3,

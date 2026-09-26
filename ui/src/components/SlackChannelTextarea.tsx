@@ -76,7 +76,7 @@ export function SlackChannelTextarea({
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (open && active) {
+    if (open && active && !event.nativeEvent.isComposing) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault()
         const step = event.key === "ArrowDown" ? 1 : -1
