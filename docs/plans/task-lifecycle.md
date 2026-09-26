@@ -551,14 +551,6 @@ Task states extend past `merged` without changing the model: `deploying`, `deplo
 per repo. A rollback is a revert PR added to the same task, which then runs the
 same cycle.
 
-## Rollout
-
-1. Backend core: schema and migration, `create_task` / `close_task` / `get_task`,
-   the tool gate, PR conditions and task state, shepherd triggers, wake-ups and
-   budget, staleness, backfill, deletions. About 3 days.
-2. Merge: shared readiness, auto-merge preference and override, merge ordering,
-   `set_task_options`. About 1 day.
-3. Takeover and release across dashboard, GitHub, and tools. About 1 day.
 
 ## Open questions
 
