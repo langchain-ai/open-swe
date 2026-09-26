@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
+from agent.github.ci import RequiredCheck
 from agent.review import routes as review_routes
 
 
@@ -77,6 +78,7 @@ async def test_payload_json_keys_stay_camel_case_for_the_dashboard_client():
         "ci",
         "failingChecks",
         "pendingChecks",
+        "missingChecks",
         "detailsLoading",
     }
     payload = prs.OpenPullRequests(
@@ -251,6 +253,39 @@ async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monk
     assert fetches.await_count == 3
     assert result is not None
     assert result.mergeable is True and result.merge_state == "clean"
+
+
+@pytest.mark.parametrize(
+    ("merge_state", "runs", "missing", "reads_rules"),
+    [
+        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], True),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
+        ("clean", [{"name": "unit", "status": "completed"}], [], False),
+    ],
+)
+async def test_blocked_merge_names_required_checks_the_head_never_reported(
+    monkeypatch, merge_state, runs, missing, reads_rules
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": merge_state,
+        "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
+    }
+    monkeypatch.setattr(prs, "_fetch_pull_request", AsyncMock(return_value=pull))
+    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(
+        prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+    )
+    rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
+    monkeypatch.setattr(prs, "read_required_checks", rules)
+    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    assert result is not None
+    assert result.missing_checks == missing
+    assert rules.await_count == int(reads_rules)
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):

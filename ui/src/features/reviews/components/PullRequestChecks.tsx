@@ -3,7 +3,11 @@ import type { OpenPullRequest } from "@/lib/api"
 const inlineLimit = 3
 
 export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
-  if (pr.failingChecks.length === 0 && pr.pendingChecks.length === 0)
+  if (
+    pr.failingChecks.length === 0 &&
+    pr.pendingChecks.length === 0 &&
+    pr.missingChecks.length === 0
+  )
     return null
   const overflow = pr.failingChecks.slice(inlineLimit)
   return (
@@ -27,6 +31,11 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
             ))}
           </ul>
         </details>
+      )}
+      {pr.missingChecks.length > 0 && (
+        <p className="text-amber-700 dark:text-amber-400">
+          Required, never reported: {pr.missingChecks.join(" · ")}
+        </p>
       )}
       {pr.pendingChecks.length > 0 && (
         <details className="text-muted-foreground">
