@@ -230,7 +230,8 @@ Human comments and reviews keep flowing through the existing untagged-comment
 path, which already carries the text. The shepherd only records the resulting
 conditions.
 
-Retry budget: after 5 wake-ups on one PR without any of its actionable conditions
+Retry budget: one shared budget per PR across CI failures, conflicts, and
+findings. After 5 wake-ups on one PR without any of its actionable conditions
 clearing (a new head SHA alone is not progress), the task is blocked with reason
 `retry_budget_exhausted` on that PR.
 
@@ -339,9 +340,15 @@ replaces the team request with a request to the one member it picks; that
 member's approval still satisfies code owner review. By default a PR gets one
 reviewer, and more only when the rules below require them.
 
-Candidates are people with write access to the repo who are not authors, drawn
-from `CODEOWNERS` entries for the changed paths and from recent committers and
-reviewers of the changed files.
+Candidates are registered Open SWE users with write access to the repo who are
+not authors, drawn from `CODEOWNERS` entries for the changed paths and from recent
+committers and reviewers of the changed files. Only registered users can get the
+Slack DM and acknowledge, so nobody else is picked. A required code-owner slot
+whose owners include no registered user blocks the task with `no_reviewer`.
+
+Anyone whose Slack presence or status marks them away (vacation, out sick, away)
+is skipped. Presence is read from Slack at pick time for the top candidates only,
+since it changes too often to store.
 
 Each candidate is scored on:
 
@@ -489,8 +496,11 @@ release it, then evaluates immediately. The driver thread's first wake-up
 includes the full current state (CI, findings, unresolved threads) so it can
 catch up in one run.
 
-Fork PRs are accepted only when `maintainer_can_modify` is true; otherwise the
-takeover is refused with that reason.
+A takeover is refused, with the reason, when:
+
+- the PR's author is not a registered Open SWE user. Their comments and reviews
+  could never reach the agent, so the PR could not be shepherded through review
+- the PR comes from a fork and `maintainer_can_modify` is false
 
 ### Release
 
@@ -551,13 +561,3 @@ Task states extend past `merged` without changing the model: `deploying`, `deplo
 per repo. A rollback is a revert PR added to the same task, which then runs the
 same cycle.
 
-
-## Open questions
-
-- On a taken-over PR, should comments from a PR author who is not a registered
-  Open SWE user wake the driver thread? Today they are dropped.
-- Is 5 the right retry budget, and should it differ for CI versus findings?
-- Should a reviewer who is not a registered Open SWE user be assignable? GitHub
-  review requests work for them, but they get no Slack DM or dashboard view.
-- Should reviewer scoring also skip people who are away (Slack status, calendar),
-  and learn from how quickly each person has reviewed before?
