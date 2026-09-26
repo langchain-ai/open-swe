@@ -446,7 +446,7 @@ async def test_expired_bot_token_is_re_minted_at_its_original_scope(
 
     assert await github_token.resolve_thread_github_token(config) == "fresh-token"
     assert await github_token.resolve_thread_github_token(config) == "fresh-token"
-    mint.assert_awaited_once_with(repositories=["r"])
+    mint.assert_awaited_once_with(repositories=("r",))
 
 
 @pytest.mark.asyncio
