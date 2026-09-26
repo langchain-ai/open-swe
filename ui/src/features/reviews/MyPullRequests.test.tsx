@@ -87,6 +87,7 @@ const pull = (
   ci: "passing",
   failingChecks: [],
   pendingChecks: [],
+  missingChecks: [],
   unresolvedThreads: 0,
   ...fields,
 })
@@ -534,6 +535,25 @@ describe("My PRs", () => {
     expect(within(card).queryByText("Status unavailable")).toBeNull()
     // The card offers the merge and lets GitHub reject it.
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+  })
+
+  it("names a required check that never reported instead of offering the merge", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewDecision: "approved",
+          missingChecks: ["Lint Final Results"],
+        }),
+      ],
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(
+      within(card).getByText("Required, never reported: Lint Final Results")
+    ).toBeTruthy()
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).getByRole("button", { name: "Update branch" })).toBeTruthy()
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {

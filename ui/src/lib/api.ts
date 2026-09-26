@@ -893,6 +893,9 @@ export interface OpenPullRequest {
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
   failingChecks: string[]
   pendingChecks: string[]
+  // Required by the base branch but never reported on the head, so GitHub
+  // refuses the merge.
+  missingChecks: string[]
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
