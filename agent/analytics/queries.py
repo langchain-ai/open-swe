@@ -85,7 +85,10 @@ async def pr_merge_rate_by_model(
 ) -> dict[str, Any]:
     days = maturity_days or ENV.ANALYTICS_PR_MATURITY_DAYS.get_int(14)
     days = min(max(days, 1), 365)
-    minimum = 1 if admin else ENV.ANALYTICS_MIN_COHORT_SIZE.get_int(5)
+    # Every eligible model/effort group with at least one PR is reported to
+    # every authenticated viewer; small samples are a UI disclosure choice,
+    # not a server-side cohort suppression.
+    minimum = 1
     as_of = datetime.now(UTC)
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
@@ -235,13 +238,6 @@ async def pr_merge_rate_by_model(
                     "mature_cohort_merge_share": cohort["merged"] / mature if mature else None,
                 }
             )
-        if not admin:
-            for cohort in cohorts:
-                efforts = cohort["efforts"]
-                if isinstance(efforts, list) and any(
-                    effort["cohort_size"] < minimum for effort in efforts
-                ):
-                    cohort["efforts"] = []
         cohorts.sort(key=lambda cohort: (-_integer(cohort["cohort_size"]), str(cohort["model_id"])))
         unavailable_threads = []
         if admin:
@@ -269,14 +265,18 @@ async def pr_merge_rate_by_model(
         elif metadata["collection_started_at"] is None:
             status = "not_started"
         else:
+            # Attribution-unavailable PRs are excluded from cohorts but still
+            # count as recorded PRs; without them the period has no PRs at all.
             has_prs = await conn.scalar(
                 text(
                     "SELECT EXISTS (SELECT 1 FROM pr_projection WHERE workspace_id = :workspace_id "
-                    "AND opened_at >= :start AND opened_at <= :as_of)"
+                    "AND opened_at >= :start AND opened_at <= :as_of "
+                    "AND originating_model_id IS NOT NULL "
+                    "AND model_attribution_quality <> 'unavailable')"
                 ),
                 {"workspace_id": workspace_id(), "start": start, "as_of": as_of},
             )
-            status = "suppressed" if has_prs else "no_prs"
+            status = "ready" if has_prs else "no_prs"
     return {
         "status": status,
         "metric": "pr_outcomes_by_opening_invocation_configured_model",
@@ -287,7 +287,6 @@ async def pr_merge_rate_by_model(
         ),
         "maturity_days": days,
         "period": period if period in {"24h", "7d", "30d", "all"} else "30d",
-        "suppression_threshold": minimum,
         "cohorts": cohorts,
         "unavailable_thread_ids": unavailable_threads,
         **metadata,

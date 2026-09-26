@@ -23,10 +23,7 @@ async def reporting_db(deployment_db):
         )
 
 
-async def test_report_distinguishes_capture_delivery_period_and_suppression(
-    reporting_db, monkeypatch
-):
-    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "2")
+async def test_report_distinguishes_capture_delivery_and_empty_periods(reporting_db):
     report = await queries.pr_merge_rate_by_model(period="all")
     assert report["status"] == "not_started"
     assert report["collection_started_at"] is None
@@ -62,7 +59,9 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     before_delivery = datetime.now(UTC)
     assert await outbox.deliver_batch() == 1
     report = await queries.pr_merge_rate_by_model(period="all")
-    assert report["status"] == "suppressed"
+    # The only PR has unavailable attribution, so there are no cohorts; the
+    # period itself is "no PRs" for this report, not a suppression state.
+    assert report["status"] == "no_prs"
     assert report["cohorts"] == []
     assert report["data_source"] == "event_projections"
     processed_at = datetime.fromisoformat(report["last_processed_at"])
@@ -75,8 +74,9 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     assert report["status"] == "no_prs"
     assert report["cohorts"] == []
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "suppressed"
+    assert report["status"] == "no_prs"
     assert report["cohorts"] == []
+    # Attribution diagnostics stay admin-only.
     assert report["unavailable_thread_ids"] == [str(opened.thread_id)]
 
     async with postgres.transaction() as conn:
@@ -86,7 +86,7 @@ async def test_report_distinguishes_capture_delivery_period_and_suppression(
     await postgres.close()
     await initialize_database()
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
-    assert report["status"] == "suppressed"
+    assert report["status"] == "no_prs"
     assert report["unavailable_thread_ids"] == []
     assert datetime.fromisoformat(report["last_processed_at"]) == processed_at
 
@@ -213,34 +213,20 @@ async def _ingest_model_effort_prs(efforts: list[str]) -> None:
         )
 
 
-async def test_merge_rates_suppress_effort_breakdown_below_threshold(reporting_db, monkeypatch):
-    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "3")
+@pytest.mark.parametrize("viewer", ["member", "admin"])
+async def test_small_effort_groups_are_reported_identically_to_every_signed_in_viewer(
+    reporting_db, viewer
+):
+    """No cohort suppression: even a one-PR effort group is in every viewer's payload."""
     await _ingest_model_effort_prs(["high", "high", "high", "low"])
 
-    report = await queries.pr_merge_rate_by_model(period="all")
-    cohort = report["cohorts"][0]
-    assert cohort["cohort_size"] == 4
-    assert cohort["efforts"] == []
-
-    report = await queries.pr_merge_rate_by_model(period="all", admin=True)
+    report = await queries.pr_merge_rate_by_model(period="all", admin=viewer == "admin")
+    assert report["status"] == "ready"
     cohort = report["cohorts"][0]
     assert cohort["cohort_size"] == 4
     assert [(effort["effort"], effort["cohort_size"]) for effort in cohort["efforts"]] == [
         ("high", 3),
         ("low", 1),
-    ]
-
-
-async def test_merge_rates_keep_efforts_when_all_groups_meet_threshold(reporting_db, monkeypatch):
-    monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "3")
-    await _ingest_model_effort_prs(["high", "high", "high", "low", "low", "low"])
-
-    report = await queries.pr_merge_rate_by_model(period="all")
-    cohort = report["cohorts"][0]
-    assert cohort["cohort_size"] == 6
-    assert [(effort["effort"], effort["cohort_size"]) for effort in cohort["efforts"]] == [
-        ("high", 3),
-        ("low", 3),
     ]
 
 
