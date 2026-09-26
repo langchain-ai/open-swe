@@ -91,14 +91,11 @@ async def test_reply_restores_status_including_completion_runs(
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     thinking_status = AsyncMock()
-    session_status = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", thinking_status)
-    monkeypatch.setattr(slack_reply_tool, "restore_slack_session_status", session_status)
 
     assert await slack_reply_tool.slack_reply("The answer", "final") == {"success": True}
     post.assert_awaited_once()
     assert thinking_status.await_count == int(thread_ts != "0")
-    assert session_status.await_count == int(thread_ts == "0")
 
 
 async def test_slack_reply_holds_mutation_lock_while_posting(

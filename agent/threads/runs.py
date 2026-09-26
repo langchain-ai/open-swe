@@ -4,7 +4,7 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -23,7 +23,10 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.repo_access import require_repo_access_for_workspace
+from agent.dashboard.repo_access import (
+    require_repo_access_for_user,
+    require_repo_access_for_workspace,
+)
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
@@ -39,7 +42,7 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt as render_prompt
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -408,6 +411,48 @@ async def _build_dashboard_configurable(
     return configurable
 
 
+async def start_dashboard_thread(
+    login: str,
+    email: str | None,
+    *,
+    title: str,
+    prompt: str,
+    repos: Sequence[str],
+    visibility: Literal["public", "private"],
+) -> str:
+    """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    repo_configs: list[dict[str, str]] = []
+    for repo in repos:
+        repo_config = _parse_repo(repo)
+        if not repo_config:
+            raise HTTPException(422, "repos must be owner/name")
+        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+        repo_configs.append(repo_config)
+    await _ensure_dashboard_github_token(login)
+    primary = repo_configs[0] if repo_configs else {}
+    thread = await _create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config=primary,
+        prompt=prompt,
+        title=title,
+        visibility=visibility,
+        workspace=await _resolve_requested_workspace(None, primary, login=login),
+    )
+    thread_id = str(thread["thread_id"])
+    client = langgraph_client()
+    await dispatch_agent_run(
+        thread_id,
+        prompt,
+        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
+        source=DASHBOARD_SOURCE,
+        thread_title=None,
+        client=client,
+    )
+    return thread_id
+
+
 def _extract_run_id_from_command_response(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None
@@ -649,7 +694,7 @@ async def _attributed_run_messages(
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
-            (_PULL_REQUEST_THREAD_SYSTEM, render_prompt("runs/pull-request-thread.md", url=pr_url))
+            (_PULL_REQUEST_THREAD_SYSTEM, render_prompt("runs/pull-request-thread", url=pr_url))
         )
     structured = build_input_messages(
         content,
