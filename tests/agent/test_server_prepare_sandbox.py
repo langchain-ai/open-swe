@@ -43,10 +43,31 @@ async def test_prepare_retries_desktop_sandbox_attach(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_prepare_does_not_notify_when_transient_attach_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = MagicMock()
+    proxy.ready = AsyncMock(
+        side_effect=[SandboxRetryableConnectionError("proxy PATCH returned HTTP 500"), "backend"]
+    )
+    notify = AsyncMock()
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", lambda _: proxy)
+    monkeypatch.setattr(server, "schedule_thread_title_generation", MagicMock())
+    monkeypatch.setattr(server, "resolve_sandbox_work_dir", AsyncMock(return_value="/work"))
+    monkeypatch.setattr(server, "construct_system_prompt", lambda **_: "prompt")
+    monkeypatch.setattr(server, "post_sandbox_unreachable_notification", notify)
+
+    result = await _middleware()._prepare({}, MagicMock())
+
+    assert result == {"work_dir": "/work", "rendered_system_prompt": "prompt"}
+    notify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_prepare_notifies_without_sandbox_id_for_retryable_attach_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    error = SandboxRetryableConnectionError("gateway unavailable")
+    error = SandboxRetryableConnectionError("proxy PATCH returned HTTP 500")
     proxy = MagicMock()
     proxy.ready = AsyncMock(side_effect=error)
     notify = AsyncMock()

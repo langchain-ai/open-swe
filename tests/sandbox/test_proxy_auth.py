@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes.providers.langsmith import (
     PROXY_GH_TOKEN_PLACEHOLDER,
     configure_sandbox_proxy,
 )
+from agent.sandboxes.state import SandboxUnreachableError
 from agent.workspaces.store import Workspace
 
 
@@ -547,3 +549,46 @@ class TestRefreshProxyOnSandboxReuse:
 
             assert excinfo.value.sandbox_id == "sandbox-stale"
             mock_create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_retryable_proxy_refresh_failure_raises_retryable_error(self) -> None:
+        mock_sandbox = MagicMock(id="sandbox-stale", aexecute=AsyncMock())
+        request = httpx2.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
+        )
+        response = httpx2.Response(500, request=request)
+
+        with patch(
+            "agent.sandboxes.lifecycle._refresh_github_proxy",
+            new_callable=AsyncMock,
+            side_effect=httpx2.HTTPStatusError(
+                "Internal server error", request=request, response=response
+            ),
+        ):
+            from agent.sandboxes.lifecycle import _refresh_github_proxy_or_fail
+
+            with pytest.raises(SandboxRetryableConnectionError):
+                await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [404, 410])
+    async def test_terminal_proxy_refresh_status_is_not_retryable(self, status_code: int) -> None:
+        mock_sandbox = MagicMock(id="sandbox-stale", aexecute=AsyncMock())
+        request = httpx2.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
+        )
+        response = httpx2.Response(status_code, request=request)
+
+        with patch(
+            "agent.sandboxes.lifecycle._refresh_github_proxy",
+            new_callable=AsyncMock,
+            side_effect=httpx2.HTTPStatusError(
+                f"HTTP {status_code}", request=request, response=response
+            ),
+        ):
+            from agent.sandboxes.lifecycle import _refresh_github_proxy_or_fail
+
+            with pytest.raises(SandboxUnreachableError) as excinfo:
+                await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
+
+            assert excinfo.value.sandbox_id == "sandbox-stale"
