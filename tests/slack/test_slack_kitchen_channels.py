@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from agent.slack import dashboard_routes
 from agent.slack.channels import SlackChannel
-from agent.slack.untagged_channels import SetUntaggedChannel
+from agent.slack.kitchen_channels import SetKitchenChannel
 
 
 @pytest.mark.parametrize(
@@ -25,17 +25,17 @@ async def test_channel_opt_in_checks_fresh_slack_eligibility(
     load = AsyncMock(return_value=SlackChannel(id="C123", payload=payload))
     put = AsyncMock()
     monkeypatch.setattr(dashboard_routes.SlackChannel, "load", load)
-    monkeypatch.setattr(dashboard_routes.UNTAGGED_CHANNELS, "put", put)
+    monkeypatch.setattr(dashboard_routes.KITCHEN_CHANNELS, "put", put)
 
     if allowed:
-        await dashboard_routes.api_enable_untagged_channel(
-            SetUntaggedChannel(channel_id="C123"), {"sub": "admin"}
+        await dashboard_routes.api_enable_kitchen_channel(
+            SetKitchenChannel(channel_id="C123"), {"sub": "admin"}
         )
         put.assert_awaited_once()
     else:
         with pytest.raises(HTTPException) as error:
-            await dashboard_routes.api_enable_untagged_channel(
-                SetUntaggedChannel(channel_id="C123"), {"sub": "admin"}
+            await dashboard_routes.api_enable_kitchen_channel(
+                SetKitchenChannel(channel_id="C123"), {"sub": "admin"}
             )
         assert error.value.status_code == 400
         put.assert_not_awaited()

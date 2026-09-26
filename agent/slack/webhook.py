@@ -1125,7 +1125,7 @@ async def _process_slack_mention_impl(
         text,
         bot_user_id,
         treat_all_messages_as_mentions=treat_all_messages_as_mentions
-        and not request.untagged_channel,
+        and not request.kitchen_channel,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,

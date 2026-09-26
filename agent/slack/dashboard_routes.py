@@ -16,10 +16,10 @@ from agent.slack.allowed_bots import (
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
 from agent.slack.channels import SlackChannel
 from agent.slack.connect import router as connect_router
-from agent.slack.untagged_channels import (
-    UNTAGGED_CHANNELS,
-    SetUntaggedChannel,
-    UntaggedChannel,
+from agent.slack.kitchen_channels import (
+    KITCHEN_CHANNELS,
+    KitchenChannel,
+    SetKitchenChannel,
 )
 
 router = APIRouter(tags=["slack"])
@@ -41,18 +41,18 @@ async def api_list_slack_channels(
     return await list_slack_channels()
 
 
-@router.get("/slack/untagged-channels")
-async def api_list_untagged_channels(
+@router.get("/slack/kitchen-channels")
+async def api_list_kitchen_channels(
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> list[UntaggedChannel]:
-    return await UNTAGGED_CHANNELS.search_all()
+) -> list[KitchenChannel]:
+    return await KITCHEN_CHANNELS.search_all()
 
 
-@router.post("/slack/untagged-channels")
-async def api_enable_untagged_channel(
-    body: SetUntaggedChannel,
+@router.post("/slack/kitchen-channels")
+async def api_enable_kitchen_channel(
+    body: SetKitchenChannel,
     _admin: dict[str, Any] = ADMIN_DEP,
-) -> UntaggedChannel:
+) -> KitchenChannel:
     channel = await SlackChannel.load(body.channel_id, use_cache=False)
     if (
         channel is None
@@ -60,15 +60,15 @@ async def api_enable_untagged_channel(
         or channel.payload.get("is_member") is not True
     ):
         raise HTTPException(400, "Choose an internal Slack channel that Open SWE has joined.")
-    return await UNTAGGED_CHANNELS.put(body.channel_id, UntaggedChannel(channel_id=body.channel_id))
+    return await KITCHEN_CHANNELS.put(body.channel_id, KitchenChannel(channel_id=body.channel_id))
 
 
-@router.delete("/slack/untagged-channels/{channel_id}")
-async def api_disable_untagged_channel(
+@router.delete("/slack/kitchen-channels/{channel_id}")
+async def api_disable_kitchen_channel(
     channel_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, bool]:
-    await UNTAGGED_CHANNELS.delete(SetUntaggedChannel(channel_id=channel_id).channel_id)
+    await KITCHEN_CHANNELS.delete(SetKitchenChannel(channel_id=channel_id).channel_id)
     return {"ok": True}
 
 

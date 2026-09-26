@@ -4,28 +4,28 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 
-const QUERY_KEY = ["untaggedSlackChannels"]
+const QUERY_KEY = ["kitchenChannels"]
 
-export function UntaggedSlackChannelsSection() {
+export function KitchenChannelsSection() {
   const qc = useQueryClient()
   const [selected, setSelected] = useState("")
   const channels = useQuery({
     queryKey: QUERY_KEY,
-    queryFn: api.listUntaggedChannels,
+    queryFn: api.listKitchenChannels,
   })
   const directory = useQuery({
     queryKey: ["slackChannelDirectory"],
     queryFn: api.listSlackChannels,
   })
   const enable = useMutation({
-    mutationFn: api.enableUntaggedChannel,
+    mutationFn: api.enableKitchenChannel,
     onSuccess: () => {
       setSelected("")
       void qc.invalidateQueries({ queryKey: QUERY_KEY })
     },
   })
   const disable = useMutation({
-    mutationFn: api.disableUntaggedChannel,
+    mutationFn: api.disableKitchenChannel,
     onSuccess: () => void qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
   const names = new Map(
@@ -36,7 +36,7 @@ export function UntaggedSlackChannelsSection() {
   return (
     <div className="space-y-3 border-t border-border p-4">
       <div>
-        <h3 className="text-sm font-medium">Untagged channel messages</h3>
+        <h3 className="text-sm font-medium">Kitchen channels</h3>
         <p className="text-xs/relaxed text-muted-foreground">
           Opt in individual Slack channels: a top-level message starts a thread,
           and replies continue it without mentioning Open SWE. Other channels

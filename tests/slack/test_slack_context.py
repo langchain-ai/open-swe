@@ -1563,9 +1563,9 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
-@pytest.mark.parametrize("untagged_channel", [True, False])
+@pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, untagged_channel: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
 ) -> None:
     import importlib
 
@@ -1597,8 +1597,8 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
                 user_id="U456",
                 text="<@UBOT> create the PR" if explicitly_tagged else "create the PR",
                 bot_user_id="UBOT",
-                untagged_channel=untagged_channel,
-                treat_all_messages_as_mentions=untagged_channel,
+                kitchen_channel=kitchen_channel,
+                treat_all_messages_as_mentions=kitchen_channel,
             ),
             webhook_common.SlackRepoResolution(
                 Repo(owner="langchain-ai", name="open-swe"), explicit=True
