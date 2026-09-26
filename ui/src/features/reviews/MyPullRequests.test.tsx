@@ -553,7 +553,9 @@ describe("My PRs", () => {
       within(card).getByText("Required, never reported: Lint Final Results")
     ).toBeTruthy()
     expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
-    expect(within(card).getByRole("button", { name: "Update branch" })).toBeTruthy()
+    expect(
+      within(card).getByRole("button", { name: "Update branch" })
+    ).toBeTruthy()
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {
