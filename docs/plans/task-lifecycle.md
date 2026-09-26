@@ -7,6 +7,13 @@ every thread working on it (root thread, subthreads, coordinators, fix and
 follow-up threads) and every pull request it produces or adopts, across any
 number of repositories.
 
+A task has an owner, who is accountable, and zero or more assignees, who must act
+next. There are no assignees while the agent is handling things. People are
+assigned when the task needs them: reviewers (never the authors) while it waits
+for human review, someone to resolve it when it is `blocked`, and the owner when
+it is ready to merge with auto-merge off. `blocked` is its own state, separate
+from waiting for review.
+
 An always-on, model-free **shepherd** tracks each of the task's pull requests from
 open to merge. It recomputes a stage for every PR from GitHub state on each
 relevant webhook, keeps one timeline per task, wakes the task's driver thread only
@@ -43,7 +50,7 @@ task.
 task
   id                uuid7
   title             text
-  owner_user_id     uuid      -> user; whose preferences apply
+  owner_user_id     uuid      -> user; accountable, whose preferences apply
   driver_thread_id  text      thread the shepherd wakes
   auto_merge        bool null null = use owner's preference
   stage             text      derived, cached (see Task stage)
@@ -64,6 +71,15 @@ task_pull_request
   blockers          jsonb     typed list, see Stages
   evaluated_sha     text
   evaluated_at      timestamptz
+
+task_assignee                  who must act now; no rows = the agent has it
+  task_id           uuid
+  user_id           uuid      -> user
+  reason            review | blocked | merge | manual
+  pull_request_id   uuid null the PR it concerns
+  assigned_by       uuid null null = the shepherd
+  assigned_at       timestamptz
+  unique (task_id, user_id, reason, pull_request_id)
 
 task_event                     append-only timeline
   id, task_id, pull_request_id null, kind, from_stage, to_stage,
@@ -106,9 +122,9 @@ Blockers (all that apply, not just the first):
 | `unresolved_threads` | via existing comment wake-ups | review threads |
 | `ci_pending` | no | running or unreported required checks |
 | `bot_review_pending` | no | repo reviewed by Open SWE and no review for head SHA |
-| `human_review_pending` | no | branch protection requires approvals not yet given |
+| `human_review_pending` (reviewers) | no | a requested or assigned reviewer has not reviewed the head, or branch protection requires approvals not yet given |
 
-Stage is the highest-priority label: `merged`, `closed`, `stalled`, `conflict`,
+Stage is the highest-priority label: `merged`, `closed`, `blocked`, `conflict`,
 `ci_failed`, `changes_requested`, `ci_pending`, `bot_review_pending`,
 `human_review_pending`, `ready`. Drafts evaluate the same way except that review
 blockers are dropped.
@@ -152,21 +168,102 @@ path, which already carries the text. The shepherd only records their effect on
 the stage.
 
 Retry budget: after 5 wake-ups on one PR without the stage improving (a new head
-SHA alone is not progress), the PR moves to `stalled`, the shepherd stops waking,
-and it posts once to the task's thread and Slack thread. A human message on the
-task or a stage improvement clears `stalled`.
+SHA alone is not progress), the PR becomes `blocked` with reason
+`retry_budget_exhausted`.
+
+### Blocked
+
+`blocked` means something went wrong or is missing, and the task cannot move
+until a person resolves it. It is separate from `human_review_pending`, which is
+the expected hand-off to reviewers.
+
+A block records `reason`, a one-paragraph `ask` addressed to the person, and the
+PR it applies to (or none for a task-wide block). Entering `blocked` assigns the
+task (see [Assignment](#assignment)). Reasons:
+
+| Reason | Entered by |
+|---|---|
+| `agent_request` | The agent, via `request_human`, when it needs a decision, access, or information it cannot get: an ambiguous review comment, conflicting reviewer asks, a secret, a product call |
+| `retry_budget_exhausted` | The shepherd, after 5 wake-ups without progress |
+| `merge_failed` | The shepherd, when an auto-merge sequence stops partway |
+| `permission_denied` | The shepherd, when a push, merge, or check read fails on GitHub permissions (a fork without `maintainer_can_modify`, a protected branch, a missing App permission) |
+| `no_reviewer` | The shepherd, when a PR needs human review and no eligible reviewer can be found (see [Assignment](#assignment)) |
+
+While blocked, the shepherd keeps evaluating and recording the timeline but sends
+no wake-ups for the blocked PR (all PRs, for a task-wide block), and auto-merge
+does not run.
+
+A block clears when:
+
+- the assignee (or the owner) replies in the task's thread, Slack thread, or on
+  the PR. The reply wakes the driver thread with the block's `ask` and the answer
+- the person clicks "Unblock" in the task panel, optionally with a note
+- the cause goes away on its own (for example, a human pushes a fix that turns
+  CI green, or a permission is granted), which the next evaluation detects. The
+  shepherd never clears an `agent_request` block on its own
+
+Clearing a block resets the PR's retry budget, removes the `blocked` assignments,
+and records a `task_event`.
+
+### Assignment
+
+A task has zero or more assignees: the people who must act next. With none, the
+agent has it. The owner stays fixed; assignees come and go. Each assignment has a
+reason, so one person can be assigned twice for different things (to review one
+PR and to unblock another).
+
+The task's **authors** are the owner, every PR author, and whoever took a PR
+over. Authors are never assigned to review.
+
+Automatic assignment, applied on stage transitions:
+
+| Stage | Assignees | Reason |
+|---|---|---|
+| `human_review_pending` | the PR's reviewers, excluding authors | `review` |
+| `blocked` | the people named in `request_human`; otherwise the owner, plus the PR author for a block on a taken-over PR | `blocked` |
+| `ready` with auto-merge off | the owner | `merge` |
+| anything else | none from the shepherd | |
+
+Reviewers for a PR, in order:
+
+1. Reviewers already requested on GitHub.
+2. Otherwise, owners of the changed paths from `CODEOWNERS`.
+3. Otherwise, the task is blocked with `no_reviewer`, assigned to the owner, whose
+   answer (or a manual assignment) picks the reviewers.
+
+Assignment and GitHub review requests stay in sync in both directions. Assigning a
+reviewer in Open SWE requests their review on the PR, and a review request made
+on GitHub adds the assignment. A reviewer's `review` assignment ends when they
+submit a review on the current head: an approval removes it, and a
+changes-requested review removes it and returns the PR to the agent. When the
+agent pushes a fix, the shepherd re-requests review from those reviewers and they
+are assigned again. A PR with several reviewers keeps all of them assigned until
+each has reviewed.
+
+Manual assignment: anyone who can see the task can add or remove assignees from
+the task panel, from chat or Slack ("have @alex and @sam review this") through
+`assign_task`, or with `@open-swe assign @login` on a PR. Manual assignments
+(`reason = manual`) survive stage transitions until the person acts (reviews,
+replies, unblocks, merges) or is removed. Assigning a person while the agent is
+working does not stop the agent.
+
+Every change records a `task_event`. Each new assignee is notified once, through a
+Slack DM and a banner in the task panel carrying the reason: the block's `ask`,
+"review <PR>", or "ready to merge". A blocked task also gets a comment on the
+affected PR.
 
 ### Merge
 
 When the task stage becomes `ready`:
 
 - `auto_merge = task.auto_merge ?? owner.preferences.auto_merge_shepherded_prs`
-- Off: post "ready to merge" once to the task thread, Slack thread, and each PR.
+- Off: assign the task to the owner and post "ready to merge" once to the task
+  thread, Slack thread, and each PR.
 - On: merge PRs in `merge_after` order (topological; independent PRs in any
   order) using each repo's merge method, via the merge code generalized out of
   `expedited_review/merge.py`. Re-evaluate each PR immediately before merging it.
-  If a merge fails or a PR stops being ready mid-sequence, stop, mark the task
-  `stalled`, and report which PRs merged.
+  If a merge fails or a PR stops being ready mid-sequence, stop and block the
+  task with `merge_failed`, listing which PRs merged.
 
 ## Entry points
 
@@ -216,16 +313,23 @@ row, records a `task_event`, and posts a PR comment.
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}` |
+| `request_human` | `ask`, `pull_request?`, `assignees?: [login]`; blocks the task (or one PR) with `agent_request`, assigns it, and ends the run |
+| `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| manual`, `pull_request?`; `review` also requests review on GitHub |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
 
 ## API and UI
 
 - Router in `agent/tasks/routes.py` under `/dashboard/api/tasks`: get task,
-  timeline, set options, takeover, release.
+  timeline, set options, assign, unblock, takeover, release, and "assigned to
+  me" listing.
 - Thread right panel gets a Task section: each PR with repo, stage chip, and
-  blockers; the task stage; the timeline; the auto-merge toggle.
-- Sidebar thread rows show the task stage chip.
+  blockers; the task stage; the timeline; the auto-merge toggle; assignees with
+  their reasons and a multi-person picker. A blocked task shows the `ask` as a
+  banner with an Unblock button.
+- Sidebar thread rows show the task stage chip and assignee avatars (none when the
+  agent has it). Tasks assigned to the viewer count toward their attention
+  indicator, and the sidebar gets an "Assigned to me" filter.
 - A standalone tasks list is out of scope for the first pass.
 
 ## Deleted
@@ -267,3 +371,7 @@ same cycle.
 - On a taken-over PR, should comments from a PR author who is not a registered
   Open SWE user wake the driver thread? Today they are dropped.
 - Is 5 the right retry budget, and should it differ for CI versus findings?
+- Should a reviewer who is not a registered Open SWE user be assignable? GitHub
+  review requests work for them, but they get no Slack DM or dashboard view.
+- Should a block that nobody answers escalate (for example, re-notify after a
+  day, or notify the workspace channel)?
