@@ -51,6 +51,22 @@ def test_squash_message_lists_each_commit_once_after_the_description() -> None:
     )
 
 
+def test_squash_message_moves_body_co_authors_into_the_trailer_block() -> None:
+    source = SquashSource(
+        title="fix: typo",
+        body="Fix it.\n\nCo-authored-by: Ada <ada@example.com>",
+        commits=[
+            _commit(
+                "fix: spelling", author=GitPerson(name="A", email="ADA@example.com"), login="ada"
+            )
+        ],
+    )
+
+    assert source.message("ramon") == (
+        "Fix it.\n\n* fix: spelling\n\nCo-authored-by: Ada <ada@example.com>"
+    )
+
+
 def test_squash_message_keeps_the_author_when_the_merger_is_someone_else() -> None:
     source = SquashSource(title="fix: typo", body=None, commits=[_commit("fix: typo")])
 

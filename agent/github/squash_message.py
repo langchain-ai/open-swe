@@ -90,12 +90,15 @@ class SquashSource(BaseModel):
         return cls(title=pull.title, body=pull.body, commits=commits)
 
     def message(self, merger_login: str | None = None) -> str | None:
-        body = (self.body or "").strip()
-        seen = {_comparable(line) for line in body.splitlines()} | {_comparable(self.title)}
         co_authors: dict[str, str] = {}
-        for line in body.splitlines():
+        body_lines: list[str] = []
+        for line in (self.body or "").splitlines():
             if match := _CO_AUTHOR.match(line.strip()):
-                co_authors[match[2].casefold()] = ""
+                co_authors.setdefault(match[2].casefold(), f"{match[1]} <{match[2]}>")
+            else:
+                body_lines.append(line)
+        body = "\n".join(body_lines).strip()
+        seen = {_comparable(line) for line in body_lines} | {_comparable(self.title)}
         headlines: list[str] = []
         merger = merger_login.casefold() if merger_login else None
         for entry in self.commits:
@@ -112,7 +115,7 @@ class SquashSource(BaseModel):
             for line in lines[1:]:
                 if match := _CO_AUTHOR.match(line.strip()):
                     co_authors.setdefault(match[2].casefold(), f"{match[1]} <{match[2]}>")
-        trailers = [f"Co-authored-by: {person}" for person in co_authors.values() if person]
+        trailers = [f"Co-authored-by: {person}" for person in co_authors.values()]
         sections = [
             section for section in (body, "\n".join(headlines), "\n".join(trailers)) if section
         ]
