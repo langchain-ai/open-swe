@@ -274,12 +274,15 @@ A task that has not made progress for **2 working days** becomes `stale`, and th
 shepherd forgets it. This is deliberately aggressive: a task nobody is moving
 should stop generating noise.
 
-Progress is any of: a PR condition clearing, a review submitted, a PR merged, a
-block answered, a new PR added, or a message from an owner or assignee on the
-task. Wake-ups, new head SHAs that clear nothing, reassignments, and nudges are
-not progress. So a task sitting in `in_review` with no review for 2 working days
-goes stale, as does a `blocked` task nobody answered, and an agent stuck in
-`in_progress` without clearing anything.
+Progress is any of: a new commit on any of the task's PRs, a PR condition
+clearing, a review submitted, a PR merged, a block answered, a new PR added, or a
+message from an owner or assignee on the task. Wake-ups, reassignments, and
+nudges are not progress. So a task sitting in `in_review` with no review and no
+commits for 2 working days goes stale, as does a `blocked` task nobody answered.
+
+This is separate from the retry budget, where a new commit that clears nothing
+does not count: an agent looping on CI keeps the task fresh but still runs out of
+budget and gets blocked.
 
 Working days are weekdays in the owners' time zones, from the stored working
 hours. `task.last_progress_at` records the latest progress event, and the global
