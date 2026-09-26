@@ -42,7 +42,7 @@ flowchart LR
     E -->|Follow-up work| B
 ```
 
-Each cloud coding thread is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. A thread is a durable conversation and work context. It can contain multiple invocations, each an agent execution triggered by a message or automation. An initial request and a follow-up belong to one thread and produce two invocations, each with its own usage. Independent threads run in parallel, and the same thread carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop work can run directly against an allowlisted local project.
+Each cloud coding thread is bound to its own persistent sandbox, so the agent can continue from prior work when you reply. A thread is a durable conversation and work context. It can contain multiple invocations, each an agent execution triggered by a message or automation. An initial request and a follow-up belong to one thread and produce two invocations, each with its own usage record. Independent threads run in parallel, and the same thread carries context from request through delivery and follow-up. Read-only PR chat does not need a sandbox, while desktop work can run directly against an allowlisted local project.
 
 ## What Open SWE does
 
