@@ -234,16 +234,51 @@ Automatic assignment, applied on stage transitions:
 | `ready` with auto-merge off | the owners | `merge` |
 | anything else | none from the shepherd | |
 
-Reviewers for a PR, in order:
+#### Picking reviewers (`agent/tasks/reviewers.py`)
 
-1. Reviewers already requested on GitHub.
-2. Otherwise, owners of the changed paths from `CODEOWNERS`.
-3. Otherwise, the task is blocked with `no_reviewer`, assigned to the owners, whose
-   answer (or a manual assignment) picks the reviewers.
+The shepherd picks reviewers itself when a PR first reaches
+`human_review_pending`. It does not use GitHub's team auto-assignment or reviewer
+suggestions. A reviewer a person explicitly requested (on GitHub, in the panel,
+or through `assign_task`) is always kept, and the picker only fills the remaining
+slots.
+
+A review is always assigned to an individual, never to a team. A team in
+`CODEOWNERS` expands to its members, who are scored like anyone else. When GitHub
+requests a team (for example through `CODEOWNERS` auto-requests), the shepherd
+replaces the team request with a request to the one member it picks; that
+member's approval still satisfies code owner review. By default a PR gets one
+reviewer, and more only when the rules below require them.
+
+Candidates are people with write access to the repo who are not authors, drawn
+from `CODEOWNERS` entries for the changed paths and from recent committers and
+reviewers of the changed files.
+
+Each candidate is scored on:
+
+| Signal | Source |
+|---|---|
+| Code ownership | `CODEOWNERS` match on changed paths, weighted by lines changed under each path |
+| Change history | commits to the changed files in the last 180 days, weighted by recency and lines touched, from the GitHub commits API per path (top 20 files by lines changed) |
+| Review history | reviews on earlier PRs touching the same files |
+| Load | open review requests across the org plus active `review` assignments in Open SWE; each one lowers the score |
+
+The pick is the smallest set that:
+
+- includes a code owner for every owned path when branch protection requires
+  code owner review, preferring one person who covers several paths
+- meets the repo's required approval count (1 when the repo requires none)
+- takes the highest-scoring remaining candidates to fill any remaining slots
+
+Every pick carries a one-line rationale built from its signals, shown in the task
+panel and in the assignment notification, for example "code owner of
+`agent/tasks/`, 14 commits to these files in 90 days, 2 open reviews". Scores are
+cached per repo and path for an hour. When no candidate qualifies, the task is
+blocked with `no_reviewer`, assigned to the owners, whose answer (or a manual
+assignment) picks the reviewers.
 
 Assignment and GitHub review requests stay in sync in both directions. Assigning a
-reviewer in Open SWE requests their review on the PR, and a review request made
-on GitHub adds the assignment. A reviewer's `review` assignment ends when they
+reviewer in Open SWE requests their review on the PR, and a review request a
+person makes on GitHub adds the assignment. A reviewer's `review` assignment ends when they
 submit a review on the current head: an approval removes it, and a
 changes-requested review removes it and returns the PR to the agent. When the
 agent pushes a fix, the shepherd re-requests review from those reviewers and they
@@ -385,5 +420,7 @@ same cycle.
 - Is 5 the right retry budget, and should it differ for CI versus findings?
 - Should a reviewer who is not a registered Open SWE user be assignable? GitHub
   review requests work for them, but they get no Slack DM or dashboard view.
+- Should reviewer scoring also use availability (Slack status, working hours,
+  time zone), and learn from how quickly each person has reviewed before?
 - Should a block that nobody answers escalate (for example, re-notify after a
   day, or notify the workspace channel)?
