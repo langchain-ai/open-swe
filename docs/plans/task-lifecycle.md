@@ -192,7 +192,8 @@ state, `PrState` (`open`, `draft`, `merged`, `closed`), which is already stored
 on the `pull_request` row and kept in sync from webhooks; this plan reuses it and
 adds no second lifecycle state for PRs. On top of it, each open PR contributes
 **conditions**: facts read from GitHub such as failing CI or a pending review.
-The task's state is derived from its PRs' GitHub states and conditions, plus
+A PR's state and conditions are inputs to the task state, never the task state
+itself. The task's state is derived from those inputs across all its PRs, plus
 task-level facts (a block, an active merge, whether the task is closed).
 
 ### PR conditions
