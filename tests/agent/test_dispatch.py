@@ -208,6 +208,12 @@ def test_prepare_run_config_marks_every_run_as_protocol_v3() -> None:
     assert run_config["configurable"]["thread_id"] == "t"
 
 
+def test_prepare_run_config_defaults_background_completion_to_false() -> None:
+    run_config = dispatch.prepare_run_config({"configurable": {"thread_id": "t"}}, None)
+
+    assert run_config["configurable"]["background_task_completion"] is False
+
+
 @pytest.mark.asyncio
 async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _FakeClient()

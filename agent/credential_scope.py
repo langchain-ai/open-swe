@@ -86,6 +86,7 @@ async def pr_author_login(requested: str | None = None) -> str | None:
     has_owner = isinstance(owner, str) and bool(owner.strip())
     if (
         cfg.background_task_completion
+        and not (cfg.github_login or "").strip()
         and metadata.get("owner_type") != "system"
         and (
             metadata.get("visibility") == "private"

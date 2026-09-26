@@ -147,31 +147,27 @@ async def test_private_pr_rejects_another_requester(monkeypatch, thread_metadata
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scope", ["public", "private", "legacy", "system", "unowned"])
-async def test_background_completion_cannot_publish_with_saved_user_identity(
-    monkeypatch, thread_metadata, credentials, scope
+async def test_background_completion_with_requester_uses_requester_login(
+    monkeypatch, thread_metadata, credentials
 ):
     opr = importlib.import_module("agent.tools.open_pull_request")
-    if scope == "private":
-        thread_metadata["visibility"] = "private"
-    elif scope == "system":
-        thread_metadata.update(owner_type="system")
-        thread_metadata.pop("owner_login")
-    elif scope in ("legacy", "unowned"):
-        thread_metadata.pop("owner_type")
-        if scope == "unowned":
-            thread_metadata.pop("owner_login")
     run_config = config()
     run_config["configurable"]["background_task_completion"] = True
     monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr(
-        opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
-    )
-    if scope in ("system", "unowned"):
-        assert await opr._resolve_pr_author_token() == ("bot-token", "bot")
-    else:
-        with pytest.raises(RuntimeError, match="Background"):
-            await opr._resolve_pr_author_token()
+    credentials.side_effect = {"alice": "alice-token"}.get
+    assert await opr._resolve_pr_author_token() == ("alice-token", "user")
+
+
+@pytest.mark.asyncio
+async def test_background_completion_without_requester_still_fails(
+    monkeypatch, thread_metadata, credentials
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    run_config = config(login=None)
+    run_config["configurable"]["background_task_completion"] = True
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+    with pytest.raises(RuntimeError, match="Background"):
+        await opr._resolve_pr_author_token()
     credentials.assert_not_awaited()
 
 
