@@ -239,7 +239,7 @@ export const ChatComposer = memo(function ChatComposer({
   onStop,
   onSubmit,
   onEmptySubmit,
-  followUpBehavior = "queue",
+  followUpBehavior = "steer",
   restoreDraft = null,
   models = [],
   selection = null,

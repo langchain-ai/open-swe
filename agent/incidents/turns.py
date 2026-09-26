@@ -19,6 +19,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.prompts import prompt
 from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_message_bot_id,
@@ -32,10 +33,8 @@ logger = logging.getLogger(__name__)
 # The whole channel is one conversation, like a code channel session.
 SESSION_TS = "0"
 AUTOMATIC_DELAY_SECONDS = 15
-AUTOMATIC_REQUEST = (
-    "New activity arrived in the incident channel. Review the new context messages, "
-    "update your investigation, and record the report."
-)
+FIRST_INVESTIGATION_REQUEST = prompt("incidents/first-investigation")
+AUTOMATIC_REQUEST = prompt("incidents/automatic")
 FAILURE_NOTICE = (
     "The incident agent hit an error on its last turn. Mention me with a question to retry."
 )
@@ -178,8 +177,19 @@ def _configurable(
     return configurable
 
 
+async def _automatic_request(record: Incident) -> str:
+    """The full flow until the investigation has been published, then quiet upkeep."""
+    latest = await service.REPORTS.get(record.id)
+    published = latest is not None and latest.investigation_posted
+    return AUTOMATIC_REQUEST if published else FIRST_INVESTIGATION_REQUEST
+
+
 def _input(
-    record: Incident, *, request: str | None, requester: PersonIdentity | None
+    record: Incident,
+    *,
+    request: str | None,
+    requester: PersonIdentity | None,
+    automatic_request: str = AUTOMATIC_REQUEST,
 ) -> dict[str, Any]:
     channel = f"slack:{record.channel_id}"
     if request is None:
@@ -187,7 +197,7 @@ def _input(
             "messages": [
                 system_introduction(_INCIDENTS_SYSTEM),
                 system_input(
-                    AUTOMATIC_REQUEST,
+                    automatic_request,
                     {
                         "sender_id": _INCIDENTS_SYSTEM["id"],
                         "channel_id": channel,
@@ -232,7 +242,12 @@ async def dispatch_turn(
     run = await create_durable_run(
         record.thread_id,
         "agent",
-        input=_input(record, request=request, requester=requester),
+        input=_input(
+            record,
+            request=request,
+            requester=requester,
+            automatic_request=AUTOMATIC_REQUEST if explicit else await _automatic_request(record),
+        ),
         source="incidents_agent",
         thread_title=None,
         config={

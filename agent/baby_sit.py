@@ -105,7 +105,7 @@ class BabySitWatch(BaseModel):
         )
         return configurable
 
-    def failure_prompt(self, failures: list[dict[str, Any]]) -> str:
+    def failure_prompt(self, failures: list[dict[str, Any]], *, expedited: bool) -> str:
         lines = []
         for failure in failures:
             name = _prompt_scalar(failure.get("name") or "check", 200)
@@ -119,6 +119,7 @@ class BabySitWatch(BaseModel):
             retry_count=self.retry_count,
             max_retries=MAX_RETRIES_PER_HEAD,
             signals="\n".join(lines),
+            expedited=expedited,
         )
 
 
@@ -526,7 +527,7 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures),
+            watch.failure_prompt(failures, expedited=await _has_expedited_card(watch)),
             configurable,
             source=str(configurable.get("source") or "github"),
             thread_title=None,

@@ -408,11 +408,30 @@ export interface ReviewPageRef {
   number: number
 }
 
+export type AgentSubagentStatus = "in_progress" | "completed" | "error"
+
+/**
+ * A subagent the thread spawned with the `task` tool, as the sidebar lists it
+ * under the thread. `toolCallId` is the `task` call's id, which is also the
+ * last segment of the namespace every event the subagent emitted carries.
+ */
+export interface AgentSubagentSummary {
+  toolCallId: string
+  /** The first line of the task description. */
+  title: string
+  subagentType: string
+  status: AgentSubagentStatus
+  startedAt: number
+  endedAt: number | null
+}
+
 export interface AgentThread {
   visibility?: "public" | "private"
   id: string
   /** Set on a PR review listed in the sidebar: its row opens this review page. */
   reviewPage?: ReviewPageRef
+  /** Root-level subagents, oldest first; only transcript-log threads report them. */
+  subagents?: Array<AgentSubagentSummary>
   /**
    * Transcript source for the thread, from its LangGraph metadata. `"v2"` means
    * the append-only event log serves it; absent means the SDK stream does.
