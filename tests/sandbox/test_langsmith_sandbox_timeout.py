@@ -24,17 +24,24 @@ class _FakeHandle:
         self._result = result
         self._raises = raises
         self.killed = False
+        self.streaming = False
+        self.killed_while_streaming = False
 
     @property
     async def result(self) -> Any:
-        if self._sleep:
-            await asyncio.sleep(self._sleep)
+        self.streaming = True
+        try:
+            if self._sleep:
+                await asyncio.sleep(self._sleep)
+        finally:
+            self.streaming = False
         if self._raises is not None:
             raise self._raises
         return self._result
 
     async def kill(self) -> None:
         self.killed = True
+        self.killed_while_streaming = self.streaming
 
 
 class _FakeSandbox:
@@ -74,9 +81,20 @@ async def test_aexecute_kills_on_client_timeout() -> None:
     assert time.monotonic() - start < 3.0
     assert resp.exit_code == 124
     assert "killed" in resp.output
-    assert handle.killed
+    assert handle.killed_while_streaming
     sandbox = cast(_FakeSandbox, sb._async_sandbox)
     assert sandbox.run_calls[0]["wait"] is False
+
+
+async def test_cancelling_aexecute_kills_the_running_command() -> None:
+    """A stopped run must not leave its command running on the sandbox."""
+    handle = _FakeHandle(sleep=60.0)
+    call = asyncio.ensure_future(_backend(handle).aexecute("sleep 999", timeout=120))
+    await asyncio.sleep(0.05)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert handle.killed_while_streaming
 
 
 async def test_aexecute_success_combines_streams() -> None:
