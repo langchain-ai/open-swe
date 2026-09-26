@@ -21,7 +21,7 @@ review needed, conflict) that the task's state is derived from.
 
 An always-on, model-free **shepherd** carries the task from its first PR to merge.
 On each relevant webhook it rereads the affected PR's conditions from GitHub,
-recomputes the task's state, keeps one timeline per task, wakes the task's driver
+recomputes the task's state, records it in the task's audit trail, wakes the task's driver
 thread only when there is work the agent can do, and merges (or announces
 readiness) once every PR in the task is mergeable.
 
@@ -94,7 +94,11 @@ task_assignee                  who must act now; no active rows = the agent has 
   user_id           uuid      -> user
   reason            review | blocked | merge | manual
   pull_request_id   uuid null the PR it concerns
-  rationale         text      the agent's one-line reason, from assign_task
+  decided_by_kind   agent | human
+  decided_by_user   uuid null the registered user, for a human decision
+  decided_by_thread text null the agent thread, for an agent decision
+  source            tool | claim | panel | slack_card | pr_comment | github_request
+  rationale         text null the agent's one-line reason
   requested_by      uuid null the person whose request the agent acted on
   assigned_at       timestamptz
   due_at            timestamptz null acknowledgement deadline, review only
@@ -109,14 +113,15 @@ task_reviewer_suggestion       input to the agent's reviewer choice
   pull_request_id   uuid
   user_id           uuid      -> user; the suggested reviewer
   suggested_by      uuid      -> user
-  source            chat | slack | pr_comment | github_request
+  source            chat | slack
   strength          preferred | required
   created_at        timestamptz
   outcome           assigned | declined | null
 
-task_event                     append-only timeline
-  id, task_id, pull_request_id null, kind, from_state, to_state,
-  head_sha, detail jsonb, created_at
+task_audit                     append-only; see Audit trail
+  id, task_id, at, actor_kind, actor_user_id null, actor_thread_id null,
+  actor_run_id null, actor_github_login null, via, action, pull_request_id null,
+  before jsonb, after jsonb, reason text, refs jsonb
 
 task_wakeup                    dedupe + retry budget
   pull_request_id, head_sha, reason   unique
@@ -144,7 +149,7 @@ task_wakeup                    dedupe + retry budget
 - The shepherd never wakes a `reviewer` or `review_scout` thread; the existing
   review triggers keep driving them. Owning them puts every thread about the task
   (building, reviewing, and explaining it) in one place: the task panel, the
-  timeline, cost, and `get_task`.
+  audit trail, cost, and `get_task`.
 - `pull_request_thread` links are unchanged. `task_pull_request` records
   ownership; `pull_request_thread` still records which threads touched a PR.
 - `create_task` requires `owners`: one or more of the thread's verified
@@ -233,7 +238,7 @@ per-PR lock, then recomputes its task's state. It is called from:
   tokens. The same sweep enforces review `due_at` and marks tasks stale
 
 Each evaluation writes the PR's `conditions` and `evaluated_sha`, the task's
-`state`, and a `task_event` when either changes.
+`state`, and an audit row when either changes.
 
 ### Wake-ups
 
@@ -273,7 +278,7 @@ shepherd entered (see [Assignment](#assignment)). Reasons:
 | `permission_denied` | The shepherd, when a push, merge, or check read fails on GitHub permissions (a fork without `maintainer_can_modify`, a protected branch, a missing App permission) |
 | `no_reviewer` | The agent, via `request_human`, when a PR needs review and no candidate fits (see [Assignment](#assignment)) |
 
-While blocked, the shepherd keeps evaluating and recording the timeline but sends
+While blocked, the shepherd keeps evaluating and recording the audit trail but sends
 no wake-ups for the blocked PR (all PRs, for a task-wide block), and auto-merge
 does not run.
 
@@ -287,7 +292,7 @@ A block clears when:
   shepherd never clears an `agent_request` block on its own
 
 Clearing a block resets the PR's retry budget, ends the `blocked` assignments,
-and records a `task_event`.
+and is recorded in the audit trail.
 
 ### Stale
 
@@ -327,11 +332,27 @@ instead.
 
 ### Assignment
 
-Assigning is always the agent's judgment call, made with one tool call:
-`assign_task`. There is no auto-assignment. The shepherd never picks a person; it
-supplies the facts, wakes the agent when an assignment decision is due, and keeps
-the bookkeeping (GitHub review requests, acknowledgement deadlines, ending an
-assignment once its job is done).
+An assignment is always a decision, made either by the agent or by a person.
+There is no auto-assignment: the shepherd never picks anyone. It supplies the
+facts, wakes the agent when a decision is due, and keeps the bookkeeping (GitHub
+review requests, acknowledgement deadlines, ending an assignment once its job is
+done).
+
+- **Agent decisions** are one tool call, `assign_task`, made with the agent's own
+  judgment.
+- **Human decisions** are explicit actions by a registered Open SWE user: "Take
+  it" on an open review call, an assign control in the task panel or on a Slack
+  card, `@open-swe assign @login` on a PR, or a review request made on GitHub.
+  The same action from anyone who is not a registered user fails and changes
+  nothing. A GitHub review request from an unregistered requester is ignored,
+  and the ignore is recorded in the audit trail.
+- **A human decision supersedes any agent decision.** It can replace or remove an
+  agent's assignment. The agent cannot replace or remove a human's assignment;
+  `assign_task` returns an error naming who decided. On a human-decided
+  assignment, a missed acknowledgement deadline gets a nudge and a note to the
+  person who decided, never a replacement.
+- Both kinds go through the same function and the same rules below, and record
+  `decided_by` (the agent's thread, or the user).
 
 A task has zero or more assignees: the people who must act next. With none, the
 agent has it. Owners change only when someone edits them; assignees come and go.
@@ -349,40 +370,54 @@ They are deduped through `task_wakeup` and do not count toward the retry budget.
 
 | Moment | Decision asked for |
 |---|---|
-| A PR has no agent-actionable or automation conditions left (CI green, Open SWE review done, nothing to fix) and lacks the approvals it needs | who reviews it |
+| A PR has no agent-actionable or automation conditions left (CI green, Open SWE review done, nothing to fix) and lacks the approvals it needs | post an open review call, or assign someone directly |
+| An open review call went unclaimed for 2 working hours | who reviews it |
 | A reviewer passed, or missed the acknowledgement deadline | who reviews instead |
 | GitHub requested a team on a PR (for example a `CODEOWNERS` auto-request) | which one member to request instead |
-| A person requested a reviewer directly on GitHub | whether to keep that request, given the reviewer's load |
 | The shepherd entered a block (`retry_budget_exhausted`, `merge_failed`, `permission_denied`) | who resolves it, and the `ask` |
 | The task reached `ready_to_merge` with auto-merge off | who merges |
 | An owner resumed a stale task | review assignments afresh |
 
-The agent can also assign at any other time, typically because a person asked in
-chat, in Slack, or with an `@open-swe assign @login` comment. People do not assign
-directly; they ask the agent, so every assignment goes through the same call and
-the same rules.
+The agent can also assign at any other time, typically because a person asked for
+it in conversation.
+
+#### Open review calls
+
+Teams already self-select reviews by posting PR links in a channel. The agent can
+do the same instead of assigning: `post_review_call(pull_request)` posts a card to
+the repo's review channel (a per-repo setting) with the PR title, a one-line
+summary, size, repo, author, and any requirement ("needs a code owner of
+`agent/tasks/`"). This generalizes the expedited review card
+(`agent/expedited_review/card.py`, `slack.py`), which already posts, updates, and
+removes channel cards.
+
+- "Take it" makes the clicker the reviewer. It is a human decision, so it passes
+  the same rules (registered user, not an author, a code owner when the card
+  requires one) and fails for anyone else. Taking a review counts as
+  acknowledging it and counts toward the taker's review load.
+- The card updates in place: "Sam is reviewing", then approved, then removed from
+  the channel. "Release" by the taker puts it back up.
+- Unclaimed after 2 working hours (in the owners' working hours), the agent gets
+  a wake-up and assigns someone directly.
+- The agent skips the channel when a `required` suggestion names the reviewer, or
+  when no review channel is configured.
+- The channel is the team's view of what is available to review.
 
 #### Suggested reviewers
 
-Authors will often suggest a reviewer. A suggestion is input to the agent's
-decision, not an assignment. Suggestions come from:
-
-- a person naming someone in the task's thread or Slack thread ("have Alex review
-  this"), which the agent records with `suggest_reviewer`
-- `@open-swe assign @login` or `@open-swe review @login` on a PR
-- a review request a person makes directly on GitHub
-
-Each is stored in `task_reviewer_suggestion` with who suggested whom for which
-PR, and shows up in `review_candidates` as `suggested_by`. A GitHub review request
-a person made also wakes the agent to decide on it.
+Authors will often suggest a reviewer in conversation ("maybe Alex should review
+this"). A suggestion is input to the agent's decision, not an assignment; the
+explicit actions listed above are decisions, not suggestions. The agent records a
+suggestion with `suggest_reviewer`. It is stored in `task_reviewer_suggestion`
+with who suggested whom for which PR, and shows up in `review_candidates` as
+`suggested_by`.
 
 Each suggestion has a strength:
 
 - `preferred`: the default. The agent weighs it against the suggested person's
   review load and the alternatives, and honours it unless that person is clearly
   more loaded than comparable candidates. When it declines, it assigns someone
-  else, withdraws the GitHub request if there was one, and tells the suggester why
-  in the thread, Slack thread, or PR, for example "Alex has 4 open reviews and
+  else and tells the suggester why in the thread or Slack thread, for example "Alex has 4 open reviews and
   took 3 today; asked Sam, who also owns `agent/tasks/`".
 - `required`: the suggester has said this specific person is the right reviewer
   ("this really needs Alex", "Alex has to look at this"). The agent infers the
@@ -394,12 +429,10 @@ Each suggestion has a strength:
   a note to the suggester instead of a replacement; the agent reassigns only if
   the suggester agrees.
 
-GitHub review requests arrive as `preferred`, since GitHub carries no way to say
-more; the requester can follow up in words to make it `required`.
+#### Rules every assignment must pass
 
-#### Rules `assign_task` enforces
-
-Violations return an error that names the rule.
+These apply to agent and human decisions alike. Violations return an error that
+names the rule.
 
 - Individuals only, never a team.
 - Registered Open SWE users only, since only they can get the Slack DM and
@@ -409,9 +442,11 @@ Violations return an error that names the rule.
   assignee.
 - Someone who passed or timed out on a PR's review cannot be assigned to review
   that PR again.
-- Every call carries a one-line `rationale`, shown to the assignee and in the
-  timeline, for example "code owner of `agent/tasks/`, 14 commits to these files
-  in 90 days, 2 open reviews".
+- The decider is the agent or a registered Open SWE user.
+- The agent cannot replace or remove a human-decided assignment.
+- Every agent decision carries a one-line `rationale`, shown to the assignee and
+  in the audit trail, for example "code owner of `agent/tasks/`, 14 commits to
+  these files in 90 days, 2 open reviews".
 
 #### Judgment the agent applies
 
@@ -488,9 +523,11 @@ Each review slot has exactly one assignee at a time, who must acknowledge within
   any review activity on the PR: a review comment, a submitted review, or opening
   the PR's Open SWE review page.
 - "Pass" in the Slack DM or task panel ends the assignment immediately.
-- On pass or a missed deadline, the assignment ends, its GitHub review request is
-  withdrawn, the person is told, and the agent gets a wake-up to choose someone
-  else.
+- On pass or a missed deadline on an agent-decided assignment, the assignment
+  ends, its GitHub review request is withdrawn, the person is told, and the agent
+  gets a wake-up to choose someone else. On a human-decided assignment, a missed
+  deadline only nudges the reviewer and tells the person who decided; a pass ends
+  it and tells that person, who decides what happens next.
 - The 2-hour clock counts only the assignee's working hours (see
   [Working hours](#working-hours)), so a review assigned overnight does not time
   out before anyone is awake.
@@ -521,16 +558,15 @@ The shepherd keeps assignments consistent with GitHub without choosing anyone:
 
 - A `review` assignment requests the review on GitHub; ending it withdraws the
   request.
-- A review request a person makes directly on GitHub is recorded as a
-  suggestion (see [Suggested reviewers](#suggested-reviewers)), not an
-  assignment. A team request triggers the "which member" wake-up above.
+- A review request a registered user makes directly on GitHub is recorded as
+  that user's decision. A team request triggers the "which member" wake-up above.
 - An assignment ends when its job is done: the reviewer submits a review on the
   current head (approval or changes requested), the block clears, or the PR
   merges. A stale task ends all of them. Ending is not reassigning; if another
   decision is needed, the agent gets a wake-up.
 - Assigning a person while the agent is working does not stop the agent.
 
-Every change records a `task_event`. Each new assignee is notified once, through a
+Every change is recorded in the audit trail. Each new assignee is notified once, through a
 Slack DM and a banner in the task panel carrying the reason and the agent's
 rationale: the block's `ask`, "review <PR>", or "ready to merge". A blocked task
 also gets a comment on the affected PR.
@@ -606,7 +642,7 @@ A takeover is refused, with the reason, when:
 
 `@open-swe release`, a dashboard button, or `release_pull_request`. The PR author
 and any task owner can always release. Release removes the `task_pull_request`
-row, records a `task_event`, and posts a PR comment.
+row, is recorded in the audit trail, and posts a PR comment.
 
 ## Settings
 
@@ -617,6 +653,51 @@ row, records a `task_event`, and posts a PR comment.
   `@open-swe automerge on|off` on any of the task's PRs.
 - Taking a PR over into a new task makes the person who took it over the owner;
   adding it to an existing task leaves that task's owners unchanged.
+- Per-repo review channel for open review calls, in the repository settings.
+
+## Audit trail
+
+Every task keeps a complete, append-only record of what happened, who or what did
+it, and why. This is separate from the webhook delivery log
+(`agent/webhooks/event_log.py`), which records raw payloads; the audit trail
+records decisions and their effects in domain terms.
+
+All task mutations go through one module (`agent/tasks/audit.py`), which writes
+the audit row in the same transaction as the change, so there is no change
+without a record. Rows are never updated or deleted, including when a task is
+abandoned.
+
+Each row records:
+
+| Field | Meaning |
+|---|---|
+| `at` | when |
+| `actor_kind` | `human`, `agent`, `shepherd`, or `github` (an outside GitHub actor) |
+| `actor` | the registered user, the agent thread and run, or the GitHub login |
+| `via` | `dashboard`, `slack`, `pr_comment`, `github`, `tool`, `sweep`, `webhook` |
+| `action` | one of the actions below |
+| `pull_request_id` | the PR concerned, if any |
+| `before`, `after` | the relevant values on each side of the change |
+| `reason` | the agent's rationale, the block's `ask`, the human's note, or the rule that fired |
+| `refs` | related ids: assignment, suggestion, wake-up run, review, commit SHA, webhook delivery |
+
+Actions:
+
+| Group | Actions |
+|---|---|
+| Lifecycle | task created, closed (completed or abandoned), went stale, resumed |
+| State | task state changed (from, to, and the conditions that caused it) |
+| People | owner added or removed; assignment made, ended (reviewed, passed, timed out, removed, done), or superseded by a human; review acknowledged; suggestion recorded, honoured, or declined; review call posted, taken, released, or gone unclaimed |
+| Work | PR added, taken over, or released; commit pushed; condition appeared or cleared; review submitted; wake-up sent (with the run it started); retry budget exhausted |
+| Blocks | block entered (reason and `ask`), answered (by whom, with the answer), cleared |
+| Merge | auto-merge changed (by whom), merge started, PR merged, merge failed |
+| Rejections | an action refused by a rule (for example an unregistered user's "Take it", or the agent trying to replace a human's assignment), with the rule |
+
+Rejections are recorded because they explain why something did not happen.
+
+`get_task` returns the recent trail. `GET /dashboard/api/tasks/{id}/audit`
+returns the whole trail, filterable by action group, actor, and PR, and
+exportable as JSON.
 
 ## Agent tools (`agent/tools/tasks.py`)
 
@@ -624,15 +705,16 @@ row, records a `task_event`, and posts a PR comment.
 |---|---|
 | `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); creates the thread's open task. Fails if one is already open |
 | `close_task` | `reason: completed \| abandoned` |
-| `get_task` | Task state, PRs with their conditions, recent timeline |
+| `get_task` | Task state, PRs with their conditions, recent audit trail |
 | `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
 | `request_human` | `ask`, `assignees: [login]`, `rationale`, `reason: agent_request \| no_reviewer`, `pull_request?`; blocks the task (or one PR), assigns it, and ends the run |
 | `review_candidates` | `pull_request`; review requirements and candidates with raw signals, review load, and suggestions (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
+| `post_review_call` | `pull_request`, `summary`; posts an open review call to the repo's review channel |
 | `suggest_reviewer` | `pull_request`, `reviewer: login`, `suggested_by: login`, `strength: preferred \| required`; records a suggestion a participant made in conversation |
-| `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the only way anyone is assigned. `review` also requests review on GitHub |
+| `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the agent's only way to assign. `review` also requests review on GitHub. Fails on a human-decided assignment |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
 
