@@ -2,7 +2,6 @@ from collections.abc import Mapping, Sequence
 from functools import cache
 from importlib import resources
 from pathlib import PurePosixPath
-from string import Template
 from typing import Any
 
 from jinja2 import Environment, FunctionLoader, StrictUndefined
@@ -41,11 +40,11 @@ def _is_template(name: str) -> bool:
 
 
 def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: object) -> str:
-    """Render ``<name>.md.jinja`` with Jinja if it exists, else ``<name>.md`` with ``$`` placeholders."""
+    """Render Jinja templates or load static Markdown prompts."""
     substitutions = {**(values or {}), **kwargs}
     if _is_template(name):
         return _JINJA.get_template(f"{name}.md.jinja").render(substitutions).strip()
-    return Template(load_prompt(f"{name}.md")).substitute(substitutions)
+    return load_prompt(f"{name}.md")
 
 
 def apply_tool_descriptions(
@@ -61,11 +60,7 @@ def apply_tool_descriptions(
             continue
         substitutions = (values or {}).get(name)
         try:
-            description = (
-                prompt(f"tools/{name}", substitutions)
-                if substitutions is not None
-                else load_prompt(f"tools/{name}.md")
-            )
+            description = prompt(f"tools/{name}", substitutions)
         except FileNotFoundError:
             described.append(value)
             continue
