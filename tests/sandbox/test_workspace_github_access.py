@@ -235,9 +235,7 @@ async def test_workspace_builder_uses_same_access_boundary(
         AsyncMock(return_value=MagicMock(id="sandbox", aexecute=AsyncMock())),
     )
 
-    workspace = Workspace(slug="workspace", repos=repos)
-    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
-    await _create_builder_sandbox(workspace, None)
+    await _create_builder_sandbox(Workspace(slug="workspace", repos=repos), None)
 
     assert injected_auth(github) == (["x-access-token:repos:11"] if repos else [""])
 
@@ -574,61 +572,3 @@ async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
 
     assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11"]
     assert listing_calls(github_requests) == 1
-
-
-async def test_app_wide_access_can_be_narrowed_and_revoked(
-    monkeypatch: pytest.MonkeyPatch, github: list[dict[str, object]]
-) -> None:
-    workspace = Workspace(slug="workspace", all_repositories=True, repos=["acme/api"])
-    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
-    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11,22"
-    assert (
-        await sandbox_access.workspace_token("workspace", repositories=["acme/api"])
-    ).token == "repos:11"
-    assert (
-        await sandbox_access.workspace_token("workspace", repositories=["outside/repo"])
-    ).token is None
-    assert (await sandbox_access.workspace_token("workspace", repositories=[])).token is None
-    workspace.all_repositories = False
-    assert (await sandbox_access.workspace_token("workspace")).token == "repos:11"
-
-
-async def test_app_wide_access_failure_is_closed(
-    monkeypatch: pytest.MonkeyPatch, github: list[dict[str, object]]
-) -> None:
-    monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="all", all_repositories=True))
-    )
-    monkeypatch.setattr(
-        sandbox_access,
-        "get_github_app_installation_token_with_expiry",
-        AsyncMock(return_value=(None, None)),
-    )
-    with pytest.raises(RuntimeError, match="installation token is unavailable"):
-        await lifecycle._create_sandbox_with_proxy(workspace_slug="all")
-    assert github == []
-
-
-async def test_app_wide_builder_and_reviewer_keep_their_permission_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
-    github: list[dict[str, object]],
-    github_requests: list[httpx.Request],
-) -> None:
-    workspace = Workspace(slug="all", all_repositories=True)
-    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
-    monkeypatch.setattr(
-        LangSmithProvider,
-        "get_or_create",
-        AsyncMock(return_value=MagicMock(id="builder", aexecute=AsyncMock())),
-    )
-    await _create_builder_sandbox(workspace, None)
-    assert injected_auth(github) == ["x-access-token:repos:11,22"]
-    await sandbox_access.workspace_token(
-        "all", repositories=["acme/api"], permissions={"contents": "read"}
-    )
-    minted = [
-        json.loads(request.content)
-        for request in github_requests
-        if request.url.path.endswith("/access_tokens")
-    ]
-    assert minted[-1] == {"repository_ids": [11], "permissions": {"contents": "read"}}

@@ -651,7 +651,6 @@ export const DEFAULT_WORKSPACE_SLUG = "default"
 export interface WorkspaceOption {
   slug: string
   name: string
-  all_repositories?: boolean
   repos: Array<string>
   /** Effective default repository, withheld when another workspace owns it. */
   default_repo: string | null
@@ -691,7 +690,6 @@ export interface WorkspaceOptionList {
 export interface WorkspaceCreate {
   name: string
   prompt?: string
-  all_repositories?: boolean
   repos?: Array<string>
   slack_channel_ids?: Array<string>
 }
@@ -700,7 +698,6 @@ export interface WorkspaceCreate {
 export interface WorkspaceUpdate {
   name?: string
   prompt?: string
-  all_repositories?: boolean
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   setup_script?: string
@@ -718,7 +715,6 @@ export interface WorkspaceRecord {
   slug: string
   name: string
   prompt: string
-  all_repositories?: boolean
   repos: Array<string>
   slack_channel_ids: Array<string>
   setup_script?: string

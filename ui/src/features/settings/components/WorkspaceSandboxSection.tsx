@@ -127,11 +127,8 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <label htmlFor={setupId}>Setup script</label>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to install tools and optionally clone only
-            the repositories you want preloaded. No repositories are imported
-            automatically. Explicit bindings are available in{" "}
-            <WorkspaceReposPopover repos={record.repos} />; app-wide access does
-            not expand this list. Permission edits never trigger a rebuild.
+            Runs on the base snapshot to build the image. Selected repositories
+            are available in <WorkspaceReposPopover repos={record.repos} />.
           </span>
           <Textarea
             id={setupId}

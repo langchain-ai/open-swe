@@ -287,21 +287,16 @@ _STATE_WRITES = {
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.parametrize("write", sorted(_STATE_WRITES))
 async def test_refresh_state_writes_never_revert_a_definition_edit(write: str) -> None:
-    await WORKSPACES.create(
-        WorkspaceCreate(name="Core", repos=["acme/api"], all_repositories=True), "ramon"
-    )
-    # What a refresh read before an admin revoked access.
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "ramon")
+    # What a refresh read before an admin edited the workspace.
     stale = await WORKSPACES.get("core")
-    await WORKSPACES.apply_update(
-        "core", WorkspaceUpdate(repos=["acme/web"], all_repositories=False, prompt="new")
-    )
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(repos=["acme/web"], prompt="new"))
 
     with patch.object(WORKSPACES, "get", AsyncMock(return_value=stale)):
         await _STATE_WRITES[write]("core")
 
     stored = await WORKSPACES.get("core")
     assert stored is not None
-    assert stored.all_repositories is False
     assert stored.repos == ["acme/web"]
     assert stored.prompt == "new"
 
@@ -316,11 +311,11 @@ async def test_a_definition_edit_never_reverts_refresh_state() -> None:
     await WORKSPACES.mark_refresh_settled("core", "success", log="done")
 
     with patch.object(WORKSPACES, "get", AsyncMock(return_value=stale)):
-        edited = await WORKSPACES.apply_update("core", WorkspaceUpdate(all_repositories=True))
+        edited = await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="edited"))
 
     stored = await WORKSPACES.get("core")
     assert stored is not None
-    assert stored.all_repositories is True
+    assert stored.prompt == "edited"
     assert stored.refresh_status == "success"
     assert stored.refresh_log == "done"
     assert edited == stored
@@ -621,7 +616,6 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "slug": "default",
             "name": "default",
             "repos": [],
-            "all_repositories": False,
             "slack_channel_ids": [],
             "is_default": True,
             "has_snapshot": True,
@@ -687,15 +681,10 @@ async def test_publish_refuses_a_create_over_an_existing_workspace() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_create_shares_repositories_and_keeps_per_workspace_settings() -> None:
+async def test_create_rejects_repo_owned_by_another_workspace() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
-    assert await WORKSPACES.workspaces_for_repo("acme/api") == ["core", "oss"]
-    await WORKSPACES.configure_repository("oss", "acme/api", may_start_threads=True)
-    assert await WORKSPACES.thread_starter_of_repo("acme/api") == "oss"
-    assert not (await WORKSPACES.repository_settings("core"))[0].may_start_threads
-    await WORKSPACES.apply_update("core", WorkspaceUpdate(repos=[]))
-    assert await WORKSPACES.owner_of_repo("acme/api") == "oss"
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -709,11 +698,9 @@ async def test_update_rejects_slack_channel_owned_by_another_workspace() -> None
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_workspaces_can_provision_tools_without_repository_bindings() -> None:
-    empty = await WORKSPACES.create(
-        WorkspaceCreate(name="Empty", setup_script="echo setup"), "alice"
-    )
-    assert empty.repos == [] and not empty.all_repositories
+async def test_non_default_workspace_requires_a_repo() -> None:
+    with pytest.raises(ValueError, match="at least one repository"):
+        await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
     record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
     assert record.slug == "default" and record.repos == []
 
@@ -761,13 +748,9 @@ async def test_one_unimportable_record_does_not_stop_the_others(
     fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    await WORKSPACES.create(
-        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C123"]), "alice"
-    )
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
     fake_store.seed(
-        WORKSPACES_NAMESPACE,
-        "taken",
-        {"slug": "taken", "name": "Taken", "repos": ["acme/api"], "slack_channel_ids": ["C123"]},
+        WORKSPACES_NAMESPACE, "taken", {"slug": "taken", "name": "Taken", "repos": ["acme/api"]}
     )
     fake_store.seed(
         WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
@@ -889,7 +872,6 @@ def _fully_populated(now: str) -> Workspace:
         slug="base",
         name="Base",
         prompt="build with make",
-        all_repositories=True,
         setup_script="make setup",
         update_script="git pull",
         base_snapshot_id="snap-base",
@@ -1035,8 +1017,8 @@ async def test_a_binding_written_outside_the_store_is_respected() -> None:
         await session.flush()
         session.add(WorkspaceRepositoryRow(repository_id=repository.id, workspace_id=workspace.id))
 
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
-    assert await WORKSPACES.workspaces_for_repo("acme/api") == ["core", "oss"]
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -1050,6 +1032,8 @@ async def test_a_claim_that_races_the_pre_check_still_names_the_owner() -> None:
         WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C0API"]), "alice"
     )
 
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.put("oss", Workspace(slug="oss", name="OSS", repos=["acme/api"]))
     with pytest.raises(ValueError, match="C0API already belongs to workspace core"):
         await WORKSPACES.put(
             "oss",
@@ -1058,20 +1042,3 @@ async def test_a_claim_that_races_the_pre_check_still_names_the_owner() -> None:
 
     # Neither claim left a half-written workspace behind.
     assert await WORKSPACES.get("oss") is None
-
-
-@pytest.mark.usefixtures("registry_db")
-async def test_shared_repository_routing_is_stable_and_app_access_does_not_claim_repos() -> None:
-    for name in ["Zulu", "Alpha", "Default"]:
-        await WORKSPACES.create(WorkspaceCreate(name=name, repos=["acme/api"]), "alice")
-        await WORKSPACES.configure_repository(name.lower(), "acme/api", may_start_threads=True)
-    assert await WORKSPACES.owner_of_repo("acme/api") == "default"
-    assert await WORKSPACES.thread_starter_of_repo("acme/api") == "default"
-    await WORKSPACES.delete("default")
-    assert await WORKSPACES.owner_of_repo("acme/api") == "alpha"
-    await WORKSPACES.create(WorkspaceCreate(name="All", all_repositories=True), "alice")
-    assert await WORKSPACES.allows_repository("all", "acme/other")
-    assert await WORKSPACES.owner_of_repo("acme/other") is None
-    assert await WORKSPACES.thread_starter_of_repo("acme/other") is None
-    await WORKSPACES.apply_update("all", WorkspaceUpdate(all_repositories=False))
-    assert not await WORKSPACES.allows_repository("all", "acme/other")

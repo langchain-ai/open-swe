@@ -1,6 +1,9 @@
 """Workspace rows, and the conversion between them and the domain record.
 
-Repository bindings are unique per workspace; Slack channels retain one owner.
+``workspace_repository`` and ``workspace_slack_channel`` key on the bound
+resource rather than on the workspace, so the database — not the application —
+is what guarantees that a repository or a Slack channel belongs to exactly one
+workspace.
 
 :class:`agent.workspaces.store.Workspace` stays the domain and API shape; these
 rows are only how it is stored, which is why the timestamps a record carries as
@@ -31,7 +34,6 @@ class WorkspaceRow(Base):
     name: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     prompt: Mapped[str] = mapped_column(server_default="", default="")
-    all_repositories: Mapped[bool] = mapped_column(server_default="false", default=False)
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
@@ -73,9 +75,7 @@ class WorkspaceRepositoryRow(Base):
     repository_id: Mapped[UUID] = mapped_column(
         ForeignKey("repository.id", ondelete="CASCADE"), primary_key=True
     )
-    workspace_id: Mapped[UUID] = mapped_column(
-        ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
-    )
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
     # Whether a workflow in this repository may federate its own GitHub OIDC
     # token into a run. Binding a repository must not imply it.
     may_start_threads: Mapped[bool] = mapped_column(server_default="false", default=False)
@@ -108,7 +108,6 @@ def to_workspace(row: WorkspaceRow, repos: list[str], channels: list[str]) -> Wo
             "update_script": row.update_script,
             "base_snapshot_id": row.base_snapshot_id,
             "repos": repos,
-            "all_repositories": row.all_repositories,
             "slack_channel_ids": channels,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
@@ -166,7 +165,6 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     """
     row.name = record.name
     row.prompt = record.prompt
-    row.all_repositories = record.all_repositories
     row.setup_script = record.setup_script
     row.update_script = record.update_script
     row.base_snapshot_id = record.base_snapshot_id

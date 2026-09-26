@@ -144,9 +144,6 @@ function WorkspaceRow({
           {configure}
         </div>
       </div>
-      {workspace.all_repositories && (
-        <Badge variant="secondary">All GitHub App repositories</Badge>
-      )}
       <Chips values={workspace.repos} hrefFor={githubRepoHref} />
       <Chips values={workspace.slack_channel_ids.map(channelLabel)} />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
@@ -202,7 +199,6 @@ export function WorkspacesSection({
       const body: WorkspaceCreate = {
         name: createDraft.name.trim(),
         repos: createDraft.repos,
-        all_repositories: createDraft.allRepositories,
         slack_channel_ids: createDraft.slackChannelIds,
       }
       const prompt = createDraft.prompt.trim()

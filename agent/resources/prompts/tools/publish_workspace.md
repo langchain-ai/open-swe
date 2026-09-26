@@ -1,6 +1,6 @@
 Capture this thread's sandbox as the workspace's image and record its definition.
 
-Provision the sandbox first with ordinary tools — optionally clone selected repos, install
+Provision the sandbox first with ordinary tools — clone the repos, install
 toolchains, warm caches — and call this when it works. Everything on its
 filesystem is captured as ``name:latest``; only once that capture succeeds is
 the workspace created or updated to point at it, so a failed capture leaves
@@ -28,7 +28,7 @@ Args:
         prompt in this workspace. This is a full replacement — pass the
         whole text, not a delta. Empty string clears it.
     setup_script: Bash script that provisions a sandbox from the base
-        snapshot: optionally clone repos to preload, install `rg`, `gh`, the toolchains and
+        snapshot: clone the repos, install `rg`, `gh`, the toolchains and
         dependencies, warm caches. It runs unattended in a throwaway sandbox
         every night, so it must be non-interactive and safe to re-run from
         scratch, and it must never write a secret or a proxy credential to
@@ -50,14 +50,8 @@ Args:
         under, defaulting to ``<prefix>-environment-<slug>``. It must not
         contain a colon — that separates the name from the tag — and it is
         stable: every refresh re-publishes ``name:latest`` under it.
-    repos: Optional explicit ``owner/repo`` bindings for permissions and routing.
-        Repositories may be shared across workspaces. Does not clone anything or
-        require the setup script to clone them. Scripts receive only this list
-        in ``OPENSWE_WORKSPACE_REPOS``; it never expands to all app repositories.
-    all_repositories: Optional opt-in to all repositories this GitHub App
-        installation can access, including future additions. False by default;
-        omit on update to preserve it. Does not bind repositories for routing,
-        clone them, or grant GitHub Actions permission to start threads.
+    repos: Optional ``owner/repo`` list this workspace covers, for the
+        dashboard. Does not clone anything by itself.
     mem_bytes: Optional memory capacity for newly-created sandbox VMs.
     vcpus: Optional virtual CPU count for newly-created sandbox VMs.
     fs_capacity_bytes: Optional filesystem capacity for newly-created sandbox VMs.

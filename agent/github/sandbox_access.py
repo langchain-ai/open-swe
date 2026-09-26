@@ -147,15 +147,6 @@ async def workspace_token(
         if slug != DEFAULT_WORKSPACE_SLUG:
             raise ValueError(f"Workspace {slug!r} does not exist")
         return SandboxGitHubAccess()
-    if workspace.all_repositories:
-        if repositories is not None:
-            return await repository_token(repositories, permissions=permissions)
-        token, expires_at = await get_github_app_installation_token_with_expiry(
-            permissions=permissions
-        )
-        if not token:
-            raise RuntimeError("Workspace GitHub installation token is unavailable")
-        return SandboxGitHubAccess(token, expires_at)
     allowed = {repo.lower() for repo in workspace.repos}
     if repositories is not None:
         allowed.intersection_update(repo.lower() for repo in repositories)

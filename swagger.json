@@ -1936,11 +1936,6 @@
       },
       "Workspace": {
         "properties": {
-          "all_repositories": {
-            "default": false,
-            "title": "All Repositories",
-            "type": "boolean"
-          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -2241,11 +2236,6 @@
       },
       "WorkspaceCreate": {
         "properties": {
-          "all_repositories": {
-            "default": false,
-            "title": "All Repositories",
-            "type": "boolean"
-          },
           "base_snapshot_id": {
             "anyOf": [
               {
@@ -2801,17 +2791,6 @@
       "WorkspaceUpdate": {
         "description": "Partial update: only the fields present are written.",
         "properties": {
-          "all_repositories": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "All Repositories"
-          },
           "base_snapshot_id": {
             "anyOf": [
               {

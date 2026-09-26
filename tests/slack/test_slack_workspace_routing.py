@@ -267,19 +267,3 @@ async def test_a_named_repository_still_outranks_a_bound_channel(
     configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
     assert configurable["workspace"] == "internal"
     assert configurable["repo"] == {"owner": "acme", "name": "internal"}
-
-
-@_needs_workspace_rows
-@pytest.mark.parametrize("all_repositories", [False, True])
-async def test_shared_default_repo_stays_in_the_selected_workspace(all_repositories: bool) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
-    await WORKSPACES.create(
-        WorkspaceCreate(
-            name="OSS",
-            repos=[] if all_repositories else ["acme/api"],
-            all_repositories=all_repositories,
-        ),
-        "alice",
-    )
-    candidate = Repo(owner="acme", name="api")
-    assert await slack_webhooks.workspace_scoped_default_repo(candidate, "oss") == candidate
