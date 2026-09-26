@@ -24,7 +24,10 @@ async def slack_attach_html(
     initial_comment: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `slack_attach_html` tool."""
-    backend, path, work_dir = await resolve_sandbox_file(file_path)
+    try:
+        backend, path, work_dir = await resolve_sandbox_file(file_path)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
     if not path.lower().endswith(".html"):
         return {"success": False, "error": "file_path must identify an HTML file"}
     staged_path = posixpath.join(work_dir, f".open-swe-slack-upload-{uuid.uuid4().hex}")

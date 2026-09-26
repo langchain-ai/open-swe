@@ -7,6 +7,13 @@ description: Author the HTML for a plan artifact, dashboard iframe, or Slack att
 
 `save_plan`, `output_iframe`, and `slack_attach_html` all publish a self-contained HTML artifact, and one contract covers all three.
 
+| Tool | Path contract |
+| --- | --- |
+| `save_plan` | Requires a single `.html` file directly under `/workspace/plans/`. |
+| `output_iframe` | Accepts a path resolved within the sandbox work directory and creates its snapshot there. |
+| `slack_attach_html` | Requires a path resolving within the sandbox work directory, normally `/root`. |
+| `create_sandbox_file_download_url` | Requires a path resolving within the sandbox work directory, normally `/root`. |
+
 Write the page content directly. When you omit `<html>`, `<head>`, and `<body>`, the tool wraps your content in that skeleton with a minimal CSS reset. Write a `<title>` yourself — a specific 2–4 word name for this page, not a summary or a category label. A Slack attachment is opened as a standalone file, so include the full skeleton there.
 
 ## Design plan first

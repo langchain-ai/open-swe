@@ -4,7 +4,8 @@ Generated presentation artifacts are temporary delivery output, not repository a
 screenshots, videos, generated HTML, or other presentation files to `artifacts/` or another path in
 the target repository unless the user explicitly asks for a durable repository asset or test
 fixture. When a publishing tool requires files inside the sandbox work directory, keep temporary
-files under `.open-swe/artifacts/` and add that path to the checkout's local `.git/info/exclude`.
+files under `/root/.open-swe/artifacts/`. This directory is outside the repository checkout;
+presentation artifacts must not be committed to the target repository.
 
 Prefer `output_iframe` for HTML previews. Use `create_sandbox_file_download_url` for images, videos,
 archives, or PDFs and set `content_disposition="inline"` with the appropriate `content_type` when the

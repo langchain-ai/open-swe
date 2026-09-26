@@ -109,19 +109,27 @@ async def test_create_download_url_defaults_to_a_non_expiring_link(
 
 
 @pytest.mark.parametrize(
-    "file_path",
-    ["../secret.txt", "artifacts/../../secret.txt", "/etc/passwd", "/workspace/project-other/x"],
+    ("file_path", "corrected_path"),
+    [
+        ("../secret.txt", "/workspace/project/secret.txt"),
+        ("artifacts/../../secret.txt", "/workspace/project/secret.txt"),
+        ("/etc/passwd", "/workspace/project/passwd"),
+        ("/workspace/project-other/x", "/workspace/project/x"),
+    ],
 )
 async def test_create_download_url_rejects_paths_outside_work_dir(
     monkeypatch: pytest.MonkeyPatch,
     file_path: str,
+    corrected_path: str,
 ) -> None:
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
     result = await download_tool.create_sandbox_file_download_url(file_path)
 
+    assert result["success"] is False
     assert "must resolve within the sandbox work directory" in result["error"]
+    assert f"use {corrected_path} instead" in result["error"]
 
     assert client.calls == []
 
@@ -134,7 +142,9 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
 
     result = await download_tool.create_sandbox_file_download_url("link-to-secret")
 
+    assert result["success"] is False
     assert "must resolve within the sandbox work directory" in result["error"]
+    assert "use /workspace/project/link-to-secret instead" in result["error"]
 
     assert client.calls == []
 
@@ -151,4 +161,5 @@ async def test_create_download_url_rejects_invalid_expiry(
         "result.bin", expires_in_seconds=expires_in_seconds
     )
 
+    assert result["success"] is False
     assert "must be positive" in result["error"]
