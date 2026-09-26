@@ -89,7 +89,7 @@ async def test_assessment_on_empty_re_review_respects_existing_findings(
             ),
         ),
         patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
-        patch("agent.tools.publish_review.get_github_token", return_value="t"),
+        patch("agent.tools.publish_review.resolve_thread_github_token", return_value="t"),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch(
@@ -587,7 +587,7 @@ async def test_publish_review_eval_mode_does_not_call_github() -> None:
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
         patch("agent.tools.publish_review.mutate_findings", AsyncMock()),
-        patch("agent.tools.publish_review.get_github_token") as get_token,
+        patch("agent.tools.publish_review.resolve_thread_github_token") as get_token,
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post_review,
     ):
         result = await publish_review(ranking=["f_high", "f_low"], assessment=_assessment())
@@ -792,7 +792,7 @@ async def test_publish_review_forwards_trace_link_config_override() -> None:
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.resolve_thread_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
         patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
@@ -2534,7 +2534,7 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.resolve_thread_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
         patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):

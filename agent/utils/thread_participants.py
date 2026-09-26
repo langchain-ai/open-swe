@@ -9,7 +9,7 @@ from langgraph_sdk import get_client
 
 from agent.dashboard.agent_overrides import resolve_github_login
 from agent.github.comments import fetch_github_thread_participants
-from agent.github.thread_token import get_github_token
+from agent.github.thread_token import resolve_thread_github_token
 from agent.slack.client import fetch_slack_thread_messages
 from agent.source_context import SourceContext
 from agent.users import User
@@ -172,7 +172,7 @@ async def resolve_thread_participant_logins(
             context.github_issue.number if context.github_issue else None
         ) or context.pr_number
         repo = _repo_config(configurable, metadata)
-        token = get_github_token(config)
+        token = await resolve_thread_github_token(config)
         if not repo or not issue_number or not token:
             return None, 0, "GitHub thread context is incomplete"
         participants = await fetch_github_thread_participants(repo, issue_number, token=token)

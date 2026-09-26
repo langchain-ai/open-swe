@@ -89,7 +89,7 @@ async def test_resolves_github_participants_from_issue_context() -> None:
     }
     with (
         patch.object(participants, "get_client", return_value=_Client(metadata)),
-        patch.object(participants, "get_github_token", return_value="token"),
+        patch.object(participants, "resolve_thread_github_token", return_value="token"),
         patch.object(
             participants,
             "fetch_github_thread_participants",

@@ -9,7 +9,7 @@ from langgraph_sdk import get_client
 
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import post_github_comment
-from agent.github.thread_token import get_github_token
+from agent.github.thread_token import resolve_thread_github_token
 from agent.linear.notifications import post_linear_notification
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -138,7 +138,9 @@ async def post_sandbox_unreachable_notification(
 
     github_target = _get_github_target(cfg)
     if github_target is not None:
-        token = get_github_token(config) or await get_github_app_installation_token()
+        token = (
+            await resolve_thread_github_token(config) or await get_github_app_installation_token()
+        )
         if not token:
             logger.info("No GitHub token available for sandbox unreachable notification")
             return

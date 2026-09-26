@@ -527,15 +527,20 @@ async def _ensure_reviewer_sandbox_for_thread(
     repo_name = cfg.repo.name if cfg.repo else ""
     github_token: str | None = None
     if cfg.source:
+        repositories = [repo_name] if repo_name else None
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name] if repo_name else None
+            repositories=repositories
         )
         if not github_token:
             raise RuntimeError(
                 f"GitHub App installation token unavailable for reviewer thread {thread_id}"
             )
         cache_github_token_for_thread(
-            thread_id, github_token, expires_at=expires_at, is_bot_token=True
+            thread_id,
+            github_token,
+            expires_at=expires_at,
+            is_bot_token=True,
+            repositories=repositories,
         )
 
     return (
