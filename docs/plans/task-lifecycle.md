@@ -299,7 +299,10 @@ candidate.
 - When the pool runs out, the task is blocked with `no_reviewer`.
 
 `task_assignee` gains `acknowledged_at`, `due_at`, and `passed_user_ids` for this.
-The global sweep enforces `due_at`.
+The assignee's time zone is read from Slack (`users.info`) once, when the
+assignment is made, and used to compute `due_at`. The global sweep compares only
+the stored `due_at`, so there is one Slack call per assignment and no cache. A
+user without a linked Slack account falls back to the workspace time zone.
 
 Assignment and GitHub review requests stay in sync in both directions. Assigning a
 reviewer in Open SWE requests their review on the PR, and a review request a
