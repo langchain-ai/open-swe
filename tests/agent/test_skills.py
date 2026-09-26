@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
@@ -93,7 +94,10 @@ async def test_organization_skill_listing_uses_opaque_cursor() -> None:
     )
 
 
-async def test_save_user_skill_uses_triggering_user_namespace() -> None:
+async def test_save_user_skill_uses_triggering_user_namespace(
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(private=True, owner=True)
     create = AsyncMock(return_value={"name": "deslop"})
     with (
         patch(

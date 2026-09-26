@@ -1,5 +1,6 @@
 """Approval policy edits stay separate from reviewer style and preserve authorization."""
 
+from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,6 +19,11 @@ from agent.tools.manage_review_approval_policy import manage_review_approval_pol
 from tests.conftest import FakeStore
 
 
+@pytest.fixture(autouse=True)
+def private_admin(grant_tool_access: Callable[..., None]) -> None:
+    grant_tool_access(admin=True, admin_surface=True)
+
+
 async def test_policy_edits_override_and_reset_without_changing_review_style(
     fake_store: FakeStore,
 ) -> None:
@@ -26,10 +32,6 @@ async def test_policy_edits_override_and_reset_without_changing_review_style(
     )
     await REVIEW_STYLES.set_custom_prompt("o/r", "Keep comments brief")
     with (
-        patch(
-            "agent.tools.manage_review_approval_policy.require_private_admin_surface",
-            AsyncMock(return_value=None),
-        ),
         patch("agent.reviewer.cached_workspace_settings", side_effect=get_workspace_settings),
         patch("agent.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")),
         patch("agent.dashboard.deps.session_is_admin", return_value=True),
@@ -89,23 +91,16 @@ async def test_instance_reset_returns_the_effective_default(fake_store: FakeStor
     assert reset["approval_policy"] is None
 
 
-async def test_tool_rechecks_private_admin_and_repo_access(fake_store: FakeStore) -> None:
+async def test_tool_rechecks_private_admin_and_repo_access(
+    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+) -> None:
+    grant_tool_access(admin=True, admin_thread=True)
+    refused = await manage_review_approval_policy("save", policy="Any change")
+    assert "not available in this thread" in str(refused["error"])
+    grant_tool_access(admin=True, admin_surface=True)
     with (
         patch(
-            "agent.tools.manage_review_approval_policy.require_private_admin_surface",
-            AsyncMock(return_value="Private admin required"),
-        ),
-        pytest.raises(ValueError, match="Private admin"),
-    ):
-        await manage_review_approval_policy("save", policy="Any change")
-    with (
-        patch(
-            "agent.tools.manage_review_approval_policy.require_private_admin_surface",
-            AsyncMock(return_value=None),
-        ),
-        patch(
-            "agent.tools.manage_review_approval_policy.private_credential_login",
-            AsyncMock(return_value="admin"),
+            "agent.run_config.get_config", return_value={"configurable": {"github_login": "admin"}}
         ),
         patch(
             "agent.tools.manage_review_approval_policy.require_repo_access_for_user",
@@ -121,18 +116,14 @@ async def test_automatic_approvals_are_separate_and_opt_in(fake_store: FakeStore
     settings = await get_workspace_settings()
     assert settings["approval_policy"] is None
     assert settings["review_auto_approve"] is False
-    with patch(
-        "agent.tools.manage_review_approval_policy.require_private_admin_surface",
-        AsyncMock(return_value=None),
-    ):
-        await manage_review_approval_policy("save", policy="Docs only")
-        assert (await get_workspace_settings())["review_auto_approve"] is False
-        await manage_review_approval_policy("save", auto_approve=True)
-        settings = await get_workspace_settings()
-        assert settings["approval_policy"] == "Docs only"
-        assert settings["review_auto_approve"] is True
-        await manage_review_approval_policy("save", auto_approve=False)
-        assert (await get_workspace_settings())["review_auto_approve"] is False
+    await manage_review_approval_policy("save", policy="Docs only")
+    assert (await get_workspace_settings())["review_auto_approve"] is False
+    await manage_review_approval_policy("save", auto_approve=True)
+    settings = await get_workspace_settings()
+    assert settings["approval_policy"] == "Docs only"
+    assert settings["review_auto_approve"] is True
+    await manage_review_approval_policy("save", auto_approve=False)
+    assert (await get_workspace_settings())["review_auto_approve"] is False
 
 
 async def test_approval_toggle_tool_can_restore_workspace_inheritance(
@@ -145,10 +136,6 @@ async def test_approval_toggle_tool_can_restore_workspace_inheritance(
             WORKSPACES,
             "get",
             AsyncMock(return_value=Workspace(name="team", slug="team", prompt="")),
-        ),
-        patch(
-            "agent.tools.manage_review_approval_policy.require_private_admin_surface",
-            AsyncMock(return_value=None),
         ),
     ):
         await manage_review_approval_policy("save", auto_approve=True)

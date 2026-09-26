@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from agent.database import postgres
-from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.access import Policy, access
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,9 @@ def _json_value(value: object) -> object:
     return str(value)
 
 
+@access(Policy(trusted="admin_surface", actor="admin"))
 async def read_only_sql(query: str) -> dict[str, object]:
     """Run one read-only PostgreSQL query on a private admin surface."""
-    if error := await require_private_admin_surface("query the database"):
-        return {"ok": False, "error": error}
-
     query = query.strip()
     if not query:
         return {"ok": False, "error": "Query cannot be empty."}

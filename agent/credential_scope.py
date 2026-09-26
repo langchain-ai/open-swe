@@ -52,13 +52,23 @@ def _requested_participant(requested: str | None, metadata: Mapping[str, Any]) -
     return login
 
 
+def private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str | None:
+    """The run's actor when this is a private thread they own, else None."""
+    if metadata.get("visibility", "public") == "public":
+        return None
+    owner = metadata.get("owner_login")
+    login = (cfg.github_login or "").strip()
+    if not isinstance(owner, str) or not login or owner.strip().lower() != login.lower():
+        return None
+    return login
+
+
 def _private_owner_login(cfg: RunConfig, metadata: Mapping[str, Any]) -> str:
     owner = metadata.get("owner_login")
     if not isinstance(owner, str) or not owner.strip():
         raise RuntimeError("Private thread has no credential owner")
-    owner = owner.strip().lower()
-    login = (cfg.github_login or "").strip()
-    if owner != login.lower():
+    login = private_owner_login(cfg, metadata)
+    if login is None:
         raise RuntimeError("Personal credentials require the private thread owner to start the run")
     return login
 

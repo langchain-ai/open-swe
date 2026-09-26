@@ -20,16 +20,14 @@ def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "source": "dashboard",
         "github_login": "Alice",
     }
-    monkeypatch.setattr(
-        import_module("agent.tools.save_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
-    monkeypatch.setattr(
-        import_module("agent.tools.read_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
+    for module in (
+        "agent.run_config",
+        "agent.tools.save_user_settings",
+        "agent.tools.read_user_settings",
+    ):
+        monkeypatch.setattr(
+            import_module(module), "get_config", lambda: {"configurable": configurable}
+        )
     return configurable
 
 
@@ -352,7 +350,7 @@ async def test_private_read_rejects_unverified_requesters(
 ) -> None:
     requester["github_login"] = login
     with patch("agent.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
-        assert (await read_user_settings())["success"] is False
+        assert "error" in await read_user_settings()
     profile.assert_not_awaited()
 
 

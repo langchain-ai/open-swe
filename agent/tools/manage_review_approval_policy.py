@@ -2,7 +2,6 @@
 
 from typing import Literal
 
-from agent.credential_scope import private_credential_login
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
@@ -12,10 +11,15 @@ from agent.dashboard.workspace_settings import (
     workspace_settings_view,
 )
 from agent.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate, normalize_repo_full_name
-from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.access import Policy, access, ack
+from agent.tools.admin_gate import configurable
 from agent.workspaces.store import WORKSPACES, slugify
 
+_READ = Policy(trusted="admin_surface", actor="admin")
+_WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "workspace"))
 
+
+@access(_WRITE, per_call=lambda args: _READ if args.get("action") == "read" else _WRITE)
 async def manage_review_approval_policy(
     action: Literal["read", "save", "reset"],
     policy: str | None = None,
@@ -24,8 +28,6 @@ async def manage_review_approval_policy(
     auto_approve: bool | Literal["inherit"] | None = None,
 ) -> dict[str, object]:
     """Read, set, or reset approval criteria independently of review guidelines."""
-    if error := await require_private_admin_surface("manage approval policies"):
-        raise ValueError(error)
     if repository and workspace:
         raise ValueError("Choose a repository or workspace, not both")
     if action == "save" and policy is None and auto_approve is None:
@@ -42,9 +44,9 @@ async def manage_review_approval_policy(
     update = WorkspaceSettingsUpdate.model_validate(changes)
     if repository:
         repository = normalize_repo_full_name(repository)
-        login = await private_credential_login()
+        login = configurable().github_login
         if not login:
-            raise ValueError("An authenticated private thread owner is required")
+            raise ValueError("An authenticated requester is required")
         await require_repo_access_for_user(login, repository)
         record = await REVIEW_STYLES.get(repository)
         if action != "read":

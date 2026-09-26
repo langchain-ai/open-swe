@@ -7,11 +7,13 @@ from langgraph.config import get_config
 
 from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
+from agent.tools.access import Policy, access, unchanged
 from agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
 
+@access(Policy(trusted="private", actor="owner", sole=unchanged))
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Implement the `save_user_instructions` tool."""
     login = await resolve_github_login(as_json_object(get_config()))

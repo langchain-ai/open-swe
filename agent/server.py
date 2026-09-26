@@ -163,7 +163,7 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
-from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
+from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     background_execute,
@@ -221,14 +221,13 @@ from agent.tools import (
     update_automation,
     web_search,
 )
+from agent.tools.access import permitted, resolve_access
 from agent.tools.admin_gate import (
     actor_has_admin_context,
     actor_is_admin,
-    is_private_admin_surface,
     participant_is_admin,
 )
 from agent.tools.manage_review_approval_policy import manage_review_approval_policy
-from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -620,7 +619,7 @@ def _general_purpose_subagent(
     return subagent
 
 
-# Added to an admin thread's tools; see the admin-thread section of the prompt.
+# Workspace-admin tools; each declares where it may run with `@access`.
 ADMIN_TOOLS = (
     list_automations,
     create_automation,
@@ -649,18 +648,6 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
-
-
-async def _private_thread(thread_id: str | None) -> bool:
-    """Whether only this thread's owner can read it. Fails closed."""
-    if not thread_id:
-        return False
-    try:
-        thread = await client.threads.get(thread_id=thread_id)
-    except Exception:
-        logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
-        return False
-    return thread_is_private(thread_metadata(thread))
 
 
 async def _bridged_thread(thread_id: str | None) -> bool:
@@ -815,6 +802,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         recent_thread_context_enabled: bool,
         admin_workspaces: bool,
+        sole_writer: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
@@ -834,6 +822,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
+        self._sole_writer = sole_writer
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
@@ -1096,6 +1085,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
                 admin_workspaces=self._admin_workspaces,
+                sole_writer=self._sole_writer,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
@@ -1371,14 +1361,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
-    private_admin_surface = admin_thread and is_private_admin_surface(cfg)
-    if admin_thread:
-        logger.info("Admin thread %s: adding workspace management tools", thread_id)
-
-    # Channel history pulls messages into the transcript, so everyone who can
-    # read the thread reads them. Only a private thread gets the tool at all.
-    async with aphase(thread_id, "factory.private_thread"):
-        private_thread = await _private_thread(thread_id)
+    async with aphase(thread_id, "factory.tool_access"):
+        tool_access = await resolve_access(cfg, login=profile_login)
 
     stop_summary_mode = cfg.stop_summary is True
     async with aphase(thread_id, "factory.bridged_thread"):
@@ -1425,7 +1409,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         background_task,
         save_plan,
         save_user_instructions,
-        *((save_user_settings,) if personal_settings_run_allowed(cfg) else ()),
+        save_user_settings,
         save_user_skill,
         delete_user_skill,
         list_threads,
@@ -1462,21 +1446,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_start_new_thread,
         submit_thread_feedback,
         submit_review_assessment_feedback,
-        *(ADMIN_TOOLS if admin_thread else ()),
+        *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
-        *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
+        read_only_sql,
+        manage_review_approval_policy,
     ]
-    if credential_login is None:
-        personal_tools = (
-            save_user_instructions,
-            save_user_settings,
-            save_user_skill,
-            delete_user_skill,
-            read_user_settings,
-        )
-        static_tools = [tool for tool in static_tools if tool not in personal_tools]
-    if not private_thread:
-        static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
+    static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     elif _slack_concierge_run(cfg):
@@ -1650,6 +1625,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                             else False
                         ),
                         admin_workspaces=admin_thread,
+                        sole_writer=tool_access.sole,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
                     ),
