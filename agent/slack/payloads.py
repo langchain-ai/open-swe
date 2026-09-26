@@ -313,6 +313,11 @@ class SlackViewSubmission(SlackPayload):
             return {}
         return parse_json_object(self.view.private_metadata.encode()) or {}
 
+    def selected(self, block_id: str, action_id: str) -> list[str]:
+        block = self.view.state.values.get(block_id) or {}
+        element = block.get(action_id)
+        return [option.value for option in element.selected_options] if element else []
+
     def submitted(self, block_id: str, action_id: str) -> str:
         """What was typed into one input, or ``""`` when it was left empty."""
         block = self.view.state.values.get(block_id) or {}
