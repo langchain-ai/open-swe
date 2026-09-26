@@ -51,6 +51,7 @@ import {
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import { api } from "@/lib/api"
 import { useProfile, useRepos } from "@/lib/profile"
+import { useRecentRepos } from "@/lib/recentRepos"
 import { useSession } from "@/lib/session"
 import {
   requestNotificationPermission,
@@ -172,7 +173,14 @@ export function AgentsHome({
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
-  const userDefaultRepo = profileQuery.data?.default_repo ?? null
+  const [recentRepos] = useState(
+    () =>
+      useRecentRepos.getState().byAccount[`${session.data?.login}:github`] ?? []
+  )
+  const recentRepo = recentRepos.find((id) =>
+    reposQuery.data?.repositories.some((repo) => repo.full_name === id)
+  )
+  const userDefaultRepo = recentRepo ?? profileQuery.data?.default_repo ?? null
 
   // Workspace first: an explicit pick, else the owner of a repository named
   // from outside (a link or the profile default), else the user's default,
@@ -656,6 +664,7 @@ export function AgentsHome({
             selection={activeSelection}
             onSelectionChange={handleSelectionChange}
             repos={workspaceRepos}
+            autoSelectRepo={repoOverride !== null}
             selectedRepo={repo}
             onRepoChange={optimisticDraftThread ? undefined : selectRepo}
             runTarget={isDesktop ? runTarget : undefined}

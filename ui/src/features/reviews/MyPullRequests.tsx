@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { MultiSelect } from "@/components/ui/multi-select"
+import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
@@ -199,20 +200,21 @@ export function MyPullRequests({
           aria-label="My open pull requests"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <MultiSelect
+            <RepoSelector
+              multiple
               label="Filter by repository"
               placeholder="All repositories"
               searchPlaceholder="Search repositories…"
-              emptyMessage={
+              noMatchesLabel={
                 knownRepos.isPending
                   ? "Loading repositories…"
                   : knownRepos.isError
                     ? "Could not load repositories"
                     : "No matches"
               }
-              options={repoNames}
-              value={repo}
-              onValueChange={(chosen) =>
+              repos={repoNames.map((full_name) => ({ full_name }))}
+              selectedRepos={repo}
+              onReposChange={(chosen) =>
                 onFiltersChange({ repo: chosen.length ? chosen : undefined })
               }
             />

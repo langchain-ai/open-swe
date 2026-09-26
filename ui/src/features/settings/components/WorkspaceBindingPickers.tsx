@@ -12,6 +12,7 @@ import {
   type SlackChannelDirectory,
   type WorkspaceOption,
 } from "@/lib/api"
+import { RepoSelector } from "./RepoSelector"
 import { useRepos } from "@/lib/profile"
 import {
   OwnershipPicker,
@@ -96,33 +97,34 @@ export function RepositoryPicker({
     [repos.data, owners]
   )
   return (
-    <OwnershipPicker
-      triggerLabel="Choose repositories"
-      title="Repositories"
-      description="Work on these repositories runs in this workspace. A repository belongs to one workspace."
-      noun="repository"
-      pluralNoun="repositories"
-      items={items}
-      selected={selected}
-      workspaceSlug={workspaceSlug}
-      onChange={onChange}
-      searchPlaceholder="Search repositories"
-      manual={{
-        label: "Add a repository by name",
-        placeholder: "owner/repo",
-        normalize: (raw) => {
-          const value = raw.trim()
-          return REPO_PATTERN.test(value) ? value : null
+    <RepoSelector
+      ownership={{
+        triggerLabel: "Choose repositories",
+        title: "Repositories",
+        description:
+          "Work on these repositories runs in this workspace. A repository belongs to one workspace.",
+        noun: "repository",
+        pluralNoun: "repositories",
+        items,
+        selected,
+        workspaceSlug,
+        onChange,
+        searchPlaceholder: "Search repositories",
+        manual: {
+          label: "Add a repository by name",
+          placeholder: "owner/repo",
+          normalize: (raw) => {
+            const value = raw.trim()
+            return REPO_PATTERN.test(value) ? value : null
+          },
+          invalidHint: "Use the owner/repo form.",
         },
-        invalidHint: "Use the owner/repo form.",
-      }}
-      loading={repos.isLoading}
-      loadError={
-        repos.isError
+        loading: repos.isLoading,
+        loadError: repos.isError
           ? "Could not load the installation's repositories; add them by name."
-          : null
-      }
-      disabled={disabled}
+          : null,
+        disabled,
+      }}
     />
   )
 }

@@ -186,6 +186,7 @@ export function DefaultRepoSection({
           control={
             <div className="w-56">
               <RepoSelector
+                autoSelect={false}
                 repos={repositories.map((full_name) => ({ full_name }))}
                 selectedRepo={settings.data?.default_repo ?? null}
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}

@@ -273,6 +273,7 @@ function CloudAgentsPage() {
               repos.data?.repositories.length ? (
                 <div className="w-56">
                   <RepoSelector
+                    autoSelect={false}
                     repos={repos.data.repositories}
                     selectedRepo={defaultRepo || null}
                     onRepoChange={(repo) => setDefaultRepo(repo ?? "")}

@@ -122,6 +122,7 @@ export interface ChatComposerProps {
   onSelectionChange?: (next: ModelSelection | null) => void
   /** Repos the user can target. When provided with onRepoChange, a repo picker is shown. */
   repos?: Array<{ full_name: string }>
+  autoSelectRepo?: boolean
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
@@ -245,6 +246,7 @@ export const ChatComposer = memo(function ChatComposer({
   selection = null,
   onSelectionChange,
   repos,
+  autoSelectRepo = true,
   selectedRepo = null,
   onRepoChange,
   runTarget,
@@ -690,6 +692,7 @@ export const ChatComposer = memo(function ChatComposer({
               placeholder="Select repository"
               repos={repos}
               searchPlaceholder="Search repositories…"
+              autoSelect={autoSelectRepo}
               selectedRepo={selectedRepo}
               side="top"
             />
