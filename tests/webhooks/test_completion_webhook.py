@@ -569,10 +569,10 @@ async def test_error_clears_thinking_status_when_no_run_is_left(
 
 
 @pytest.mark.asyncio
-async def test_completion_leaves_session_status_anchored(
+async def test_completion_leaves_session_locations_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DM/code-channel sessions anchor the status on the newest message, not ts 0."""
+    """Concierge DMs and code channels have no per-message status to clear."""
     client = _FakeActiveRunClient(
         {
             "source": "slack",

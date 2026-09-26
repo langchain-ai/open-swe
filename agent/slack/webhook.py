@@ -1279,15 +1279,12 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and isinstance(run_id, str) and run_id:
+    if not code_channel and not concierge_mode and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            # A concierge DM names no Slack thread, so the status hangs on the
-            # message being answered and the session owns only that one.
-            thread_ts=(reply_thread_ts or original_message_ts) if concierge_mode else thread_ts,
-            session_ts=thread_ts if concierge_mode else "",
+            thread_ts=thread_ts,
         )
     return bool(isinstance(run_id, str) and run_id)

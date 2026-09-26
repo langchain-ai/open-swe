@@ -215,6 +215,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_start_new_thread,
+    start_thread,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
@@ -563,6 +564,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
+        "start_thread",
     }
 
 
@@ -1429,6 +1431,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         list_threads,
         get_thread,
         manage_thread,
+        *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,

@@ -198,93 +198,12 @@ def test_namespaced_tool_events_have_stable_distinct_ids() -> None:
     assert len({step.task_id for step in stream.steps.values()}) == 2
 
 
-class _AnchorStore:
-    """The session status anchor, as the LangGraph store keeps it."""
-
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, object]] = {}
-
-    async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, object] | None:
-        value = self.items.get((namespace, key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(
-        self, namespace: tuple[str, ...], key: str, value: dict[str, object]
-    ) -> None:
-        self.items[(namespace, key)] = value
-
-    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
-        self.items.pop((namespace, key), None)
-
-
-def _status_client(store: _AnchorStore) -> AsyncMock:
+def _status_client() -> AsyncMock:
     client = AsyncMock()
-    client.store = store
     client.runs.join.return_value = {}
     client.runs.list.return_value = []
     client.threads.get.return_value = {"metadata": {}}
     return client
-
-
-async def test_session_status_moves_to_the_newest_message(monkeypatch) -> None:
-    """A DM shows one indicator, on the message being answered, then none."""
-    calls: list[tuple[str, str, str]] = []
-
-    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
-        calls.append((channel_id, thread_ts, status))
-        return True
-
-    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
-    store = _AnchorStore()
-
-    await slack_thinking.show_slack_thinking_status(
-        client=_status_client(store),
-        thread_id="t1",
-        run_id="run-1",
-        channel_id="D1",
-        thread_ts="111.0",
-        session_ts="0",
-    )
-    await slack_thinking.show_slack_thinking_status(
-        client=_status_client(store),
-        thread_id="t1",
-        run_id="run-2",
-        channel_id="D1",
-        thread_ts="222.0",
-        session_ts="0",
-    )
-
-    assert calls == [
-        ("D1", "111.0", "Thinking..."),
-        ("D1", "111.0", ""),
-        ("D1", "222.0", "Thinking..."),
-        ("D1", "222.0", ""),
-    ]
-    assert store.items == {}
-
-
-async def test_session_status_release_leaves_a_newer_runs_indicator_alone(monkeypatch) -> None:
-    """The run that finishes first must not clear the indicator someone is waiting on."""
-    cleared: list[str] = []
-
-    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:  # noqa: ARG001
-        if not status:
-            cleared.append(thread_ts)
-        return True
-
-    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    store = _AnchorStore()
-    client = _status_client(store)
-
-    # The newer run already owns the session's status.
-    await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
-
-    released = await slack_thinking._release_status_anchor(client, "D1", "0", "111.0")
-
-    assert released is False
-    assert cleared == []
-    assert store.items[(("slack_session_status_anchor", "D1"), "0")] == {"message_ts": "222.0"}
 
 
 async def test_thread_status_refresh_finishes_before_completion_clears(
@@ -313,7 +232,7 @@ async def test_thread_status_refresh_finishes_before_completion_clears(
 
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.0)
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.join.side_effect = join
 
     async with asyncio.timeout(2):
@@ -338,7 +257,7 @@ async def test_thread_status_refresh_finishes_before_completion_clears(
 async def test_early_status_survives_while_another_run_is_active(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
 
     await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
@@ -352,7 +271,7 @@ async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 3600.0)
 
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.list = AsyncMock(return_value=[{"id": "run-2"}])
 
     await slack_thinking.show_slack_thinking_status(
@@ -366,17 +285,13 @@ async def test_thread_status_survives_while_another_run_is_active(monkeypatch) -
     assert call("C1", "1.0", "") not in set_status.await_args_list
 
 
-@pytest.mark.parametrize("session", [False, True])
-async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool) -> None:
+async def test_background_waiting_resumes_and_clears(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    store = _AnchorStore()
-    client = _status_client(store)
+    client = _status_client()
     metadata = {
         "running_background_tasks": ["cmd-1", "cmd-2"],
-        "source_context": {
-            "slack_thread": {"channel_id": "C1", "thread_ts": "0" if session else "1.0"}
-        },
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
     }
     client.threads.get.return_value = {"metadata": metadata}
 
@@ -386,7 +301,6 @@ async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool)
         run_id="run-1",
         channel_id="C1",
         thread_ts="1.0",
-        session_ts="0" if session else "",
     )
     assert set_status.await_args.args == ("C1", "1.0", "Waiting for background tasks…")
 
@@ -405,25 +319,12 @@ async def test_background_waiting_resumes_and_clears(monkeypatch, session: bool)
     metadata["running_background_tasks"] = []
     await slack_thinking.sync_slack_background_status(client, "thread-1")
     assert set_status.await_args.args == ("C1", "1.0", "")
-    assert store.items == {}
-
-
-async def test_idle_settlement_preserves_newer_session_anchor(monkeypatch) -> None:
-    set_status = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore())
-    client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
-    await slack_thinking._claim_status_anchor(client, "D1", "0", "222.0")
-    await slack_thinking.clear_slack_thinking_status_if_idle(
-        client, "thread-1", "D1", "111.0", session_ts="0"
-    )
-    set_status.assert_not_awaited()
 
 
 async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -> None:
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.list.side_effect = RuntimeError("unavailable")
     client.threads.get.return_value = {"metadata": {"running_background_tasks": ["cmd-1"]}}
     await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "C1", "1.0")
@@ -435,7 +336,7 @@ async def test_run_lookup_failure_does_not_replace_working_status(monkeypatch) -
 async def test_status_sync_reuses_metadata_for_idle_settlement(
     monkeypatch: pytest.MonkeyPatch, provided_metadata: bool, waiting: bool
 ) -> None:
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     metadata: dict[str, object] = {
         "running_background_tasks": ["cmd-1"] if waiting else [],
         "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
@@ -455,7 +356,7 @@ async def test_status_sync_reuses_metadata_for_idle_settlement(
 async def test_status_sync_does_not_clear_run_started_during_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.list.side_effect = [[], [], [{"run_id": "new-run"}]]
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -469,34 +370,29 @@ async def test_status_sync_does_not_clear_run_started_during_settlement(
 
 
 @pytest.mark.parametrize("waiting", [False, True])
-async def test_status_sync_preserves_anchor_replaced_during_settlement(
+async def test_status_sync_leaves_session_locations_alone(
     monkeypatch: pytest.MonkeyPatch, waiting: bool
 ) -> None:
-    client = AsyncMock()
-    client.runs.list.return_value = []
-    client.store.get_item.side_effect = [
-        {"value": {"message_ts": "1.0"}},
-        {"value": {"message_ts": "2.0"}},
-    ]
+    """Concierge DMs and code channels show no per-message thinking status."""
+    client = _status_client()
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await slack_thinking.sync_slack_background_status(
         client,
         "thread-1",
+        resume=True,
         metadata={
             "running_background_tasks": ["cmd-1"] if waiting else [],
             "source_context": {"slack_thread": {"channel_id": "D1", "thread_ts": "0"}},
         },
     )
-    client.threads.get.assert_not_awaited()
-    client.store.delete_item.assert_not_awaited()
     set_status.assert_not_awaited()
 
 
 async def test_status_wait_recovers_connection_failure_without_webhook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.join.side_effect = [httpx.ConnectError("disconnected"), {}]
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -516,16 +412,13 @@ async def test_status_wait_recovers_connection_failure_without_webhook(
     ]
 
 
-@pytest.mark.parametrize("session", [False, True])
 async def test_status_wait_keeps_refreshing_after_repeated_failures(
     monkeypatch: pytest.MonkeyPatch,
-    session: bool,
 ) -> None:
     refreshed = asyncio.Event()
     complete = asyncio.Event()
     statuses: list[str] = []
-    store = _AnchorStore()
-    client = _status_client(store)
+    client = _status_client()
     client.runs.list.return_value = [{"run_id": "run-1"}]
 
     async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
@@ -555,7 +448,6 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
                     run_id="run-1",
                     channel_id="C1",
                     thread_ts="1.0",
-                    session_ts="0" if session else "",
                 )
             )
             await refreshed.wait()
@@ -564,7 +456,6 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
             complete.set()
 
     assert statuses[-1] == ""
-    assert store.items == {}
 
 
 async def test_status_wait_cancellation_propagates_and_clears_idle_status(
@@ -577,7 +468,7 @@ async def test_status_wait_cancellation_propagates_and_clears_idle_status(
         await asyncio.Event().wait()
         return {}
 
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     client.runs.join.side_effect = join
     set_status = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -605,57 +496,33 @@ async def test_status_wait_cancellation_propagates_and_clears_idle_status(
     ]
 
 
-@pytest.mark.parametrize("session", [False, True])
-async def test_failed_status_clear_retries_without_losing_anchor(
-    monkeypatch: pytest.MonkeyPatch,
-    session: bool,
-) -> None:
-    store = _AnchorStore()
-    client = _status_client(store)
-    anchor_key = (("slack_session_status_anchor", "C1"), "0")
-    if session:
-        store.items[anchor_key] = {"message_ts": "1.0"}
+async def test_failed_status_clear_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     statuses: list[str] = []
 
     async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
-        if session:
-            assert store.items[anchor_key] == {"message_ts": "1.0"}
         statuses.append(status)
         return len(statuses) == 2
 
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await slack_thinking.clear_slack_thinking_status_if_idle(
-        client,
-        "thread-1",
-        "C1",
-        "1.0",
-        session_ts="0" if session else "",
+        _status_client(), "thread-1", "C1", "1.0"
     )
 
     assert statuses == ["", ""]
-    assert store.items == {}
 
 
-async def test_failed_status_clear_stops_retrying_and_retains_anchor(
+async def test_failed_status_clear_stops_retrying(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = _AnchorStore()
-    anchor_key = (("slack_session_status_anchor", "D1"), "0")
-    store.items[anchor_key] = {"message_ts": "1.0"}
     set_status = AsyncMock(return_value=False)
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
 
     await slack_thinking.clear_slack_thinking_status_if_idle(
-        _status_client(store),
-        "thread-1",
-        "D1",
-        "1.0",
-        session_ts="0",
+        _status_client(), "thread-1", "D1", "1.0"
     )
 
     assert set_status.await_args_list == [call("D1", "1.0", "")] * 3
-    assert store.items[anchor_key] == {"message_ts": "1.0"}
     assert "cleanup retries exhausted" in caplog.text
 
 
@@ -664,7 +531,7 @@ async def test_status_clear_recovers_transient_read_failure(
     monkeypatch: pytest.MonkeyPatch,
     failed_read: str,
 ) -> None:
-    client = _status_client(_AnchorStore())
+    client = _status_client()
     if failed_read == "runs":
         client.runs.list.side_effect = [httpx.ConnectError("unavailable"), [], []]
     else:
@@ -677,63 +544,37 @@ async def test_status_clear_recovers_transient_read_failure(
     set_status.assert_awaited_once_with("C1", "1.0", "")
 
 
-@pytest.mark.parametrize("new_owner", ["run", "anchor"])
-async def test_status_clear_retry_preserves_newer_work(
-    monkeypatch: pytest.MonkeyPatch,
-    new_owner: str,
-) -> None:
-    store = _AnchorStore()
-    anchor_key = (("slack_session_status_anchor", "D1"), "0")
-    store.items[anchor_key] = {"message_ts": "1.0"}
-    client = _status_client(store)
+async def test_status_clear_retry_preserves_newer_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _status_client()
     calls: list[str] = []
 
     async def set_status(_channel_id: str, thread_ts: str, _status: str) -> bool:
         calls.append(thread_ts)
-        if new_owner == "run":
-            client.runs.list.return_value = [{"run_id": "new-run"}]
-        else:
-            store.items[anchor_key] = {"message_ts": "2.0"}
+        client.runs.list.return_value = [{"run_id": "new-run"}]
         return False
 
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-    await slack_thinking.clear_slack_thinking_status_if_idle(
-        client,
-        "thread-1",
-        "D1",
-        "1.0",
-        session_ts="0",
-    )
+    await slack_thinking.clear_slack_thinking_status_if_idle(client, "thread-1", "D1", "1.0")
 
     assert calls == ["1.0"]
-    assert store.items[anchor_key] == {"message_ts": "1.0" if new_owner == "run" else "2.0"}
 
 
 async def test_status_clear_retry_reloads_background_task_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = _AnchorStore()
-    anchor_key = (("slack_session_status_anchor", "D1"), "0")
-    store.items[anchor_key] = {"message_ts": "1.0"}
-    client = _status_client(store)
+    client = _status_client()
     client.threads.get.return_value = {"metadata": {"running_background_tasks": ["task-1"]}}
     set_status = AsyncMock(side_effect=[False, True])
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
 
     await slack_thinking.clear_slack_thinking_status_if_idle(
-        client,
-        "thread-1",
-        "D1",
-        "1.0",
-        session_ts="0",
-        metadata={},
+        client, "thread-1", "D1", "1.0", metadata={}
     )
 
     assert set_status.await_args_list == [
         call("D1", "1.0", ""),
         call("D1", "1.0", "Waiting for background tasks…"),
     ]
-    assert store.items[anchor_key] == {"message_ts": "1.0"}
 
 
 @pytest.mark.parametrize("already_completed", [False, True])
