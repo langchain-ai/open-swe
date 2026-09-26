@@ -7,6 +7,28 @@ from pydantic import SecretStr
 from agent.middleware.sanitize_openai_responses import _sanitize_messages
 
 
+def test_stateless_responses_replay_drops_orphaned_tool_outputs() -> None:
+    messages = [
+        ToolMessage(
+            content="stale result",
+            tool_call_id="call_J9r0MSqtnTYYqMOCKHGYjVoT",
+            name="execute",
+        ),
+        HumanMessage("continue"),
+    ]
+    model = ChatOpenAI(
+        model="gpt-5.6-sol",
+        api_key=SecretStr("test"),
+        use_responses_api=True,
+        store=False,
+        output_version="responses/v1",
+    )
+
+    payload = model._get_request_payload(_sanitize_messages(messages))
+
+    assert payload["input"] == [{"content": "continue", "role": "user", "type": "message"}]
+
+
 def test_stateless_responses_replay_preserves_tool_history_without_mutation() -> None:
     messages = [
         HumanMessage("test the todo middleware"),
