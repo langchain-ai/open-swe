@@ -276,6 +276,31 @@ cached per repo and path for an hour. When no candidate qualifies, the task is
 blocked with `no_reviewer`, assigned to the owners, whose answer (or a manual
 assignment) picks the reviewers.
 
+#### Acknowledgement and reassignment
+
+Each review slot has exactly one assignee at a time. The assignee must
+acknowledge within **2 working hours** or the slot moves to the next-best
+candidate.
+
+- Acknowledging means clicking "Start review" in the Slack DM or task panel, or
+  any review activity on the PR: a review comment, a submitted review, or opening
+  the PR's Open SWE review page.
+- "Pass" in the Slack DM or task panel reassigns immediately.
+- On timeout or pass, the shepherd picks the next candidate from the same pool
+  (the same code-owner team, for a code-owner slot), moves the GitHub review
+  request, notifies both people, and records a `task_event`. Someone who timed out
+  or passed is not picked again for that PR.
+- The 2-hour clock counts only the assignee's working hours (weekdays 09:00–18:00
+  in their Slack time zone), so a review assigned overnight does not rotate
+  through the team before anyone is awake.
+- Once acknowledged, the slot is no longer reassigned automatically. If no review
+  arrives within 1 working day, the shepherd nudges the reviewer once and
+  notifies the owners.
+- When the pool runs out, the task is blocked with `no_reviewer`.
+
+`task_assignee` gains `acknowledged_at`, `due_at`, and `passed_user_ids` for this.
+The global sweep enforces `due_at`.
+
 Assignment and GitHub review requests stay in sync in both directions. Assigning a
 reviewer in Open SWE requests their review on the PR, and a review request a
 person makes on GitHub adds the assignment. A reviewer's `review` assignment ends when they
@@ -420,7 +445,9 @@ same cycle.
 - Is 5 the right retry budget, and should it differ for CI versus findings?
 - Should a reviewer who is not a registered Open SWE user be assignable? GitHub
   review requests work for them, but they get no Slack DM or dashboard view.
-- Should reviewer scoring also use availability (Slack status, working hours,
-  time zone), and learn from how quickly each person has reviewed before?
+- Should reviewer scoring also skip people who are away (Slack status, calendar),
+  and learn from how quickly each person has reviewed before?
+- Are weekdays 09:00–18:00 in the assignee's Slack time zone the right working
+  hours for the acknowledgement clock, or should they be a per-person setting?
 - Should a block that nobody answers escalate (for example, re-notify after a
   day, or notify the workspace channel)?
