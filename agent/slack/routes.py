@@ -48,7 +48,12 @@ from agent.slack.responses import (
     ephemeral,
     ignored,
 )
-from agent.slack.run_feedback import FEEDBACK_ACTION, process_feedback
+from agent.slack.run_feedback import (
+    FEEDBACK_ACTION,
+    handle_run_feedback_submission,
+    is_run_feedback_submission,
+    process_feedback,
+)
 from agent.slack.solo_threads import allow_solo_thread_followup
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.users import User
@@ -738,6 +743,8 @@ async def slack_interactivity(
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
+    if is_run_feedback_submission(payload):
+        return await handle_run_feedback_submission(payload)
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
