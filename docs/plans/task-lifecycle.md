@@ -16,8 +16,9 @@ someone to resolve it when it is `blocked`, and someone to merge when auto-merge
 is off. There is no auto-assignment. `blocked` is its own state, separate from
 waiting for review.
 
-The task has one state. Its pull requests only contribute conditions (CI failing,
-review needed, conflict) that the task's state is derived from.
+The task has its own lifecycle state, derived from its pull requests' GitHub
+state (open, draft, merged, closed) and their conditions (CI failing, review
+needed, conflict).
 
 An always-on, model-free **shepherd** carries the task from its first PR to merge.
 On each relevant webhook it rereads the affected PR's conditions from GitHub,
@@ -79,7 +80,8 @@ task_pull_request
   released_at       timestamptz null set when handed back; the row stays
   added_by_user_id  uuid null
   merge_after       uuid[]    pull_request_ids that must merge first
-  conditions        jsonb     typed list, see PR conditions; not a state
+  conditions        jsonb     typed list, see PR conditions; the PR's GitHub
+                              state stays on pull_request.state
   evaluated_sha     text
   evaluated_at      timestamptz
 
@@ -185,19 +187,22 @@ task_wakeup                    dedupe + retry budget
 
 ## Task state (`agent/tasks/state.py`)
 
-The task has the state. Pull requests have no state of their own in this model;
-each contributes **conditions**, facts read from GitHub, and the task's state is
-derived from the conditions of all its PRs plus task-level facts (a block, an
-active merge, whether it is closed).
+The task has its own lifecycle state. A pull request keeps its inherent GitHub
+state, `PrState` (`open`, `draft`, `merged`, `closed`), which is already stored
+on the `pull_request` row and kept in sync from webhooks; this plan reuses it and
+adds no second lifecycle state for PRs. On top of it, each open PR contributes
+**conditions**: facts read from GitHub such as failing CI or a pending review.
+The task's state is derived from its PRs' GitHub states and conditions, plus
+task-level facts (a block, an active merge, whether the task is closed).
 
 ### PR conditions
 
 A pure function turns a PR snapshot into its list of conditions. The snapshot
-generalizes `PullRequestSnapshot` from `expedited_review/readiness.py` (GitHub
-open/merged/closed, draft, mergeability, check runs, commit statuses, required
-checks, reviews, unresolved review threads) and adds the latest Open SWE review
-for the head SHA from `pull_request_review`. Every condition that applies is
-listed, not just the first.
+generalizes `PullRequestSnapshot` from `expedited_review/readiness.py` (the PR's
+`PrState`, mergeability, check runs, commit statuses, required checks, reviews,
+unresolved review threads) and adds the latest Open SWE review for the head SHA
+from `pull_request_review`. Every condition that applies is listed, not just the
+first.
 
 | Condition | Who acts | Source |
 |---|---|---|
