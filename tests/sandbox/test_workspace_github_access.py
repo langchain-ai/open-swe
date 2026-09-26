@@ -95,6 +95,7 @@ def github(
     )
     monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
     app.clear_app_token_cache()
     proxy.clear_proxy_token_expiry("thread")
     yield payloads
@@ -114,34 +115,27 @@ def injected_auth(payloads: list[dict[str, object]]) -> list[str]:
     return values
 
 
-@pytest.mark.parametrize(
-    ("repos", "expected"),
-    [
-        (["acme/api"], "x-access-token:repos:11"),
-        (["other/api"], ""),
-        ([], ""),
-    ],
-)
-async def test_sandbox_only_receives_workspace_repository_access(
+@pytest.mark.parametrize("slug", ["workspace", "default"])
+async def test_every_sandbox_receives_the_installation_token(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
-    repos: list[str],
-    expected: str,
+    slug: str,
 ) -> None:
-    monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=repos))
-    )
+    """A workspace's preferred repositories route work; they do not limit access."""
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
 
-    await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace", thread_id="thread")
+    await lifecycle._create_sandbox_with_proxy(workspace_slug=slug, thread_id="thread")
 
-    assert injected_auth(github) == [expected]
+    assert injected_auth(github) == ["x-access-token:repos:11,22"]
 
 
 async def test_workspace_lookup_failure_cannot_grant_installation_access(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(side_effect=RuntimeError("unavailable")))
+    monkeypatch.setattr(
+        WORKSPACES, "slug_exists", AsyncMock(side_effect=RuntimeError("unavailable"))
+    )
 
     with pytest.raises(RuntimeError):
         await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace")
@@ -149,34 +143,13 @@ async def test_workspace_lookup_failure_cannot_grant_installation_access(
     assert github == []
 
 
-async def test_refresh_applies_repository_removal(
-    monkeypatch: pytest.MonkeyPatch,
-    github: list[dict[str, object]],
-) -> None:
-    workspace = Workspace(slug="workspace", repos=["acme/api", "acme/internal"])
-    monkeypatch.setattr(WORKSPACES, "get", AsyncMock(return_value=workspace))
-    backend = await lifecycle._create_sandbox_with_proxy(
-        workspace_slug="workspace", thread_id="thread"
-    )
-    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
-    workspace.repos = ["acme/api"]
-
-    assert await proxy.refresh_proxy_token("thread")
-    workspace.repos = []
-    assert await proxy.refresh_proxy_token("thread")
-
-    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11", ""]
-
-
 @pytest.mark.parametrize("cached", [False, True])
-async def test_reconnect_limits_existing_sandbox_to_current_workspace(
+async def test_reconnect_gives_an_existing_sandbox_the_installation_token(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     cached: bool,
 ) -> None:
-    monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
-    )
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
     backend = MagicMock(id="sandbox", aexecute=AsyncMock())
     monkeypatch.setattr(
         lifecycle,
@@ -205,26 +178,27 @@ async def test_reconnect_limits_existing_sandbox_to_current_workspace(
 
     await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
 
-    assert injected_auth(github) == ["x-access-token:repos:11"]
+    assert injected_auth(github) == ["x-access-token:repos:11,22"]
 
 
-async def test_base_image_retains_workspace_access_and_reviewer_can_only_narrow_it(
+async def test_base_image_keeps_installation_access_and_callers_can_narrow_it(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
-    )
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
     await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace", source="base")
     await lifecycle._create_sandbox_with_proxy(
         workspace_slug="workspace", github_proxy_repositories=["acme/internal"]
     )
+    await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="workspace", github_proxy_repositories=[]
+    )
 
-    assert injected_auth(github) == ["x-access-token:repos:11", ""]
+    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:22", ""]
 
 
 @pytest.mark.parametrize("repos", [["acme/api"], []])
-async def test_workspace_builder_uses_same_access_boundary(
+async def test_workspace_builder_gets_the_installation_token(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     repos: list[str],
@@ -237,10 +211,10 @@ async def test_workspace_builder_uses_same_access_boundary(
 
     await _create_builder_sandbox(Workspace(slug="workspace", repos=repos), None)
 
-    assert injected_auth(github) == (["x-access-token:repos:11"] if repos else [""])
+    assert injected_auth(github) == ["x-access-token:repos:11,22"]
 
 
-@pytest.mark.parametrize("repos", [["acme/api"], []])
+@pytest.mark.parametrize("narrowed", [["acme/api"], []])
 @pytest.mark.parametrize(
     "path",
     [
@@ -254,13 +228,13 @@ async def test_workspace_builder_uses_same_access_boundary(
 async def test_git_auth_preserves_repository_scope_for_mixed_case_remotes(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
-    repos: list[str],
+    narrowed: list[str],
     path: str,
 ) -> None:
-    monkeypatch.setattr(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=repos))
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
+    await lifecycle._create_sandbox_with_proxy(
+        workspace_slug="workspace", github_proxy_repositories=narrowed
     )
-    await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace")
     config = github[-1]["proxy_config"]
     assert isinstance(config, dict)
     rules = config["rules"]
@@ -289,7 +263,7 @@ async def test_git_auth_preserves_repository_scope_for_mixed_case_remotes(
         ),
         "",
     )
-    if repos:
+    if narrowed:
         assert base64.b64decode(auth.removeprefix("Basic ")).decode() == "x-access-token:repos:11"
     else:
         assert not auth
@@ -320,7 +294,7 @@ async def test_expiry_refresh_keeps_workspace_and_custom_proxy_rules(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )
 
-    assert injected_auth(github) == ["x-access-token:repos:11", "x-access-token:repos:11"]
+    assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11,22"]
     config = github[-1]["proxy_config"]
     assert isinstance(config, dict)
     assert custom in config["rules"]
@@ -330,10 +304,10 @@ async def test_missing_workspace_does_not_inherit_default_access(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    async def load(slug: str) -> Workspace | None:
-        return Workspace(slug="default", repos=["acme/internal"]) if slug == "default" else None
+    async def exists(slug: str) -> bool:
+        return slug == "default"
 
-    monkeypatch.setattr(WORKSPACES, "get", load)
+    monkeypatch.setattr(WORKSPACES, "slug_exists", exists)
     with pytest.raises(ValueError, match="does not exist"):
         await lifecycle._create_sandbox_with_proxy(workspace_slug="deleted")
     assert github == []
@@ -383,7 +357,9 @@ async def test_scoped_token_failure_does_not_inject_discovery_token(
         AsyncMock(side_effect=[("discovery-token", None), (None, None)]),
     )
     with pytest.raises(RuntimeError, match="repository token is unavailable"):
-        await lifecycle._create_sandbox_with_proxy(workspace_slug="workspace")
+        await lifecycle._create_sandbox_with_proxy(
+            workspace_slug="workspace", github_proxy_repositories=["acme/api"]
+        )
     assert github == []
 
 

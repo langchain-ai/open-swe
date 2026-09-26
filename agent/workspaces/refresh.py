@@ -161,14 +161,14 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 
 
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
-    from agent.github.sandbox_access import repository_token
+    from agent.github.sandbox_access import installation_token
     from agent.sandboxes.providers.langsmith import (
         configure_sandbox_proxy,
         create_langsmith_sandbox,
         get_sandbox_proxy_config,
     )
 
-    access = await repository_token(record.repos)
+    access = await installation_token()
     create_params = {
         **record.sandbox_create_params(),
         "delete_after_stop_seconds": BUILDER_DELETE_AFTER_STOP_SECONDS,
