@@ -61,6 +61,7 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         monkeypatch.setattr(slack_routes.common, name, mock)
     dispatched = AsyncMock()
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", dispatched)
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     return {**calls, "process_slack_mention": dispatched}
 
 

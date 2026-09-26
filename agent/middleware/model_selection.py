@@ -11,15 +11,13 @@ from pydantic import BaseModel
 
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt, prompt
+from agent.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
 PersistedRoute = Route | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
-
-_CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:

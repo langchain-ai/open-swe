@@ -43,6 +43,7 @@ class SlackChannelOption(BaseModel):
     is_private: bool
     is_member: bool
     is_ext_shared: bool
+    is_pending_ext_shared: bool = False
     num_members: int | None = None
 
 
@@ -111,6 +112,7 @@ def _channel_option(
         is_private=channel.get("is_private") is True,
         is_member=channel.get("is_member") is True if member is None else member,
         is_ext_shared=channel.get("is_ext_shared") is True,
+        is_pending_ext_shared=channel.get("is_pending_ext_shared") is True,
         num_members=members if isinstance(members, int) and not isinstance(members, bool) else None,
     )
 

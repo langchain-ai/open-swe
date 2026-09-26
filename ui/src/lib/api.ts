@@ -672,6 +672,7 @@ export interface SlackChannelOption {
   is_private: boolean
   is_member: boolean
   is_ext_shared: boolean
+  is_pending_ext_shared?: boolean
   num_members: number | null
 }
 
@@ -1398,6 +1399,18 @@ export const api = {
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  listKitchenChannels: () =>
+    request<Array<{ channel_id: string }>>("/slack/kitchen-channels"),
+  enableKitchenChannel: (channelId: string) =>
+    request<{ channel_id: string }>("/slack/kitchen-channels", {
+      method: "POST",
+      body: JSON.stringify({ channel_id: channelId }),
+    }),
+  disableKitchenChannel: (channelId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/kitchen-channels/${encodeURIComponent(channelId)}`,
+      { method: "DELETE" }
+    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

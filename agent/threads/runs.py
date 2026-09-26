@@ -4,7 +4,7 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -23,7 +23,10 @@ from agent.dashboard.options import (
     normalize_model_choice,
 )
 from agent.dashboard.profiles import get_profile
-from agent.dashboard.repo_access import require_repo_access_for_workspace
+from agent.dashboard.repo_access import (
+    require_repo_access_for_user,
+    require_repo_access_for_workspace,
+)
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.dashboard.workspace_settings import (
     get_workspace_settings,
@@ -33,11 +36,13 @@ from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_a
 from agent.input_messages import (
     PersonIdentity,
     RunMessage,
+    SystemIdentity,
     build_input_messages,
     dynamic_context_hashes_from_messages,
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
+from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -101,6 +106,20 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _MAX_DASHBOARD_IMAGES = 5
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
+_DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
+    "id": "system:dashboard-handoff",
+    "display_name": "Dashboard handoff",
+    "platform": "open-swe",
+}
+_PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
+    "id": "system:pull-request-thread",
+    "display_name": "Pull request thread",
+    "platform": "open-swe",
+}
+
+
+class _LinkedPullRequest(BaseModel):
+    pr_url: str | None = None
 
 
 class DashboardImageBody(BaseModel):
@@ -392,6 +411,48 @@ async def _build_dashboard_configurable(
     return configurable
 
 
+async def start_dashboard_thread(
+    login: str,
+    email: str | None,
+    *,
+    title: str,
+    prompt: str,
+    repos: Sequence[str],
+    visibility: Literal["public", "private"],
+) -> str:
+    """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    repo_configs: list[dict[str, str]] = []
+    for repo in repos:
+        repo_config = _parse_repo(repo)
+        if not repo_config:
+            raise HTTPException(422, "repos must be owner/name")
+        await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
+        repo_configs.append(repo_config)
+    await _ensure_dashboard_github_token(login)
+    primary = repo_configs[0] if repo_configs else {}
+    thread = await _create_dashboard_thread_record(
+        str(uuid.uuid4()),
+        login=login,
+        email=email,
+        repo_config=primary,
+        prompt=prompt,
+        title=title,
+        visibility=visibility,
+        workspace=await _resolve_requested_workspace(None, primary, login=login),
+    )
+    thread_id = str(thread["thread_id"])
+    client = langgraph_client()
+    await dispatch_agent_run(
+        thread_id,
+        prompt,
+        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
+        source=DASHBOARD_SOURCE,
+        thread_title=None,
+        client=client,
+    )
+    return thread_id
+
+
 def _extract_run_id_from_command_response(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None
@@ -605,9 +666,11 @@ async def _attributed_run_messages(
     sender_id = f"github:{login}"
     injected = injected_dynamic_context_hashes_from_metadata(metadata)
     persisted_message_ids: set[str] = set()
+    history_read = False
     if not creating:
         try:
             prior_state = await client.threads.get_state(thread_id)
+            history_read = True
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
@@ -625,33 +688,27 @@ async def _attributed_run_messages(
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
+    notices: list[tuple[SystemIdentity, str]] = []
+    if metadata.get("source") == "slack":
+        notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
+    pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
+    if pr_url and history_read and not persisted_message_ids:
+        notices.append(
+            (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
+        )
     structured = build_input_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        systems=(
-            [
-                {
-                    "id": "system:dashboard-handoff",
-                    "display_name": "Dashboard handoff",
-                    "platform": "open-swe",
-                }
-            ]
-            if metadata.get("source") == "slack"
-            else None
-        ),
+        systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
-    if metadata.get("source") == "slack":
+    for system, body in notices:
         structured.insert(
             -1,
             build_input_messages(
-                DASHBOARD_HANDOFF_BODY,
-                {
-                    "sender_id": "system:dashboard-handoff",
-                    "surface": "automation",
-                    "kind": "system",
-                },
-                injected_dynamic_context_hashes={"system:dashboard-handoff"},
+                body,
+                {"sender_id": system["id"], "surface": "automation", "kind": "system"},
+                injected_dynamic_context_hashes={system["id"]},
             )[0],
         )
     return structured, injected, persisted_message_ids

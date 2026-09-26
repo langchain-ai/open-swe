@@ -26,6 +26,7 @@ from agent.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from agent.slack.kitchen_channels import is_kitchen_channel
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -452,6 +453,14 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
+    in_kitchen_channel = (
+        not in_code_channel
+        and event.channel_type != "im"
+        and not is_dm_channel(channel_context)
+        and event.type == "message"
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+        and await is_kitchen_channel(channel_id)
+    )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
@@ -499,6 +508,11 @@ async def slack_webhook(
         explicit_mention
         or is_message_update
         or in_code_channel
+        or (
+            in_kitchen_channel
+            and event.type == "message"
+            and event.subtype in {"", "file_share", "thread_broadcast"}
+        )
         or allowed_bot is not None
         or is_direct_message
         or solo_followup
@@ -568,7 +582,9 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
+                or in_kitchen_channel
                 or solo_followup,
+                kitchen_channel=in_kitchen_channel,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
