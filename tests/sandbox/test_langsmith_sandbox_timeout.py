@@ -87,6 +87,29 @@ async def test_aexecute_success_combines_streams() -> None:
     assert not handle.killed
 
 
+async def test_aexecute_server_timeout_result_without_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "1")
+    handle = _FakeHandle(
+        sleep=0.02,
+        result=SimpleNamespace(stdout="", stderr="", exit_code=None),
+    )
+    sb = _backend(handle)
+    resp = await sb.aexecute("make hang", timeout=0.01)
+    assert resp.output == "Command timed out after 0.01s on the sandbox."
+    assert resp.exit_code == 124
+    assert not handle.killed
+
+
+async def test_aexecute_success_with_no_output_and_zero_exit_code() -> None:
+    handle = _FakeHandle(result=SimpleNamespace(stdout="", stderr="", exit_code=0))
+    sb = _backend(handle)
+    resp = await sb.aexecute(":", timeout=5)
+    assert resp.output == ""
+    assert resp.exit_code == 0
+
+
 async def test_aexecute_server_timeout_not_killed() -> None:
     handle = _FakeHandle(raises=CommandTimeoutError("server enforced"))
     sb = _backend(handle)
@@ -117,6 +140,21 @@ async def test_aexecute_ws_connect_failure_falls_back_to_base(
     resp = await sb.aexecute("git status", timeout=5)
     assert called == {"command": "git status", "timeout": 5}
     assert resp.output == "via-http"
+
+
+async def test_aexecute_base_timeout_without_output_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_base_execute(self: Any, command: str, *, timeout: int | None = None) -> Any:
+        return SimpleNamespace(output="", exit_code=None, truncated=False)
+
+    monkeypatch.setattr(
+        "agent.sandboxes.providers.langsmith.LangSmithSandbox.aexecute", fake_base_execute
+    )
+    sb = _backend(_FakeHandle(), run_raises=SandboxConnectionError("no ws"))
+    resp = await sb.aexecute("sleep 999", timeout=7)
+    assert resp.output == "Command timed out after 7s on the sandbox."
+    assert resp.exit_code == 124
 
 
 async def test_aexecute_ws_connect_timeout_falls_back_to_base(

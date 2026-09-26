@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import shlex
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Literal, NotRequired, TypedDict
 
@@ -632,7 +633,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         return effective_timeout + _execute_client_grace_seconds()
 
     @staticmethod
-    def _result_to_response(result: Any) -> ExecuteResponse:
+    def _result_to_response(
+        result: Any, *, effective_timeout: int, elapsed: float
+    ) -> ExecuteResponse:
+        timed_out = getattr(result, "timed_out", False) or getattr(result, "status", None) in {
+            "timeout",
+            "timed_out",
+        }
+        if timed_out or (result.exit_code is None and elapsed >= effective_timeout):
+            return TimeoutLangSmithSandbox._timeout_response(effective_timeout, server_side=True)
         output = result.stdout or ""
         if result.stderr:
             output += "\n" + result.stderr if output else result.stderr
@@ -655,7 +664,11 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
     async def _abase_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
-        return await LangSmithSandbox.aexecute(self, command, timeout=timeout)
+        effective = timeout if timeout is not None else self._default_timeout
+        response = await LangSmithSandbox.aexecute(self, command, timeout=timeout)
+        if response.exit_code is None and not response.output:
+            return self._timeout_response(effective, server_side=True)
+        return response
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("TimeoutLangSmithSandbox is async-only; use aexecute.")
@@ -695,6 +708,7 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # run(wait=False) opens the WS and reads the "started" frame, so
         # connect/setup failures raise here — fall back to the base path.
         try:
+            started_at = time.monotonic()
             handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
             return await self._abase_execute(command, timeout)
@@ -708,7 +722,11 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return self._timeout_response(effective, server_side=True)
         except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
             return await self._abase_execute(command, timeout)
-        return self._result_to_response(result)
+        return self._result_to_response(
+            result,
+            effective_timeout=effective,
+            elapsed=time.monotonic() - started_at,
+        )
 
 
 class SandboxProvider(ABC):
