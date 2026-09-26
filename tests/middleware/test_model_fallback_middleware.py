@@ -51,6 +51,12 @@ def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
     return anthropic.BadRequestError("model unavailable", response=response, body=body)
 
 
+def _anthropic_bad_request_error() -> anthropic.BadRequestError:
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(400, request=request, json={"error": {}})
+    return anthropic.BadRequestError("bad request", response=response, body={})
+
+
 def _make_request() -> ModelRequest[None]:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
@@ -223,6 +229,22 @@ class TestModelFallbackMiddleware:
         assert raised.value is exc
         handler.assert_awaited_once_with(request)
         cast(MagicMock, request.override).assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_async_retries_primary_after_non_transient_fallback_error(self) -> None:
+        fallback_model = MagicMock(name="fallback_model")
+        request = _make_request()
+        response = ModelResponse(result=[AIMessage(content="ok from primary")])
+        handler = AsyncMock(side_effect=[_openai_5xx(), _anthropic_bad_request_error(), response])
+
+        result = await ModelFallbackMiddleware(
+            fallback_model, backoff_schedule=(0.0, 0.0)
+        ).awrap_model_call(request, handler)
+
+        assert result is response
+        assert handler.await_count == 3
+        handler.assert_any_await(request)
+        handler.assert_awaited_with(request)
 
     @pytest.mark.asyncio
     async def test_async_falls_over_on_httpx2_stream_transport_error(self) -> None:
