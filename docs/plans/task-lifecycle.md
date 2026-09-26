@@ -3,8 +3,8 @@
 ## Decision
 
 A **task** is a new first-class entity above threads and pull requests. It owns
-every thread working on it (root thread, subthreads, coordinators, fix and
-follow-up threads) and every pull request it produces or adopts, across any
+every thread about it (root thread, subthreads, coordinators, fix and follow-up
+threads, and each PR's reviewer and review scout threads) and every pull request it produces or adopts, across any
 number of repositories.
 
 A task has one or more owners (usually one), who are accountable, and zero or more assignees, who must act
@@ -58,7 +58,8 @@ task
 task_thread
   thread_id         text PK   a thread belongs to at most one task
   task_id           uuid
-  role              root | sub | coordinator | fix | followup
+  role              root | sub | coordinator | fix | followup | reviewer | review_scout
+  pull_request_id   uuid null the PR a reviewer or review_scout thread belongs to
 
 task_pull_request
   pull_request_id   uuid PK   -> pull_request; a PR belongs to at most one task
@@ -104,6 +105,15 @@ task_wakeup                    dedupe + retry budget
 - A subthread (`parent_thread_id` set) joins its parent's task as `sub`.
 - A thread started from the dashboard PR actions (`agent/threads/pr_fixes.py`)
   joins the PR's task as `fix` when one exists.
+- Each PR's reviewer thread (`reviewer_thread_id`) and review scout thread
+  (`review_scout_thread_id`) join the task as `reviewer` and `review_scout` when
+  the PR joins, or when they are created later for a PR already in a task. They
+  leave with the PR on release. Reviewer and scout threads for PRs outside any
+  task are unchanged.
+- The shepherd never wakes a `reviewer` or `review_scout` thread; the existing
+  review triggers keep driving them. Owning them puts every thread about the task
+  (building, reviewing, and explaining it) in one place: the task panel, the
+  timeline, cost, and `get_task`.
 - `pull_request_thread` links are unchanged. `task_pull_request` records
   ownership; `pull_request_thread` still records which threads touched a PR.
 - The first owner is the person who started the root thread (or took the PR
