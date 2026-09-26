@@ -302,6 +302,7 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
                 "watch": True,
                 "last_reviewed_sha": "oldsha",
                 "review_check_run_id": 41,
+                "superseded_review_check_run_ids": [40],
             },
         ),
         patch(
@@ -327,7 +328,7 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
         patch(
             "agent.webhooks.common.complete_review_check_run",
             new_callable=AsyncMock,
-            return_value=True,
+            side_effect=lambda **kwargs: kwargs["check_run_id"] != 41,
         ) as complete_check,
         patch("agent.webhooks.common.get_client", return_value=fake_client),
     ):
@@ -338,16 +339,19 @@ async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check(
     assert configurable["head_sha"] == "newsha"
     assert create_check.await_args is not None
     assert create_check.await_args.kwargs["head_sha"] == "newsha"
-    complete_check.assert_awaited_once()
-    assert complete_check.await_args is not None
-    assert complete_check.await_args.kwargs["check_run_id"] == 41
-    assert complete_check.await_args.kwargs["conclusion"] == "neutral"
-    check_id_writes = [
-        (c.kwargs.get("extra") or {}).get("review_check_run_id")
+    closed = {
+        c.kwargs["check_run_id"]: c.kwargs["conclusion"] for c in complete_check.await_args_list
+    }
+    assert closed == {40: "neutral", 41: "neutral"}
+    tracked = [
+        c.kwargs["extra"]
         for c in set_meta.await_args_list
         if "review_check_run_id" in (c.kwargs.get("extra") or {})
     ]
-    assert check_id_writes == [99]
+    assert len(tracked) == 1
+    assert tracked[0]["review_check_run_id"] == 99
+    # 41's close failed, so it stays queued for the next retry; 40 closed.
+    assert tracked[0]["superseded_review_check_run_ids"] == [41]
 
 
 @pytest.mark.asyncio

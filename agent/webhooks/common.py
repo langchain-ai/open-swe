@@ -1161,31 +1161,46 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
 
 class _TrackedReviewCheck(BaseModel):
     review_check_run_id: int | None = None
+    superseded_review_check_run_ids: list[int] = []
 
 
 async def track_review_check_run(
     thread_id: str, *, owner: str, repo: str, token: str, check_run_id: int
 ) -> None:
-    """Track ``check_run_id`` as the thread's review check, closing the one it supersedes.
+    """Track ``check_run_id`` as the thread's review check, closing the ones it supersedes.
 
     The run that owned the previous check is interrupted by the new one and never
     settles it, so it would otherwise stay "in progress" on its commit forever.
+    Checks that fail to close are kept and retried on the next call.
     """
-    metadata = await get_thread_metadata_safe(thread_id) or {}
-    previous = _TrackedReviewCheck.model_validate(metadata).review_check_run_id
-    if previous is not None and previous != check_run_id:
-        await complete_review_check_run(
+    tracked = _TrackedReviewCheck.model_validate(await get_thread_metadata_safe(thread_id) or {})
+    superseded = [
+        stale
+        for stale in dict.fromkeys(
+            [*tracked.superseded_review_check_run_ids, tracked.review_check_run_id]
+        )
+        if stale is not None and stale != check_run_id
+    ]
+    unsettled = [
+        stale
+        for stale in superseded
+        if not await complete_review_check_run(
             owner=owner,
             repo=repo,
-            check_run_id=previous,
+            check_run_id=stale,
             token=token,
             conclusion="neutral",
             title="Superseded by a newer review",
             summary="A newer Open SWE review run replaced this one.",
         )
+    ]
     await set_reviewer_thread_metadata(
         thread_id,
-        extra={"review_check_run_id": check_run_id, "review_check_pending_result": None},
+        extra={
+            "review_check_run_id": check_run_id,
+            "review_check_pending_result": None,
+            "superseded_review_check_run_ids": unsettled,
+        },
     )
 
 
