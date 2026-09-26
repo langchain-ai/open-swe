@@ -5,6 +5,7 @@ import importlib
 import json
 import logging
 from typing import cast
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import httpx
@@ -1311,7 +1312,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
         captured["github_user_id"] = github_user_id
         captured["slack_channel_id"] = slack_channel_id
         captured["slack_thread_ts"] = slack_thread_ts
-        return {"success": True, "thread_id": "thread-id"}
+        return {"success": True, "thread_id": "thread-id", "pr_url": pr_ref.url}
 
     monkeypatch.setattr(
         request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
@@ -1328,6 +1329,7 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
             }
         },
     )
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
     result = await request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
 
@@ -1340,6 +1342,75 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert captured["slack_channel_id"] == "C123"
     assert captured["slack_thread_ts"] == "1700000000.000100"
     assert result["success"] is True
+    assert (
+        result["review_url"]
+        == "https://dashboard.example/agents/reviews/langchain-ai/open-swe/1244"
+    )
+
+
+async def test_request_pr_review_tool_adds_review_url_to_failure(monkeypatch) -> None:
+    async def fake_trigger_pr_review_from_ref(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
+    ) -> dict[str, object]:
+        return {"success": False, "error": "Could not fetch pull request metadata"}
+
+    monkeypatch.setattr(
+        request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
+    )
+    monkeypatch.setattr(
+        request_pr_review_module, "get_config", lambda: {"configurable": {"source": "github"}}
+    )
+    monkeypatch.setattr(
+        request_pr_review_module,
+        "get_active_slack_thread",
+        AsyncMock(return_value=None),
+    )
+
+    result = await request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
+
+    assert result["success"] is False
+    assert "review_url" not in result
+
+
+async def test_request_pr_review_tool_omits_review_url_without_dashboard_base(monkeypatch) -> None:
+    async def fake_trigger_pr_review_from_ref(
+        pr_ref: GitHubPrRef,
+        *,
+        source: str,
+        github_login: str = "",
+        github_user_id: int | None = None,
+        slack_channel_id: str = "",
+        slack_thread_ts: str = "",
+    ) -> dict[str, object]:
+        return {"success": True, "thread_id": "thread-id", "pr_url": pr_ref.url}
+
+    monkeypatch.setattr(
+        request_pr_review_module, "trigger_pr_review_from_ref", fake_trigger_pr_review_from_ref
+    )
+    monkeypatch.setattr(
+        request_pr_review_module, "get_config", lambda: {"configurable": {"source": "github"}}
+    )
+    monkeypatch.setattr(
+        request_pr_review_module,
+        "get_active_slack_thread",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        request_pr_review_module,
+        "dashboard_review_url",
+        lambda owner, repo, pr_number: None,
+    )
+
+    result = await request_pr_review_tool("https://github.com/langchain-ai/open-swe/pull/1244")
+
+    assert result["success"] is True
+    assert "review_url" not in result
 
 
 def test_process_github_pr_comment_without_email_skips(
