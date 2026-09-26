@@ -25,6 +25,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.sandboxes.providers.registry import create_sandbox
+from agent.utils.startup_trace import aphase
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._pending_setup: dict[asyncio.Task[None], str] = {}
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -99,6 +101,14 @@ class SandboxBackendProxy(BaseSandbox):
         reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None,
     ) -> None:
         self._reconnect = reconnect
+
+    def hold_commands_until(self, sandbox_id: str, setup: asyncio.Task[None]) -> None:
+        """Hold commands on ``sandbox_id`` until ``setup`` (the git identity write) finishes.
+
+        File operations don't wait.
+        """
+        self._pending_setup[setup] = sandbox_id
+        setup.add_done_callback(lambda done: self._pending_setup.pop(done, None))
 
     def start(self) -> None:
         if self._startup_task is not None:
@@ -187,6 +197,16 @@ class SandboxBackendProxy(BaseSandbox):
                 raise RuntimeError(f"No sandbox backend cached for thread {self._thread_id}")
             return backend
 
+    async def _acommand_backend(self) -> SandboxBackendProtocol:
+        # Resolved first: the startup it may await is what hands over the setup.
+        backend = await self._aget_backend()
+        while pending := [task for task, box in self._pending_setup.items() if box == backend.id]:
+            async with aphase(self._thread_id, "sandbox.await_git_identity_command", replay=False):
+                await asyncio.wait(pending)
+            # The thread can be rebound to another box while a command is held.
+            backend = await self._aget_backend()
+        return backend
+
     def ls(self, path: str) -> LsResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
@@ -274,7 +294,7 @@ class SandboxBackendProxy(BaseSandbox):
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
-        return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
+        return await (await self._acommand_backend()).aexecute(command, timeout=effective_timeout)
 
     def execute_with_offload(
         self,
@@ -296,7 +316,7 @@ class SandboxBackendProxy(BaseSandbox):
         max_capture_bytes: int | None = None,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
     ) -> ExecuteOffloadResult:
-        backend = await self._aget_backend()
+        backend = await self._acommand_backend()
         effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
         offload = getattr(backend, "aexecute_with_offload", None)
         if offload is None:

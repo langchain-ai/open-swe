@@ -84,19 +84,19 @@ async def test_phase_works_without_apm(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_phases_replay_as_child_spans_of_the_current_run() -> None:
     async with aphase("thread-1", "sandbox.boot", snapshot_id="snap-1"):
         await asyncio.sleep(0.01)
-    async with aphase("thread-1", "sandbox.git_identity"):
+    async with aphase("thread-1", "sandbox.proxy_configure"):
         pass
 
     client = await _flush_in_traced_node("thread-1")
 
     names = [run["name"] for run in client.created]
-    assert names == ["LangGraph", "node", "startup", "sandbox.boot", "sandbox.git_identity"]
+    assert names == ["LangGraph", "node", "startup", "sandbox.boot", "sandbox.proxy_configure"]
     boot = next(run for run in client.created if run["name"] == "sandbox.boot")
     assert boot["inputs"]["snapshot_id"] == "snap-1"
     wrapper = next(run for run in client.updated if run["name"] == "startup")
     assert [phase["name"] for phase in wrapper["outputs"]["phases"]] == [
         "sandbox.boot",
-        "sandbox.git_identity",
+        "sandbox.proxy_configure",
     ]
     assert wrapper["outputs"]["phases"][0]["elapsed_ms"] >= 10
 

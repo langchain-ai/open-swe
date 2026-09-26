@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import httpx2
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
 from agent.github import app, proxy, sandbox_access
 from agent.github.repositories import Repository
@@ -19,6 +20,8 @@ from agent.sandboxes.providers.langsmith import LangSmithProvider
 from agent.workspaces.refresh import _create_builder_sandbox
 from agent.workspaces.store import WORKSPACES, Workspace
 from tests.support.github_sdk import mock_github_sdk
+
+_COMMAND_OK = ExecuteResponse(output="", exit_code=0)
 
 
 class ListedRepository(TypedDict):
@@ -91,7 +94,9 @@ def github(
     monkeypatch.setattr(
         lifecycle,
         "create_sandbox",
-        AsyncMock(return_value=MagicMock(id="sandbox", aexecute=AsyncMock())),
+        AsyncMock(
+            return_value=MagicMock(id="sandbox", aexecute=AsyncMock(return_value=_COMMAND_OK))
+        ),
     )
     monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -177,7 +182,7 @@ async def test_reconnect_limits_existing_sandbox_to_current_workspace(
     monkeypatch.setattr(
         WORKSPACES, "get", AsyncMock(return_value=Workspace(slug="workspace", repos=["acme/api"]))
     )
-    backend = MagicMock(id="sandbox", aexecute=AsyncMock())
+    backend = MagicMock(id="sandbox", aexecute=AsyncMock(return_value=_COMMAND_OK))
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",

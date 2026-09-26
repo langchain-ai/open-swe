@@ -29,9 +29,6 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
             return_value=new_sandbox,
         ) as create,
         patch(
-            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
-        ) as configure,
-        patch(
             "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=persist_metadata,
@@ -48,7 +45,6 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
         source="workspace",
         owner_login="octocat",
     )
-    configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
         thread_id=thread_id,
         metadata={"sandbox_id": "sandbox-new"},
@@ -75,7 +71,6 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
             new_callable=AsyncMock,
             return_value=MagicMock(id="sandbox-new"),
         ) as create,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
     ):
         result = await recreate_sandbox_for_thread(
@@ -141,7 +136,6 @@ async def test_recreate_sandbox_keeps_old_binding_when_metadata_update_fails() -
             new_callable=AsyncMock,
             return_value=new_sandbox,
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "agent.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
@@ -174,15 +168,11 @@ async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
             new_callable=AsyncMock,
             return_value=MagicMock(id="sandbox-same"),
         ),
-        patch(
-            "agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock
-        ) as configure,
         patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
     ):
         with pytest.raises(RuntimeError, match="distinct sandbox"):
             await recreate_sandbox_for_thread(thread_id)
 
-    configure.assert_not_awaited()
     update.assert_not_awaited()
     assert SANDBOX_BACKENDS[thread_id].current is old_sandbox
     SANDBOX_BACKENDS.clear()
