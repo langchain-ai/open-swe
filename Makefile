@@ -85,10 +85,11 @@ cli:
 ######################
 
 TEST_FILE ?= tests/
+PYTEST_ARGS ?=
 
 test tests:
 	@if [ -d "$(TEST_FILE)" ] || [ -f "$(TEST_FILE)" ]; then \
-		uv run pytest -vvv $(TEST_FILE); \
+		uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE); \
 	else \
 		echo "Skipping tests: path not found: $(TEST_FILE)"; \
 	fi

@@ -1,28 +1,25 @@
 """Shared pytest fixtures."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
-from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent import store as agent_store
-from agent.database import postgres
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
+from tests.support.postgres import MigratedTemplate, isolated_database
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
@@ -155,32 +152,8 @@ async def post_signed_github_webhook(
 _TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"
 
 
-@asynccontextmanager
-async def isolated_schema(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    """Point ``agent.database`` at a fresh, fully migrated schema, then drop it.
-
-    The real engine, connection, transaction and session code runs; only the
-    engine and the schema name are swapped, so it does not matter which module a
-    consumer imported the database API through.
-    """
-    monkeypatch.setenv("POSTGRES_URI", uri)
-    engine = create_async_engine(
-        postgres.uri() or uri, connect_args={"server_settings": {"TimeZone": "UTC"}}
-    )
-    schema = f"open_swe_test_{uuid4().hex}"
-    migrations = postgres.load_migrations()
-    async with engine.begin() as conn:
-        await conn.execute(text(f"CREATE SCHEMA {schema}"))
-        await conn.run_sync(postgres.upgrade, migrations, schema)
-    monkeypatch.setattr(postgres, "SCHEMA", schema)
-    monkeypatch.setattr(postgres, "_ENGINE", engine)
-    monkeypatch.setattr(postgres, "_ENGINE_URI", postgres.uri())
-    try:
-        yield
-    finally:
-        async with engine.begin() as conn:
-            await conn.execute(text(f"DROP SCHEMA {schema} CASCADE"))
-        await engine.dispose()
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    asyncio.run(MigratedTemplate.drop())
 
 
 @pytest.fixture
@@ -189,7 +162,7 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
     if not uri:
         pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for PostgreSQL regressions")
-    async with isolated_schema(uri, monkeypatch):
+    async with isolated_database(uri, monkeypatch):
         yield
 
 
@@ -204,7 +177,7 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         monkeypatch.delenv("POSTGRES_URI", raising=False)
         yield False
         return
-    async with isolated_schema(uri, monkeypatch):
+    async with isolated_database(uri, monkeypatch):
         yield True
 
 
