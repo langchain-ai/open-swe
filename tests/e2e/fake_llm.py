@@ -788,6 +788,21 @@ REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
 REVIEW_CHAT_FILE = "zeta.py"
 
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "slack_form": (
+        _tool_step(
+            "Asking the user to select items.",
+            "slack_open_modal",
+            {
+                "title": "Review items",
+                "items": [
+                    {"label": "First item", "comment": True},
+                    {"label": "Second item", "comment": False},
+                ],
+            },
+            "call-slack-form",
+        ),
+        StepSpec(content="Waiting for the form submission."),
+    ),
     "review_chat_comments": (
         _tool_step(
             "Drafting the first comment.",
@@ -1243,6 +1258,9 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule(
+        "slack_form", lambda ctx: ctx.human_count <= 1 and "E2E_SLACK_FORM" in ctx.first_text
+    ),
     ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
     ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
     ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),

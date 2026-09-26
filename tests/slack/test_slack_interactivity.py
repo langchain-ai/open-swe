@@ -227,3 +227,40 @@ async def test_code_channel_external_select_returns_registered_suggestions(
 
     assert result == {"options": options}
     get_suggestions.assert_awaited_once_with(ANY, "C-code", "V-plan", "repository", "open")
+
+
+@pytest.mark.asyncio
+async def test_form_button_routes_to_modal(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _option_payload()
+    payload["type"] = "block_actions"
+    payload["trigger_id"] = "trigger"
+    payload["actions"] = [
+        {
+            "action_id": "open_swe_form_open",
+            "value": json.dumps({"type": "open_swe_form", "fingerprint": "f1"}),
+        }
+    ]
+    modal = AsyncMock(return_value={})
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes.slack_forms, "handle_button", modal)
+    assert await slack_routes.slack_interactivity(_request(payload), BackgroundTasks()) == {}
+    modal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_form_submission_acks_without_inline_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "type": "view_submission",
+        "view": {"callback_id": "open_swe_form", "private_metadata": "{}"},
+        "user": {"id": "U1"},
+    }
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(slack_routes.slack_forms, "_dispatch", dispatch)
+    tasks = BackgroundTasks()
+    assert await slack_routes.slack_interactivity(_request(payload), tasks) == {}
+    dispatch.assert_not_awaited()
+    await tasks()
+    dispatch.assert_awaited_once()
