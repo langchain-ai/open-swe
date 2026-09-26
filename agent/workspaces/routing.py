@@ -108,6 +108,23 @@ async def workspace_for_slack_channel(channel_id: str) -> str | None:
         return None
 
 
+async def is_kitchen_channel(channel_id: str) -> bool:
+    """Whether untagged human messages in this Slack channel reach the agent.
+
+    Fails soft: a failed lookup reads as off, logged at error, so the channel
+    keeps requiring mentions.
+    """
+    try:
+        return await WORKSPACES.is_kitchen_channel(channel_id)
+    except Exception:
+        logger.error(
+            "kitchen channel lookup failed; treating the channel as not a kitchen channel",
+            extra={"slack_channel_id": channel_id},
+            exc_info=True,
+        )
+        return False
+
+
 def _unassigned_policy() -> str:
     value = ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.get("default").strip().lower()
     return value if value in ("default", "ignore") else "default"

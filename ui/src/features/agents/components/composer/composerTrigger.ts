@@ -1,12 +1,19 @@
 /**
  * Trigger parsing for the composer's autocomplete: `@path` file mentions,
- * `/command` slash commands, and `$skill` skill commands. The prompt stays a
+ * `/command` slash commands, `$skill` skill commands, and `#channel` Slack
+ * channels. The prompt stays a
  * plain string end to end — the Lexical editor only renders chips over it — so
  * everything here operates on
  * text plus a cursor offset rather than on editor nodes.
  */
 
-export type ComposerTriggerKind = "path" | "slash-command" | "skill-command"
+import { detectSlackChannelTrigger } from "@/lib/slack-channels"
+
+export type ComposerTriggerKind =
+  | "path"
+  | "slash-command"
+  | "skill-command"
+  | "slack-channel"
 
 /** Slash commands open-swe understands. `model` opens the picker rather than editing the prompt. */
 export type ComposerSlashCommand = "model" | "offload"
@@ -78,6 +85,10 @@ export function detectComposerTrigger(
   while (tokenIdx >= 0 && !isWhitespace(text[tokenIdx] ?? "")) tokenIdx -= 1
   const tokenStart = tokenIdx + 1
   const token = text.slice(tokenStart, cursor)
+  if (token.startsWith("#")) {
+    const channel = detectSlackChannelTrigger(text, cursor)
+    return channel && { kind: "slack-channel", ...channel }
+  }
   if (
     !token.startsWith("@") &&
     !token.startsWith("/") &&

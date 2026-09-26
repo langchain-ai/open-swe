@@ -12,6 +12,10 @@ export function SkillPromptText({ text }: { text: string }) {
   return splitPromptIntoSegments(text).map((segment, index) =>
     segment.type === "skill" ? (
       <SkillBadge key={index} name={segment.name} />
+    ) : segment.type === "channel" ? (
+      <span key={index} className="font-medium" title={segment.channelId}>
+        #{segment.name}
+      </span>
     ) : (
       <span key={index}>
         {segment.type === "text" ? segment.text : segment.source}

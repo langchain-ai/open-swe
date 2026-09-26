@@ -1,7 +1,8 @@
 import { QuestionIcon } from "@phosphor-icons/react"
 
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
@@ -49,6 +50,7 @@ export interface WorkspaceDraft {
   name: string
   repos: Array<string>
   slackChannelIds: Array<string>
+  kitchenChannelIds: Array<string>
   prompt: string
 }
 
@@ -57,6 +59,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     name: workspace.name,
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
+    kitchenChannelIds: workspace.kitchen_channel_ids,
     prompt: workspace.prompt,
   }
 }
@@ -65,7 +68,44 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   name: "",
   repos: [],
   slackChannelIds: [],
+  kitchenChannelIds: [],
   prompt: "",
+}
+
+function SlackChannelRows({
+  draft,
+  onChange,
+  channelLabel,
+}: {
+  draft: WorkspaceDraft
+  onChange: (next: WorkspaceDraft) => void
+  channelLabel: (id: string) => string
+}) {
+  const kitchen = new Set(draft.kitchenChannelIds)
+  return (
+    <ul className="w-full divide-y divide-border rounded-md border border-border">
+      {draft.slackChannelIds.map((id) => (
+        <li
+          key={id}
+          className="flex items-center justify-between gap-3 px-2.5 py-1.5"
+        >
+          <span className="truncate text-xs">{channelLabel(id)}</span>
+          <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+            Kitchen
+            <Switch
+              aria-label={`Kitchen mode for ${channelLabel(id)}`}
+              checked={kitchen.has(id)}
+              onCheckedChange={(on) => {
+                if (on) kitchen.add(id)
+                else kitchen.delete(id)
+                onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
+              }}
+            />
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 export function WorkspaceEditor({
@@ -133,21 +173,47 @@ export function WorkspaceEditor({
         </div>
       </div>
       <div className="text-sm">
-        Slack channels
+        <span className="inline-flex items-center gap-1.5">
+          Slack channels
+          <Tooltip>
+            <TooltipTrigger
+              aria-label="About kitchen channels"
+              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              type="button"
+            >
+              <QuestionIcon size={15} weight="fill" />
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-72">
+              Mentions in these channels start runs in this workspace. Turn on
+              Kitchen for a channel to let every top-level message start a
+              thread and replies continue it without mentioning Open SWE.
+            </TooltipPopup>
+          </Tooltip>
+        </span>
         <div
           role="group"
           aria-label="Slack channels"
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.slackChannelIds.length > 0 ? (
-            <Chips values={draft.slackChannelIds.map(channelLabel)} />
+            <SlackChannelRows
+              draft={draft}
+              onChange={onChange}
+              channelLabel={channelLabel}
+            />
           ) : (
             <span className="text-xs text-muted-foreground">None yet</span>
           )}
           <SlackChannelPicker
             selected={draft.slackChannelIds}
             onChange={(slackChannelIds) =>
-              onChange({ ...draft, slackChannelIds })
+              onChange({
+                ...draft,
+                slackChannelIds,
+                kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
+                  slackChannelIds.includes(id)
+                ),
+              })
             }
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}
@@ -156,11 +222,11 @@ export function WorkspaceEditor({
       </div>
       <label className="block text-sm">
         Instructions
-        <Textarea
+        <SlackChannelTextarea
           aria-label="Instructions"
           placeholder={promptHint}
           value={draft.prompt}
-          onChange={(e) => onChange({ ...draft, prompt: e.target.value })}
+          onValueChange={(prompt) => onChange({ ...draft, prompt })}
         />
       </label>
     </div>

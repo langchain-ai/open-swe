@@ -58,6 +58,11 @@ class SlackChannel(Base):
         """This channel's identity and description, for prompts and thread metadata."""
         return self.details.to_context(self.id)
 
+    @property
+    def can_be_kitchen(self) -> bool:
+        """Whether Slack delivers this channel's messages and it is not externally shared."""
+        return self.context.allows_operations and self.payload.get("is_member") is True
+
     @classmethod
     def from_payload(cls, payload: JsonObject) -> Self | None:
         """A row for one Slack ``channel`` object; ``None`` when it carries no id."""

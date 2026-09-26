@@ -655,6 +655,8 @@ export interface WorkspaceOption {
   /** Effective default repository, withheld when another workspace owns it. */
   default_repo: string | null
   slack_channel_ids: Array<string>
+  /** Bound channels where untagged messages start and continue threads. */
+  kitchen_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -693,6 +695,7 @@ export interface WorkspaceCreate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
@@ -701,6 +704,7 @@ export interface WorkspaceUpdate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -718,6 +722,7 @@ export interface WorkspaceRecord {
   prompt: string
   repos: Array<string>
   slack_channel_ids: Array<string>
+  kitchen_channel_ids: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -1399,18 +1404,6 @@ export const api = {
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
-  listKitchenChannels: () =>
-    request<Array<{ channel_id: string }>>("/slack/kitchen-channels"),
-  enableKitchenChannel: (channelId: string) =>
-    request<{ channel_id: string }>("/slack/kitchen-channels", {
-      method: "POST",
-      body: JSON.stringify({ channel_id: channelId }),
-    }),
-  disableKitchenChannel: (channelId: string) =>
-    request<{ ok: boolean }>(
-      `/slack/kitchen-channels/${encodeURIComponent(channelId)}`,
-      { method: "DELETE" }
-    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

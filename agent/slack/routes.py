@@ -26,7 +26,6 @@ from agent.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
-from agent.slack.kitchen_channels import is_kitchen_channel
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -56,6 +55,7 @@ from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
+from agent.workspaces.routing import is_kitchen_channel
 
 router = APIRouter()
 
