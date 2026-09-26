@@ -14,6 +14,7 @@ from agent import store as agent_store
 from agent.dashboard import repo_access
 from agent.dashboard.options import fable_disabled_fallback
 from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -1537,3 +1538,40 @@ async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_error"] == "Slack post failed: not_in_channel"
+
+
+@pytest.mark.parametrize(("private", "scope"), [(False, ["langchain-ai/open-swe"]), (True, None)])
+async def test_an_issue_automation_on_a_public_repository_records_a_single_repository_scope(
+    fake_client, auth, private: bool, scope: list[str] | None
+) -> None:  # noqa: ANN001, ARG001
+    record = {
+        "id": "sched_1",
+        "name": "Issue responder",
+        "prompt": "Triage the newly opened issue",
+        "trigger": "github_issue_opened",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "Default",
+        "enabled": True,
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+    }
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+
+    await schedules.launch_github_issue_automations(
+        {
+            "repository": {
+                "owner": {"login": "langchain-ai"},
+                "name": "open-swe",
+                "private": private,
+            },
+            "issue": {"number": 42, "title": "Bug", "user": {"login": "outside-user"}},
+        },
+        "delivery-1",
+    )
+
+    opening = next(
+        update["metadata"]
+        for update in fake_client.threads.updated
+        if "source" in update["metadata"]
+    )
+    assert opening.get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope

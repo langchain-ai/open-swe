@@ -1,8 +1,10 @@
 """Which workspace an inbound event belongs to.
 
 Resolution order, first match wins: the thread's recorded workspace, a
-``workspace:<slug>`` tag on the opening message, the repository's owner, the
-Slack channel's owner, the user's default, then ``default``. This is the
+``workspace:<slug>`` tag on the opening message, the Slack channel's owner, the
+repository's preferred workspace, the user's default, then ``default``. The
+channel outranks the repository because every workspace can use every
+repository: a message in a workspace's channel stays there. This is the
 workspace architecture's order; callers never guess on their own.
 
 A storage failure is not an answer: "nothing owns this repository" and "we
@@ -147,14 +149,14 @@ async def _resolve_from_store(
             tagged = ""
         if tagged and await _slug_exists(tagged):
             return WorkspaceResolution(tagged, "tag")
-    if repo is not None:
-        owner = await _repo_owner(*repo)
-        if owner is not None:
-            return WorkspaceResolution(owner, "repo")
     if slack_channel_id:
         owner = await _channel_owner(slack_channel_id)
         if owner is not None:
             return WorkspaceResolution(owner, "channel")
+    if repo is not None:
+        owner = await _repo_owner(*repo)
+        if owner is not None:
+            return WorkspaceResolution(owner, "repo")
     if login:
         preferred = (await get_user_preferences(login)).get("default_workspace")
         if isinstance(preferred, str) and preferred and await _slug_exists(preferred):

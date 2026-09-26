@@ -40,6 +40,8 @@ class GitHubActionsClaims(BaseModel):
     sub: str
     repository: str
     repository_owner: str = ""
+    # "public", "private" or "internal"; an absent claim is treated as public.
+    repository_visibility: str = ""
     ref: str = ""
     workflow_ref: str = ""
     run_id: str = ""

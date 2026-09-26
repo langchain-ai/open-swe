@@ -22,6 +22,7 @@ from agent.dashboard.repo_access import (
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import create_durable_run
 from agent.github.comments import format_github_comment_body_for_prompt
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
@@ -37,7 +38,7 @@ from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_lock_thread, create_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import workspace_for_repo_config
+from agent.webhooks.common import repo_private_from_payload, workspace_for_repo_config
 
 logger = logging.getLogger(__name__)
 
@@ -638,7 +639,11 @@ async def _agent_run_config(
 
 
 async def _launch_agent_schedule_record(
-    record: dict[str, Any], *, test_run: bool = False, prompt: str | None = None
+    record: dict[str, Any],
+    *,
+    test_run: bool = False,
+    prompt: str | None = None,
+    token_repositories: list[str] | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -704,6 +709,8 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
+    if token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
         metadata["system_authorization"] = {
             "schedule_id": schedule_id,
@@ -896,7 +903,13 @@ async def launch_github_issue_automations(
             continue
         try:
             result = await _launch_agent_schedule_record(
-                record, prompt=_github_issue_prompt(record, payload)
+                record,
+                prompt=_github_issue_prompt(record, payload),
+                # An outsider can open an issue on a public repository, so the
+                # run it starts reaches only that repository.
+                token_repositories=event_token_repositories(
+                    owner_login, repo_name, private=repo_private_from_payload(payload)
+                ),
             )
         except Exception:
             logger.exception(
