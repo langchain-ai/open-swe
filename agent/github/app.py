@@ -154,6 +154,20 @@ async def _local_dev_token() -> str | None:
     return await gh_token()
 
 
+def _app_credentials_configured(installation_id: str) -> bool:
+    return bool(
+        GITHUB_APP_ID
+        and GITHUB_APP_PRIVATE_KEY
+        and installation_id.isdigit()
+        and int(installation_id) > 0
+    )
+
+
+def github_app_configured() -> bool:
+    """Whether the GitHub App's credentials and default installation are set."""
+    return _app_credentials_configured(str(GITHUB_APP_INSTALLATION_ID or "").strip())
+
+
 async def get_github_app_installation_token_with_expiry(
     *,
     installation_id: str | int | None = None,
@@ -166,12 +180,7 @@ async def get_github_app_installation_token_with_expiry(
     resolved_installation_id = str(
         GITHUB_APP_INSTALLATION_ID if installation_id is None else installation_id
     ).strip()
-    if (
-        not GITHUB_APP_ID
-        or not GITHUB_APP_PRIVATE_KEY
-        or not resolved_installation_id.isdigit()
-        or int(resolved_installation_id) <= 0
-    ):
+    if not _app_credentials_configured(resolved_installation_id):
         local_token = await _local_dev_token()
         if local_token:
             return local_token, None

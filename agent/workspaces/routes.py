@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from agent.github.sandbox_access import resolve_repository_ids_later
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
@@ -70,6 +71,7 @@ async def api_create_workspace(
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e
+    resolve_repository_ids_later(record.repos)
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
     return record
@@ -137,6 +139,8 @@ async def api_update_workspace(
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
+    if body.repos is not None:
+        resolve_repository_ids_later(record.repos)
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
         if repos_changed:

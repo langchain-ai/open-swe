@@ -1,8 +1,9 @@
 """Exercise the credential boundary from workspace lookup to the sandbox proxy."""
 
+import asyncio
 import base64
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from typing import TypedDict
@@ -11,7 +12,9 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import httpx2
 import pytest
+from fastapi import FastAPI
 
+from agent.dashboard import deps, oauth, routes
 from agent.github import app, proxy, sandbox_access
 from agent.github.repositories import Repository
 from agent.sandboxes import lifecycle
@@ -572,3 +575,58 @@ async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
 
     assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11"]
     assert listing_calls(github_requests) == 1
+
+
+@pytest.fixture
+async def admin_client(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> AsyncIterator[httpx.AsyncClient]:
+    """The real dashboard API, signed in as an admin."""
+    session = {"sub": "admin", "email": "admin@example.com"}
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    dashboard = FastAPI()
+    dashboard.include_router(routes.router)
+    dashboard.dependency_overrides[deps.admin_session] = lambda: session
+    dashboard.dependency_overrides[oauth.require_session] = lambda: session
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=dashboard),
+        base_url="http://test",
+        headers={"Origin": "http://test"},
+    ) as client:
+        yield client
+
+
+async def _stored_id_eventually(full_name: str) -> int | None:
+    """The id resolution runs after the save returns, so give it a moment."""
+    for _ in range(200):
+        if (github_id := await stored_github_id(full_name)) is not None:
+            return github_id
+        await asyncio.sleep(0.01)
+    return None
+
+
+@pytest.mark.parametrize("change", ["create", "update"])
+async def test_adding_a_repository_to_a_workspace_stores_its_id_before_the_first_run(
+    admin_client: httpx.AsyncClient,
+    github: list[dict[str, object]],
+    github_requests: list[httpx.Request],
+    change: str,
+) -> None:
+    if change == "create":
+        response = await admin_client.post(
+            "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
+        )
+    else:
+        await admin_client.post(
+            "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/internal"]}
+        )
+        assert await _stored_id_eventually("acme/internal") == 22
+        response = await admin_client.put(
+            "/dashboard/api/workspaces/core", json={"repos": ["acme/internal", "acme/api"]}
+        )
+    assert response.status_code == 200
+    assert await _stored_id_eventually("acme/api") == 11
+
+    github_requests.clear()
+    assert (await sandbox_access.repository_token(["acme/api"])).token == "repos:11"
+    assert listing_calls(github_requests) == 0

@@ -1,5 +1,6 @@
 """Repository-scoped credentials for sandbox GitHub traffic."""
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from agent.database import postgres
 from agent.github.app import (
     PermissionMap,
     get_github_app_installation_token_with_expiry,
+    github_app_configured,
 )
 from agent.github.repositories import Repository
 from agent.github.sdk import GITHUB_API_VERSION, github_sdk
@@ -20,6 +22,8 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 logger = logging.getLogger(__name__)
 
 RECHECK_MISSING_AFTER = timedelta(minutes=10)
+
+_BACKGROUND: set[asyncio.Task[None]] = set()
 
 
 class _InstallationRepository(BaseModel):
@@ -68,6 +72,35 @@ async def repository_token(
     if not token:
         raise RuntimeError("Workspace GitHub repository token is unavailable")
     return SandboxGitHubAccess(token, expires_at)
+
+
+async def resolve_repository_ids(repositories: Sequence[str]) -> None:
+    """Store the GitHub ids ``repositories`` lack, so their first run mints without listing."""
+    allowed = {repo.lower() for repo in repositories}
+    if not allowed:
+        return
+    stored = await _stored_repositories(allowed)
+    if stored is None or _ids_are_current(allowed, stored):
+        return
+    await _listed_repository_ids(allowed, stored)
+
+
+def resolve_repository_ids_later(repositories: Sequence[str]) -> None:
+    """Start :func:`resolve_repository_ids` without waiting for the installation listing.
+
+    A failure is only logged: the repositories' first run lists instead.
+    """
+    if not repositories or not github_app_configured():
+        return
+    task = asyncio.create_task(resolve_repository_ids(list(repositories)))
+    _BACKGROUND.add(task)
+    task.add_done_callback(_finish_background_resolution)
+
+
+def _finish_background_resolution(task: asyncio.Task[None]) -> None:
+    _BACKGROUND.discard(task)
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.warning("Could not store repository ids", exc_info=exc)
 
 
 async def _stored_repositories(allowed: set[str]) -> dict[str, Repository] | None:
