@@ -45,7 +45,13 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { slackChannelMatches } from "@/components/SlackChannelCombobox"
+import type { SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
+import {
+  slackChannelReference,
+  useSlackChannelDirectory,
+} from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
@@ -181,9 +187,25 @@ export function buildCommandItems(
   mentionPaths: Array<string>,
   skills: Array<Skill>,
   includeModelCommand = true,
-  includeOffloadCommand = false
+  includeOffloadCommand = false,
+  slackChannels: Array<SlackChannelOption> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
+
+  if (trigger.kind === "slack-channel") {
+    return slackChannels
+      .filter((channel) => slackChannelMatches(channel, query))
+      .sort((left, right) => Number(right.is_member) - Number(left.is_member))
+      .slice(0, MAX_MENTION_SUGGESTIONS)
+      .map((channel) => ({
+        id: `channel:${channel.id}`,
+        type: "slack-channel" as const,
+        channelId: channel.id,
+        name: channel.name,
+        label: `#${channel.name}`,
+        description: channel.is_member ? "" : "bot not in channel",
+      }))
+  }
 
   if (trigger.kind === "slash-command" || trigger.kind === "skill-command") {
     const skillItems = skills
@@ -341,6 +363,9 @@ export const ChatComposer = memo(function ChatComposer({
     [cursor, value]
   )
   const triggerKey = trigger ? `${trigger.kind}:${trigger.rangeStart}` : null
+  const slackChannels = useSlackChannelDirectory(
+    trigger?.kind === "slack-channel"
+  ).data?.channels
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
     [skills]
@@ -353,10 +378,11 @@ export const ChatComposer = memo(function ChatComposer({
             mentionPaths,
             skills,
             models.length > 0,
-            canOffload
+            canOffload,
+            slackChannels
           )
         : [],
-    [mentionPaths, models.length, skills, trigger, canOffload]
+    [mentionPaths, models.length, skills, trigger, canOffload, slackChannels]
   )
   const menuOpen =
     trigger !== null &&
@@ -450,14 +476,20 @@ export const ChatComposer = memo(function ChatComposer({
         return
       }
 
-      if (item.type === "path" || item.type === "skill") {
+      if (
+        item.type === "path" ||
+        item.type === "skill" ||
+        item.type === "slack-channel"
+      ) {
         const next = replaceTextRange(
           value,
           trigger.rangeStart,
           trigger.rangeEnd,
           item.type === "path"
             ? mentionReplacementText(item.path)
-            : `/${item.name} `
+            : item.type === "slack-channel"
+              ? `${slackChannelReference(item.channelId, item.name)} `
+              : `/${item.name} `
         )
         applyPrompt(next.text, next.cursor)
         return

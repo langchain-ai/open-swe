@@ -4,12 +4,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from agent.slack import channel_options
+from agent.slack import channel_options, dashboard_routes
 from agent.utils import ttl_cache
 
 
@@ -211,3 +212,29 @@ async def test_a_repeating_cursor_is_refused(monkeypatch: pytest.MonkeyPatch) ->
         await channel_options.list_slack_channels()
 
     assert excinfo.value.status_code == 502
+
+
+@pytest.mark.parametrize("admin", [True, False])
+async def test_private_channels_are_listed_for_admins_only(
+    monkeypatch: pytest.MonkeyPatch, admin: bool
+) -> None:
+    def option(channel_id: str, *, private: bool) -> channel_options.SlackChannelOption:
+        return channel_options.SlackChannelOption(
+            id=channel_id,
+            name=channel_id.lower(),
+            is_private=private,
+            is_member=True,
+            is_ext_shared=False,
+        )
+
+    directory = channel_options.SlackChannelDirectory(
+        channels=[option("C0PUBLIC", private=False), option("G0PRIVATE", private=True)]
+    )
+    monkeypatch.setattr(dashboard_routes, "list_slack_channels", AsyncMock(return_value=directory))
+    monkeypatch.setattr(dashboard_routes, "session_is_admin", lambda _session: admin)
+
+    listed = await dashboard_routes.api_list_slack_channels({"sub": "someone"})
+
+    assert [channel.id for channel in listed.channels] == (
+        ["C0PUBLIC", "G0PRIVATE"] if admin else ["C0PUBLIC"]
+    )

@@ -617,6 +617,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "name": "default",
             "repos": [],
             "slack_channel_ids": [],
+            "kitchen_channel_ids": [],
             "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
@@ -1003,6 +1004,36 @@ async def test_an_update_releases_the_bindings_it_drops() -> None:
     )
     assert released.repos == ["acme/api"]
     assert await WORKSPACES.owner_of_slack_channel("C0API") == "oss"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_kitchen_mode_is_limited_to_bound_channels() -> None:
+    with pytest.raises(ValidationError, match="bound to this workspace"):
+        WorkspaceCreate(name="Core", repos=["acme/api"], kitchen_channel_ids=["C0API"])
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core",
+            repos=["acme/api"],
+            slack_channel_ids=["C0API", "C0WEB"],
+            kitchen_channel_ids=["c0api"],
+        ),
+        "alice",
+    )
+    assert await WORKSPACES.is_kitchen_channel(" c0api ")
+    assert not await WORKSPACES.is_kitchen_channel("C0WEB")
+
+    with pytest.raises(ValueError, match="bound to this workspace"):
+        await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0OTHER"]))
+
+    moved = await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0WEB"]))
+    assert moved.kitchen_channel_ids == ["C0WEB"]
+    assert not await WORKSPACES.is_kitchen_channel("C0API")
+
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(slack_channel_ids=["C0API"]))
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.kitchen_channel_ids == []
+    assert not await WORKSPACES.is_kitchen_channel("C0WEB")
 
 
 @pytest.mark.usefixtures("registry_db")

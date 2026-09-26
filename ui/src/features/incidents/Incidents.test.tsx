@@ -333,10 +333,9 @@ it("saves settings as a versioned request and preserves unsaved values on confli
   mount(<IncidentSettings />)
   const prefix = await screen.findByRole("textbox", { name: "Channel prefix" })
   fireEvent.change(prefix, { target: { value: "incident-" } })
-  fireEvent.change(
-    screen.getByRole("textbox", { name: "Excluded channel IDs" }),
-    { target: { value: "C1, C2, C1" } }
-  )
+  const excluded = screen.getByRole("combobox", { name: "Excluded channels" })
+  fireEvent.change(excluded, { target: { value: "C0000000001" } })
+  fireEvent.keyDown(excluded, { key: "Enter" })
   fireEvent.click(screen.getByRole("button", { name: "Save settings" }))
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain("Settings changed")
@@ -346,7 +345,7 @@ it("saves settings as a versioned request and preserves unsaved values on confli
   expect(screen.queryByRole("textbox", { name: "Workspace ID" })).toBeNull()
   expect(screen.getByText("A123")).toBeTruthy()
   expect(writes[0]?.policy.workspace_id).toBe("T123")
-  expect(writes[0]?.policy.excluded_channel_ids).toEqual(["C1", "C2"])
+  expect(writes[0]?.policy.excluded_channel_ids).toEqual(["C0000000001"])
   expect(prefix).toHaveProperty("value", "incident-")
 })
 

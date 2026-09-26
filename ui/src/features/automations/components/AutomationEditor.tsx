@@ -13,6 +13,8 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -337,13 +339,13 @@ export function AutomationEditor({
 
         <SectionLabel>Slack destination</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <input
-            value={slackChannelId}
-            onChange={(e) => setSlackChannelId(e.target.value)}
+          <SlackChannelCombobox
+            value={slackChannelId.trim() || null}
+            onValueChange={(id) => setSlackChannelId(id ?? "")}
             disabled={!canManage}
-            placeholder="C0123456789"
-            spellCheck={false}
-            className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            placeholder="Search channels or paste a channel ID"
+            aria-label="Slack channel"
+            className="w-full"
           />
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <span className="text-xs text-muted-foreground">
@@ -377,9 +379,10 @@ export function AutomationEditor({
 
         <SectionLabel>Agent Instructions</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <textarea
+          <SlackChannelTextarea
+            bare
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onValueChange={setPrompt}
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}
