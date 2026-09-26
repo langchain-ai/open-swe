@@ -81,6 +81,10 @@ _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external
 _OPTION_ACTION_ID = "open_swe_option_select"
 
 
+def _bot_directly_addresses_us(text: str, bot_user_id: str) -> bool:
+    return text.lstrip().startswith(f"<@{bot_user_id}>")
+
+
 def _synthetic_slack_ts() -> str:
     timestamp = time_ns()
     return f"{timestamp // 1_000_000_000}.{timestamp % 1_000_000_000:09d}"
@@ -413,7 +417,7 @@ async def slack_webhook(
             or event.subtype not in {"", "bot_message"}
             or text is None
             or not bot_user_id
-            or f"<@{bot_user_id}>" not in text
+            or not _bot_directly_addresses_us(text, bot_user_id)
             or user_id == bot_user_id
             or (event.app_id and event.app_id == envelope.api_app_id)
         ):
