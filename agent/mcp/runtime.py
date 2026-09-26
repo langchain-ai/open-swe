@@ -22,7 +22,6 @@ from langchain_mcp_adapters.sessions import (
     create_session,
 )
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
-from langgraph_api.cache import swr
 
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
@@ -215,6 +214,8 @@ async def _cached_definitions(
         ):
             definitions = await discover_tools(record, source.namespace)
         return [tool.model_dump(mode="json", exclude_none=True) for tool in definitions]
+
+    from langgraph_api.cache import swr
 
     result = await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
     return [Tool.model_validate(tool) for tool in result.value], (

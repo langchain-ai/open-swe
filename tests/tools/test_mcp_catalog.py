@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet
-from langgraph_api import cache
 from mcp.types import Tool
 
 from agent.mcp import MCPConnectionUpdate, runtime
@@ -17,6 +16,10 @@ FETCH = Tool(name="fetch", inputSchema={"type": "object"})
 @pytest.fixture(autouse=True)
 def encryption(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("REDIS_URI", "_FAKE")
+    monkeypatch.setenv("DATABASE_URI", ":memory:")
+    from langgraph_api import cache
+
     if hasattr(cache, "_CACHE"):
         cache._CACHE.clear()
 
@@ -48,7 +51,9 @@ async def test_cache_failure_does_not_start_independent_discovery(fake_store, mo
     await save(allowed_tools=["search"])
     discover = AsyncMock(return_value=[SEARCH])
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    monkeypatch.setattr(runtime, "swr", AsyncMock(side_effect=ConnectionError("cache unavailable")))
+    from langgraph_api import cache
+
+    monkeypatch.setattr(cache, "swr", AsyncMock(side_effect=ConnectionError("cache unavailable")))
 
     assert await names() == []
     discover.assert_not_awaited()
@@ -66,6 +71,8 @@ async def test_changed_connection_rediscovers(fake_store, monkeypatch):
 
 
 async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
+    from langgraph_api import cache
+
     await save(allowed_tools=["search", "fetch"])
     monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[SEARCH]))
     assert await names() == ["search"]
