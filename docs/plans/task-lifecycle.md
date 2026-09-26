@@ -50,14 +50,17 @@ task.
 task
   id                uuid7
   title             text
+  goal              text      what done looks like, from create_task
   driver_thread_id  text      thread the shepherd wakes
   auto_merge        bool null null = use the owners' preferences
   stage             text      derived, cached (see Task stage)
   created_at, closed_at
+  close_reason      completed | abandoned | null
 
 task_thread
-  thread_id         text PK   a thread belongs to at most one task
   task_id           uuid
+  thread_id         text      at most one open task per thread
+  primary key (task_id, thread_id)
   role              root | sub | coordinator | fix | followup | reviewer | review_scout
   pull_request_id   uuid null the PR a reviewer or review_scout thread belongs to
 
@@ -99,9 +102,14 @@ task_wakeup                    dedupe + retry budget
 
 ### Membership
 
-- A task is created lazily the first time a thread links a PR
-  (`open_pull_request`, `link_pull_request`, or a takeover). That thread becomes
-  the root and the driver.
+- The agent creates a task explicitly with `create_task(title, goal)` as soon as
+  it decides the work will change code, before any PR exists. The calling thread
+  becomes the root and the driver. A takeover also creates a task when the PR is
+  not being added to an existing one.
+- A thread has at most one open task. Once it closes (completed or abandoned),
+  the same thread can create another, so a long-lived Slack or concierge thread
+  can carry several tasks in sequence.
+- The thread's open task is "in scope" for its runs, and for its subthreads.
 - A subthread (`parent_thread_id` set) joins its parent's task as `sub`.
 - A thread started from the dashboard PR actions (`agent/threads/pr_fixes.py`)
   joins the PR's task as `fix` when one exists.
@@ -151,9 +159,15 @@ blockers are dropped.
 
 ### Task stage
 
-Derived from its open PRs: `ready` when every PR is `ready`, `merged` when every
-PR is merged or closed with at least one merged, otherwise the worst PR stage.
-The UI shows the breakdown ("2 of 3 ready").
+`in_progress` while the task has no PRs. After that it is derived from its open
+PRs: `ready` when every PR is `ready`, `merged` when every PR is merged or closed
+with at least one merged, otherwise the worst PR stage. The UI shows the
+breakdown ("2 of 3 ready").
+
+A task closes as `completed` when it reaches `merged` and the agent does not
+open another PR within its run, or explicitly through `close_task(reason)`
+(`completed` or `abandoned`). Abandoning a task with open PRs asks the agent to
+close or release them first.
 
 ## Shepherd (`agent/tasks/shepherd.py`)
 
@@ -366,7 +380,32 @@ When the task stage becomes `ready`:
 
 ### Agent-opened PRs
 
-`open_pull_request` creates or joins the thread's task. No opt-in.
+`open_pull_request` adds the PR to the task in scope and fails without one,
+returning an error that tells the agent to call `create_task` first. No opt-in
+beyond that.
+
+### Tools gated on a task
+
+Code-changing tools require a task in scope; everything else stays available, so
+questions, investigations, and reviews never need a task.
+
+| Gated | Why |
+|---|---|
+| `write_file`, `edit_file` | Direct file changes |
+| `open_pull_request`, `link_pull_request` | PRs always belong to a task |
+| `git push` through the sandbox GitHub proxy | Catches changes made through `execute` |
+
+`execute` itself stays ungated because investigation needs it (running tests,
+reading logs, `git log`); the push check in the proxy is what stops untracked
+work from leaving the sandbox. A gated call without a task returns an error
+naming `create_task`. The gate is one middleware in `agent/middleware/` plus the
+proxy check. Local runs get the middleware but not the push check, since they push
+from the user's machine without the proxy. The system prompt tells the agent to
+create a task before changing code.
+
+Nothing creates a task implicitly on the agent's behalf: not thread creation,
+not the first edit, not `open_pull_request`. The only paths are the agent's
+`create_task` call and a human takeover.
 
 ### Takeover
 
@@ -407,6 +446,8 @@ row, records a `task_event`, and posts a PR comment.
 
 | Tool | Behaviour |
 |---|---|
+| `create_task` | `title`, `goal`; creates the thread's open task. Fails if one is already open |
+| `close_task` | `reason: completed \| abandoned` |
 | `get_task` | Task, PRs with stage and blockers, recent timeline |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Remove a PR from the task |
@@ -447,6 +488,8 @@ Tool descriptions live under `agent/resources/prompts/tools/`.
 Migration: backfill a task for every open PR with an `open_pull_request` link,
 with its linked agent thread as root and driver, then drop the baby-sit crons.
 Active watches need no conversion because the backfilled task covers the same PR.
+A thread that is mid-change without a PR at deploy time hits the gate on its next
+edit and gets the `create_task` error, which is the intended path.
 
 ## Later
 
@@ -457,8 +500,9 @@ same cycle.
 
 ## Rollout
 
-1. Backend core: schema and migration, stage evaluation, shepherd triggers,
-   wake-ups and budget, backfill, `get_task`, deletions. About 2–3 days.
+1. Backend core: schema and migration, `create_task` / `close_task` / `get_task`,
+   the tool gate, stage evaluation, shepherd triggers, wake-ups and budget,
+   backfill, deletions. About 3 days.
 2. Merge: shared readiness, auto-merge preference and override, merge ordering,
    `set_task_options`. About 1 day.
 3. Takeover and release across dashboard, GitHub, and tools. About 1 day.
