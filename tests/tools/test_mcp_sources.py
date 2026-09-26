@@ -76,6 +76,26 @@ async def test_sources_combine_distinct_connections_and_replace_matching_names(r
     ]
 
 
+def test_datadog_tool_description_preserves_provider_description_and_adds_guidance():
+    tool = runtime._wrap_tool(
+        "datadog",
+        "https://datadog.example/mcp",
+        "streamable_http",
+        Tool(
+            name="analyze_datadog_logs",
+            description="https://datadog.example/mcp",
+            inputSchema={"type": "object"},
+        ),
+        ("workspace_mcps",),
+        (),
+    )
+
+    assert tool.description.startswith("https://datadog.example/mcp\n\n")
+    assert "GROUP BY" in tool.description
+    assert "p90()" in tool.description
+    assert '"@http.status_code"' in tool.description
+
+
 async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before(remote):
     instance = source(
         ("instance_mcps",),
