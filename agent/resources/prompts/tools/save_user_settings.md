@@ -7,6 +7,7 @@ Supported profile fields:
 - `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
+- Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record. Browser-local Feature Flags tab visibility cannot be changed here.
 - `model_routing_enabled`, `review_draft_prs`: boolean overrides; null inherits the shared default.
 - `draft_prs`: whether newly opened PRs are drafts; use true or false (null keeps the existing preference).
 
