@@ -539,7 +539,6 @@ def _slack_context_input(
         current_message, bot_user_id, user_names_by_id, channel_names
     )
     _, separator, forwarded_context = rendered_request.partition("\n")
-    request_text = _label_slack_mentions(request_text, user_names_by_id, channel_names)
     if separator and forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
@@ -861,7 +860,10 @@ async def _process_slack_mention_impl(
         for value in (message.get("user") for message in context_messages)
         if isinstance(value, str) and value
     ]
-    message_texts = [text, *(str(message.get("text", "")) for message in context_messages)]
+    message_texts = [
+        text,
+        common.format_slack_messages_for_prompt([*context_messages, *source_messages], {}),
+    ]
     mentioned_user_ids = [
         mentioned
         for message_text in message_texts
@@ -919,6 +921,7 @@ async def _process_slack_mention_impl(
         source_messages, user_names_by_id
     )
 
+    clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
     image_urls = common.dedupe_urls(
