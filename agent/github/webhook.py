@@ -456,8 +456,12 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config.get("owner", ""),
+            repo=repo_config.get("name", ""),
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     is_re_review = bool(last_reviewed_sha)
@@ -666,7 +670,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     pr_url = pr.get("html_url") or pr.get("url") or ""
     base_sha = pr.get("base", {}).get("sha", "")
     base_ref = pr.get("base", {}).get("ref", "")
-    head_sha = pr.get("head", {}).get("sha", after_sha)
+    # The PR API can still report the previous head moments after a push.
+    head_sha = after_sha
     pr_title = pr.get("title", "")
     if not isinstance(pr_number, int) or not base_sha or not head_sha:
         common.logger.warning(
@@ -802,8 +807,12 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     re_review_prompt = (
