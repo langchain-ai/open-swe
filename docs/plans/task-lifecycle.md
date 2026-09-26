@@ -127,10 +127,6 @@ task_audit                     append-only; see Audit trail
   actor_run_id null, actor_github_login null, via, action, pull_request_id null,
   before jsonb, after jsonb, reason text, refs jsonb
 
-task_thread_cursor             what each thread has already been told
-  thread_id         text PK
-  last_seen_audit_id uuid
-
 task_wakeup                    dedupe + retry budget
   pull_request_id, head_sha, reason   unique
   task_id, created_at
@@ -316,25 +312,33 @@ Most things that happen on a task need the coordinator to know about them but no
 to act: CI going green, a reviewer acknowledging, an approval, a teammate pushing
 a commit, a person reassigning a review, an owner being added, a state change.
 These are delivered as **notices**, not wake-ups: they never start a run, and the
-coordinator sees them at the start of its next run, whatever triggers it (a
+coordinator sees them before its next model call, whatever triggers the run (a
 wake-up, a person's message, a comment).
 
-Notices are read from the audit trail rather than queued separately. The
-coordinator thread keeps a cursor, `last_seen_audit_id`. At the start of each run,
-and before each model call during a run, a middleware reads the task's audit rows
-after the cursor, renders them as one compact `<dynamic-context>` block (the
-existing mechanism in `agent/input_messages.py` and
-`middleware/check_message_queue.py`, deduped by hash), and advances the cursor.
+A notice is its own deliberate message, not a view of the audit trail. The audit
+trail is busy and is never read into context automatically; the agent reads it
+only on purpose, through `query_task_audit`.
 
-- Each audit action is classified once as `wake` or `notice`. Wake actions (the
-  wake-up moments above) also appear in the digest, so the coordinator sees the
-  full picture.
-- Rows the coordinator's own run caused are skipped.
-- The digest groups by PR, collapses repeats ("CI passed 3 times"), and is capped
-  in length; when capped, it ends with a pointer to `get_task` for the rest.
+Notices use the existing queue-without-running facility:
+`queue_message_for_thread` (`agent/utils/thread_ops.py`) appends to the thread's
+`("queue", thread_id)` store item, and `middleware/check_message_queue.py` drains
+it before the next model call. `_queue_channel_housekeeping` in
+`agent/slack/routes.py` already uses it the same way for "nothing is being asked
+of you" membership notes.
 
-The same digest is what a member thread sees about its task, from its own cursor,
-when a person talks to it directly.
+- The shepherd sends a notice only for a fixed, short list of events: CI passing
+  on a PR after it had failed, a review approved, a reviewer acknowledging or
+  passing, a review call taken, a person making or overriding an assignment, a
+  commit pushed by someone other than the agent, an owner added or removed, a
+  person changing auto-merge, a block clearing on its own, and a PR merging while
+  others in the task are still open. Anything that needs action is a wake-up
+  instead, never a notice.
+- Each notice is one short line rendered from
+  `agent/resources/prompts/runs/task-notice.md.jinja`, naming the PR and the
+  actor, and saying that nothing is being asked.
+- The queue item's `queue_id` is the audit row id, so a retried send never
+  duplicates a notice.
+- Notices go to the coordinator only.
 
 ### Blocked
 
@@ -845,7 +849,7 @@ it needs has merged.
 
 | # | Piece | What users get | Contents | Needs | Size |
 |---|---|---|---|---|---|
-| 1 | Agent PRs drive themselves to green | The agent fixes CI failures, conflicts, and Open SWE findings on its own PRs without `/baby-sit` or a human relaying findings | Schema (`task`, `task_thread`, `task_pull_request`, `task_owner`, `task_audit`, `task_wakeup`, `task_thread_cursor`); `create_task` with owners; `open_pull_request` requiring a task; PR conditions and task state; shepherd triggers and sweep; wake-ups and retry budget; `blocked` via `request_human`; notices; `get_task`; `close_task` with agent-decided completion; subthreads, fix, reviewer, and scout threads joining; backfill; deleting baby-sit and auto-fix | — | ~4 days |
+| 1 | Agent PRs drive themselves to green | The agent fixes CI failures, conflicts, and Open SWE findings on its own PRs without `/baby-sit` or a human relaying findings | Schema (`task`, `task_thread`, `task_pull_request`, `task_owner`, `task_audit`, `task_wakeup`); `create_task` with owners; `open_pull_request` requiring a task; PR conditions and task state; shepherd triggers and sweep; wake-ups and retry budget; `blocked` via `request_human`; notices; `get_task`; `close_task` with agent-decided completion; subthreads, fix, reviewer, and scout threads joining; backfill; deleting baby-sit and auto-fix | — | ~4 days |
 | 2 | Coordinator introspection | The coordinator can see every thread, PR, and decision in its task, and people can read the audit trail | `list_task_threads`, `read_task_thread`, `query_task_audit`, `get_task_pull_request`, `list_tasks`, audit API | 1 | ~1.5 days |
 | 3 | Open review calls | Ready PRs are posted to the repo's review channel and teammates self-select with "Take it" | `post_review_call`, channel card built on the expedited review card, claim and release, unclaimed fallback wake-up, human decisions | 1 | ~1.5 days |
 | 4 | The agent picks reviewers | One sensible individual reviewer per PR, chosen on ownership, file history, and load; suggestions honoured, `required` ones always; human assignments win | `review_candidates`, `assign_task`, `suggest_reviewer`, review-load view, GitHub review-request sync, Slack DM | 1 | ~2.5 days |
