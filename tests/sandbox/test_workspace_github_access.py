@@ -129,6 +129,57 @@ async def test_every_sandbox_receives_the_installation_token(
     assert injected_auth(github) == ["x-access-token:repos:11,22"]
 
 
+async def test_a_thread_scoped_to_its_repository_keeps_that_scope_across_refreshes(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    """A thread an event on a public repository started never gets the installation token."""
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(return_value=["acme/api"])
+    )
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+
+    backend = await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    assert await proxy.maybe_refresh_proxy_token(
+        "thread", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+
+    assert injected_auth(github) == ["x-access-token:repos:11", "x-access-token:repos:11"]
+
+
+async def test_a_callers_scope_cannot_widen_the_threads(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(return_value=["acme/api"])
+    )
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+
+    await lifecycle.ensure_sandbox_for_thread(
+        "thread",
+        workspace_slug="workspace",
+        github_proxy_repositories=["acme/api", "acme/internal"],
+    )
+
+    assert injected_auth(github) == ["x-access-token:repos:11"]
+
+
+async def test_an_unreadable_thread_scope_fails_the_sandbox_rather_than_widening(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(side_effect=RuntimeError("down"))
+    )
+
+    with pytest.raises(RuntimeError):
+        await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
+
+    assert github == []
+
+
 async def test_workspace_lookup_failure_cannot_grant_installation_access(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],

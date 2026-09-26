@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from deepagents.backends.protocol import (
@@ -24,6 +25,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.github.token_scope import token_repositories_from_metadata
 from agent.sandboxes.providers.registry import create_sandbox
 
 logger = logging.getLogger(__name__)
@@ -397,6 +399,46 @@ async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
     thread = await get_client().threads.get(thread_id)
     metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
     return metadata if isinstance(metadata, dict) else {}
+
+
+_TOKEN_SCOPES: OrderedDict[str, list[str] | None] = OrderedDict()
+_TOKEN_SCOPE_CACHE_LIMIT = 4096
+
+
+def clear_thread_token_repositories() -> None:
+    _TOKEN_SCOPES.clear()
+
+
+async def thread_token_repositories(thread_id: str) -> list[str] | None:
+    """The repositories a thread's GitHub token is limited to; ``None`` is the installation.
+
+    Read from the live thread, never from a run's config: the scope is stamped
+    once by the server when the thread is created, and nothing a run carries may
+    widen it. It never changes afterwards, so a successful read is cached. A
+    failed read propagates, since reading it as "no scope" would widen access.
+    """
+    if thread_id in _TOKEN_SCOPES:
+        _TOKEN_SCOPES.move_to_end(thread_id)
+        return _TOKEN_SCOPES[thread_id]
+    thread = await get_client().threads.get(thread_id)
+    metadata = thread.get("metadata") if isinstance(thread, dict) else None
+    scope = token_repositories_from_metadata(metadata if isinstance(metadata, dict) else {})
+    _TOKEN_SCOPES[thread_id] = scope
+    while len(_TOKEN_SCOPES) > _TOKEN_SCOPE_CACHE_LIMIT:
+        _TOKEN_SCOPES.popitem(last=False)
+    return scope
+
+
+def narrowed_repositories(
+    requested: Sequence[str] | None, recorded: Sequence[str] | None
+) -> list[str] | None:
+    """A caller's scope, never wider than the one the thread recorded."""
+    if recorded is None:
+        return None if requested is None else list(requested)
+    if requested is None:
+        return list(recorded)
+    allowed = {repo.lower() for repo in recorded}
+    return [repo for repo in requested if repo.lower() in allowed]
 
 
 async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:

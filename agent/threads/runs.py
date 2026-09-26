@@ -30,6 +30,7 @@ from agent.dashboard.workspace_settings import (
 )
 from agent.database import postgres
 from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_agent_run
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.input_messages import (
     PersonIdentity,
     RunMessage,
@@ -1306,6 +1307,8 @@ async def _create_system_thread_record(
     if repo_config:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
+    if principal.token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(principal.token_repositories)
     client = langgraph_client()
     await create_thread(
         client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"

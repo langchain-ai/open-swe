@@ -1172,6 +1172,7 @@ async def process_github_pr_comment(
         github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
+        token_repositories=common.event_thread_token_repositories(repo_config, payload),
     )
 
 
@@ -1446,7 +1447,8 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         "environment": workspace,
     }
 
-    await common.upsert_agent_thread_metadata(
+    token_repositories = common.event_thread_token_repositories(repo_config, payload)
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
@@ -1454,7 +1456,14 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
         workspace=workspace,
+        token_repositories=token_repositories,
     )
+    if not persisted and token_repositories is not None:
+        common.logger.error(
+            "Not starting a GitHub issue run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
