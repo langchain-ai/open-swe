@@ -2,9 +2,10 @@
 
 The LangSmith sandbox proxy is configured with a GitHub App installation token
 that expires after exactly one hour. Long runs would otherwise hit 401s on
-every ``gh``/``git`` call once that snapshot goes stale. This hook re-configures
-the proxy with a fresh token before each model call when the recorded token is
-near expiry.
+every ``gh``/``git`` call once that snapshot goes stale, and a repository added
+to the workspace mid-run would stay unreachable. This hook re-configures the
+proxy before each model call when the recorded token is near expiry or the
+workspace's repositories changed, and only when the new token differs.
 """
 
 import logging
@@ -26,7 +27,7 @@ async def refresh_github_proxy_before_model(
     state: AgentState,  # noqa: ARG001
     runtime: Runtime,  # noqa: ARG001
 ) -> dict[str, Any] | None:
-    """Refresh the sandbox proxy's GitHub token before it expires mid-run."""
+    """Refresh the sandbox proxy's GitHub token when it nears expiry or its repos change."""
     try:
         config = get_config()
         thread_id = config.get("configurable", {}).get("thread_id")

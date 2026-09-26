@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from githubkit.auth import TokenAuthStrategy
@@ -31,6 +31,8 @@ class _InstallationRepository(BaseModel):
 class SandboxGitHubAccess:
     token: str | None = None
     expires_at: str | None = None
+    # The lowercased full names the token was requested for.
+    repositories: frozenset[str] = frozenset()
 
 
 async def repository_token(
@@ -141,13 +143,25 @@ async def workspace_token(
     permissions: PermissionMap | None = None,
 ) -> SandboxGitHubAccess:
     """Resolve permissions strictly; snapshot fallback must never broaden access."""
+    allowed = await workspace_repositories(workspace_slug, repositories=repositories)
+    access = await repository_token(sorted(allowed), permissions=permissions)
+    return replace(access, repositories=allowed)
+
+
+async def workspace_repositories(
+    workspace_slug: str | None, *, repositories: Sequence[str] | None = None
+) -> frozenset[str]:
+    """The lowercased repositories a sandbox in ``workspace_slug`` may reach.
+
+    ``repositories`` narrows the workspace's list and never adds to it.
+    """
     slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
     workspace = await WORKSPACES.get(slug)
     if workspace is None:
         if slug != DEFAULT_WORKSPACE_SLUG:
             raise ValueError(f"Workspace {slug!r} does not exist")
-        return SandboxGitHubAccess()
+        return frozenset()
     allowed = {repo.lower() for repo in workspace.repos}
     if repositories is not None:
         allowed.intersection_update(repo.lower() for repo in repositories)
-    return await repository_token(sorted(allowed), permissions=permissions)
+    return frozenset(allowed)

@@ -3,10 +3,14 @@
 The LangSmith sandbox proxy is configured once at run start with a GitHub App
 installation token. Those tokens expire after exactly one hour, so any agent
 run longer than ~1h would start seeing 401s on every ``gh``/``git`` call in the
-sandbox. This module records when each thread's proxy token expires and lets a
-before-model middleware re-configure the proxy before it goes stale.
+sandbox. A token also covers only the repositories it was minted for, so one
+added to the workspace mid-run would stay unreachable until the next run. This
+module records each thread's token and lets a before-model middleware
+re-configure the proxy when the token nears expiry or the workspace's
+repositories change, and only when the new token differs.
 """
 
+import hashlib
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -18,7 +22,11 @@ from agent.github.app import (
     PermissionMap,
     normalize_permissions,
 )
-from agent.github.sandbox_access import workspace_token
+from agent.github.sandbox_access import (
+    SandboxGitHubAccess,
+    workspace_repositories,
+    workspace_token,
+)
 from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -35,6 +43,8 @@ _PROXY_TOKEN_EXPIRY: dict[
 ] = {}
 _PROXY_WORKSPACES: dict[str, str] = {}
 _PROXY_BASE_CONFIGS: dict[str, dict[str, Any]] = {}
+# thread_id -> (repositories the proxy token was minted for, SHA-256 of that token)
+_PROXY_MINTED: dict[str, tuple[frozenset[str], str | None]] = {}
 ProxyTokenRecord = tuple[datetime | None, datetime, tuple[str, ...] | None, PermissionKey]
 
 
@@ -71,14 +81,21 @@ def record_proxy_token_expiry(
     permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
+    minted: SandboxGitHubAccess | None = None,
 ) -> None:
     """Record when ``thread_id``'s proxy token expires and the repo scope it was minted with.
 
     ``repositories`` and ``permissions`` preserve the original token scope so a
     later refresh doesn't broaden it to an installation-wide or more privileged token.
+    ``minted`` is the access the proxy now holds, which lets a refresh tell when the
+    workspace's repositories changed and whether a new token needs configuring.
     """
     if not thread_id:
         return
+    if minted is not None:
+        _PROXY_MINTED[thread_id] = (minted.repositories, _token_digest(minted.token))
+    else:
+        _PROXY_MINTED.pop(thread_id, None)
     scope = tuple(repositories) if repositories is not None else None
     _PROXY_WORKSPACES[thread_id] = workspace_slug or DEFAULT_WORKSPACE_SLUG
     _PROXY_TOKEN_EXPIRY[thread_id] = (
@@ -105,6 +122,11 @@ def clear_proxy_token_expiry(thread_id: str | None) -> None:
         _PROXY_TOKEN_EXPIRY.pop(thread_id, None)
         _PROXY_WORKSPACES.pop(thread_id, None)
         _PROXY_BASE_CONFIGS.pop(thread_id, None)
+        _PROXY_MINTED.pop(thread_id, None)
+
+
+def _token_digest(token: str | None) -> str | None:
+    return hashlib.sha256(token.encode()).hexdigest() if token else None
 
 
 def _unpack_proxy_token_record(record: tuple[Any, ...]) -> ProxyTokenRecord:
@@ -166,19 +188,22 @@ async def refresh_proxy_token(
         permissions=dict(permission_key) if permission_key else None,
     )
 
-    from agent.sandboxes.providers.langsmith import configure_sandbox_proxy
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
     base_proxy_config = _PROXY_BASE_CONFIGS.get(thread_id)
-    if base_proxy_config is not None:
-        await configure_sandbox_proxy(
-            current_backend.id,
-            access.token,
-            base_proxy_config=base_proxy_config,
-            thread_id=thread_id,
-        )
-    else:
-        await configure_sandbox_proxy(current_backend.id, access.token, thread_id=thread_id)
+    minted = _PROXY_MINTED.get(thread_id)
+    token_changed = minted is None or minted[1] != _token_digest(access.token)
+    if token_changed:
+        from agent.sandboxes.providers.langsmith import configure_sandbox_proxy
+
+        current_backend = unwrap_sandbox_backend(sandbox_backend)
+        if base_proxy_config is not None:
+            await configure_sandbox_proxy(
+                current_backend.id,
+                access.token,
+                base_proxy_config=base_proxy_config,
+                thread_id=thread_id,
+            )
+        else:
+            await configure_sandbox_proxy(current_backend.id, access.token, thread_id=thread_id)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,
@@ -186,18 +211,36 @@ async def refresh_proxy_token(
         permissions=dict(permission_key) if permission_key else None,
         base_proxy_config=base_proxy_config,
         workspace_slug=workspace_slug,
+        minted=access,
     )
-    logger.info("Refreshed GitHub proxy token for thread %s", thread_id)
-    return True
+    if token_changed:
+        logger.info("Refreshed GitHub proxy token for thread %s", thread_id)
+    return token_changed
+
+
+async def _workspace_repositories_changed(thread_id: str) -> bool:
+    minted = _PROXY_MINTED.get(thread_id)
+    record = _PROXY_TOKEN_EXPIRY.get(thread_id)
+    if minted is None or record is None:
+        return False
+    _expires, _recorded, scope, _permissions = _unpack_proxy_token_record(record)
+    current = await workspace_repositories(
+        _PROXY_WORKSPACES.get(thread_id, DEFAULT_WORKSPACE_SLUG), repositories=scope
+    )
+    return current != minted[0]
 
 
 async def maybe_refresh_proxy_token(thread_id: str | None, *, now: datetime | None = None) -> bool:
-    """Re-configure the sandbox proxy with a fresh token when near expiry.
+    """Re-configure the sandbox proxy when its token nears expiry or its repositories change.
 
-    Returns True when a refresh was performed. Only applies to LangSmith
+    Returns True when the proxy was re-configured. Only applies to LangSmith
     sandboxes; other providers don't use the proxy.
     """
-    if not thread_id or not proxy_token_needs_refresh(thread_id, now=now):
+    if not thread_id:
+        return False
+    if not proxy_token_needs_refresh(thread_id, now=now) and not (
+        await _workspace_repositories_changed(thread_id)
+    ):
         return False
     refreshed = await refresh_proxy_token(thread_id)
     if refreshed:
