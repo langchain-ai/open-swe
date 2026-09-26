@@ -113,7 +113,6 @@ async def _capture_create_deep_agent_kwargs(
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
-    private_thread: bool = False,
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
@@ -162,11 +161,6 @@ async def _capture_create_deep_agent_kwargs(
                     "default_agent_routing_performance_reasoning_effort": "high",
                 }
             ),
-        ),
-        patch(
-            "agent.server._private_thread",
-            new_callable=AsyncMock,
-            return_value=private_thread,
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
@@ -1003,7 +997,10 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("private_thread", [True, False])
-async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None:
+async def test_channel_reads_need_a_private_thread(
+    private_thread: bool, saved_thread_scope: dict[str, str]
+) -> None:
+    saved_thread_scope["visibility"] = "private" if private_thread else "public"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -1014,7 +1011,7 @@ async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None
         }
     )
 
-    captured = await _capture_create_deep_agent_kwargs(config, private_thread=private_thread)
+    captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(tools, list)

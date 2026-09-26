@@ -39,10 +39,8 @@ async def test_read_only_sql_requires_private_admin_surface(
     for config in configs:
         with patch("agent.run_config.get_config", return_value=config):
             result = await query_tool("SELECT 1")
-        assert result == {
-            "ok": False,
-            "error": "Only workspace admins on a private admin surface can query the database.",
-        }
+        assert result["ok"] is False
+        assert "not available in this thread" in str(result["error"])
 
 
 @pytest.mark.asyncio
@@ -87,10 +85,8 @@ async def test_read_only_sql_rechecks_admin_membership(monkeypatch: pytest.Monke
     ):
         result = await query_tool("SELECT 1")
 
-    assert result == {
-        "ok": False,
-        "error": "Only workspace admins on a private admin surface can query the database.",
-    }
+    assert result["ok"] is False
+    assert "not available in this thread" in str(result["error"])
 
 
 @pytest.mark.asyncio

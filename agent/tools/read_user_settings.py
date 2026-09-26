@@ -13,6 +13,7 @@ from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.dashboard.user_preferences import get_user_preferences
+from agent.tools.access import Policy, access
 from agent.users import User
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
@@ -61,6 +62,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     }
 
 
+@access(Policy(trusted="private", actor="owner"))
 async def read_user_settings() -> dict[str, Any]:
     """Implement the `read_user_settings` tool."""
     config = get_config()

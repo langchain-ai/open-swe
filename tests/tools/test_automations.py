@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,8 +8,8 @@ from agent.tools import automations
 
 
 @pytest.fixture(autouse=True)
-def admin(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(automations, "require_admin", AsyncMock(return_value=None))
+def admin(monkeypatch, grant_tool_access: Callable[..., None]) -> None:  # noqa: ANN001
+    grant_tool_access(admin=True, admin_thread=True)
     monkeypatch.setattr(
         automations,
         "configurable",
@@ -40,16 +40,26 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     assert called["body"].repo == "langchain-ai/open-swe"
 
 
-async def test_automation_tools_recheck_admin(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        automations,
-        "require_admin",
-        AsyncMock(return_value="Only workspace admins can manage automations."),
-    )
+async def test_automation_tools_recheck_admin(grant_tool_access: Callable[..., None]) -> None:
+    grant_tool_access()
 
     result = await automations.delete_automation("schedule-1")
 
-    assert result == {
-        "ok": False,
-        "error": "Only workspace admins can manage automations.",
-    }
+    assert result["ok"] is False
+    assert "not available in this thread" in str(result["error"])
+
+
+async def test_sole_writer_sees_only_an_acknowledgement(
+    monkeypatch,  # noqa: ANN001
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(admin=True, sole=True)
+
+    async def update(*_: Any, **__: Any) -> dict[str, Any]:
+        return {"id": "schedule-1", "prompt": "Secret workspace prompt", "repo": "x/y"}
+
+    monkeypatch.setattr(automations.schedules, "update_agent_schedule", update)
+
+    result = await automations.update_automation("schedule-1", prompt="New prompt")
+
+    assert result == {"ok": True, "automation": {"id": "schedule-1"}}

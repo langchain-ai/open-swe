@@ -155,11 +155,9 @@ async def test_workspace_admin_resolves_email_for_github_login(
 @pytest.mark.asyncio
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
-        assert await env_tools.list_workspaces() == {
-            "ok": False,
-            "error": "Only workspace admins can manage workspaces.",
-        }
+    config = _config(admin_thread=True, github_login="someone-else")
+    with patch("agent.run_config.get_config", return_value=config):
+        assert (await env_tools.list_workspaces())["ok"] is False
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
 
@@ -201,7 +199,7 @@ class _Publish:
         for target in (
             patch(
                 "agent.run_config.get_config",
-                return_value=_config(github_login="ramonn", thread_id="t-1"),
+                return_value=_config(admin_thread=True, github_login="ramonn", thread_id="t-1"),
             ),
             patch.object(
                 env_tools.store.WORKSPACES,
@@ -401,7 +399,10 @@ async def test_refresh_start_refuses_an_workspace_with_no_script(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     start = AsyncMock()
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch(
+            "agent.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
         patch.object(
             env_tools.store.WORKSPACES,
             "get",
@@ -424,7 +425,10 @@ async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
     """Minutes of work, so the tool hands back a task id instead of blocking."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch(
+            "agent.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
         patch.object(
             env_tools.store.WORKSPACES,
             "get",
@@ -461,7 +465,10 @@ async def test_refresh_start_refuses_while_one_is_running(
     )
     start = AsyncMock()
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch(
+            "agent.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
         patch.object(
             env_tools.store.WORKSPACES, "get", new_callable=AsyncMock, return_value=running
         ),

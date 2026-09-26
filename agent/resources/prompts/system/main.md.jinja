@@ -55,6 +55,10 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {% else %}
 {% include "system/workspace-admin-required.md" +%}
 {% endif %}
+{% if sole_writer %}
+
+{% include "system/sole-writer.md" +%}
+{% endif %}
 
 {% include "system/shared-base.md" +%}
 {% if sandbox_file_downloads %}

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -9,7 +10,10 @@ from agent.utils import thread_participants as participants
 
 
 @pytest.fixture(autouse=True)
-def collaborative_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+def collaborative_scope(
+    monkeypatch: pytest.MonkeyPatch, grant_tool_access: Callable[..., None]
+) -> None:
+    grant_tool_access(private=True, owner=True)
     monkeypatch.setattr(
         import_module("agent.tools.read_user_settings"),
         "private_credential_login",
