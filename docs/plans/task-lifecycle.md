@@ -149,10 +149,12 @@ task_wakeup                    dedupe + retry budget
 - The thread's task is "in scope" for its runs. Subthreads, fix threads, reviewer
   and scout threads are members, never the coordinator.
 - **Concierge threads are never in a task.** They coordinate at a higher level
-  with their own tool, `start_task_thread`, instead of `create_task`, which is not
-  loaded there. It creates a new thread, creates the task with that thread as
-  coordinator, and dispatches the first run with the concierge's instructions.
-  The concierge's requester and any named participants become the new thread's
+  with their own tool instead of `create_task`, which is not loaded there: the
+  existing `start_thread` (`agent/resources/prompts/tools/start_thread.md`),
+  which already starts a separate background thread owned by the person the
+  concierge is talking to. It gains `goal` and `owners`, and creates the task with
+  the new thread as coordinator before dispatching the first run. The
+  concierge's requester and any named participants become the new thread's
   participants. The concierge then reads and steers tasks through `get_task` and
   messages to their coordinator threads. A concierge thread is never a
   coordinator, never a member, and never assigned. Other surfaces that should
@@ -786,7 +788,7 @@ exportable as JSON.
 | Tool | Behaviour |
 |---|---|
 | `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); binds the calling thread as coordinator, permanently. Fails if the calling thread already belongs to a task. Not loaded in concierge threads |
-| `start_task_thread` | Concierge threads only. `title`, `goal`, `owners`, `instructions`, `repos`; creates a new coordinator thread and its task, and dispatches the first run |
+| `start_thread` | Existing concierge tool. Gains `goal` and `owners`; creates the new thread's task with it as coordinator before dispatching the first run |
 | `close_task` | `reason: completed \| abandoned` |
 | `get_task` | The task at a glance (see [Introspection](#introspection)) |
 | `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
@@ -857,7 +859,7 @@ it needs has merged.
 | 6 | Stale | Dead tasks stop costing money and stop pinging people | Staleness sweep, `resume_task`, withdrawing requests on stale | 1 | ~1 day |
 | 7 | Tasks merge themselves | Auto-merge per person with a per-task override; multi-repo tasks merge in dependency order | Readiness moved out of `expedited_review`, merge ordering, `merging`, `merge_failed` | 1 | ~1.5 days |
 | 8 | Take over PRs you wrote | "Shepherd this PR" brings your own PR into the cycle | Takeover and release from the dashboard, GitHub, and tools | 1 | ~1 day |
-| 9 | Concierge starts tasks | A concierge thread can kick off and steer tasks without joining them | `start_task_thread` | 1 | ~0.5 day |
+| 9 | Concierge starts tasks | A concierge thread can kick off and steer tasks without joining them | `goal` and `owners` on the existing `start_thread` | 1 | ~0.5 day |
 
 The tool gate (file edits and `git push` requiring a task) is a few hours and
 rides along with whichever piece is open.
