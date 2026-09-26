@@ -838,6 +838,26 @@ Active watches need no conversion because the backfilled task covers the same PR
 A thread that is mid-change without a PR at deploy time hits the gate on its next
 edit and gets the `create_task` error, which is the intended path.
 
+## Shipping in pieces
+
+Each piece is useful on its own and ships as its own PR off `main` once the piece
+it needs has merged.
+
+| # | Piece | What users get | Contents | Needs | Size |
+|---|---|---|---|---|---|
+| 1 | Agent PRs drive themselves to green | The agent fixes CI failures, conflicts, and Open SWE findings on its own PRs without `/baby-sit` or a human relaying findings | Schema (`task`, `task_thread`, `task_pull_request`, `task_owner`, `task_audit`, `task_wakeup`, `task_thread_cursor`); `create_task` with owners; `open_pull_request` requiring a task; PR conditions and task state; shepherd triggers and sweep; wake-ups and retry budget; `blocked` via `request_human`; notices; `get_task`; `close_task` with agent-decided completion; subthreads, fix, reviewer, and scout threads joining; backfill; deleting baby-sit and auto-fix | — | ~4 days |
+| 2 | Coordinator introspection | The coordinator can see every thread, PR, and decision in its task, and people can read the audit trail | `list_task_threads`, `read_task_thread`, `query_task_audit`, `get_task_pull_request`, `list_tasks`, audit API | 1 | ~1.5 days |
+| 3 | Open review calls | Ready PRs are posted to the repo's review channel and teammates self-select with "Take it" | `post_review_call`, channel card built on the expedited review card, claim and release, unclaimed fallback wake-up, human decisions | 1 | ~1.5 days |
+| 4 | The agent picks reviewers | One sensible individual reviewer per PR, chosen on ownership, file history, and load; suggestions honoured, `required` ones always; human assignments win | `review_candidates`, `assign_task`, `suggest_reviewer`, review-load view, GitHub review-request sync, Slack DM | 1 | ~2.5 days |
+| 5 | Reviews don't sit unanswered | Unacknowledged reviews go back to the agent after 2 working hours; reviewers can Pass | Stored time zone and working hours, deadlines, Start review and Pass, reassignment wake-ups, 1-day nudge | 4 | ~1.5 days |
+| 6 | Stale | Dead tasks stop costing money and stop pinging people | Staleness sweep, `resume_task`, withdrawing requests on stale | 1 | ~1 day |
+| 7 | Tasks merge themselves | Auto-merge per person with a per-task override; multi-repo tasks merge in dependency order | Readiness moved out of `expedited_review`, merge ordering, `merging`, `merge_failed` | 1 | ~1.5 days |
+| 8 | Take over PRs you wrote | "Shepherd this PR" brings your own PR into the cycle | Takeover and release from the dashboard, GitHub, and tools | 1 | ~1 day |
+| 9 | Concierge starts tasks | A concierge thread can kick off and steer tasks without joining them | `start_task_thread` | 1 | ~0.5 day |
+
+The tool gate (file edits and `git push` requiring a task) is a few hours and
+rides along with whichever piece is open.
+
 ## Later
 
 Task states extend past `merged` without changing the model: `deploying`, `deployed`,
