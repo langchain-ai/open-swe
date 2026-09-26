@@ -50,7 +50,10 @@ class MCPToolCatalog(Base):
             return {(row.namespace, row.connection_name): row for row in rows}
 
     @classmethod
-    async def save(cls, key: CatalogKey, revision: str, definitions: Sequence[Tool]) -> None:
+    async def save(
+        cls, key: CatalogKey, revision: str, definitions: Sequence[Tool], *, refresh: bool
+    ) -> None:
+        """Store a discovery; a refresh never replaces a row saved for another revision."""
         namespace, connection_name = key
         upsert = insert(cls).values(
             namespace=namespace,
@@ -67,5 +70,6 @@ class MCPToolCatalog(Base):
                         "tools": upsert.excluded.tools,
                         "fetched_at": func.clock_timestamp(),
                     },
+                    where=cls.revision == upsert.excluded.revision if refresh else None,
                 )
             )

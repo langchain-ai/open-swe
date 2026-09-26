@@ -204,7 +204,12 @@ async def _discover_and_store(
     with apm_span("mcp.discover", {"mcp.name": record.name, "mcp.background": background}):
         definitions = await discover_tools(record, namespace)
     try:
-        await MCPToolCatalog.save(catalog_key(namespace, record.name), record.revision, definitions)
+        await MCPToolCatalog.save(
+            catalog_key(namespace, record.name),
+            record.revision,
+            definitions,
+            refresh=background,
+        )
     except Exception:
         logger.warning("MCP catalog save failed", extra={"mcp_name": record.name}, exc_info=True)
     return definitions
