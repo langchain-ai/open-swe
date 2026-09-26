@@ -42,7 +42,7 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.prompts import prompt as render_prompt
+from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -694,7 +694,7 @@ async def _attributed_run_messages(
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
-            (_PULL_REQUEST_THREAD_SYSTEM, render_prompt("runs/pull-request-thread", url=pr_url))
+            (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
     structured = build_input_messages(
         content,
