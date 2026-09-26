@@ -14,8 +14,7 @@ import type {
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -83,14 +82,19 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
-      <div className="flex items-center justify-between gap-2 px-4 py-1">
+      <div className="px-4 py-1">
         <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
           {data.title}
         </span>
-        {hasGroups && (
-          <ReviewViewToggle view={data.view} onChange={data.onViewChange} />
-        )}
       </div>
+      {hasGroups && (
+        <ReviewViewTabs
+          view={data.view}
+          onChange={data.onViewChange}
+          stepCount={data.groups?.length ?? 0}
+          fileCount={data.files?.length ?? null}
+        />
+      )}
       <OverviewRow
         active={showAi && data.activeGroup === null}
         onSelect={data.onSelectOverview}
@@ -116,62 +120,56 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   )
 }
 
-function ReviewViewToggle({
+function ReviewViewTabs({
   view,
   onChange,
+  stepCount,
+  fileCount,
 }: {
   view: ReviewSidebarView
   onChange: (view: ReviewSidebarView) => void
+  stepCount: number
+  fileCount: number | null
 }) {
   return (
-    <ToggleGroup
-      aria-label="Sidebar view"
-      spacing={0.5}
-      size="sm"
-      value={[view]}
-      onValueChange={(values) => {
-        const next = values.find(
-          (value): value is ReviewSidebarView =>
-            value === "ai" || value === "files"
-        )
-        if (next) onChange(next)
-      }}
-      className="rounded-md border border-border p-0.5"
+    <Tabs
+      value={view}
+      onValueChange={(next) => onChange(next === "files" ? "files" : "ai")}
+      className="mx-3 mb-1 border-b border-border"
     >
-      <ReviewViewToggleButton value="ai" label="AI sorted">
-        <ListBulletsIcon className="size-3.5" />
-      </ReviewViewToggleButton>
-      <ReviewViewToggleButton value="files" label="File tree">
-        <TreeViewIcon className="size-3.5" />
-      </ReviewViewToggleButton>
-    </ToggleGroup>
+      <TabsList aria-label="Sidebar view" variant="line" className="w-full">
+        <ReviewViewTab value="ai" label="Walkthrough" count={stepCount}>
+          <ListBulletsIcon />
+        </ReviewViewTab>
+        <ReviewViewTab value="files" label="Files" count={fileCount}>
+          <TreeViewIcon />
+        </ReviewViewTab>
+      </TabsList>
+    </Tabs>
   )
 }
 
-function ReviewViewToggleButton({
+function ReviewViewTab({
   value,
   label,
+  count,
   children,
 }: {
   value: ReviewSidebarView
   label: string
-  children: React.ReactNode
+  count: number | null
+  children: ReactNode
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <ToggleGroupItem
-            value={value}
-            aria-label={label}
-            className="size-5 min-w-5 rounded px-0 text-muted-foreground/70 hover:text-foreground aria-pressed:bg-sidebar-row-hover aria-pressed:text-foreground"
-          />
-        }
-      >
-        {children}
-      </TooltipTrigger>
-      <TooltipPopup>{label}</TooltipPopup>
-    </Tooltip>
+    <TabsTrigger value={value}>
+      {children}
+      {label}
+      {count !== null && (
+        <span className="font-normal text-muted-foreground/70 tabular-nums">
+          {count}
+        </span>
+      )}
+    </TabsTrigger>
   )
 }
 
