@@ -15,7 +15,8 @@ Slack event ──► /webhooks/slack ──► agent.incidents.channels.handle_
 
 main `agent` graph on the incident thread
   IncidentMiddleware  — incident instructions, watching/paused check, evidence from context and tools
-  record_incident_report — validates citations, stores the report, updates the postmortem, posts when changed
+  record_incident_report — validates citations, stores the report, updates the postmortem,
+                           publishes the one automatic investigation, answers questions
   search_incidents / read_incident — retained history
   manage_incident — start (follow this channel), pause, resume, complete; also on regular Slack runs
 
@@ -45,7 +46,13 @@ Each record has one writer class so concurrent turns and controls cannot lose up
 
 ## Reports and Slack updates
 
-The agent finishes each turn by calling `record_incident_report`. Claims without evidence ids from this turn's context blocks or tool results are dropped and noted as a gap. The tool stores the report, rewrites the postmortem summary, and posts a compact channel update when the turn answered a question, or, unprompted, only when the report digest changed and the last post is at least `UNPROMPTED_POST_INTERVAL` old; a repeated call in the same run does not post again. The digest covers the conclusion — summary, impact, outcome, next steps, hypotheses, questions, with citations stripped — and not the retrieved evidence, because every turn cites the newest channel message and would otherwise always look new. Rewording alone still reads as a change, which is what the interval absorbs. A held report is not lost: it is recorded, and the next turn offers it again. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
+The agent finishes each turn by calling `record_incident_report`. Claims without evidence ids from this turn's context blocks or tool results are dropped and noted as a gap. The tool stores the report and rewrites the postmortem summary on every turn, including turns that stay silent.
+
+The channel receives one automatic message per incident: the first investigation that reaches a supported conclusion (`outcome == "findings"`), tracked in `investigation_posted`. An inconclusive first turn does not spend it, so the real investigation still lands. Afterwards automatic turns keep the stored report and the postmortem current without posting, and the channel belongs to the responders; only a question posts again, answered once per run. Automatic turns are driven by `FIRST_INVESTIGATION_REQUEST` until the investigation is published and by `AUTOMATIC_REQUEST` after that, so the flow instruction and the post gate agree on one condition.
+
+The investigation is published in a fixed order — problem, previous occurrence, impact, cause, steps to solve — each a named section with its own character budget, and empty sections are skipped. A report with no filled sections falls back to its summary. The summary is the one-line headline the dashboard, the activity list, and the completion notice show, and it is the body of an answer to a question; it is deliberately left out of the investigation message, where it only repeated what responders had already written above. A missing recurrence check is published as missing, because an empty section would otherwise read as "this has never happened before".
+
+The digest covers the conclusion — summary, problem, previous occurrence, impact, cause, outcome, next steps, hypotheses, questions, with citations stripped — and not the retrieved evidence, because every turn cites the newest channel message and would otherwise always look new. It keeps an answer from repeating itself inside one run. Pause and complete cancel the thread's pending and running runs and post a notice; complete includes the latest summary.
 
 ## Failure handling
 
