@@ -27,14 +27,13 @@ from langgraph_api.cache import swr
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
-from agent.utils import ttl_cache
 from agent.utils.startup_trace import asubphase
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)
 _TIMEOUT_SECONDS = 30
 
-type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "memory", "failed"]
+type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
@@ -217,19 +216,10 @@ async def _cached_definitions(
             definitions = await discover_tools(record, source.namespace)
         return [tool.model_dump(mode="json", exclude_none=True) for tool in definitions]
 
-    try:
-        result = await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
-        return [Tool.model_validate(tool) for tool in result.value], (
-            "hit" if result.status == "fresh" else result.status
-        )
-    except Exception:
-        logger.warning(
-            "MCP distributed catalog unavailable", extra={"mcp_name": record.name}, exc_info=True
-        )
-        definitions = await ttl_cache.cached_stale_while_revalidate(
-            key, _CATALOG_TTL.total_seconds(), partial(discover_tools, record, source.namespace)
-        )
-        return definitions, "memory"
+    result = await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
+    return [Tool.model_validate(tool) for tool in result.value], (
+        "hit" if result.status == "fresh" else result.status
+    )
 
 
 async def _load_tools(
