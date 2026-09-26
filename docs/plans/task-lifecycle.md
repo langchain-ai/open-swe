@@ -1,0 +1,269 @@
+# Task lifecycle
+
+## Decision
+
+A **task** is a new first-class entity above threads and pull requests. It owns
+every thread working on it (root thread, subthreads, coordinators, fix and
+follow-up threads) and every pull request it produces or adopts, across any
+number of repositories.
+
+An always-on, model-free **shepherd** tracks each of the task's pull requests from
+open to merge. It recomputes a stage for every PR from GitHub state on each
+relevant webhook, keeps one timeline per task, wakes the task's driver thread only
+when there is work the agent can do, and merges (or announces readiness) once
+every PR in the task is ready.
+
+The shepherd replaces `/baby-sit` and the dead auto-fix plumbing entirely. Any
+human-authored PR can be taken over and enter the same cycle.
+
+Deployment, post-deploy verification, and rollback are a later phase. The stage
+model leaves room for them (see [Later](#later)).
+
+## Why
+
+Today each step has its own mechanism, its own state, and its own gaps:
+
+| Step | Today | Gap |
+|---|---|---|
+| CI | `agent/baby_sit.py`, opt-in per PR via `/baby-sit` | Nothing watches CI unless someone asks. The agent opens a PR and stops |
+| Automated review → fix | `reviewer` graph publishes findings | Findings never reach the coding thread: `agent/github/routes.py` drops events from `open-swe[bot]` because it is not a registered user. A human must relay them |
+| Human review | Untagged comments and reviews wake the agent on PRs it opened | Only for PRs the agent opened; nothing for adopted PRs |
+| Merge readiness | `agent/expedited_review/readiness.py` | Only expedited PRs get a readiness verdict or a merge |
+| Auto-fix | `agent/dashboard/autofix_state.py`, `("autofix", thread_id)` store events, `runs/autofix-event.md` | The consumer in `check_message_queue.py` still runs, but nothing produces events and `is_pr_autofix_disabled` has no callers |
+| Status | Thread metadata, store namespaces, crons, Slack card state | No single answer to "where is this work?" for the UI, Slack, or the agent |
+
+A PR is also the wrong unit. One task routinely spans repos (an SDK change plus
+its consumer), and with subthreads and coordinators ([async subagents plan](https://github.com/langchain-ai/open-swe/pull/3074))
+one task spans threads too. Merge and readiness have to be decided for the whole
+task.
+
+## Model (`agent/tasks/models.py`)
+
+```
+task
+  id                uuid7
+  title             text
+  owner_user_id     uuid      -> user; whose preferences apply
+  driver_thread_id  text      thread the shepherd wakes
+  auto_merge        bool null null = use owner's preference
+  stage             text      derived, cached (see Task stage)
+  created_at, closed_at
+
+task_thread
+  thread_id         text PK   a thread belongs to at most one task
+  task_id           uuid
+  role              root | sub | coordinator | fix | followup
+
+task_pull_request
+  pull_request_id   uuid PK   -> pull_request; a PR belongs to at most one task
+  task_id           uuid
+  source            opened | takeover
+  added_by_user_id  uuid null
+  merge_after       uuid[]    pull_request_ids that must merge first
+  stage             text
+  blockers          jsonb     typed list, see Stages
+  evaluated_sha     text
+  evaluated_at      timestamptz
+
+task_event                     append-only timeline
+  id, task_id, pull_request_id null, kind, from_stage, to_stage,
+  head_sha, detail jsonb, created_at
+
+task_wakeup                    dedupe + retry budget
+  pull_request_id, head_sha, reason   unique
+  task_id, created_at
+```
+
+### Membership
+
+- A task is created lazily the first time a thread links a PR
+  (`open_pull_request`, `link_pull_request`, or a takeover). That thread becomes
+  the root and the driver.
+- A subthread (`parent_thread_id` set) joins its parent's task as `sub`.
+- A thread started from the dashboard PR actions (`agent/threads/pr_fixes.py`)
+  joins the PR's task as `fix` when one exists.
+- `pull_request_thread` links are unchanged. `task_pull_request` records
+  ownership; `pull_request_thread` still records which threads touched a PR.
+- `PullRequest.agent_thread_id` callers move to the task's driver thread, so
+  adopted PRs behave the same as agent-opened ones.
+
+## Stages (`agent/tasks/stages.py`)
+
+A pure function evaluates a PR snapshot into a stage plus a blocker list. The
+snapshot generalizes `PullRequestSnapshot` from `expedited_review/readiness.py`
+(state, draft, mergeability, check runs, commit statuses, required checks,
+reviews, unresolved review threads) and adds the latest Open SWE review for the
+head SHA from `pull_request_review`.
+
+Blockers (all that apply, not just the first):
+
+| Blocker | Actionable by agent | Source |
+|---|---|---|
+| `conflict` | yes | mergeability |
+| `ci_failed` (check names, URLs) | yes | failing required checks, or any failing check the agent can reproduce |
+| `bot_findings` (finding ids) | yes | unresolved Open SWE findings on the head SHA |
+| `changes_requested` (reviewers) | via existing comment wake-ups | latest human review state |
+| `unresolved_threads` | via existing comment wake-ups | review threads |
+| `ci_pending` | no | running or unreported required checks |
+| `bot_review_pending` | no | repo reviewed by Open SWE and no review for head SHA |
+| `human_review_pending` | no | branch protection requires approvals not yet given |
+
+Stage is the highest-priority label: `merged`, `closed`, `stalled`, `conflict`,
+`ci_failed`, `changes_requested`, `ci_pending`, `bot_review_pending`,
+`human_review_pending`, `ready`. Drafts evaluate the same way except that review
+blockers are dropped.
+
+### Task stage
+
+Derived from its open PRs: `ready` when every PR is `ready`, `merged` when every
+PR is merged or closed with at least one merged, otherwise the worst PR stage.
+The UI shows the breakdown ("2 of 3 ready").
+
+## Shepherd (`agent/tasks/shepherd.py`)
+
+### Triggers
+
+`reevaluate(pull_request_id)` runs under the existing per-PR state lock and is
+called from:
+
+- `pull_request` webhooks (every action), `push` to a task PR's head ref,
+  `GITHUB_CI_EVENTS`, `pull_request_review`, `pull_request_review_comment`
+- `publish_review` right after the reviewer posts, so bot findings are seen
+  without depending on a bot-authored webhook
+- takeover and release
+- one global sweep cron (every 10 minutes) over open task PRs whose
+  `evaluated_at` is older than 10 minutes. This catches base-branch changes that
+  alter mergeability and any lost webhook. Unchanged state costs no model tokens
+
+Each evaluation writes `stage`, `blockers`, `evaluated_sha`, and a `task_event`
+when the stage changes.
+
+### Wake-ups
+
+When actionable blockers (`conflict`, `ci_failed`, `bot_findings`) appear for a
+head SHA, the shepherd inserts `task_wakeup(pr, sha, reason)` and, only if the
+insert succeeded, dispatches one run to the driver thread through the normal
+queue. The prompt (`agent/resources/prompts/runs/task-wakeup.md.jinja`) names the
+repo, PR, head SHA, and every actionable blocker at once, so a PR failing CI with
+open findings gets one wake-up, not two.
+
+Human comments and reviews keep flowing through the existing untagged-comment
+path, which already carries the text. The shepherd only records their effect on
+the stage.
+
+Retry budget: after 5 wake-ups on one PR without the stage improving (a new head
+SHA alone is not progress), the PR moves to `stalled`, the shepherd stops waking,
+and it posts once to the task's thread and Slack thread. A human message on the
+task or a stage improvement clears `stalled`.
+
+### Merge
+
+When the task stage becomes `ready`:
+
+- `auto_merge = task.auto_merge ?? owner.preferences.auto_merge_shepherded_prs`
+- Off: post "ready to merge" once to the task thread, Slack thread, and each PR.
+- On: merge PRs in `merge_after` order (topological; independent PRs in any
+  order) using each repo's merge method, via the merge code generalized out of
+  `expedited_review/merge.py`. Re-evaluate each PR immediately before merging it.
+  If a merge fails or a PR stops being ready mid-sequence, stop, mark the task
+  `stalled`, and report which PRs merged.
+
+## Entry points
+
+### Agent-opened PRs
+
+`open_pull_request` creates or joins the thread's task. No opt-in.
+
+### Takeover
+
+A registered Open SWE user with write access to the repo can hand any open PR to
+the agent:
+
+- Dashboard: a "Shepherd this PR" action (`ShepherdIntent` next to `FixIntent`
+  in `agent/threads/pr_fixes.py`), into a new task or an existing one
+- GitHub: `@open-swe shepherd` on the PR
+- Agent: `link_pull_request(..., shepherd=True)`, so "take over #123" or "add
+  #123 to this task" works from Slack and chat
+
+On takeover the shepherd posts a PR comment naming who handed it over and how to
+release it, then evaluates immediately. The driver thread's first wake-up
+includes the full current state (CI, findings, unresolved threads) so it can
+catch up in one run.
+
+Fork PRs are accepted only when `maintainer_can_modify` is true; otherwise the
+takeover is refused with that reason.
+
+### Release
+
+`@open-swe release`, a dashboard button, or `release_pull_request`. The PR author
+and the task owner can always release. Release removes the `task_pull_request`
+row, records a `task_event`, and posts a PR comment.
+
+## Settings
+
+- `UserPreferences.auto_merge_shepherded_prs: bool = False`
+  (`agent/users/preferences.py`), in the dashboard settings.
+- Per-task override `task.auto_merge`, set from the task panel toggle, from chat
+  ("merge when ready", "don't auto-merge") through `set_task_options`, or with
+  `@open-swe automerge on|off` on any of the task's PRs.
+- For a taken-over PR, the task owner is the user who took it over.
+
+## Agent tools (`agent/tools/tasks.py`)
+
+| Tool | Behaviour |
+|---|---|
+| `get_task` | Task, PRs with stage and blockers, recent timeline |
+| `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
+| `release_pull_request` | Remove a PR from the task |
+| `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}` |
+
+Tool descriptions live under `agent/resources/prompts/tools/`.
+
+## API and UI
+
+- Router in `agent/tasks/routes.py` under `/dashboard/api/tasks`: get task,
+  timeline, set options, takeover, release.
+- Thread right panel gets a Task section: each PR with repo, stage chip, and
+  blockers; the task stage; the timeline; the auto-merge toggle.
+- Sidebar thread rows show the task stage chip.
+- A standalone tasks list is out of scope for the first pass.
+
+## Deleted
+
+- `agent/baby_sit.py`, `agent/tools/manage_baby_sit.py`,
+  `agent/bundled_skills/baby-sit/`, prompts `tools/manage_baby_sit.md` and
+  `runs/baby-sit-failure.md.jinja`, the `baby_sit_watches` store namespace and
+  `baby_sit_watch` crons, and their references in `scheduler.py`, `dispatch.py`,
+  `thread_ids.py`, `source_context.py`, `server.py`, `github/webhook.py`, and
+  `ui/src/features/agents/lib/queries.ts`
+- Auto-fix leftovers: `agent/dashboard/autofix_state.py`, the autofix consumer in
+  `middleware/check_message_queue.py`, `runs/autofix-event.md`, the
+  `("autofix",)` entry in `slack/stop.py`, and the `autofix_*` workspace settings
+- `expedited_review/readiness.py` moves to `agent/tasks/readiness.py`; expedited
+  review keeps its voting and card and reads readiness from the shepherd
+
+Migration: backfill a task for every open PR with an `open_pull_request` link,
+with its linked agent thread as root and driver, then drop the baby-sit crons.
+Active watches need no conversion because the backfilled task covers the same PR.
+
+## Later
+
+Stages extend past `merged` without changing the model: `deploying`, `deployed`,
+`verified`, driven by GitHub `deployment_status` or a configured deploy workflow
+per repo. A rollback is a revert PR added to the same task, which then runs the
+same cycle.
+
+## Rollout
+
+1. Backend core: schema and migration, stage evaluation, shepherd triggers,
+   wake-ups and budget, backfill, `get_task`, deletions. About 2–3 days.
+2. Merge: shared readiness, auto-merge preference and override, merge ordering,
+   `set_task_options`. About 1 day.
+3. Takeover and release across dashboard, GitHub, and tools. About 1 day.
+4. UI: task panel, sidebar chip, settings toggle. About 1 day.
+
+## Open questions
+
+- On a taken-over PR, should comments from a PR author who is not a registered
+  Open SWE user wake the driver thread? Today they are dropped.
+- Is 5 the right retry budget, and should it differ for CI versus findings?
