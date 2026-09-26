@@ -524,21 +524,6 @@ row, records a `task_event`, and posts a PR comment.
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
 
-## API and UI
-
-- Router in `agent/tasks/routes.py` under `/dashboard/api/tasks`: get task,
-  timeline, set options, assign, unblock, takeover, release, and "assigned to
-  me" listing.
-- Thread right panel gets a Task section: the task state chip; each PR with repo,
-  GitHub open/merged/closed, and its conditions; the timeline; the auto-merge
-  toggle; assignees with their reasons and a multi-person picker. A blocked task
-  shows the `ask` as a banner with an Unblock button; a stale task shows a Resume
-  button to its owners.
-- Sidebar thread rows show the task state chip and assignee avatars (none when the
-  agent has it). Tasks assigned to the viewer count toward their attention
-  indicator, and the sidebar gets an "Assigned to me" filter.
-- A standalone tasks list is out of scope for the first pass.
-
 ## Deleted
 
 - `agent/baby_sit.py`, `agent/tools/manage_baby_sit.py`,
@@ -574,7 +559,6 @@ same cycle.
 2. Merge: shared readiness, auto-merge preference and override, merge ordering,
    `set_task_options`. About 1 day.
 3. Takeover and release across dashboard, GitHub, and tools. About 1 day.
-4. UI: task panel, sidebar chip, settings toggle. About 1 day.
 
 ## Open questions
 
