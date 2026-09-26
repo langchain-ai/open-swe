@@ -31,7 +31,7 @@ Ranks the most-called MCP tools in an Open SWE tracing project (default `open-sw
   - Human turns wrap text in `<input-message>` with an HTML-escaped body.
   - Open SWE also injects `<dynamic-context>` human turns. The focused view skips these when picking the prompting message.
 
-- **Open SWE thread link:** read from `metadata.dashboard_thread_url` on the chosen call's run. `agent/server.py` sets it from `DASHBOARD_BASE_URL`, so preview and self-hosted instances link to themselves. Older traces don't have it and fall back to `https://openswe.vercel.app/agents/<thread_id>`, since those all came from production. LangSmith's `thread_id` is the Open SWE thread id.
+- **Open SWE thread link:** read from `metadata.openswe_thread_url` on the chosen call's run. `agent/server.py` sets it from `DASHBOARD_BASE_URL`, so preview and self-hosted instances link to themselves. Older traces don't have it and fall back to `https://openswe.vercel.app/agents/<thread_id>`, since those all came from production. LangSmith's `thread_id` is the Open SWE thread id.
 
 ## Gotchas
 

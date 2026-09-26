@@ -1328,7 +1328,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
-        **({"dashboard_thread_url": thread_url} if thread_url else {}),
+        **({"openswe_thread_url": thread_url} if thread_url else {}),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled

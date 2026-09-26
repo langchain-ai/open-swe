@@ -14,7 +14,7 @@ import { parseToolName } from './lib/tools';
 
 export const DEFAULT_PROJECT_NAME = 'open-swe-v3';
 
-// Traces from before Open SWE recorded `dashboard_thread_url` all came from production.
+// Traces from before Open SWE recorded `openswe_thread_url` all came from production.
 function productionThreadUrl(threadId: string): string {
   return `https://openswe.vercel.app/agents/${encodeURIComponent(threadId)}`;
 }
@@ -175,7 +175,7 @@ export async function fetchThreadUrl(projectId: string, run: ToolCallRun): Promi
       selects: ['EXTRA'],
     },
   });
-  const recorded = response.items[0]?.extra?.metadata?.dashboard_thread_url;
+  const recorded = response.items[0]?.extra?.metadata?.openswe_thread_url;
   return typeof recorded === 'string' && recorded ? recorded : productionThreadUrl(threadId);
 }
 
