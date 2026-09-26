@@ -784,7 +784,7 @@ exportable as JSON.
 | `create_task` | `title`, `goal`, `owners: [login \| email]` (thread participants only, at least one); binds the calling thread as coordinator, permanently. Fails if the calling thread already belongs to a task. Not loaded in concierge threads |
 | `start_task_thread` | Concierge threads only. `title`, `goal`, `owners`, `instructions`, `repos`; creates a new coordinator thread and its task, and dispatches the first run |
 | `close_task` | `reason: completed \| abandoned` |
-| `get_task` | Task state, PRs with their conditions, recent audit trail |
+| `get_task` | The task at a glance (see [Introspection](#introspection)) |
 | `resume_task` | Moves a stale task back into the cycle; only when the requesting participant is an owner |
 | `link_pull_request` | Gains `shepherd: bool`; adds the PR to the thread's task |
 | `release_pull_request` | Stop shepherding a PR; it stays in the task's record |
@@ -796,6 +796,27 @@ exportable as JSON.
 | `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the agent's only way to assign. `review` also requests review on GitHub. Fails on a human-decided assignment |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
+
+### Introspection
+
+The coordinator is responsible for the whole task, so it can see everything about
+it: every thread, every PR, every decision, and why. These tools are read-only
+and cheap, so the agent can call them freely. The coordinator can use them on its
+own task; member threads can use them on their task; a concierge thread can use
+them on any task it started. Every tool also accepts a `task_id`, which must be a
+task the calling thread is allowed to see.
+
+| Tool | Returns |
+|---|---|
+| `get_task` | The task at a glance: title, goal, state and why it is in that state, owners, active assignments (reason, who decided, rationale, deadline, acknowledged), any open block and its `ask`, auto-merge setting and where it came from, merge order, staleness clock (last progress, when it goes stale), and each PR with repo, GitHub state, head SHA, conditions, and remaining retry budget |
+| `list_task_threads` | Every thread in the task: role, title, parent, status (`running`, `idle`, `interrupted`, `error`), created, last active, what it is doing now (the tool in flight) or the last thing it said (a short snippet), the last human message it got and from whom, its PRs, model, and cost. Filterable by role and by active or idle |
+| `read_task_thread` | One member thread's recent transcript, newest first, including tool calls (name, argument preview, output preview), budgeted by `max_tokens` (default 2000) and optionally `since` a timestamp or audit id. Built on `get_thread` (`agent/tools/threads.py`) and the transcript projections in `agent/transcript/` |
+| `query_task_audit` | The audit trail, filterable by action group, action, actor (kind or specific person or thread), PR, and time range, paginated with a cursor. Each row includes its `reason` and `refs`, so "why did Alex get assigned?" or "who turned auto-merge on?" is one call |
+| `get_task_pull_request` | One PR in depth, read live from GitHub on request: every check run with its conclusion and log link, required checks, reviews by person, unresolved review threads with their text, mergeability, Open SWE findings and their status, and the wake-ups sent for it with the runs they started |
+| `list_tasks` | Tasks the caller can see, filtered by owner, assignee, state, repo, or staleness. For the concierge and for finding related work |
+
+`list_task_threads` and `get_task` read Postgres and the transcript projections,
+not LangGraph checkpoints, so they stay fast on tasks with many threads.
 
 ## Deleted
 
