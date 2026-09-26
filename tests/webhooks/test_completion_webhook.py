@@ -631,6 +631,145 @@ async def test_interrupted_status_is_ignored(monkeypatch: pytest.MonkeyPatch) ->
     assert client.threads.updates == []
 
 
+def _slack_payload(**overrides: Any) -> dict[str, Any]:
+    return {
+        "thread_id": "t1",
+        "run_id": "run-1",
+        "status": "success",
+        "metadata": {"prepare_run_id": "prepare-1"},
+        **overrides,
+    }
+
+
+@pytest.mark.asyncio
+async def test_success_silent_answer_posts_slack_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
+    monkeypatch.setattr(completion, "schedule_session_cost_refresh", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        completion,
+        "get_langsmith_trace_url",
+        AsyncMock(return_value="https://smith.example/t1"),
+    )
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    payload = _slack_payload(
+        values={
+            "messages": [
+                {"type": "human", "content": "is this a real issue?"},
+                {"type": "ai", "content": "Yes, and here is the full analysis..."},
+            ]
+        }
+    )
+
+    result = await completion.handle_run_completion(payload)
+
+    assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    reply.assert_awaited_once()
+    args = reply.await_args.args
+    assert args[0] == "C1"
+    assert args[1] == "123.45"
+    assert "never reached this thread" in args[2]
+    assert "<https://smith.example/t1|LangSmith>" in args[2]
+    assert reply.await_args.kwargs == {"agent_thread_id": "t1"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_call_names",
+    [
+        ["slack_thread_reply"],
+        ["enter_plan_mode", "slack_thread_reply"],
+    ],
+)
+async def test_success_with_slack_reply_tool_stays_silent(
+    monkeypatch: pytest.MonkeyPatch, tool_call_names: list[str]
+) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_session_cost_refresh", AsyncMock(return_value=True))
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    payload = _slack_payload(
+        values={
+            "messages": [
+                {
+                    "type": "ai",
+                    "content": "Posted.",
+                    "tool_calls": [
+                        {"name": name, "args": {}, "id": str(i)}
+                        for i, name in enumerate(tool_call_names)
+                    ],
+                },
+            ]
+        }
+    )
+
+    result = await completion.handle_run_completion(payload)
+
+    assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_success_automated_wakeup_stays_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_session_cost_refresh", AsyncMock(return_value=True))
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    payload = _slack_payload(
+        metadata={"kind": "thread_wakeup", "prepare_run_id": "prepare-1"},
+        values={"messages": [{"type": "ai", "content": "Still waiting on CI."}]},
+    )
+
+    result = await completion.handle_run_completion(payload)
+
+    assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_success_with_empty_final_message_stays_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_session_cost_refresh", AsyncMock(return_value=True))
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    payload = _slack_payload(
+        values={"messages": [{"type": "ai", "content": "   "}]},
+    )
+
+    result = await completion.handle_run_completion(payload)
+
+    assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_success_silent_notice_failure_does_not_break_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_slack_metadata())
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
+    monkeypatch.setattr(completion, "schedule_session_cost_refresh", AsyncMock(return_value=True))
+    monkeypatch.setattr(completion, "get_langsmith_trace_url", AsyncMock(return_value=None))
+    reply = AsyncMock(return_value=False)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    payload = _slack_payload(
+        values={"messages": [{"type": "ai", "content": "The answer."}]},
+    )
+
+    result = await completion.handle_run_completion(payload)
+
+    assert result == {"status": "ok", "reason": "cost refresh scheduled"}
+    reply.assert_awaited_once()
+
+
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     # No secret configured: fail closed (reject everything).
     monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
