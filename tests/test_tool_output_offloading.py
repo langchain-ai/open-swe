@@ -82,6 +82,8 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
 
     assert result == {
         "success": True,
+        "status": "success",
+        "retryable": False,
         "results_path": "/workspace/web-search-result.jsonl",
         "results": None,
         "result_chars": len(raw_results),
@@ -90,6 +92,85 @@ async def test_web_search_saves_results_and_returns_only_path(monkeypatch) -> No
     assert writes[0][0::2] == ("web-search", "jsonl")
     assert _decode_jsonl(writes[0][1]) == raw_results
     assert raw_results not in str(result)
+
+
+async def test_web_search_classifies_provider_credits_exhausted(monkeypatch) -> None:
+    class CreditsExhaustedError(Exception):
+        status_code = 402
+
+    class FailingExa(FakeExa):
+        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
+            raise CreditsExhaustedError("payment required: buy more credits in the dashboard")
+
+    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FailingExa))
+    monkeypatch.setenv("EXA_API_KEY", "test-key")
+    monkeypatch.setattr(web_search_tool, "_provider_unavailable_reported", False)
+    reports: list[tuple[str, list[str]]] = []
+
+    async def fake_report(problem_description: str, keywords: list[str]) -> dict[str, str]:
+        reports.append((problem_description, keywords))
+        return {"report_id": "report-1"}
+
+    monkeypatch.setattr(web_search_tool, "report_platform_issue", fake_report)
+
+    result = await web_search_tool.web_search("python docs")
+
+    assert result == {
+        "success": False,
+        "status": "search_unavailable",
+        "retryable": False,
+        "results_path": None,
+        "results": None,
+        "result_chars": 0,
+        "error": "Web search is unavailable for this deployment (search provider returned 402). "
+        "Do not retry this tool in this turn; if the answer depends on web evidence, say the web "
+        "could not be consulted and fall back to fetch_url on a known URL.",
+    }
+    assert "credits" not in result["error"]
+    assert len(reports) == 1
+
+
+async def test_web_search_classifies_provider_server_error_as_retryable(monkeypatch) -> None:
+    class ServerError(Exception):
+        status = 503
+
+    class FailingExa(FakeExa):
+        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
+            raise ServerError("status code 503")
+
+    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FailingExa))
+    monkeypatch.setenv("EXA_API_KEY", "test-key")
+
+    result = await web_search_tool.web_search("python docs")
+
+    assert result == {
+        "success": False,
+        "status": "search_error",
+        "retryable": True,
+        "results_path": None,
+        "results": None,
+        "result_chars": 0,
+        "error": "Web search temporarily failed. The tool may be retried.",
+    }
+
+
+async def test_web_search_sanitizes_vendor_billing_error(monkeypatch) -> None:
+    class ProviderError(Exception):
+        pass
+
+    class FailingExa(FakeExa):
+        def search_and_contents(self, *args: Any, **kwargs: Any) -> str:
+            raise ProviderError("Exa says upgrade your plan in the billing dashboard")
+
+    monkeypatch.setitem(sys.modules, "exa_py", types.SimpleNamespace(Exa=FailingExa))
+    monkeypatch.setenv("EXA_API_KEY", "test-key")
+
+    result = await web_search_tool.web_search("python docs")
+
+    assert result["status"] == "search_error"
+    assert result["retryable"] is False
+    assert result["error"] == "ProviderError: provider error details redacted"
+    assert "billing" not in result["error"]
 
 
 async def test_web_search_returns_bounded_inline_results_without_sandbox(monkeypatch) -> None:
