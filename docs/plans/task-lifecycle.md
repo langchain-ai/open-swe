@@ -127,6 +127,10 @@ task_audit                     append-only; see Audit trail
   actor_run_id null, actor_github_login null, via, action, pull_request_id null,
   before jsonb, after jsonb, reason text, refs jsonb
 
+task_thread_cursor             what each thread has already been told
+  thread_id         text PK
+  last_seen_audit_id uuid
+
 task_wakeup                    dedupe + retry budget
   pull_request_id, head_sha, reason   unique
   task_id, created_at
@@ -238,10 +242,31 @@ The task's state is the first rule that matches:
 The task panel shows the state once, with each PR's conditions underneath, for
 example "In review: sdk#41 waiting on @alex; app#88 CI running".
 
-A task closes as `completed` when it reaches `merged` and the agent does not
-open another PR within its run, or explicitly through `close_task(reason)`
-(`completed` or `abandoned`). Abandoning a task with open PRs asks the agent to
-close or release them first.
+A task closes only through an explicit `close_task(reason)` by the agent or an
+owner (`completed` or `abandoned`), never automatically. Reaching `merged` wakes
+the coordinator, which checks the work against the task's `goal` and either
+closes it as `completed` or keeps going (a second PR, a follow-up). Abandoning a
+task with open PRs asks the agent to close or release them first.
+
+### Which transitions are automatic
+
+Facts move the state automatically; judgments are explicit decisions by the agent
+or a person.
+
+- Automatic, because they record something that already happened: every
+  transition derived from PR state and conditions (`in_progress`,
+  `waiting_on_checks`, `in_review`, `ready_to_merge`, `merged`), `merging` when
+  auto-merge is on (a person authorized it in advance), and leaving `blocked`
+  when its cause goes away.
+- Automatic as safety stops: `blocked` on retry budget, merge failure, or
+  permission errors (the looping agent should not decide whether to stop), and
+  `stale` (confirming each dead task with a model call would defeat its purpose;
+  an owner resumes it in one click).
+- Decisions: `blocked` via `request_human`, `completed`, `abandoned`, resuming a
+  stale task, and every assignment.
+
+Every transition is recorded in the audit trail with its actor: the shepherd and
+the causing fact for automatic ones, the agent or person for decisions.
 
 ## Shepherd (`agent/tasks/shepherd.py`)
 
@@ -281,6 +306,35 @@ Retry budget: one shared budget per PR across CI failures, conflicts, and
 findings. After 5 wake-ups on one PR without any of its actionable conditions
 clearing (a new head SHA alone is not progress), the task is blocked with reason
 `retry_budget_exhausted` on that PR.
+
+Other wake-ups: the task reaching `merged` (decide whether the goal is met), and
+the assignment moments listed under [Assignment](#assignment).
+
+### Notices
+
+Most things that happen on a task need the coordinator to know about them but not
+to act: CI going green, a reviewer acknowledging, an approval, a teammate pushing
+a commit, a person reassigning a review, an owner being added, a state change.
+These are delivered as **notices**, not wake-ups: they never start a run, and the
+coordinator sees them at the start of its next run, whatever triggers it (a
+wake-up, a person's message, a comment).
+
+Notices are read from the audit trail rather than queued separately. The
+coordinator thread keeps a cursor, `last_seen_audit_id`. At the start of each run,
+and before each model call during a run, a middleware reads the task's audit rows
+after the cursor, renders them as one compact `<dynamic-context>` block (the
+existing mechanism in `agent/input_messages.py` and
+`middleware/check_message_queue.py`, deduped by hash), and advances the cursor.
+
+- Each audit action is classified once as `wake` or `notice`. Wake actions (the
+  wake-up moments above) also appear in the digest, so the coordinator sees the
+  full picture.
+- Rows the coordinator's own run caused are skipped.
+- The digest groups by PR, collapses repeats ("CI passed 3 times"), and is capped
+  in length; when capped, it ends with a pointer to `get_task` for the rest.
+
+The same digest is what a member thread sees about its task, from its own cursor,
+when a person talks to it directly.
 
 ### Blocked
 
