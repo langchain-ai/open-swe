@@ -82,6 +82,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 CURRENT_THREAD: dict[str, str | None] = {"channel": DEMO_CHANNEL, "thread_ts": None}
 LAST_SLACK_EVENT: dict[str, Any] = {"payload": None}
+OPEN_SLACK_VIEWS: list[dict[str, Any]] = []
 
 # Message timestamps restart from a fixed base on every boot, but the store the
 # webhook dedupes against is persisted — so event ids need a per-process salt or
@@ -106,6 +107,7 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    OPEN_SLACK_VIEWS.clear()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -617,6 +619,7 @@ async def slack_action(request: Request) -> JSONResponse:
 
     payload = {
         "type": "block_actions",
+        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
         "user": {"id": user_id},
         "channel": {"id": channel_id},
         "container": {
@@ -1395,6 +1398,41 @@ async def gh_graphql(request: Request) -> JSONResponse:
 # --- fake Slack API (real slack code hits this) ----------------------------
 def _ok(extra: dict[str, Any] | None = None) -> JSONResponse:
     return JSONResponse({"ok": True, **(extra or {})})
+
+
+@app.post("/fake-slack/views.open")
+async def slack_views_open(request: Request) -> JSONResponse:
+    body = await request.json()
+    trigger_id = body.get("trigger_id")
+    view = body.get("view")
+    if (
+        not isinstance(trigger_id, str)
+        or not trigger_id.startswith("trigger-")
+        or not isinstance(view, dict)
+    ):
+        return JSONResponse({"ok": False, "error": "invalid_trigger"})
+    OPEN_SLACK_VIEWS.append({"trigger_id": trigger_id, "view": view})
+    return _ok({"view": {"id": f"V{len(OPEN_SLACK_VIEWS)}", **view}})
+
+
+@app.get("/mock/slack/views")
+async def mock_slack_views() -> JSONResponse:
+    return JSONResponse(OPEN_SLACK_VIEWS)
+
+
+@app.post("/mock/slack/submit")
+async def mock_slack_submit(request: Request) -> JSONResponse:
+    body = await request.json()
+    view = body.get("view")
+    if not isinstance(view, dict):
+        raise HTTPException(status_code=400, detail="Missing Slack view")
+    payload = {
+        "type": body.get("type", "view_submission"),
+        "user": {"id": body.get("user", TEST_USERS[0]["slack_id"])},
+        "view": view,
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(response.json(), status_code=response.status_code)
 
 
 @app.post("/fake-slack/chat.postMessage")
