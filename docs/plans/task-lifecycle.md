@@ -290,19 +290,32 @@ candidate.
   (the same code-owner team, for a code-owner slot), moves the GitHub review
   request, notifies both people, and records a `task_event`. Someone who timed out
   or passed is not picked again for that PR.
-- The 2-hour clock counts only the assignee's working hours (weekdays 09:00–18:00
-  in their Slack time zone), so a review assigned overnight does not rotate
-  through the team before anyone is awake.
+- The 2-hour clock counts only the assignee's working hours (see
+  [Working hours](#working-hours)), so a review assigned overnight does not
+  rotate through the team before anyone is awake.
 - Once acknowledged, the slot is no longer reassigned automatically. If no review
   arrives within 1 working day, the shepherd nudges the reviewer once and
   notifies the owners.
 - When the pool runs out, the task is blocked with `no_reviewer`.
 
 `task_assignee` gains `acknowledged_at`, `due_at`, and `passed_user_ids` for this.
-The assignee's time zone is read from Slack (`users.info`) once, when the
-assignment is made, and used to compute `due_at`. The global sweep compares only
-the stored `due_at`, so there is one Slack call per assignment and no cache. A
-user without a linked Slack account falls back to the workspace time zone.
+#### Working hours
+
+Each user row stores `time_zone` (IANA name), `time_zone_synced_at`, and
+`working_hours` (default weekdays 09:00–18:00, editable in settings). Keeping
+them in Postgres makes "who can review right now?" a single query:
+`now() AT TIME ZONE time_zone` compared against `working_hours`, joined with
+review load.
+
+- `time_zone` updates whenever Slack hands us the user's profile anyway (the
+  Slack webhook already reads `tz` on every mention), and on assignment when
+  `time_zone_synced_at` is older than 7 days. No separate polling.
+- A user without a linked Slack account uses the workspace time zone.
+- The picker prefers candidates inside working hours right now, so a review goes
+  to someone who can pick it up. When nobody in the pool is working, it picks
+  the best candidate anyway and the clock starts at their next working hour.
+- `due_at` is computed once at assignment from the stored values; the sweep only
+  compares `due_at`.
 
 Assignment and GitHub review requests stay in sync in both directions. Assigning a
 reviewer in Open SWE requests their review on the PR, and a review request a
@@ -450,7 +463,5 @@ same cycle.
   review requests work for them, but they get no Slack DM or dashboard view.
 - Should reviewer scoring also skip people who are away (Slack status, calendar),
   and learn from how quickly each person has reviewed before?
-- Are weekdays 09:00–18:00 in the assignee's Slack time zone the right working
-  hours for the acknowledgement clock, or should they be a per-person setting?
 - Should a block that nobody answers escalate (for example, re-notify after a
   day, or notify the workspace channel)?
