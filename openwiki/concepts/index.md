@@ -1,6 +1,6 @@
 # Files
 
-- [Authentication, Authorization, and Secret Boundaries](auth-and-security.md) - How Open SWE authenticates dashboard and automation users, resolves GitHub authority, verifies inbound requests, encrypts stored credentials, and keeps secrets out of sandboxes.
-- [Models, Profiles, and Instructions](models-profiles-instructions.md) - Model and reasoning selection, fallback, gateway construction, and the team, profile, and thread layers that govern agent runs. Explains how repository, environment, and sender instructions are persisted and placed into prompts.
-- [Threads, Durable Runs, and State](threads-and-state.md) - How Open SWE identifies durable LangGraph conversations, constructs follow-up inputs, owns thread metadata and Store records, and preserves sandbox continuity across product surfaces.
-- [Tool Catalog and Authorization](tools.md) - How Open SWE exports curated tools, wires graph-specific and deferred tool surfaces, and enforces authorization and plan-mode controls. Use this page when safely adding or changing an agent capability.
+- [Authorization, Credentials, and Security Boundaries](auth-and-security.md) - How Open SWE gates dashboard identities, scopes GitHub App and personal credentials, authorizes repositories and mutations, and verifies inbound requests without exposing sandbox secrets.
+- [Models, Profiles, and Instruction Resolution](models-profiles-instructions.md) - Explains how workspace, profile, thread, and per-run choices resolve into provider models, including adaptive routing and recovery from stale settings. Covers durable instruction sources and how repository, workspace, and personal guidance enters an agent prompt.
+- [Threads, Runs, and Durable State](threads-and-state.md) - How Open SWE identifies conversations, creates checkpointed LangGraph runs, separates metadata and Store records, and maintains a durable dashboard transcript across surfaces.
+- [Tool Surfaces and Dynamic Loading](tools.md) - How Open SWE constructs least-privilege tool surfaces for its Deep Agents, exposes optional MCP and Notion schemas on demand, and rechecks sensitive authorization at invocation time.

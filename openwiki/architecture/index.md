@@ -1,7 +1,7 @@
 # Files
 
-- [Coding Agent Assembly](agent-graph.md) - How the primary Deep Agents coding graph is assembled for an executable thread run, including configuration, model policy, sandbox and skills backends, tool surfaces, subagents, and run preparation.
-- [Middleware and Failure Boundaries](middleware-stack.md) - Ordering-sensitive middleware around the coding agent and reviewer model and tool loops. Explains preparation, policy, retries, deadlines, completion hooks, and how failures become safe user-visible outcomes.
-- [Runtime and Product Architecture](overview.md) - LangGraph deployment, graph entrypoints, FastAPI ingress, durable dispatch, sandbox ownership, and the dashboard and desktop product surfaces.
-- [Review and Style Analysis Graphs](reviewer-and-analyzer.md) - Architecture of the isolated reviewer and review-style analyzer graphs, including repository preparation, durable finding reconciliation and publication, per-repository style persistence, and continual analysis scheduling.
-- [Thread Sandbox Lifecycle](sandbox-lifecycle.md) - How a thread acquires, persists, reconnects to, and deliberately replaces its sandbox. Covers provider selection, proxy-backed credentials, recovery safety, and operational lifecycle controls.
+- [Coding Agent Assembly](agent-graph.md) - How the primary Deep Agents coding graph is assembled for an executable LangGraph thread, including configuration, sandbox and skill backends, model policy, tools, middleware, and per-run preparation.
+- [Middleware and Run Guardrails](middleware-stack.md) - Ordering-sensitive middleware that prepares coding and review runs, governs model and tool calls, and turns delivery, timeout, queue, and failure edge cases into controlled outcomes.
+- [System Architecture and Runtime Surfaces](overview.md) - System-level map of Open SWE's LangGraph graph suite, FastAPI ingress, durable-run boundary, persistence, and cloud and desktop product surfaces.
+- [Review, Style Analysis, and Review Scout Graphs](reviewer-and-analyzer.md) - The reviewer, analyzer, and review-scout graphs prepare pull-request context, produce durable findings or walkthroughs, and publish review guidance under separate authority and sandbox boundaries.
+- [Thread Sandbox Lifecycle](sandbox-lifecycle.md) - How an agent thread binds to a hosted sandbox or a local CLI bridge, provisions workspace snapshots, refreshes credentials, and handles reconnection and replacement safely.
