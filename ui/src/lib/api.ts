@@ -1398,6 +1398,18 @@ export const api = {
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  listUntaggedChannels: () =>
+    request<Array<{ channel_id: string }>>("/slack/untagged-channels"),
+  enableUntaggedChannel: (channelId: string) =>
+    request<{ channel_id: string }>("/slack/untagged-channels", {
+      method: "POST",
+      body: JSON.stringify({ channel_id: channelId }),
+    }),
+  disableUntaggedChannel: (channelId: string) =>
+    request<{ ok: boolean }>(
+      `/slack/untagged-channels/${encodeURIComponent(channelId)}`,
+      { method: "DELETE" }
+    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

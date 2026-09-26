@@ -15,6 +15,11 @@ from agent.slack.allowed_bots import (
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
 from agent.slack.connect import router as connect_router
+from agent.slack.untagged_channels import (
+    UNTAGGED_CHANNELS,
+    SetUntaggedChannel,
+    UntaggedChannel,
+)
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
@@ -33,6 +38,30 @@ async def api_list_slack_channels(
 ) -> SlackChannelDirectory:
     """The channels a workspace can be bound to, for the picker on the Workspaces page."""
     return await list_slack_channels()
+
+
+@router.get("/slack/untagged-channels")
+async def api_list_untagged_channels(
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[UntaggedChannel]:
+    return await UNTAGGED_CHANNELS.search_all()
+
+
+@router.post("/slack/untagged-channels")
+async def api_enable_untagged_channel(
+    body: SetUntaggedChannel,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> UntaggedChannel:
+    return await UNTAGGED_CHANNELS.put(body.channel_id, UntaggedChannel(channel_id=body.channel_id))
+
+
+@router.delete("/slack/untagged-channels/{channel_id}")
+async def api_disable_untagged_channel(
+    channel_id: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, bool]:
+    await UNTAGGED_CHANNELS.delete(SetUntaggedChannel(channel_id=channel_id).channel_id)
+    return {"ok": True}
 
 
 @router.get("/slack/allowed-bots")

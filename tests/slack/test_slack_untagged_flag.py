@@ -100,6 +100,7 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_routes, "allows_untagged_messages", AsyncMock(return_value=False))
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
@@ -171,6 +172,7 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
         )
 
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(slack_routes, "allows_untagged_messages", AsyncMock(return_value=True))
     payload = _message_payload("please fix this", f"Ev-kitchen-{reply}")
     if not reply:
         del payload["event"]["thread_ts"]
@@ -184,6 +186,27 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
     request = cast(SlackRequest, background_tasks.tasks[0][1][0])
     assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
     assert request.treat_all_messages_as_mentions is True
+
+
+async def test_kitchen_name_without_opt_in_does_not_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(
+            name="team-kitchen", is_ext_shared=False, is_pending_ext_shared=False
+        )
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    payload = _message_payload("just talking", "Ev-kitchen-no-opt-in")
+    del payload["event"]["thread_ts"]
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+
+    assert response["status"] == "ignored"
+    assert background_tasks.tasks == []
 
 
 async def test_message_update_queues_only_the_new_text() -> None:

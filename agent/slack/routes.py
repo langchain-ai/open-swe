@@ -50,6 +50,7 @@ from agent.slack.responses import (
 from agent.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from agent.slack.solo_threads import allow_solo_thread_followup
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
+from agent.slack.untagged_channels import allows_untagged_messages
 from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -452,10 +453,13 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
-    in_kitchen_channel = bool(
+    in_untagged_channel = (
         not in_code_channel
-        and channel_context
-        and channel_context.label.lower().endswith("-kitchen")
+        and event.channel_type != "im"
+        and not is_dm_channel(channel_context)
+        and event.type == "message"
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+        and await allows_untagged_messages(channel_id)
     )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
@@ -505,7 +509,7 @@ async def slack_webhook(
         or is_message_update
         or in_code_channel
         or (
-            in_kitchen_channel
+            in_untagged_channel
             and event.type == "message"
             and event.subtype in {"", "file_share", "thread_broadcast"}
         )
@@ -578,7 +582,7 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
-                or in_kitchen_channel
+                or in_untagged_channel
                 or solo_followup,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
