@@ -35,7 +35,7 @@ Always run an ngrok tunnel when starting Open SWE locally. GitHub and Slack need
 
 For a first-time setup, the free ngrok plan gives you a static domain:
 
-1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or the download the dashboard offers).
+1. Sign up at [dashboard.ngrok.com](https://dashboard.ngrok.com/signup) and install the agent (`brew install ngrok`, or use the download the dashboard offers).
 2. Connect the agent to your account with the `ngrok config add-authtoken …` command shown under **Getting Started → Your Authtoken**.
 3. Under **Domains**, claim the free static domain. It looks like `<name>.ngrok-free.dev`.
 4. Start the tunnel and leave it running while you develop:
