@@ -1,6 +1,7 @@
 import type {
   ChartPreviewResponse,
   Project,
+  RunExtraResponse,
   ThreadCandidate,
   ToolCallRun,
   ToolCallRunsResponse,
@@ -12,6 +13,11 @@ import type {
 import { parseToolName } from './lib/tools';
 
 export const DEFAULT_PROJECT_NAME = 'open-swe-v3';
+
+// Traces from before Open SWE recorded `dashboard_thread_url` all came from production.
+function productionThreadUrl(threadId: string): string {
+  return `https://openswe.vercel.app/agents/${encodeURIComponent(threadId)}`;
+}
 
 const MCP_TOOL_FILTER = 'and(eq(run_type, "tool"), eq(metadata_key, "mcp_tool_name"))';
 const MAX_GROUPS = 20;
@@ -156,6 +162,21 @@ export async function fetchTrajectory(projectId: string, threadId: string): Prom
     if (!cursor) break;
   }
   return messages;
+}
+
+export async function fetchThreadUrl(projectId: string, run: ToolCallRun): Promise<string> {
+  const threadId = run.thread_id ?? '';
+  const response = await call<RunExtraResponse>('POST /api/v2/runs/query', {
+    body: {
+      project_ids: [projectId],
+      ids: [run.id],
+      min_start_time: run.start_time,
+      page_size: 1,
+      selects: ['EXTRA'],
+    },
+  });
+  const recorded = response.items[0]?.extra?.metadata?.dashboard_thread_url;
+  return typeof recorded === 'string' && recorded ? recorded : productionThreadUrl(threadId);
 }
 
 export async function openRun(projectId: string, run: ToolCallRun): Promise<void> {

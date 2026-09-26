@@ -240,7 +240,11 @@ from agent.utils.authorship import (
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
+from agent.utils.dashboard_links import (
+    dashboard_base_url,
+    dashboard_plan_url,
+    dashboard_thread_url,
+)
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
@@ -1319,10 +1323,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         adaptive_model_routing = False
 
     model_routing_mode = _model_routing_mode(thread_id) if adaptive_model_routing else None
+    thread_url = dashboard_thread_url(thread_id)
     config["metadata"] = {
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        **({"dashboard_thread_url": thread_url} if thread_url else {}),
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled

@@ -3,6 +3,7 @@ import { Banner } from '@langchain/macaw-components/Banner';
 import { Button } from '@langchain/macaw-components/Button';
 import { Card } from '@langchain/macaw-components/Card';
 import { CodeLite } from '@langchain/macaw-components/Code/CodeLite';
+import { CopyIconButton } from '@langchain/macaw-components/CopyButton';
 import { EmptyState } from '@langchain/macaw-components/EmptyState';
 import { GroupedTabs } from '@langchain/macaw-components/GroupedTabs';
 import { Spinner } from '@langchain/macaw-components/Spinner';
@@ -11,7 +12,7 @@ import { cn } from '@langchain/macaw-components/utils/cn';
 import { ArrowSquareOutIcon } from '@phosphor-icons/react/dist/ssr/ArrowSquareOut';
 import { ShuffleIcon } from '@phosphor-icons/react/dist/ssr/Shuffle';
 import { useEffect, useMemo, useState } from 'react';
-import { fetchThreadCandidates, fetchTrajectory, openRun } from '../api';
+import { fetchThreadCandidates, fetchThreadUrl, fetchTrajectory, openRun } from '../api';
 import { focusThread, messageText, toolCalls } from '../lib/messages';
 import { formatCount, parseToolName } from '../lib/tools';
 import type { ThreadCandidate, ToolCallBlock, ToolUsage, TrajectoryMessage, WindowKey } from '../types';
@@ -38,6 +39,7 @@ export function ThreadView({
   const [mode, setMode] = useState<ViewMode>('focused');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [openFailed, setOpenFailed] = useState(false);
+  const [threadUrl, setThreadUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +65,11 @@ export function ThreadView({
     setMessagesFailed(false);
     setExpanded(new Set());
     setOpenFailed(false);
+    setThreadUrl(null);
     if (!candidate) return;
+    fetchThreadUrl(projectId, candidate.calls[0])
+      .then((url) => !cancelled && setThreadUrl(url))
+      .catch((e) => console.error('Failed to load thread URL', e));
     fetchTrajectory(projectId, candidate.threadId)
       .then((result) => !cancelled && setMessages(result))
       .catch((e) => {
@@ -99,6 +105,14 @@ export function ThreadView({
                 } call${candidate.calls.length === 1 ? '' : 's'} here · ${formatCount(tool.count)} in window`
               : `${formatCount(tool.count)} calls in window`}
           </Text>
+          {threadUrl && (
+            <div className="flex min-w-0 items-center gap-space-1">
+              <span className="min-w-0 select-all truncate font-mono text-xs text-secondary">
+                {threadUrl}
+              </span>
+              <CopyIconButton copy={threadUrl} label="Copy Open SWE thread link" size="xs" />
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-space-2">
           <Button

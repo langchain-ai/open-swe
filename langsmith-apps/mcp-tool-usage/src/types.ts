@@ -40,6 +40,10 @@ export interface ToolCallRunsResponse {
   next_cursor?: string | null;
 }
 
+export interface RunExtraResponse {
+  items: Array<{ extra?: { metadata?: Record<string, unknown> } | null }>;
+}
+
 export interface ThreadCandidate {
   threadId: string;
   calls: ToolCallRun[];
