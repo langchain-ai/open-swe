@@ -43,6 +43,13 @@ def _latest_human_task(messages: Sequence[Any]) -> str:
             continue
         if "<input-message" not in text:
             plain = text
+    if plain:
+        return plain
+    for message in reversed(messages):
+        if not isinstance(message, HumanMessage):
+            continue
+        if authored := input_message_text(message.content):
+            return authored
     return plain
 
 
@@ -112,6 +119,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         messages = state.get("messages", [])
         task = _latest_human_task(messages)
         route: Route = "balanced"
+        if not task.strip():
+            logger.info(
+                "Using default model route because no task text was extractable",
+                extra={"route": route},
+            )
+            return route
         try:
             decision = await self._classifier.ainvoke(prompt("model-selection", task=task[-8_000:]))
             if isinstance(decision, RouteDecision):
