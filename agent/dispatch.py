@@ -271,6 +271,10 @@ async def create_durable_run(
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     run_metadata = dict(metadata or {})
+    configurable = config.get("configurable") if isinstance(config, dict) else None
+    resolved_config = RunConfig.parse(configurable if isinstance(configurable, dict) else {})
+    if workspace := resolved_config.workspace_slug:
+        run_metadata["workspace"] = workspace
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type

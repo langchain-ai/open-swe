@@ -136,6 +136,47 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["workspace", "environment"])
+async def test_create_durable_run_records_resolved_workspace(key: str) -> None:
+    client = _FakeClient()
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        config={"configurable": {key: "routed-workspace"}},
+        metadata={"workspace": "stale-workspace"},
+        client=client,
+    )
+
+    created = client.runs.created[0]
+    assert created["metadata"]["workspace"] == "routed-workspace"
+    assert created["config"]["metadata"]["workspace"] == "routed-workspace"
+
+
+@pytest.mark.asyncio
+async def test_create_durable_run_prefers_workspace_over_environment() -> None:
+    client = _FakeClient()
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        config={
+            "configurable": {
+                "workspace": "thread-workspace",
+                "environment": "legacy-workspace",
+            }
+        },
+        client=client,
+    )
+
+    assert client.runs.created[0]["metadata"]["workspace"] == "thread-workspace"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("is_im", "conversation_type"),
     [(True, "dm"), (False, "channel")],
