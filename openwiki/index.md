@@ -4,7 +4,7 @@ okf_version: "0.2"
 
 # Files
 
-- [Open SWE Codebase Guide](quickstart.md) - Start here to set up Open SWE, choose the entrypoint and owner for a safe change, and run focused validation. Links route contributors to the detailed architecture, workflow, integration, operations, and testing guides.
+- [Open SWE Change Guide](quickstart.md) - Route a scoped Open SWE change from the correct runtime or product entrypoint to its owning architecture, workflow, operations, integration, and focused-test guidance. Distinguishes the Python backend from the pnpm workspace and cross-boundary end-to-end validation.
 
 # Directories
 

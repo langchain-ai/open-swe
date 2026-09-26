@@ -1,52 +1,26 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:fa8ecee6739c9292c8fd16b4eb96b29fea3cc1423d751f6234785fc0a2f704b7",
+  "pageVersion": "sha256:e4d185dd941ba93f11a33462c19ab894f8b16b6df9dd35067db790bcaa44f8b6",
   "claims": [
     {
       "id": "claim_a92a213a430c4e9e8cac73490f5ecdb8",
       "statement": "Surface adapters normalize Slack, Linear, and GitHub events into ordered RunInput transcripts with attributed identities and structured metadata; the generic dispatcher supplies fallback identities, rejects a prebuilt input combined with raw fields, and creates a durable Protocol-v2 run.",
       "evidence": [
         {
-          "resource": "repo://agent/dispatch.py#L209-L322",
-          "version": "repo-lines-v1:sha256:edba7a3c2f8670ac160040393e75da803d2eeabcc4bd804ebb58f7532f31613b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4NGMzNWEwM2Y2ODM4ZjM5ZWM1OWI3NDE3ODY5YTY5M2Q5NmE0MDNlMmU2YjAzZjYyMWJjMzAyZDg5MWYyZWNkIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJkOGU1MWMwYjA3M2ZlMWU1ZWEyMjc2MTUyODg3YWVkY2UzMmUwNjE4ODhlYTZmMzJjOTFiNjgzMzQ1ZmNiMDVlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+          "resource": "repo://agent/dispatch.py",
+          "version": "repo-file-v1:sha256:d2406c1e82e4c69b2a4d037f47dfdfcd7a4b70caa3d406324233e9ad65099958"
         },
         {
-          "resource": "repo://agent/dispatch.py#L72-L149",
-          "version": "repo-lines-v1:sha256:b2c1c93365a26128d74079151bf6d4ad3800d813a0a5e2346489a36e59091c06:eyJzZWxlY3RlZExpbmVDb3VudCI6NzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgxNjZjZjA4ZWVmZWU2ODIyZGRkMjU0YTFlNWRiYThiM2E2OGY1MTdkYjBlZDczODNjYmZjNjUyM2JmYjkyMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjczY2JjNjc0M2Q3OTk3ODJiOGEzYmRjZWRhNjlmMDQ1M2MwOGY0YjYyYzE0MjA2NDRkYThjMDhjNDEzNTA2YmMifQ"
+          "resource": "repo://agent/github/webhook.py",
+          "version": "repo-file-v1:sha256:86c358c756ec16b6fa46597a329c969edc8c68fd4a248ad71d75edacb89c129c"
         },
         {
-          "resource": "repo://agent/github/webhook.py#L1152-L1257",
-          "version": "repo-lines-v1:sha256:605c3f3637742570371a7134ca4ae341d5f50f45d9da079f17fb58ab6692a876:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJkZTA2OTRhZmI0OTMzOGY5YWYyYTUxZTY2OTQyMmIyMGQyYzY2NzY2NmIwNjgwMzNlMzZmZDFjYmIwMjY3NjY2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3YzAxMDNkNGY5YThjYzBmYzJlNzkwZWVmN2VkMzY3OGJhNDA1MWU2ZTljZjZmYWExOWY3YmY3ZDRiNjFlZWYyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiI1MTcwY2JjNjczNDRiMmY1MWQ3YmM2MTQ0NzhlNGViNDExNDU1YWE3M2YzMDgxZjAzNGFjMDRjNjdlODVmMzVkIn0"
+          "resource": "repo://agent/linear/webhook.py",
+          "version": "repo-file-v1:sha256:55b19d4e766778ef899a2082326b26517d6be068813b9294ff4adec3cb77f64f"
         },
         {
-          "resource": "repo://agent/linear/webhook.py#L262-L330",
-          "version": "repo-lines-v1:sha256:75b8708b33c3ad65c72a4436104890f80c22e011a630d5956c1132f278b8b15a:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmNzExMDk2MGUxZjBiOWM0MTAwOWI3NmFmY2RlODJmMDYwZTdlNDZlZDVmMDZiMzk4MjFjYzY2MTcyYzFjNDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRiYTg5MmJiMDk0ZmQ4Njc3MWFhMTEyYjhiOWZlZWYwMDMwY2FlNjFkNjI1YWEzYzU1N2IxN2JiZTUzNmM5MzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3NDAzOTE4Y2FjNjQ5YzYwNWQ1NWI2MWUwMWYzYzk2Mzk4ODUwMjZkODNlNDQ2ZmYxNzAxNzRkM2Y4ZmY4ZjMifQ"
-        },
-        {
-          "resource": "repo://agent/linear/webhook.py#L82-L160",
-          "version": "repo-lines-v1:sha256:bfee7afb126597150fa7c64f477b78ccb40a7c6251d16c649bc1b6e3bf9efe14:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzZjdmZThiMzBlZTFiYzFhNmEwMDE0NTBkZmIwYzcyMTc3OTVlNTlkZmNkOWY5YjM0OWI3MGU2MzMxYzI3MjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwMmFlZTVkYzc2NDgwOTc0MzkyNWE4NTc3NzM4ODc5ODM1OWQ4MmFlMTNmZDU1Yzc4MDkxMDJlMzcwMjMxZjAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3MTEyYmU5M2RkNjQ4YWYyMTY4YzhkYjk1ZDhkZTI0ZGYyNjFhMTBmZDM1NWRiODM4YzdhMDFmMGQzZTBlODYifQ"
-        },
-        {
-          "resource": "repo://agent/slack/webhook.py#L313-L455",
-          "version": "repo-lines-v1:sha256:c3c1b4bf6d86b44ed8264db4e121c29b5ad64d9a3284cd5225dc03dae770af92:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyZTA1YTFjYjRhODhlMjE1OTkzMjliOTAzZjBjYTUyYTdkNjdlNzRhNjc5Njc3NjlkOTkxZWZhNDgwNzFkNzdhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJlY2VlMzE4NGY5NDFhZTYwZDBlNGEwZWUxYjliYmU1MGU4ZTRkY2IzMDBhY2YwMDU2YmYzNzhjYzVhZTUxZDUzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3NDBiYTIxYjRlYTE2ZGQ1ODYwMjIzMWRiZWVlOTY2NWUwYzJlODg5YTBhN2VjNGM5MjQ3YWQ5ZjMyNzVkYWZlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIwYzE0MGY4NDRhZTBmZDg0YTZiYWJhODEzMzU1NGMzNTljZjE3YTdmZTlkY2QyYWRkMzUzMjMzMTY5ZTUwZmNiIn0"
-        }
-      ]
-    },
-    {
-      "id": "claim_ad1fae40600e42daabbb6af2eba6988e",
-      "statement": "Input serialization uses escaped input-message envelopes and content-hashed dynamic-context introductions, marks Slack channel topic and purpose untrusted, and reintroduces contexts hidden by summarization.",
-      "evidence": [
-        {
-          "resource": "repo://agent/input_messages.py#L198-L272",
-          "version": "repo-lines-v1:sha256:74f5f398bd2da10d51654ea4e81ccd4246576c2b0e2abc0851dc011d2ffffede:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3NmZmOTY5MjYyYjU5MTIyYmQ0YWY4ODVlYjBmNTQwN2VmMjY3OGY2MjE3Zjk1N2I2OWRkYjQyZTJiMGY4NTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxMWYwZTYyMjdjMGY2M2UyYjljNmI1ZGIyZTkyNDY3ZTdjZjUyZGFmYjg1ZGJjOTk1YzgxNWVkMDg1MWUwYjEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAwYzNjMDgzMDY3MmIwYTk0ZTQ4MDgyNzcwOWU4MzVlNTNmN2M5NGNlZTQ0MDZjNGE3ZTQ1NzVjMzk5OWFmMGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhODFlOTViNzIxODI4YTY4ZGUzMDUzMjJmMDI5NmMwYTQzZjQ0NDgzMWM4NTE2ZGYwNWY2MGNmNDJkYzMxNTEifQ"
-        },
-        {
-          "resource": "repo://agent/input_messages.py#L333-L440",
-          "version": "repo-lines-v1:sha256:98e628ec1b78d67e1a53c0ea58584bb95386ffe60cb0713696bbf9e808854378:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3NDQwMzFlZWMxMWQ0MjlkMThmYzNkZWZlZDQ2YzliNjhlYWRiYzM4ZmE0OWE0ZjY3MTdmZmU2NTE5M2NmYzVkIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI4MDc4NmMyNjQ0Y2Q4NWMyN2E3NTZhMjJiN2EwYjY5YTE0Y2QzZmUwMTg5NDhhNGJmNTIxMGY3MDU1MzJmZTQ3IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJhMWZlM2E4Y2QyZmZkN2JkMjM2YTc3ZmRiZDBjODJmOWQ2YzJlNjMwNWMwOTU1ZDhiMTNiZTM5NTk1ZWVjMDlhIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIn0"
-        },
-        {
-          "resource": "repo://agent/input_messages.py#L85-L103",
-          "version": "repo-lines-v1:sha256:4851a7b43e767e358d1dc0bb33fa9ab478064d113acc1f83fc339820f98d4556:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzZmQ3ODcxNzVjNzVjYTE4ODNlNTdhODNjMzY4YjhlNGU4ZjliMWE1NThhZThkNmVkMWFlYzUyMmE5MzVkMGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyODAwNWU1YzA2Njg4YTBkZDE1ZWQ5OWM0MjRkMzRmYzU5OGFjZTNjN2E5YWNkZDdmNGNlOWU1Yzc5YTI0M2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZlMWQwYjVhODQzMWM4OGJlZmM5M2U1OGI0NzU2Mzk2MjcyMWYzNWI5YTY0OTEwNWQxZTJkN2ZmYWMwMGViNDgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg0ZWI2NDJmMTQyMzQxNGQ0OThhYTQxZjQ3ZTgwYzNhMWIxMTU2NzEwMDBjODM1ZTQxNGQ4ZjNjZDQxNDJhN2UifQ"
+          "resource": "repo://agent/slack/webhook.py",
+          "version": "repo-file-v1:sha256:e3e5a265f5fe4ea2e33a6fe8fe6836998c4c795832cfd2e4c88142175a490779"
         }
       ]
     },
@@ -55,52 +29,34 @@
       "statement": "SourceContext persists Slack, Linear, GitHub, and PR provenance in thread metadata while tolerating malformed or extended data: its models allow extras, dumps exclude unset defaults, and parse returns an empty context on validation failure.",
       "evidence": [
         {
-          "resource": "repo://agent/github/webhook.py#L1206-L1213",
-          "version": "repo-lines-v1:sha256:7261f89154daa9f92a0d49020f8438cbe77623ab2789f9c98cdaa49a9424c07e:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjNlOWRlMWZmZTk1ZDJkNGQyNzQxMWE0OTkzZjJjY2EwZTg3MTQzY2NmZWU0MGQxZGUzODA3MjdjMDAyMzFmMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZjlhZWIyNWU5M2I2MGJlYjg4MjYyYjQyNWUzZDcwMmMyZDk0MzI5N2M0YzZkNDg3MWRlYzA0YzgyYjk0NTBmNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjY3OTJkOTA2MDExYjYwN2FjNGMzZTczN2JkMDc1NDBmZTdkZjBkNjc3OTlkOTU5ZTFkYzYyMTc5M2ZkZWI2MyJ9"
+          "resource": "repo://agent/github/webhook.py",
+          "version": "repo-file-v1:sha256:86c358c756ec16b6fa46597a329c969edc8c68fd4a248ad71d75edacb89c129c"
         },
         {
-          "resource": "repo://agent/linear/webhook.py#L252-L260",
-          "version": "repo-lines-v1:sha256:6147ebdeb7d516774e0e7dc696df1eee6836650e72d6afd0ffb2daa38777975a:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYjNlOWRlMWZmZTk1ZDJkNGQyNzQxMWE0OTkzZjJjY2EwZTg3MTQzY2NmZWU0MGQxZGUzODA3MjdjMDAyMzFmMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDNhMTg4NTI4YjdjOTljZjJhYWEzOGI4NTNlNDI2MTEwYzUwNTcwMmI3ODBhODA0OTkxMmJkMjVjMjc5N2UwNiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjkzNzk1MjE2M2M0ZTZiNGRmNzIwN2E1NTNhOTkxYTRiYzViMzE1MTM2YWZmYTNhNWZkODI1MDg2OTRjODIxYSJ9"
+          "resource": "repo://agent/linear/webhook.py",
+          "version": "repo-file-v1:sha256:55b19d4e766778ef899a2082326b26517d6be068813b9294ff4adec3cb77f64f"
         },
         {
           "resource": "repo://agent/source_context.py",
-          "version": "repo-file-v1:sha256:c65a91af1adfd97f7526d7d2cc7884afbc8df629816fa758121f7476d5a5c55d"
+          "version": "repo-file-v1:sha256:2cfb139eb8aa8af4fe7d0480474931a5b82364be45a4b743627505e744a51b7e"
         },
         {
-          "resource": "repo://agent/webhooks/common.py#L764-L807",
-          "version": "repo-lines-v1:sha256:378f811af089dbaec4c83ce9cae6af5dc7b2f77725a4651ba5a817a9f18c8a84:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg2ZTg0MWJmMGIzMDU1ZmVkZmZlY2QwMzdhZDUzNDBkNjQ3M2QxMzE0Yzg2MjY2M2UzN2UzYTQwOTMxY2JmMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdjNGZlNDRkYjVlZjBiNzhkNTMxODJkYWY0NzY5YjlmOTI3OTdhOTA1YzAwOGZhOGY2MGY2NGQ3ZWRhMTAxOWIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgyMTM3ZWNhNTcyNzM5YTRiMTcwZTExMDY1MDcxMjRkMGU3ODQyZDkwOTgzOGE1ODY0ZDdlOWJhOWI1MDZjMzMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM4MDVmZWJmNTc1MTdjZGJlZWU4YzRkMWJlM2M4NTE2YTk1OTZlOTI2ZTEwODA3NWUyMmM2YjljNTI4YTY1NTcifQ"
+          "resource": "repo://agent/webhooks/common.py",
+          "version": "repo-file-v1:sha256:528204f85814e5f0f766ccf0e2631a89b69b58d8f20e777b5cf0c155d23627c4"
         }
       ]
     },
     {
       "id": "claim_72b9ff8fa4c74e1bbffca8eed4902598",
-      "statement": "Preparation middleware checkpoints idempotent setup by a message/configuration fingerprint and wraps rendered prompt material immediately before a model call; the main agent emits sender context as a separate structured message rather than altering history.",
+      "statement": "Preparation middleware checkpoints idempotent setup by a latest-message and configuration fingerprint; it renders prompt material and separate visible participant context before execution, and combines the rendered prompt with any existing system message before each model call.",
       "evidence": [
         {
-          "resource": "repo://agent/middleware/prepare_run.py#L42-L108",
-          "version": "repo-lines-v1:sha256:3eefe055dc85ea8990a6f335d04614d34d9e0ab7f23e992392331f562dc28691:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5MjhkZGMwMzkzOTIxMTZlOWIxZjBhYjlmNjdlNjJiNGVhMTY3MzZhMjljNDkyM2FiYjAzNTJkZWU4NDIwN2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFjYzk1ODcwYjI2NWU2NjBlMWY2OTRjMmY4MzAyNjZjNmEyMDhlMjZkY2FiYjNlODU0ZTJmMThhMjZjNTA5N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcxZWE2M2E2MmY5MjFhY2ZlOTFhMTcyMzExMDkyMjljNTkzZGU3ODMxZjAxYWZkYWZkNjA1MWM1MjYxNTRjZTkifQ"
+          "resource": "repo://agent/middleware/prepare_run.py",
+          "version": "repo-file-v1:sha256:3906a99f23886c05d3b7cb8bacb956eb1e318d8a20a7a01c00d9ca9b0f3554a3"
         },
         {
-          "resource": "repo://agent/server.py#L734-L851",
-          "version": "repo-lines-v1:sha256:f44af17dc63529c009f0e3ffc12c20068a337337b031adbf509ead75b1884364:eyJzZWxlY3RlZExpbmVDb3VudCI6MTE4LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI0MWFiY2QwY2M2OTEzZDRmNTFlYjIxZTRmNWFmYzJlOTBmODZkMzZhNDUwYmI0MmNiMDVjNmYzZTBkNzA2ZjhjIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzZjA5MWFkOGU4MDYyNjQzYzZlYTc0YjUwNzM3ZjNiN2YxMmRkMWMxYzk0ZjJmYTVjYTgzMzVmM2MzOWNkYzgwIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIxZTg4MWMwM2FlZTM5YjljNmY0OTczZjQyYWZlYjAzYTAxOTVmNTE4OGJhYzVjMDE5ODc4Zjc5ZWNlN2MyOTA5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0ODU5NzYyNDJhYmJlN2IxMmYyYzg1NjQ4NjkxNTU3MzlkNTU5OGRjYWIwZWFjMzE1YjJjMjdiNTU0YThjNDg2In0"
-        }
-      ]
-    },
-    {
-      "id": "claim_ce52717833c346b6a64a18fcdec5149a",
-      "statement": "The main prompt requires root AGENTS.md after repository setup and gives it precedence over custom, environment, and sender instructions; scoped middleware injects unread ancestor AGENTS.md files after successful reads without failing the read when candidates fail.",
-      "evidence": [
-        {
-          "resource": "repo://agent/middleware/subdir_agents.py#L69-L192",
-          "version": "repo-lines-v1:sha256:99fe1c76e18950ab3161a5de677bc63c1e136e42fb4191b542da7903f4afa182:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI0LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI1MjNjZjhhYzhhMzNmY2I2OGNiMjcyNjI2YzAzZjk2Y2JjMmMxNTc1ODRjNDQ2MjI2ZjVjZWE3NGRjYjViMjJhIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI4ZTExNmNlOWUzMDU2MGQwYzRjNDM1YWMwMzM3ZWI1OGQwNTRlZTFkMDNlMzdlNDEzMjU3NjEwMjRlZWMzZmNkIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3N2QwNjQ5ZDU4ZjdiZWQzZTQ0MjRiM2QyZGM0ODkzYTY4NDUzNGEzMTNlMjZiYWNlYTY0Y2E2OTcwYjYyOWU2IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
-        },
-        {
-          "resource": "repo://agent/prompt.py#L285-L299",
-          "version": "repo-lines-v1:sha256:2b7633f17d42b78a693ff5a184ac884f4e527839467f0347d8e7c5166cf6a916:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU3YjA1MmEwMzU0YzZmN2U1Zjk5NjcwNGEzNDQzYzY1ZTFkODQ5ODY5MjFiYmI1ZjU4N2Q0ZjQwMzlkOGQ0M2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhZjY4YWE1Y2IwNGEzMzhkMjg1NDJhMzczNzMyZWFjN2U0NjBiNTQyZGFhOTc1MmE3MWM0YTUwZTY0OTI3MDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NDg1ZDczMjUwODdmOGM1NTQ3MGJkNGNkMjRmMDUwMmU1MGQ0YjQwN2U3MmJjMjhlZmM4YzdjYWY4OWI5MmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJkYTJiYTk0YTY4NWExYzc1YzZkMzMwYzQwMjhiNGJjOTMyOGUxYzYxNmQxZTk2ODQ3MWRkMTZmM2RmYTg0NjQifQ"
-        },
-        {
-          "resource": "repo://agent/prompt.py#L412-L478",
-          "version": "repo-lines-v1:sha256:e470547da70ef647fbfdf25f70e92dd6ed7b6d9aeb423c148077ad4b493d57d1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3M2JjMjQ4NjU5YTZkY2NjMDllYmFhNTRjYTg4YmRjNzgyOGZlNGI4MDg4ODcwZjQyNzBhODcyZjM2MjZmZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjE2NTRiNWIxNGUxMDAxZjVhNjcwMDY0ZGU5MmUzZGEwMzI2Njk3MTk5YTdkM2VlYmJiMWEzN2RlY2VhZDBjY2UifQ"
+          "resource": "repo://agent/server.py",
+          "version": "repo-file-v1:sha256:cb6628f231b444110f1cc43178f146fad8191d6d5d1b57ef64420bd31e2e4f7f"
         }
       ]
     },
@@ -109,8 +65,8 @@
       "statement": "Reviewer convention context is fetched deterministically from GitHub at the PR reference, with a 64 KiB cap and AGENTS.md then CLAUDE.md fallback only on 404; changed-file ancestor instructions are fetched independently and concurrently in shallow-to-deep order.",
       "evidence": [
         {
-          "resource": "repo://agent/utils/agents_md.py#L17-L195",
-          "version": "repo-lines-v1:sha256:c03d39ed9da00411be2f49b83ca494e7f89961aa30c5e7fd3be4157b58cf75ce:eyJzZWxlY3RlZExpbmVDb3VudCI6MTc5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIwNDFiNzU4Y2IwNzcxOTczMGY2NjlkZjFkMWYyODZmN2NmY2UxYTgzMjI1YzI3OWMxMDEyMzExODZmMDlkMTcwIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJmYTExYzA1NjdkMGE1ZjllOWIxMzVmNjVjZDI1MzcyZGZkNjI4Nzc1ZjdjMWVkMjUzZjhiYWQ0MmRkMmQ2NjY5IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlNWMxYzQ2MmUyYTM5ZDc0NzU5ZjVlMWIxMjZmNzY4M2EyYjczMDExOGUxOGY1MTIyYjA4Y2VkZWViNjUwZTIzIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+          "resource": "repo://agent/utils/agents_md.py",
+          "version": "repo-file-v1:sha256:3258d774e04d3bd994080206faccc962c8a1ebb360defc4cfc9e9fef703f4c34"
         }
       ]
     },
@@ -119,30 +75,102 @@
       "statement": "Main-agent skills are read-only virtual files mounted by CompositeBackend, with bundled skills always available and user, organization, and desktop sources selected by run type; analyzer playbooks are seeded in input files and served from a StateBackend at /skills/.",
       "evidence": [
         {
-          "resource": "repo://agent/analyzer.py#L162-L204",
-          "version": "repo-lines-v1:sha256:41d5981b9e503c08df4759c9bd2d6dc80c7badd8a2c0a9e62896781fe5db91c7:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjODY4ZTkyNTEwZmMxOTM2MThhODdkMjllMTQ0ZDM1NTU5NTRlNTNmODFiMDAxZGVhMjNmMzk3MGYwMTU1Y2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNkYzUzOTJhODAyMDE0ZjMxZjRiMTgwOTE3NzM5NmExNTgxNWIwNjE1ZTA3YWUxMTQwYzRhZmViZGVlMWJmMGEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmOGNmNmU2MjBjMDg2ZDAzMTIyYzIxNThkMTY2ODZkMmIzYzBkZGE3YjY1ZDdkMjc4YjVkNWFlOGE2MDMxMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlZjg5MWM1ODJhYjJiZDA4M2Q5ZWUwODdhZGVhNWNkNTliNDM0YWQ5NWIzM2U5NmJmZTA1MGQ5ZDg3M2E2NmYifQ"
+          "resource": "repo://agent/analyzer.py",
+          "version": "repo-file-v1:sha256:b97e34ab5fa77e1ea0ff64ca2996f519d387ab4deae61c4cd9cdf22c72fca56b"
         },
         {
-          "resource": "repo://agent/analyzer.py#L69-L91",
-          "version": "repo-lines-v1:sha256:32b9513da77b580baeee9ec6861c9137656dc0e72ce31c4c4d1ebae940e4a299:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkNzY2YjZlNjAzOGYxNTU4MGM4ZDI3MmQyZDVmOWE4OWQ5NWQ4NDYzM2I5MzVmMjhmN2NiZTI5NmYxOTQ5NjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ5OGIyMWUyNGYwMTAyMDNjZTI0YjEzZWEyODgzZTJlYTgxNTM2YWJkNmZiYzVkMDI0YjA4ODgxOWY0YjkyZjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2ZGJhYjYyMDdkMTRiZWFhZjg1N2U1Y2ZlMGY4ZGEwYmZmNmVkODc1ZTEzNzg0NDE1MDkxN2QxYWRjMmI1NDcifQ"
+          "resource": "repo://agent/review/style_jobs.py",
+          "version": "repo-file-v1:sha256:57b20f82c2d1ec99b00e5db6de2d65090425796a9dea03978a6fc29c6f36b0a0"
         },
         {
-          "resource": "repo://agent/review/style_jobs.py#L125-L151",
-          "version": "repo-lines-v1:sha256:97ae2c5af511216e332e858314b2cec78547c7eef2aa2c021a41ffe1580499ac:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFkYTVjNjZlMTdiMTQ1Mzk3ODM0YjhjODU0ZGM0MTkzZTIxMjUxODBhODk5NmExNGMzMTg4MzMyNmIyZWZiY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNmUyMDlkYTVhYTE2MTgyZWY2NDE2NDE1OWYzYzcxNmRjZjJlMGYyN2IzZDZkMTg3ZGE5ODljNTBiMmUyMDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjYyZGMyMjBkZjQwNTg3NzhhYWQ0MjU1ZDJjMThkNjQwZTIyOGJlZTBhMjU4YTJhYTc5MjEyOTI3YWNiMjI0ZjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI3NTUxZjBlZmZjMzMxMGNhNWIyMDRiMWU2MDdmZTRmNWNmYTFkYzdhOTA3OTc1NTYxNTJjOGU4ODJkNTc0YTUifQ"
+          "resource": "repo://agent/server.py",
+          "version": "repo-file-v1:sha256:cb6628f231b444110f1cc43178f146fad8191d6d5d1b57ef64420bd31e2e4f7f"
         },
         {
-          "resource": "repo://agent/server.py#L1236-L1326",
-          "version": "repo-lines-v1:sha256:46ca86d1327acc9f6a2d9825d65bd5e3418e8715ec5d8616b78289f52f8944a7:eyJzZWxlY3RlZExpbmVDb3VudCI6OTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmM2JjNmViOGIxMjczY2MwZTU4NTFmOGJmYjUzZmI2YTg0ODBlOWFlY2ViOWY0NGIxZDg3OTJkM2VjYmRmZDMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5YTRkMmRiZTRkMzdiMjM5MzM0NTI0YzNmODVmYWIyMGUwYjBhMDkxNTA4ZDEyMDM1NTMzYTE1YTI1MmJlYWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ0MTA2OTZhMzUxMWM1MjcxOTlmNTI3Yjc1OTQ4ZjY3ZGQ3YmE4YzZhYjFiYzNjNDM5NzIyNWMwNzQ2ZWE4ODUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRhYzJiOGYxYjlmNGYwN2YwM2JkZTU0ZDczOTJiY2Q0NjVkOGZhN2UwMzFkNDY3OGQ2MTVkZDNjYTQ2ZTZhMjQifQ"
+          "resource": "repo://agent/utils/analyzer_skills.py",
+          "version": "repo-file-v1:sha256:fb7991d45dfbec27cb66cb7158ace7a4cc955431bdefb0839f6419feb878baae"
+        }
+      ]
+    },
+    {
+      "id": "claim_87175c2e98d944c680ac914a6f598d1c",
+      "statement": "Input messages serialize authored text in validated, escaped envelopes with namespaced sender identity, surface, kind, optional channel, and structured data; multimodal inputs envelope text blocks while retaining non-text blocks.",
+      "evidence": [
+        {
+          "resource": "repo://agent/input_messages.py",
+          "version": "repo-file-v1:sha256:c7e7517c5ed83e31b08babed905902a1392efae3a9cda2040151b2192274f6dd"
+        }
+      ]
+    },
+    {
+      "id": "claim_5db92be04112418b832d970fed32f45a",
+      "statement": "Dynamic-context introductions are content-hashed and deduplicated only while visible to the model; contexts behind a summarization cutoff can be reintroduced, and Slack treats unreadable state as empty so context may repeat rather than be omitted.",
+      "evidence": [
+        {
+          "resource": "repo://agent/input_messages.py",
+          "version": "repo-file-v1:sha256:c7e7517c5ed83e31b08babed905902a1392efae3a9cda2040151b2192274f6dd"
         },
         {
-          "resource": "repo://agent/utils/analyzer_skills.py#L18-L48",
-          "version": "repo-lines-v1:sha256:76162cd2013661af799a8f1ed38d7785fb51526813fda20b0f30c41ece2633da:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYyNWUwZTg4NDBjMWJjZDg2ZWI1YjllNGJjYjIxZTBhZTg1MmM4MWJkMGRjMjhhNDg3MjI0YjA2ZjZmNDgxMDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRlMmQzOWFjYmYxN2U5ODcxMzliNmViZjhlMjA3NWQ0OTMxMDcxMjA3NjBiN2NkYjEyZThmOTJlMmY2NTg0ZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJjNjVkOWRkNzk0Mjk5NDI2NDdkMWM2MDFkNzMwOTlkZTA3NzI2YTIzOTNlYWM3NjcxNTBiYzRlYTQxZTRiMGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://agent/slack/webhook.py",
+          "version": "repo-file-v1:sha256:e3e5a265f5fe4ea2e33a6fe8fe6836998c4c795832cfd2e4c88142175a490779"
+        }
+      ]
+    },
+    {
+      "id": "claim_ea7eff6da43f41bead6f18d78061f3ad",
+      "statement": "Main prompt construction combines source guidance, configured default instructions, repository scope, collaboration guidance, repository custom instructions, workspace instructions, and eligible recent-thread context; repository custom instructions override workspace instructions and both yield to AGENTS.md.",
+      "evidence": [
+        {
+          "resource": "repo://agent/prompt.py",
+          "version": "repo-file-v1:sha256:cd63938bdab20e6c055656c94f8be711bd0d472850174bb73eb477f8e38c32ee"
+        },
+        {
+          "resource": "repo://agent/resources/prompts/system/collaboration.md",
+          "version": "repo-file-v1:sha256:5463eb583a039b3fb6734f6c931021a7a63241c04cf0d34ee145de29bcd44326"
+        },
+        {
+          "resource": "repo://agent/resources/prompts/system/repo-instructions.md",
+          "version": "repo-file-v1:sha256:edf71f598d8db71d2e352595346668dc95ef6f7077ae60b5385f3b075b54842d"
+        },
+        {
+          "resource": "repo://agent/resources/prompts/system/workspace-instructions.md",
+          "version": "repo-file-v1:sha256:53da17bb04b3d933216975a8c811a2aa58fef86276bc6d557ee1fa98e1defd8d"
+        }
+      ]
+    },
+    {
+      "id": "claim_3282bb3506bc46e6971fea8796da61f0",
+      "statement": "SubdirAgentsReadMiddleware appends unread shallow-to-deep ancestor AGENTS.md content only after a successful absolute-path read_file result, marks directly read convention files as loaded, caps candidate reads, and ignores candidate failures without failing the requested read.",
+      "evidence": [
+        {
+          "resource": "repo://agent/middleware/subdir_agents.py",
+          "version": "repo-file-v1:sha256:03484f671f214dee84905b15f9c117706758be00972e7cf2734481a48baf1b13"
+        }
+      ]
+    },
+    {
+      "id": "claim_a24e387a67fe4f2a9c518890fbb32e57",
+      "statement": "Slack context construction excludes Open SWE replies and previously dispatched source timestamps, attributes third-party Slack bots as system senders, and falls back to the triggering user when the event cannot be matched to a human history message.",
+      "evidence": [
+        {
+          "resource": "repo://agent/slack/webhook.py",
+          "version": "repo-file-v1:sha256:e3e5a265f5fe4ea2e33a6fe8fe6836998c4c795832cfd2e4c88142175a490779"
+        }
+      ]
+    },
+    {
+      "id": "claim_7c44f2a592084357aaafd541b4b7c3c8",
+      "statement": "Linear constructs a system issue-description message followed by attributed relevant comments, preserving fetched image blocks; it selects comments from the triggering comment when identified and otherwise filters recent comments for known bot responses.",
+      "evidence": [
+        {
+          "resource": "repo://agent/linear/webhook.py",
+          "version": "repo-file-v1:sha256:55b19d4e766778ef899a2082326b26517d6be068813b9294ff4adec3cb77f64f"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-08T08:15:30.533Z"
+    "at": "2026-09-26T08:14:17.321Z"
   }
 }
