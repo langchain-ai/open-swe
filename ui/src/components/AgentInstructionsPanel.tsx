@@ -10,9 +10,11 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import {
   api,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
+import { cn } from "@/lib/utils"
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
@@ -31,6 +34,7 @@ function formatMutationError(e: Error): string {
 
 export function AgentInstructionsPanel() {
   const qc = useQueryClient()
+  const confirm = useConfirm()
   const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
@@ -212,24 +216,26 @@ export function AgentInstructionsPanel() {
         <div className="space-y-2">
           <p className="text-xs font-medium text-foreground">Repositories</p>
           {(instructions.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No repositories yet.
-            </p>
+            <Empty className="border p-4">
+              <EmptyDescription>No repositories yet.</EmptyDescription>
+            </Empty>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {(instructions.data ?? []).map((s) => (
                 <li key={s.full_name}>
-                  <button
-                    type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
-                      selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-border"
-                    }`}
+                  <Button
+                    aria-pressed={selected === s.full_name}
+                    className={cn(
+                      "max-w-full justify-start",
+                      selected === s.full_name &&
+                        "border-primary bg-muted font-medium"
+                    )}
                     onClick={() => setSelected(s.full_name)}
+                    size="sm"
+                    variant="outline"
                   >
                     <span className="truncate">{s.full_name}</span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -272,11 +278,14 @@ export function AgentInstructionsPanel() {
                 size="sm"
                 variant="destructive"
                 className="ml-auto"
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    !window.confirm(
-                      `Remove custom instructions for ${active.full_name}? This cannot be undone.`
-                    )
+                    !(await confirm({
+                      title: `Remove custom instructions for ${active.full_name}?`,
+                      description: "This cannot be undone.",
+                      confirmLabel: "Remove",
+                      destructive: true,
+                    }))
                   ) {
                     return
                   }

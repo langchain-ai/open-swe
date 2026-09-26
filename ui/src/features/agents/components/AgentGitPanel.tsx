@@ -19,6 +19,7 @@ import {
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 
 interface AgentGitPanelProps {
   thread: AgentThread
@@ -166,16 +167,15 @@ export function AgentGitPanel({
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
-                title={recoveryError ?? "Download recovery patch"}
+              <TooltipIconButton
+                label="Download recovery patch"
+                tooltip={recoveryError ?? "Download recovery patch"}
+                size="icon"
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
               >
                 <DownloadIcon className="size-3.5" />
-              </button>
+              </TooltipIconButton>
             ) : undefined
           }
         />

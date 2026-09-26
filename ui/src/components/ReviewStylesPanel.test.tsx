@@ -7,9 +7,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 import { api, type ReviewStyle } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
@@ -83,7 +85,9 @@ const chipStatus = (repo: string) =>
 async function renderAndSelect(repo: string) {
   render(
     <QueryClientProvider client={client}>
-      <ReviewStylesPanel />
+      <ConfirmProvider>
+        <ReviewStylesPanel />
+      </ConfirmProvider>
     </QueryClientProvider>
   )
   fireEvent.click(
@@ -140,12 +144,16 @@ it("caches an analysis under the repo it started for after the selection moves",
 })
 
 it("removes a repo from the list immediately and restores it when deletion fails", async () => {
-  vi.spyOn(window, "confirm").mockReturnValue(true)
   const request = deferred<void>()
   vi.spyOn(api, "deleteReviewStyle").mockReturnValue(request.promise)
   await renderAndSelect("acme/api")
 
   fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+  fireEvent.click(
+    within(await screen.findByRole("alertdialog")).getByRole("button", {
+      name: "Remove",
+    })
+  )
   await waitFor(() => expect(repoChip("acme/api")).toBeNull())
 
   const failure = new Error("cannot delete")

@@ -1,9 +1,14 @@
-import { Dialog } from "@base-ui/react/dialog"
 import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogDescription,
+  DialogPopup,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -95,116 +100,106 @@ export function OnboardingDialog() {
   }
 
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (!next) dismiss()
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
-          {step === "model" ? (
-            <div className="flex flex-col gap-4">
-              <Dialog.Title className="text-sm font-medium">
-                Choose your default model
-              </Dialog.Title>
-              <Dialog.Description className="text-xs text-muted-foreground">
-                Pick the model Open SWE uses when you don't specify one. You can
-                change this anytime in your settings.
-              </Dialog.Description>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium">Default model</span>
-                  <Select
-                    value={modelId}
-                    onValueChange={(v) => v && setModelId(v)}
-                  >
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Pick a model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {defaultModels?.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium">Reasoning effort</span>
-                  <Select
-                    value={effort}
-                    onValueChange={(v) => v && setEffort(v)}
-                  >
-                    <SelectTrigger className="w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currentModel?.efforts.map((e) => (
-                        <SelectItem key={e} value={e}>
-                          {e}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+      <DialogPopup className="max-w-md p-6">
+        {step === "model" ? (
+          <div className="flex flex-col gap-4">
+            <DialogTitle>Choose your default model</DialogTitle>
+            <DialogDescription>
+              Pick the model Open SWE uses when you don't specify one. You can
+              change this anytime in your settings.
+            </DialogDescription>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium">Default model</span>
+                <Select
+                  value={modelId}
+                  onValueChange={(v) => v && setModelId(v)}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Pick a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {defaultModels?.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="mt-2 flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDismissed(true)}
-                >
-                  Maybe later
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleSaveModel}
-                  disabled={!modelId || save.isPending}
-                >
-                  {save.isPending
-                    ? "Saving…"
-                    : needsSlack
-                      ? "Save & continue"
-                      : "Save"}
-                </Button>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium">Reasoning effort</span>
+                <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {currentModel?.efforts.map((e) => (
+                      <SelectItem key={e} value={e}>
+                        {e}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
-                <Dialog.Title className="text-sm font-medium">
-                  Connect your Slack account
-                </Dialog.Title>
-              </div>
-              <Dialog.Description className="text-xs text-muted-foreground">
-                Connect Slack so that when you tag Open SWE, it can resolve your
-                GitHub account. We use the email Slack verifies, which also lets
-                Linear mentions resolve to you.
-              </Dialog.Description>
-              <div className="mt-2 flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={dismiss}>
-                  Don't ask again
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    void connectService("slack")?.finally(
-                      () => void session.refetch()
-                    )
-                  }
-                >
-                  <IoLogoSlack className="size-4" />
-                  Connect Slack
-                </Button>
-              </div>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDismissed(true)}
+              >
+                Maybe later
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveModel}
+                disabled={!modelId || save.isPending}
+              >
+                {save.isPending
+                  ? "Saving…"
+                  : needsSlack
+                    ? "Save & continue"
+                    : "Save"}
+              </Button>
             </div>
-          )}
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
+              <DialogTitle>Connect your Slack account</DialogTitle>
+            </div>
+            <DialogDescription>
+              Connect Slack so that when you tag Open SWE, it can resolve your
+              GitHub account. We use the email Slack verifies, which also lets
+              Linear mentions resolve to you.
+            </DialogDescription>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={dismiss}>
+                Don't ask again
+              </Button>
+              <Button
+                size="sm"
+                onClick={() =>
+                  void connectService("slack")?.finally(
+                    () => void session.refetch()
+                  )
+                }
+              >
+                <IoLogoSlack className="size-4" />
+                Connect Slack
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogPopup>
+    </Dialog>
   )
 }

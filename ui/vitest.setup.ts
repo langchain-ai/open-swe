@@ -5,6 +5,17 @@ import { JSDOM } from "jsdom"
 // not. Node 26 defines an experimental `localStorage` global that reads back
 // undefined without `--localstorage-file`, so jsdom's never lands. Node 22 has
 // no such global, hence CI never sees this.
+// cmdk (ui/command) measures its list and scrolls the active item into view;
+// jsdom implements neither.
+if (typeof window !== "undefined") {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Element.prototype.scrollIntoView ??= () => {}
+}
+
 if (!(globalThis as { localStorage?: Storage }).localStorage) {
   const { window } = new JSDOM("", { url: "http://localhost:3000" })
   Object.defineProperty(globalThis, "localStorage", {

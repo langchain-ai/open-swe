@@ -1,23 +1,27 @@
-import { Dialog } from "@base-ui/react/dialog"
 import { useNavigate } from "@tanstack/react-router"
-import {
-  Command as CommandIcon,
-  Laptop,
-  LoaderCircle,
-  MessageSquare,
-  Search,
-} from "lucide-react"
+import { Command as CommandIcon, Laptop, MessageSquare } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import type { AppCommand } from "@/lib/appCommands"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DesktopLocalThreadSummary } from "@/desktop"
+import { Button } from "@/components/ui/button"
+import {
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@/components/ui/command"
 import { Kbd } from "@/components/ui/kbd"
+import { Spinner } from "@/components/ui/spinner"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
-import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 
 interface CommandResult {
@@ -45,7 +49,11 @@ type PaletteResult = CommandResult | CloudThreadResult | LocalThreadResult
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
-  return <Kbd className="ml-auto bg-background/70">{label}</Kbd>
+  return (
+    <CommandShortcut>
+      <Kbd className="bg-background/70">{label}</Kbd>
+    </CommandShortcut>
+  )
 }
 
 function commandMatches(command: AppCommand, query: string): boolean {
@@ -134,7 +142,6 @@ export function AppCommandPalette({
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [activeHighlight, setActiveHighlight] = useState({ key: "", index: 0 })
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -181,19 +188,8 @@ export function AppCommandPalette({
     }
     return [...grouped]
   }, [results])
-  const resultKey = results.map((result) => result.id).join("|")
 
-  const activeIndex =
-    activeHighlight.key === resultKey ? activeHighlight.index : 0
-  const setActiveIndex = (next: number | ((current: number) => number)) => {
-    setActiveHighlight({
-      key: resultKey,
-      index: typeof next === "function" ? next(activeIndex) : next,
-    })
-  }
-
-  const runResult = (result: PaletteResult | undefined) => {
-    if (!result) return
+  const runResult = (result: PaletteResult) => {
     onOpenChange(false)
     if (result.kind === "command") {
       void result.command.run?.()
@@ -212,145 +208,81 @@ export function AppCommandPalette({
     }
   }
 
-  const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault()
-      setActiveIndex((current) =>
-        results.length === 0 ? 0 : (current + 1) % results.length
-      )
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault()
-      setActiveIndex((current) =>
-        results.length === 0
-          ? 0
-          : (current - 1 + results.length) % results.length
-      )
-    } else if (event.key === "Home") {
-      event.preventDefault()
-      setActiveIndex(0)
-    } else if (event.key === "End") {
-      event.preventDefault()
-      setActiveIndex(Math.max(0, results.length - 1))
-    } else if (event.key === "Enter") {
-      event.preventDefault()
-      runResult(results[activeIndex])
-    }
-  }
-
   const showLoading = cloudThreads.isFetching && results.length === 0
   const showError = cloudThreads.isError && results.length === 0
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup
-          className="fixed top-[18%] left-1/2 z-50 flex max-h-[min(34rem,70vh)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-          data-hotkeys="ignore"
-        >
-          <Dialog.Title className="sr-only">
-            Search commands and threads
-          </Dialog.Title>
-          <Dialog.Description className="sr-only">
-            Search commands, cloud threads, and local desktop threads.
-          </Dialog.Description>
-          <div className="flex items-center gap-2 border-b border-border px-4">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              autoFocus
-              aria-activedescendant={results[activeIndex]?.id}
-              aria-autocomplete="list"
-              aria-controls="app-command-results"
-              className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={onInputKeyDown}
-              placeholder="Search commands, repositories, and threads…"
-              role="combobox"
-              value={query}
-            />
-            <Kbd>Esc</Kbd>
-          </div>
-          <div
-            className="min-h-20 overflow-y-auto p-2"
-            id="app-command-results"
-            role="listbox"
-          >
-            {showLoading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
-                <LoaderCircle className="size-4 animate-spin" />
-                Searching threads…
-              </div>
-            ) : showError ? (
-              <p className="py-10 text-center text-xs text-destructive">
-                Thread search is unavailable.
-              </p>
-            ) : results.length === 0 ? (
-              <p className="py-10 text-center text-xs text-muted-foreground">
-                No commands or threads found.
-              </p>
-            ) : (
-              <>
-                {resultGroups.map(([group, groupResults]) => (
-                  <div aria-label={group} key={group} role="group">
-                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                      {group}
-                    </div>
-                    {groupResults.map((result) => {
-                      const index = results.indexOf(result)
-                      const command =
-                        result.kind === "command" ? result.command : null
-                      const Icon =
-                        result.kind === "command"
-                          ? CommandIcon
-                          : result.kind === "local-thread"
-                            ? Laptop
-                            : MessageSquare
-                      return (
-                        <button
-                          aria-selected={index === activeIndex}
-                          className={cn(
-                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm",
-                            index === activeIndex
-                              ? "bg-accent text-accent-foreground"
-                              : "text-foreground"
-                          )}
-                          id={result.id}
-                          key={result.id}
-                          onClick={() => runResult(result)}
-                          onMouseEnter={() => setActiveIndex(index)}
-                          role="option"
-                          type="button"
-                        >
-                          <Icon className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate">
-                            {result.label}
-                          </span>
-                          {command?.shortcuts?.[0] && (
-                            <ShortcutHint shortcut={command.shortcuts[0]} />
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-                {cloudThreads.hasNextPage && (
-                  <button
-                    className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    disabled={cloudThreads.isFetchingNextPage}
-                    onClick={() => void cloudThreads.fetchNextPage()}
-                    type="button"
+    <CommandDialog
+      className="max-w-[40rem]"
+      description="Search commands, cloud threads, and local desktop threads."
+      onOpenChange={onOpenChange}
+      open={open}
+      title="Search commands and threads"
+    >
+      <Command data-hotkeys="ignore" loop shouldFilter={false}>
+        <CommandInput
+          autoFocus
+          onValueChange={setQuery}
+          placeholder="Search commands, repositories, and threads…"
+          value={query}
+        />
+        <CommandList className="max-h-[min(30rem,60vh)] min-h-20">
+          {showLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
+              <Spinner className="size-4" />
+              Searching threads…
+            </div>
+          ) : showError ? (
+            <p className="py-10 text-center text-xs text-destructive">
+              Thread search is unavailable.
+            </p>
+          ) : (
+            <CommandEmpty className="py-10 text-muted-foreground">
+              No commands or threads found.
+            </CommandEmpty>
+          )}
+          {resultGroups.map(([group, groupResults]) => (
+            <CommandGroup heading={group} key={group}>
+              {groupResults.map((result) => {
+                const command =
+                  result.kind === "command" ? result.command : null
+                const Icon =
+                  result.kind === "command"
+                    ? CommandIcon
+                    : result.kind === "local-thread"
+                      ? Laptop
+                      : MessageSquare
+                return (
+                  <CommandItem
+                    key={result.id}
+                    onSelect={() => runResult(result)}
+                    value={result.id}
                   >
-                    {cloudThreads.isFetchingNextPage && (
-                      <LoaderCircle className="size-3.5 animate-spin" />
+                    <Icon className="size-4 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {result.label}
+                    </span>
+                    {command?.shortcuts?.[0] && (
+                      <ShortcutHint shortcut={command.shortcuts[0]} />
                     )}
-                    Load more threads
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          ))}
+          {results.length > 0 && cloudThreads.hasNextPage && (
+            <Button
+              className="w-full text-muted-foreground"
+              disabled={cloudThreads.isFetchingNextPage}
+              onClick={() => void cloudThreads.fetchNextPage()}
+              variant="ghost"
+            >
+              {cloudThreads.isFetchingNextPage && <Spinner />}
+              Load more threads
+            </Button>
+          )}
+        </CommandList>
+      </Command>
+    </CommandDialog>
   )
 }

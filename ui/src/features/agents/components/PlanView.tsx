@@ -6,6 +6,12 @@ import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"
 import { buttonVariants } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+} from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
@@ -128,15 +134,19 @@ export function PlanView({
     const status = query.error instanceof PlanApiError ? query.error.status : 0
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-sm text-muted-foreground/70">
-          <p>
-            {status === 401
-              ? "Please sign in to view this artifact."
-              : "This artifact could not be found."}
-          </p>
-          {status === 401 ? <PlanSignInButton /> : null}
-          {backLink}
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyDescription>
+              {status === 401
+                ? "Please sign in to view this artifact."
+                : "This artifact could not be found."}
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            {status === 401 ? <PlanSignInButton /> : null}
+            {backLink}
+          </EmptyContent>
+        </Empty>
       </Centered>
     )
   }
@@ -145,13 +155,15 @@ export function PlanView({
   if (!plan?.html.trim() && !plan?.markdown.trim()) {
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-sm text-muted-foreground/70">
-          <p>
-            The agent is still writing the content. This view will update
-            automatically…
-          </p>
-          {backLink}
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyDescription>
+              The agent is still writing the content. This view will update
+              automatically…
+            </EmptyDescription>
+          </EmptyHeader>
+          {backLink && <EmptyContent>{backLink}</EmptyContent>}
+        </Empty>
       </Centered>
     )
   }

@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChatCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import type { PrReviewComment } from "@/lib/api"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 function basename(path: string): string {
   const idx = path.lastIndexOf("/")
@@ -27,7 +36,6 @@ export function ReviewCommentsMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const wrapperRef = useRef<HTMLDivElement | null>(null)
 
   const comments = useQuery({
     queryKey: ["reviewComments", owner, repo, number],
@@ -48,120 +56,103 @@ export function ReviewCommentsMenu({
     )
   }, [otherComments, query])
 
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !wrapperRef.current?.contains(event.target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("pointerdown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
-
   const count = otherComments.length
 
   return (
-    <div ref={wrapperRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-label="PR comments"
-        aria-expanded={open}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground",
-          open && "text-foreground"
-        )}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="PR comments"
+            className="text-muted-foreground"
+          />
+        }
       >
-        <ChatCircleIcon className="size-3.5" />
+        <ChatCircleIcon />
         <span>Comments</span>
         {count > 0 && (
           <span className="rounded bg-muted px-1 text-[10px] font-medium text-foreground">
             {count}
           </span>
         )}
-      </button>
-      {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 w-96 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
-          <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
-            <MagnifyingGlassIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <input
+      </PopoverTrigger>
+      <PopoverPopup
+        align="end"
+        className="flex w-96 flex-col overflow-hidden p-0"
+      >
+        <div className="border-b border-border p-1.5">
+          <InputGroup>
+            <InputGroupAddon>
+              <MagnifyingGlassIcon />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label="Search comments"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search comments"
-              className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
             />
-          </div>
-          <div className="max-h-96 overflow-y-auto">
-            {comments.isLoading ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                Loading…
-              </p>
-            ) : comments.isError ? (
-              <p className="px-3 py-4 text-center text-xs text-destructive">
-                Failed to load comments
-              </p>
-            ) : filtered.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+          </InputGroup>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          {comments.isLoading ? (
+            <Empty className="p-4">
+              <Spinner />
+            </Empty>
+          ) : comments.isError ? (
+            <p className="px-3 py-4 text-center text-xs text-destructive">
+              Failed to load comments
+            </p>
+          ) : filtered.length === 0 ? (
+            <Empty className="p-4">
+              <EmptyDescription>
                 {otherComments.length === 0
                   ? "No comments yet"
                   : "No matching comments"}
-              </p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {filtered.map((comment) => (
-                  <li key={comment.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelect(comment)
-                        setOpen(false)
-                      }}
-                      className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
-                    >
-                      {comment.author_avatar_url ? (
-                        <img
-                          src={comment.author_avatar_url}
-                          alt=""
-                          className="mt-0.5 size-4 shrink-0 rounded-full"
-                        />
-                      ) : (
-                        <span className="mt-0.5 size-4 shrink-0 rounded-full bg-muted" />
+              </EmptyDescription>
+            </Empty>
+          ) : (
+            <ul className="divide-y divide-border">
+              {filtered.map((comment) => (
+                <li key={comment.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(comment)
+                      setOpen(false)
+                    }}
+                    className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
+                  >
+                    <Avatar className="mt-0.5 size-4">
+                      {comment.author_avatar_url && (
+                        <AvatarImage src={comment.author_avatar_url} alt="" />
                       )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          <span className="font-medium text-foreground">
-                            {comment.author}
+                      <AvatarFallback />
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-[11px]">
+                        <span className="font-medium text-foreground">
+                          {comment.author}
+                        </span>
+                        {comment.path && (
+                          <span className="truncate font-mono text-muted-foreground">
+                            {basename(comment.path)}
+                            {comment.line !== null ? `:${comment.line}` : ""}
                           </span>
-                          {comment.path && (
-                            <span className="truncate font-mono text-muted-foreground">
-                              {basename(comment.path)}
-                              {comment.line !== null ? `:${comment.line}` : ""}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {comment.body}
-                        </p>
+                        )}
                       </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {comment.body}
+                      </p>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      )}
-    </div>
+      </PopoverPopup>
+    </Popover>
   )
 }

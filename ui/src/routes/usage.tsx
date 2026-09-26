@@ -14,7 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react"
-import { Fragment, useState } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 
 import type {
   AnalyticsMetadata,
@@ -27,11 +27,18 @@ import type {
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { CopyButton } from "@/components/CopyButton"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
-import { AppShell, SettingsSection } from "@/components/AppShell"
+import { AuthedAppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import {
   Select,
   SelectContent,
@@ -40,17 +47,27 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import {
   buildUsageDiagnostics,
   metricAvailability,
   type MetricAvailability,
 } from "@/lib/usage-diagnostics"
-import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -89,8 +106,11 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   all: "All time",
 }
 
+const HINT_TRIGGER_CLASS =
+  "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+const STATIC_ROW_CLASS = "hover:bg-transparent has-aria-expanded:bg-transparent"
+
 function UsagePage() {
-  const session = useSession()
   const period =
     (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
@@ -103,18 +123,8 @@ function UsagePage() {
     ? period
     : "7d"
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Usage"
       className="max-w-5xl"
       action={
@@ -126,12 +136,14 @@ function UsagePage() {
         />
       }
     >
-      <UsageAnalytics
-        period={activePeriod}
-        login={session.data.login}
-        isAdmin={session.data.is_admin}
-      />
-    </AppShell>
+      {(user) => (
+        <UsageAnalytics
+          period={activePeriod}
+          login={user.login}
+          isAdmin={user.is_admin}
+        />
+      )}
+    </AuthedAppShell>
   )
 }
 
@@ -270,6 +282,21 @@ function UsageAnalyticsPeriod({
     leaderboard.isError ? undefined : leaderboard.data,
     report.isError ? undefined : report.data?.payload,
   ].filter((data): data is NonNullable<typeof data> => data != null)
+  const changeUsageScope = (scope: UsageScope) => {
+    setUsageScope(scope)
+    if (sort === "invocations" || sort === "threads") {
+      setSort(scope)
+    } else if (
+      sort === "avg_invocation_seconds" ||
+      sort === "avg_thread_seconds"
+    ) {
+      setSort(
+        scope === "threads" ? "avg_thread_seconds" : "avg_invocation_seconds"
+      )
+    }
+    setLeaderboardPage(1)
+    setLeaderboardCursors([undefined])
+  }
 
   return (
     <>
@@ -279,43 +306,28 @@ function UsageAnalyticsPeriod({
         title="Agent leaderboard"
         description="Ranked by merged PRs, then agent lines of code and PRs opened."
         action={
-          <div className="flex items-center gap-2">
-            <div
-              className="flex rounded-md bg-muted p-0.5"
-              role="group"
-              aria-label="Usage scope"
-            >
-              {(["invocations", "threads"] as const).map((scope) => (
-                <Button
-                  key={scope}
-                  type="button"
-                  size="sm"
-                  variant={usageScope === scope ? "secondary" : "ghost"}
-                  aria-pressed={usageScope === scope}
-                  className="capitalize"
-                  onClick={() => {
-                    setUsageScope(scope)
-                    if (sort === "invocations" || sort === "threads") {
-                      setSort(scope)
-                    } else if (
-                      sort === "avg_invocation_seconds" ||
-                      sort === "avg_thread_seconds"
-                    ) {
-                      setSort(
-                        scope === "threads"
-                          ? "avg_thread_seconds"
-                          : "avg_invocation_seconds"
-                      )
-                    }
-                    setLeaderboardPage(1)
-                    setLeaderboardCursors([undefined])
-                  }}
-                >
-                  {scope}
-                </Button>
-              ))}
-            </div>
-          </div>
+          <ToggleGroup
+            aria-label="Usage scope"
+            value={[usageScope]}
+            onValueChange={([scope]) => {
+              if (scope === "invocations" || scope === "threads") {
+                changeUsageScope(scope)
+              }
+            }}
+            spacing={0.5}
+            className="bg-muted p-0.5"
+          >
+            {(["invocations", "threads"] as const).map((scope) => (
+              <ToggleGroupItem
+                key={scope}
+                value={scope}
+                size="sm"
+                className="text-xs capitalize aria-pressed:bg-background aria-pressed:shadow-sm"
+              >
+                {scope}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         }
       >
         {leaderboard.isLoading ? (
@@ -332,19 +344,22 @@ function UsageAnalyticsPeriod({
                 ? "Usage analytics is unavailable on this deployment."
                 : "Could not load usage analytics. Try again."}
             </p>
-            <button
+            <Button
               type="button"
-              className="underline"
-              onClick={() => leaderboard.refetch()}
+              size="sm"
+              variant="outline"
+              onClick={() => void leaderboard.refetch()}
             >
               Retry usage analytics
-            </button>
+            </Button>
           </div>
         ) : !leaderboard.data?.total_members ? (
-          <div className="p-6 text-center text-xs text-muted-foreground">
-            No Open SWE Agent usage has been recorded for{" "}
-            {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
-          </div>
+          <Empty>
+            <EmptyDescription>
+              No Open SWE Agent usage has been recorded for{" "}
+              {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
+            </EmptyDescription>
+          </Empty>
         ) : (
           <UsageTable
             scope={usageScope}
@@ -407,10 +422,12 @@ function UsageAnalyticsPeriod({
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-xs text-muted-foreground">
-            No reviewer stats have been recorded for{" "}
-            {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
-          </div>
+          <Empty>
+            <EmptyDescription>
+              No reviewer stats have been recorded for{" "}
+              {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
+            </EmptyDescription>
+          </Empty>
         )}
       </SettingsSection>
       <AnalyticsCoverage
@@ -472,19 +489,19 @@ function AnalyticsCoverage({
           label: "Analytics are updating",
           description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
-          tone: "text-amber-600 dark:text-amber-400",
+          tone: "text-warning-foreground",
         }
       : {
           label: "Analytics are up to date",
           icon: CheckCircleIcon,
-          tone: "text-emerald-600 dark:text-emerald-400",
+          tone: "text-success-foreground",
         }
   const StatusIcon = status.icon
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-border bg-card text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+      <Collapsible className="rounded-xl border border-border bg-card text-xs">
+        <div className="flex items-center gap-3 px-4 py-3.5">
           <StatusIcon
             aria-hidden="true"
             className={`size-4 shrink-0 ${status.tone}`}
@@ -506,26 +523,30 @@ function AnalyticsCoverage({
             variant="outline"
             className="shrink-0"
             disabled={refreshing}
-            onClick={(event) => {
-              event.preventDefault()
-              onRefresh()
-            }}
+            onClick={onRefresh}
           >
-            <ArrowClockwiseIcon
-              aria-hidden="true"
-              className={`size-3.5 ${refreshing ? "animate-spin" : ""}`}
-            />
+            {refreshing ? (
+              <Spinner aria-hidden="true" />
+            ) : (
+              <ArrowClockwiseIcon aria-hidden="true" className="size-3.5" />
+            )}
             {refreshing ? "Refreshing…" : "Refresh now"}
           </Button>
-          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+          <CollapsibleTrigger
+            render={<Button type="button" size="sm" variant="ghost" />}
+            className="group/details shrink-0 text-muted-foreground data-panel-open:text-foreground"
+          >
             Details
             <CaretDownIcon
               aria-hidden="true"
-              className="size-3.5 transition-transform group-open:rotate-180"
+              className="size-3.5 transition-transform group-data-panel-open/details:rotate-180"
             />
-          </span>
-        </summary>
-        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent
+          keepMounted
+          className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground"
+        >
           <p>
             Period: {PERIOD_LABELS[period]} · PR report as of{" "}
             {reportServerAsOf ? (
@@ -580,8 +601,8 @@ function AnalyticsCoverage({
               })
             }
           />
-        </div>
-      </details>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }
@@ -657,13 +678,14 @@ function PRMergeRateSection({
               ? "PR analytics is unavailable on this deployment."
               : "Could not load PR outcomes. Try again."}
           </p>
-          <button
+          <Button
             type="button"
-            className="underline"
-            onClick={() => report.refetch()}
+            size="sm"
+            variant="outline"
+            onClick={() => void report.refetch()}
           >
             Retry
-          </button>
+          </Button>
         </div>
       ) : data?.status === "ready" ? (
         <PRMergeRateTable
@@ -672,44 +694,35 @@ function PRMergeRateSection({
           maturityDays={data.maturity_days}
         />
       ) : (
-        <p
-          className="p-6 text-center text-xs text-muted-foreground"
-          role="status"
-        >
-          {emptyMessage}
-        </p>
+        <Empty role="status">
+          <EmptyDescription>{emptyMessage}</EmptyDescription>
+        </Empty>
       )}
       {data?.unavailable_thread_ids.length ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <Collapsible className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <DisclosureTrigger>
             Unavailable model attribution ({data.unavailable_thread_ids.length})
-          </summary>
-          <p className="mt-3">
-            These PRs are excluded from model outcomes. Copy a thread ID to
-            triage its opening-run attribution.
-          </p>
-          <ul className="mt-2 space-y-1">
-            {data.unavailable_thread_ids.map((threadId) => (
-              <li key={threadId} className="flex items-center gap-2">
-                <code className="select-all">{threadId}</code>
-                <button
-                  type="button"
-                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  onClick={() => void navigator.clipboard.writeText(threadId)}
-                >
-                  Copy
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
+          </DisclosureTrigger>
+          <CollapsibleContent keepMounted>
+            <p className="mt-3">
+              These PRs are excluded from model outcomes. Copy a thread ID to
+              triage its opening-run attribution.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {data.unavailable_thread_ids.map((threadId) => (
+                <li key={threadId} className="flex items-center gap-2">
+                  <code className="select-all">{threadId}</code>
+                  <CopyButton text={threadId} label="Copy thread ID" />
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
       {data ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
-            How these numbers work
-          </summary>
-          <div className="mt-3 space-y-3">
+        <Collapsible className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <DisclosureTrigger>How these numbers work</DisclosureTrigger>
+          <CollapsibleContent keepMounted className="mt-3 space-y-3">
             <p>
               <strong>Open</strong> includes PRs that haven’t been merged or
               closed. Each count’s tooltip shows the age breakdown: open for
@@ -759,10 +772,22 @@ function PRMergeRateSection({
                 hidden for privacy.
               </p>
             ) : null}
-          </div>
-        </details>
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
     </SettingsSection>
+  )
+}
+
+function DisclosureTrigger({ children }: { children: ReactNode }) {
+  return (
+    <CollapsibleTrigger className="group/disclosure flex cursor-pointer items-center gap-1 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+      <ChevronRight
+        aria-hidden="true"
+        className="size-3 shrink-0 transition-transform group-data-panel-open/disclosure:rotate-90"
+      />
+      <span>{children}</span>
+    </CollapsibleTrigger>
   )
 }
 
@@ -784,7 +809,7 @@ function OpenPRCount({
       <TooltipTrigger
         closeOnClick={false}
         onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className={HINT_TRIGGER_CLASS}
       >
         {cohort.waiting + cohort.mature_pending}
       </TooltipTrigger>
@@ -813,29 +838,31 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
 function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
   if (!("avg_delivery_seconds" in cohort)) {
     // A backend that predates the metric has no key for it at all.
-    return (
-      <span
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        title="Metric unavailable from this backend"
-        aria-label="Avg time to PR: metric unavailable from this backend"
-        tabIndex={0}
-      >
-        —
-      </span>
-    )
+    return <ExplainedDash label="Metric unavailable from this backend" />
   }
   if (cohort.avg_delivery_seconds == null) {
-    return <span title="No PRs with valid timing in this group">—</span>
+    return <ExplainedDash label="No PRs with valid timing in this group" />
   }
   return (
     <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+      <TooltipTrigger className={HINT_TRIGGER_CLASS}>
         {formatAvgDuration(cohort.avg_delivery_seconds)}
       </TooltipTrigger>
       <TooltipPopup className="max-w-xs">
         Based on PRs whose opening run has a valid start time, regardless of
         outcome; PRs with missing or invalid timing are excluded.
       </TooltipPopup>
+    </Tooltip>
+  )
+}
+
+function ExplainedDash({ label }: { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger aria-label={label} className={HINT_TRIGGER_CLASS}>
+        —
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-xs">{label}</TooltipPopup>
     </Tooltip>
   )
 }
@@ -931,132 +958,128 @@ function PRMergeRateTable({
 
   return (
     <div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-xs">
-          <thead className="border-b border-border text-muted-foreground">
-            <tr>
-              {PR_OUTCOME_COLUMNS.map((column, index, columns) => (
-                <SortableHeader
-                  key={column.key}
-                  column={
-                    column.key === "merge_rate"
-                      ? {
-                          ...column,
-                          tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
-                        }
-                      : column
-                  }
-                  sortKey={sort}
-                  sortDirection={direction}
-                  onSort={(nextSort, defaultDirection) => {
-                    setDirection(
-                      sort === nextSort
-                        ? direction === "asc"
-                          ? "desc"
-                          : "asc"
-                        : defaultDirection
-                    )
-                    setSort(nextSort)
-                    setPage(1)
-                  }}
-                  className={`${index === 0 ? "sticky left-0 z-10 bg-card pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
-                />
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((cohort) => {
-              const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-              const hasMultipleEfforts = cohort.efforts.length > 1
-              const isExpanded = hasMultipleEfforts && expanded.has(key)
-              const modelLabel = cohort.model_id
-                ? safeModelLabel(cohort.model_id) || "Unavailable"
-                : "Unavailable"
-              return (
-                <Fragment key={key}>
-                  <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {hasMultipleEfforts ? (
-                          <button
-                            type="button"
-                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                            aria-expanded={isExpanded}
-                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
-                            onClick={() =>
-                              setExpanded((current) => {
-                                const next = new Set(current)
-                                if (next.has(key)) next.delete(key)
-                                else next.add(key)
-                                return next
-                              })
-                            }
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="size-3.5" />
-                            ) : (
-                              <ChevronRight className="size-3.5" />
-                            )}
-                          </button>
-                        ) : (
-                          <span
-                            aria-hidden="true"
-                            className="-ml-1 size-5.5 shrink-0"
-                          />
-                        )}
-                        <div>
-                          <div className="font-medium">{modelLabel}</div>
-                          <div className="text-muted-foreground">
-                            {hasMultipleEfforts
-                              ? `All efforts · ${cohort.model_attribution_quality} attribution`
-                              : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
-                          </div>
+      <Table className="min-w-[860px]">
+        <TableHeader className="text-muted-foreground">
+          <TableRow className={STATIC_ROW_CLASS}>
+            {PR_OUTCOME_COLUMNS.map((column, index, columns) => (
+              <SortableHeader
+                key={column.key}
+                column={
+                  column.key === "merge_rate"
+                    ? {
+                        ...column,
+                        tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
+                      }
+                    : column
+                }
+                sortKey={sort}
+                sortDirection={direction}
+                onSort={(nextSort, defaultDirection) => {
+                  setDirection(
+                    sort === nextSort
+                      ? direction === "asc"
+                        ? "desc"
+                        : "asc"
+                      : defaultDirection
+                  )
+                  setSort(nextSort)
+                  setPage(1)
+                }}
+                className={`${index === 0 ? "sticky left-0 z-10 bg-card pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+              />
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((cohort) => {
+            const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+            const hasMultipleEfforts = cohort.efforts.length > 1
+            const isExpanded = hasMultipleEfforts && expanded.has(key)
+            const modelLabel = cohort.model_id
+              ? safeModelLabel(cohort.model_id) || "Unavailable"
+              : "Unavailable"
+            return (
+              <Fragment key={key}>
+                <TableRow className={STATIC_ROW_CLASS}>
+                  <TableCell className="sticky left-0 z-10 bg-card px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {hasMultipleEfforts ? (
+                        <IconButton
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="-ml-1 text-muted-foreground"
+                          aria-expanded={isExpanded}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                          onClick={() =>
+                            setExpanded((current) => {
+                              const next = new Set(current)
+                              if (next.has(key)) next.delete(key)
+                              else next.add(key)
+                              return next
+                            })
+                          }
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="size-3.5" />
+                          ) : (
+                            <ChevronRight className="size-3.5" />
+                          )}
+                        </IconButton>
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="-ml-1 size-5 shrink-0"
+                        />
+                      )}
+                      <div>
+                        <div className="font-medium">{modelLabel}</div>
+                        <div className="text-muted-foreground">
+                          {hasMultipleEfforts
+                            ? `All efforts · ${cohort.model_attribution_quality} attribution`
+                            : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
                         </div>
                       </div>
-                    </td>
-                    <PRMergeRateCells
-                      cohort={cohort}
-                      maturityDays={maturityDays}
-                    />
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <AvgTimeToPR cohort={cohort} />
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <AvgTimeToMerge cohort={cohort} />
-                    </td>
-                  </tr>
-                  {isExpanded
-                    ? cohort.efforts.map((effort) => (
-                        <tr
-                          key={`${key}-${effort.effort ?? "unknown"}`}
-                          className="bg-muted/35"
-                        >
-                          <td className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 font-medium">
-                            {formatEffort(effort.effort)}
-                          </td>
-                          <PRMergeRateCells
-                            cohort={effort}
-                            maturityDays={maturityDays}
-                          />
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    : null}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+                    </div>
+                  </TableCell>
+                  <PRMergeRateCells
+                    cohort={cohort}
+                    maturityDays={maturityDays}
+                  />
+                  <TableCell className="px-4 py-3 text-right tabular-nums">
+                    <AvgTimeToPR cohort={cohort} />
+                  </TableCell>
+                  <TableCell className="px-4 py-3 text-right tabular-nums">
+                    <AvgTimeToMerge cohort={cohort} />
+                  </TableCell>
+                </TableRow>
+                {isExpanded
+                  ? cohort.efforts.map((effort) => (
+                      <TableRow
+                        key={`${key}-${effort.effort ?? "unknown"}`}
+                        className="bg-muted/35 hover:bg-muted/35"
+                      >
+                        <TableCell className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 font-medium">
+                          {formatEffort(effort.effort)}
+                        </TableCell>
+                        <PRMergeRateCells
+                          cohort={effort}
+                          maturityDays={maturityDays}
+                        />
+                        <TableCell className="px-4 py-3 text-right tabular-nums">
+                          <ExplainedDash label="Average shown at the model level" />
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-right tabular-nums">
+                          <ExplainedDash label="Average shown at the model level" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  : null}
+              </Fragment>
+            )
+          })}
+        </TableBody>
+      </Table>
       <TablePagination
         page={currentPage}
         pageSize={pageSize}
@@ -1146,30 +1169,31 @@ function SortableHeader<Key extends string>({
     : undefined
 
   const button = (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-        column.align === "right" ? "justify-end" : "justify-start"
-      } ${isActive ? "text-foreground" : ""} ${
-        column.tooltip
-          ? "cursor-help underline decoration-dotted underline-offset-2"
-          : ""
-      }`}
+      className={cn(
+        "h-auto w-full rounded-sm px-2 py-3 font-normal hover:bg-muted/50",
+        column.align === "right" ? "justify-end" : "justify-start",
+        isActive ? "text-foreground" : "text-muted-foreground",
+        column.tooltip &&
+          "cursor-help underline decoration-dotted underline-offset-2"
+      )}
     >
       {column.label}
       <Icon
         className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
         aria-hidden
       />
-    </button>
+    </Button>
   )
 
   return (
-    <th
+    <TableHead
       scope="col"
       aria-sort={ariaSort}
-      className={`${className} p-0 font-normal`}
+      className={cn("h-auto p-0 font-normal text-muted-foreground", className)}
     >
       {column.tooltip ? (
         <Tooltip>
@@ -1179,7 +1203,7 @@ function SortableHeader<Key extends string>({
       ) : (
         button
       )}
-    </th>
+    </TableHead>
   )
 }
 
@@ -1208,19 +1232,21 @@ function PRMergeRateCells({
 }) {
   return (
     <>
-      <td className="px-2 py-3 text-right tabular-nums">
+      <TableCell className="px-2 py-3 text-right tabular-nums">
         {cohort.cohort_size}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">{cohort.merged}</td>
-      <td className="px-2 py-3 text-right tabular-nums">
+      </TableCell>
+      <TableCell className="px-2 py-3 text-right tabular-nums">
+        {cohort.merged}
+      </TableCell>
+      <TableCell className="px-2 py-3 text-right tabular-nums">
         {cohort.closed_without_merge}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
+      </TableCell>
+      <TableCell className="px-2 py-3 text-right tabular-nums">
         <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
+      </TableCell>
+      <TableCell className="px-2 py-3 text-right tabular-nums">
         <Tooltip>
-          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <TooltipTrigger className={HINT_TRIGGER_CLASS}>
             {cohort.median_distance_basis_points == null
               ? "—"
               : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
@@ -1232,16 +1258,14 @@ function PRMergeRateCells({
         </Tooltip>
         {(cohort.distance_sample_size ?? 0) > 0 &&
           (cohort.distance_sample_size ?? 0) < 5 && (
-            <div className="text-xs text-amber-600 dark:text-amber-400">
-              Small sample
-            </div>
+            <div className="text-xs text-warning-foreground">Small sample</div>
           )}
-      </td>
-      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
+      </TableCell>
+      <TableCell className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
         {cohort.mature_cohort_merge_share == null
           ? "—"
           : formatPercent(cohort.mature_cohort_merge_share)}
-      </td>
+      </TableCell>
     </>
   )
 }
@@ -1277,95 +1301,100 @@ function UsageTable({
 }) {
   return (
     <div>
-      <div className="overflow-x-auto">
-        <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
-          {isUpdating ? (
-            <caption className="sr-only">Updating leaderboard</caption>
-          ) : null}
-          <thead className="border-b border-border text-xs text-muted-foreground">
-            <tr>
-              {usageColumns(scope, period).map((column, index, columns) => (
-                <SortableHeader
-                  key={column.key}
-                  column={column}
-                  sortKey={sort}
-                  sortDirection={direction}
-                  onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
-                />
-              ))}
-            </tr>
-          </thead>
-          <tbody
-            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
-          >
-            {rows.map((row) => (
-              <tr
-                key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-              >
-                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="sticky left-0 z-10 bg-card px-2 py-3">
-                  <UserCell
-                    row={row}
-                    isCurrentUser={row.rank === currentUserRank}
-                  />
-                </td>
-                <td className="max-w-48 px-2 py-3 text-muted-foreground">
-                  <div className="truncate">
-                    {safeModelLabel(row.favorite_model) || "Unavailable"}
-                  </div>
-                  <div className="capitalize">
-                    {row.favorite_model_effort === undefined
-                      ? null
-                      : (row.favorite_model_effort ?? "Unknown")}
-                  </div>
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {formatNumber(
-                    scope === "threads" ? (row.threads ?? 0) : row.invocations
-                  )}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {row.threads
-                    ? (row.invocations / row.threads).toFixed(1)
-                    : "—"}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {formatNumber(row.total_tokens)}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  <UsageCost row={row} />
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {formatDuration(
-                    scope === "threads"
-                      ? (row.avg_thread_seconds ?? 0)
-                      : row.avg_invocation_seconds
-                  )}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {formatNumber(row.prs_opened)}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {formatNumber(row.merged_prs)}
-                </td>
-                <td className="px-2 py-3 text-right tabular-nums">
-                  {(row.merged_prs_per_thread ?? 0).toFixed(2)}
-                </td>
-                <td
-                  className="px-2 py-3 text-right tabular-nums"
-                  title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
-                >
-                  {formatNumber(row.agent_loc)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {formatNumber(row.feedback_given)}
-                </td>
-              </tr>
+      <Table aria-busy={isUpdating} className="min-w-[1040px]">
+        {isUpdating ? (
+          <TableCaption className="sr-only">Updating leaderboard</TableCaption>
+        ) : null}
+        <TableHeader className="text-muted-foreground">
+          <TableRow className={STATIC_ROW_CLASS}>
+            {usageColumns(scope, period).map((column, index, columns) => (
+              <SortableHeader
+                key={column.key}
+                column={column}
+                sortKey={sort}
+                sortDirection={direction}
+                onSort={onSort}
+                className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+              />
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableRow>
+        </TableHeader>
+        <TableBody className={isUpdating ? "opacity-50" : undefined}>
+          {rows.map((row) => (
+            <TableRow
+              key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+              className={STATIC_ROW_CLASS}
+            >
+              <TableCell className="px-4 py-3 text-muted-foreground">
+                {row.rank}
+              </TableCell>
+              <TableCell className="sticky left-0 z-10 bg-card px-2 py-3">
+                <UserCell
+                  row={row}
+                  isCurrentUser={row.rank === currentUserRank}
+                />
+              </TableCell>
+              <TableCell className="max-w-48 px-2 py-3 text-muted-foreground">
+                <div className="truncate">
+                  {safeModelLabel(row.favorite_model) || "Unavailable"}
+                </div>
+                <div className="capitalize">
+                  {row.favorite_model_effort === undefined
+                    ? null
+                    : (row.favorite_model_effort ?? "Unknown")}
+                </div>
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {formatNumber(
+                  scope === "threads" ? (row.threads ?? 0) : row.invocations
+                )}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {row.threads ? (row.invocations / row.threads).toFixed(1) : "—"}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {formatNumber(row.total_tokens)}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                <UsageCost row={row} />
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {formatDuration(
+                  scope === "threads"
+                    ? (row.avg_thread_seconds ?? 0)
+                    : row.avg_invocation_seconds
+                )}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {formatNumber(row.prs_opened)}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {formatNumber(row.merged_prs)}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                {(row.merged_prs_per_thread ?? 0).toFixed(2)}
+              </TableCell>
+              <TableCell className="px-2 py-3 text-right tabular-nums">
+                <Tooltip>
+                  <TooltipTrigger
+                    aria-label={`${formatNumber(row.agent_loc)} agent LOC: ${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
+                    className={HINT_TRIGGER_CLASS}
+                  >
+                    {formatNumber(row.agent_loc)}
+                  </TooltipTrigger>
+                  <TooltipPopup>
+                    {formatNumber(row.additions)} additions,{" "}
+                    {formatNumber(row.deletions)} deletions
+                  </TooltipPopup>
+                </Tooltip>
+              </TableCell>
+              <TableCell className="px-4 py-3 text-right tabular-nums">
+                {formatNumber(row.feedback_given)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
       <TablePagination
         page={page}
         pageSize={pageSize}

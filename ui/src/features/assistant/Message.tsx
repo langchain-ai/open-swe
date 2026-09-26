@@ -15,7 +15,14 @@ import {
 } from "@assistant-ui/react-langchain"
 import { useMessages } from "@langchain/react"
 import type { AnyStream, SubagentDiscoverySnapshot } from "@langchain/react"
-import { Copy } from "lucide-react"
+import type { ReactNode } from "react"
+import { ChevronRight, Copy } from "lucide-react"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { parseStructuredInput } from "@/features/agents/lib/structuredInputMessages"
 import {
@@ -25,6 +32,39 @@ import {
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { DiffView } from "@/features/agents/components/chat/DiffView"
 
+function Disclosure({
+  summary,
+  summaryClassName,
+  className,
+  defaultOpen,
+  children,
+}: {
+  summary: ReactNode
+  summaryClassName?: string
+  className?: string
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  return (
+    <Collapsible
+      className={className}
+      data-transcript-disclosure=""
+      defaultOpen={defaultOpen}
+    >
+      <CollapsibleTrigger
+        className={cn(
+          "flex w-full cursor-pointer items-start gap-1 text-left [&[data-panel-open]>svg]:rotate-90",
+          summaryClassName
+        )}
+      >
+        <ChevronRight className="mt-[0.2lh] size-3.5 shrink-0 transition-transform" />
+        <span className="min-w-0">{summary}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent hiddenUntilFound>{children}</CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 function HumanText({ text }: { text: string }) {
   const parsed = parseStructuredInput(text)
   if (
@@ -32,10 +72,9 @@ function HumanText({ text }: { text: string }) {
     (parsed.type === "message" && parsed.senderKind === "system")
   ) {
     return (
-      <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Context</summary>
+      <Disclosure className="text-xs text-muted-foreground" summary="Context">
         <pre className="whitespace-pre-wrap">{text}</pre>
-      </details>
+      </Disclosure>
     )
   }
   return <div className="whitespace-pre-wrap">{parsed.content}</div>
@@ -57,20 +96,24 @@ export function ToolResult({
   status,
 }: ToolCallMessagePartProps) {
   return (
-    <details
+    <Disclosure
+      key={isError ? "error" : "ok"}
       className={`my-2 rounded-xl border p-3 text-sm ${isError ? "border-destructive text-destructive" : "border-border"}`}
-      open={isError || undefined}
+      defaultOpen={isError}
+      summaryClassName="font-medium"
+      summary={
+        <>
+          {toolName}{" "}
+          <span className="ml-2 text-xs text-muted-foreground">
+            {isError
+              ? "Failed"
+              : status.type === "running"
+                ? "Running"
+                : "Complete"}
+          </span>
+        </>
+      }
     >
-      <summary className="cursor-pointer font-medium">
-        {toolName}{" "}
-        <span className="ml-2 text-xs text-muted-foreground">
-          {isError
-            ? "Failed"
-            : status.type === "running"
-              ? "Running"
-              : "Complete"}
-        </span>
-      </summary>
       <pre className="mt-2 max-h-48 overflow-auto text-xs whitespace-pre-wrap">
         {JSON.stringify(args, null, 2)}
       </pre>
@@ -79,7 +122,7 @@ export function ToolResult({
           {outputText(result)}
         </pre>
       )}
-    </details>
+    </Disclosure>
   )
 }
 
@@ -116,13 +159,17 @@ function SubagentTool(props: ToolCallMessagePartProps) {
   const subagents = useLangChainSubagents()
   const target = subagents.get(props.toolCallId)
   return (
-    <details className="my-2 rounded-xl border border-border p-3 text-sm">
-      <summary className="cursor-pointer">
-        Subagent:{" "}
-        {typeof props.args.description === "string"
-          ? props.args.description
-          : props.toolName}
-      </summary>
+    <Disclosure
+      className="my-2 rounded-xl border border-border p-3 text-sm"
+      summary={
+        <>
+          Subagent:{" "}
+          {typeof props.args.description === "string"
+            ? props.args.description
+            : props.toolName}
+        </>
+      }
+    >
       {stream && target ? (
         <div className="mt-3 max-h-96 overflow-auto">
           <SubagentTranscript
@@ -134,7 +181,7 @@ function SubagentTool(props: ToolCallMessagePartProps) {
       ) : (
         <ToolResult {...props} />
       )}
-    </details>
+    </Disclosure>
   )
 }
 
@@ -203,31 +250,38 @@ export function AssistantMessage() {
             const reading = part.type.startsWith("group-read:")
             const path = part.type.slice(part.type.indexOf(":") + 1)
             return (
-              <details className="my-2 rounded-xl border border-border p-3 text-sm">
-                <summary className="cursor-pointer font-medium break-all">
-                  {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
-                  calls
-                  {part.status.type === "running" && (
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      Running
-                    </span>
-                  )}
-                </summary>
+              <Disclosure
+                className="my-2 rounded-xl border border-border p-3 text-sm"
+                summaryClassName="font-medium break-all"
+                summary={
+                  <>
+                    {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
+                    calls
+                    {part.status.type === "running" && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        Running
+                      </span>
+                    )}
+                  </>
+                }
+              >
                 <div className="mt-3 space-y-3">{children}</div>
-              </details>
+              </Disclosure>
             )
           }
           switch (part.type) {
             case "group-activity":
               return (
-                <details className="my-3 rounded-xl border border-border p-3 text-sm text-muted-foreground">
-                  <summary className="cursor-pointer">
-                    {part.status.type === "running"
+                <Disclosure
+                  className="my-3 rounded-xl border border-border p-3 text-sm text-muted-foreground"
+                  summary={
+                    part.status.type === "running"
                       ? "Working…"
-                      : "Show activity"}
-                  </summary>
+                      : "Show activity"
+                  }
+                >
                   <div className="mt-3 space-y-3">{children}</div>
-                </details>
+                </Disclosure>
               )
             case "text":
               return role === "user" ? (

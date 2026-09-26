@@ -2,7 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
 import { IoLogoGithub } from "react-icons/io5"
 
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -34,15 +34,16 @@ export function PullRequestLinks({
   return (
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
-        <button
-          type="button"
-          className={navLink}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-1.5 text-muted-foreground"
           disabled={thread.isPending || thread.isSuccess}
           aria-live="polite"
           onClick={() => thread.mutate()}
         >
           {thread.isPending ? "Opening thread…" : "Agent"}
-        </button>
+        </Button>
         {!onReviewPage && (
           <>
             <Link

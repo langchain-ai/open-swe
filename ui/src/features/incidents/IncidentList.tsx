@@ -5,7 +5,7 @@ import { ArrowRight, History, Search } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { incidentsApi } from "./api"
 import { citationPreview } from "./citations"
 import { workspaceApi } from "./workspace-api"
@@ -74,28 +74,28 @@ export function IncidentList({
       </p>
       <div className="mb-5 flex flex-wrap items-center gap-4">
         {view !== "history" && (
-          <div
-            role="group"
-            className="flex gap-1 rounded-lg border border-border p-1"
+          <ToggleGroup
             aria-label="Agent activity filters"
+            spacing={1}
+            value={[view]}
+            onValueChange={(values) => {
+              const next = incidentViews.find(
+                (option) => option.value === values[0]
+              )
+              if (next) onViewChange(next.value)
+            }}
+            className="rounded-lg border border-border p-1"
           >
             {incidentViews.map(({ value, label }) => (
-              <button
-                type="button"
+              <ToggleGroupItem
                 key={value}
-                onClick={() => onViewChange(value)}
-                aria-pressed={view === value}
-                className={cn(
-                  "min-h-8 rounded-md px-3 py-1.5 text-xs transition-colors",
-                  view === value
-                    ? "bg-accent font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60"
-                )}
+                value={value}
+                className="h-8 px-3 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
               >
                 {label}
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
         )}
         <div className="relative min-w-0 flex-1 basis-56">
           <Search className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />

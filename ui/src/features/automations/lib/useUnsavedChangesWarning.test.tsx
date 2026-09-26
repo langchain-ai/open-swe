@@ -1,9 +1,16 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, renderHook } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  renderHook,
+  screen,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { useUnsavedChangesWarning } from "./useUnsavedChangesWarning"
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 
 const { useBlockerMock } = vi.hoisted(() => ({
   useBlockerMock: vi.fn(),
@@ -13,17 +20,26 @@ vi.mock("@tanstack/react-router", () => ({
   useBlocker: useBlockerMock,
 }))
 
+type BlockerOptions = { shouldBlockFn: () => Promise<boolean> }
+
+function renderWarning(isDirty: boolean) {
+  const hook = renderHook(() => useUnsavedChangesWarning(isDirty), {
+    wrapper: ConfirmProvider,
+  })
+  const options = useBlockerMock.mock.lastCall?.[0] as BlockerOptions
+  return { ...hook, options }
+}
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  vi.restoreAllMocks()
 })
 
 describe("useUnsavedChangesWarning", () => {
   it("only blocks navigation and unloads while changes are dirty", () => {
     const { rerender } = renderHook(
       ({ isDirty }) => useUnsavedChangesWarning(isDirty),
-      { initialProps: { isDirty: false } }
+      { initialProps: { isDirty: false }, wrapper: ConfirmProvider }
     )
 
     expect(useBlockerMock).toHaveBeenLastCalledWith(
@@ -37,32 +53,31 @@ describe("useUnsavedChangesWarning", () => {
     )
   })
 
-  it("blocks client navigation when the user keeps editing", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false)
-    renderHook(() => useUnsavedChangesWarning(true))
-    const options = useBlockerMock.mock.lastCall?.[0] as {
-      shouldBlockFn: () => boolean
-    }
+  it("blocks client navigation when the user keeps editing", async () => {
+    const { options } = renderWarning(true)
 
-    expect(options.shouldBlockFn()).toBe(true)
-    expect(window.confirm).toHaveBeenCalledWith(
-      "You have unsaved changes. Leave without saving?"
-    )
+    let pending!: Promise<boolean>
+    act(() => {
+      pending = options.shouldBlockFn()
+    })
+    expect(await screen.findByText("Leave without saving?")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+
+    await expect(pending).resolves.toBe(true)
   })
 
-  it("allows confirmed and successful navigation", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
-    const { result } = renderHook(() => useUnsavedChangesWarning(true))
-    const options = useBlockerMock.mock.lastCall?.[0] as {
-      shouldBlockFn: () => boolean
-    }
+  it("allows confirmed and successful navigation", async () => {
+    const { options, result } = renderWarning(true)
 
-    expect(options.shouldBlockFn()).toBe(false)
+    let pending!: Promise<boolean>
+    act(() => {
+      pending = options.shouldBlockFn()
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Leave" }))
+    await expect(pending).resolves.toBe(false)
 
-    confirm.mockClear()
     act(() => result.current())
 
-    expect(options.shouldBlockFn()).toBe(false)
-    expect(confirm).not.toHaveBeenCalled()
+    await expect(options.shouldBlockFn()).resolves.toBe(false)
   })
 })

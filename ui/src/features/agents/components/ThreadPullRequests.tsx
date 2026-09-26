@@ -12,16 +12,17 @@ import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
+import { DiffStat } from "@/components/DiffStat"
+import { PrStateBadge } from "@/components/PrState"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  HoverCard,
+  HoverCardPopup,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
-
-const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  open: "bg-success/15 text-success-foreground",
-  merged: "bg-merged/15 text-merged-foreground",
-  closed: "bg-destructive/10 text-destructive",
-}
 
 function relativeAge(value: string | null): string {
   if (!value) return ""
@@ -107,24 +108,20 @@ function HealthSummary({
   return (
     <>
       {failingCount > 0 && (
-        <span className="rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
+        <Badge variant="destructive">
           {failingCount} check{failingCount === 1 ? "" : "s"}
-        </span>
+        </Badge>
       )}
       {commentCount > 0 && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 font-medium text-warning-foreground">
+        <Badge variant="warning">
           {commentCount} comment{commentCount === 1 ? "" : "s"}
-        </span>
+        </Badge>
       )}
       {health.mergeConflictState === "conflicting" && (
-        <span className="rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
-          Conflict
-        </span>
+        <Badge variant="destructive">Conflict</Badge>
       )}
       {(health.pendingCheckCount ?? 0) > 0 && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 font-medium text-warning-foreground">
-          {health.pendingCheckCount} pending
-        </span>
+        <Badge variant="warning">{health.pendingCheckCount} pending</Badge>
       )}
     </>
   )
@@ -250,14 +247,7 @@ export function PullRequestHoverCard({
       className="w-96 max-w-[calc(100vw-2rem)] space-y-3 p-1"
     >
       <div className="flex items-center gap-2 text-sm">
-        <span
-          className={cn(
-            "rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-            PR_STATE_STYLES[state]
-          )}
-        >
-          {state}
-        </span>
+        <PrStateBadge state={state} />
         <span className="min-w-0 truncate text-muted-foreground">
           {pullRequest.repoFullName} #{pullRequest.number}
         </span>
@@ -290,12 +280,10 @@ export function PullRequestHoverCard({
           {pullRequest.author ?? "Unknown author"}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-success-foreground">
-            +{pullRequest.diffStats.additions}
-          </span>
-          <span className="text-destructive">
-            -{pullRequest.diffStats.deletions}
-          </span>
+          <DiffStat
+            additions={pullRequest.diffStats.additions}
+            deletions={pullRequest.diffStats.deletions}
+          />
           <span>
             {pullRequest.diffStats.files} file
             {pullRequest.diffStats.files === 1 ? "" : "s"}
@@ -340,8 +328,8 @@ function PullRequestLink({
 
   return (
     <div className="flex min-w-0 items-stretch gap-1.5">
-      <Tooltip>
-        <TooltipTrigger
+      <HoverCard>
+        <HoverCardTrigger
           render={
             <a
               href={pullRequest.url}
@@ -366,47 +354,39 @@ function PullRequestLink({
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <HealthSummary health={health} />
-            <span className="hidden text-success-foreground sm:inline">
-              +{pullRequest.diffStats.additions}
+            <span className="hidden sm:inline-flex">
+              <DiffStat
+                additions={pullRequest.diffStats.additions}
+                deletions={pullRequest.diffStats.deletions}
+              />
             </span>
-            <span className="hidden text-destructive sm:inline">
-              -{pullRequest.diffStats.deletions}
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 font-medium capitalize",
-                PR_STATE_STYLES[state]
-              )}
-            >
-              {state}
-            </span>
+            <PrStateBadge state={state} />
           </span>
-        </TooltipTrigger>
-        <TooltipPopup
-          variant="glass"
+        </HoverCardTrigger>
+        <HoverCardPopup
           side="top"
           align="start"
           sideOffset={8}
-          className="rounded-xl p-3 shadow-2xl"
+          className="w-auto shadow-2xl"
         >
           <PullRequestHoverCard
             pullRequest={pullRequest}
             health={health}
             healthUnavailable={healthUnavailable}
           />
-        </TooltipPopup>
-      </Tooltip>
+        </HoverCardPopup>
+      </HoverCard>
       {actionable && onFix && (
-        <button
-          type="button"
+        <Button
+          variant="destructive"
           aria-label={`Fix PR #${pullRequest.number} issues`}
           disabled={fixDisabled || fixing}
           onClick={() => void handleFix()}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/8 px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-auto gap-1.5 rounded-lg border-destructive/30 px-3"
         >
           <Wrench className="size-3.5" />
           {fixing ? "Starting…" : fixFailed ? "Retry" : "Fix"}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -452,11 +432,12 @@ export function ThreadPullRequests({
         />
       ))}
       {hiddenCount > 0 && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="font-normal text-muted-foreground"
         >
           {expanded ? (
             <ChevronUp className="size-3.5" />
@@ -464,7 +445,7 @@ export function ThreadPullRequests({
             <ChevronDown className="size-3.5" />
           )}
           {expanded ? "Show less" : `Show ${hiddenCount} more`}
-        </button>
+        </Button>
       )}
     </div>
   )

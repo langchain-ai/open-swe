@@ -1,5 +1,3 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Menu } from "@base-ui/react/menu"
 import { DotsThreeIcon } from "@phosphor-icons/react"
 import { Folder } from "lucide-react"
 import { useRef, useState } from "react"
@@ -11,6 +9,14 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
+import { IconButton } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuPopup,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { Input } from "@/components/ui/input"
+import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
@@ -56,14 +62,18 @@ function ThreadRepoIndicator({
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger
-        render={<button type="button" />}
+        render={
+          <IconButton
+            variant="ghost"
+            data-no-drag=""
+            className="text-muted-foreground"
+          />
+        }
         closeOnClick={false}
         onClick={() => setOpen(true)}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
         aria-label={`Repository: ${repoName}`}
-        data-no-drag=""
-        className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
       >
         <Folder className="size-4" />
       </TooltipTrigger>
@@ -236,12 +246,12 @@ export function AgentThreadHeader({
               <ThreadRepoIndicator thread={thread} localThread={localThread} />
             )}
             {draft !== null ? (
-              <input
+              <Input
                 autoFocus
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-auto md:text-sm"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -278,31 +288,27 @@ export function AgentThreadHeader({
               </span>
             )}
             {(thread || localThread) && (
-              <Menu.Root>
-                <Menu.Trigger
-                  aria-label="Thread actions"
-                  data-no-drag=""
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <IconButton
+                      variant="ghost"
+                      aria-label="Thread actions"
+                      data-no-drag=""
+                      className="text-muted-foreground"
+                    />
+                  }
                 >
                   <DotsThreeIcon className="size-5" weight="bold" />
-                </Menu.Trigger>
-                <Menu.Portal>
-                  <Menu.Positioner
-                    align="start"
-                    sideOffset={4}
-                    className="z-50 outline-none"
-                  >
-                    <Menu.Popup
-                      finalFocus={() =>
-                        editingRef.current ? false : undefined
-                      }
-                      className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
-                    >
-                      {menuItems}
-                    </Menu.Popup>
-                  </Menu.Positioner>
-                </Menu.Portal>
-              </Menu.Root>
+                </MenuTrigger>
+                <MenuPopup
+                  align="start"
+                  className="min-w-40"
+                  finalFocus={() => (editingRef.current ? false : undefined)}
+                >
+                  {menuItems}
+                </MenuPopup>
+              </Menu>
             )}
           </div>
         )}
@@ -318,19 +324,14 @@ export function AgentThreadHeader({
 
   return (
     <>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger render={header} />
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup
-              finalFocus={() => (editingRef.current ? false : undefined)}
-              className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
-            >
-              {menuItems}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+      <ContextMenu>
+        <ContextMenuTrigger render={header} />
+        <ContextMenuPopup
+          finalFocus={() => (editingRef.current ? false : undefined)}
+        >
+          {menuItems}
+        </ContextMenuPopup>
+      </ContextMenu>
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

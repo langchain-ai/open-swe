@@ -7,9 +7,13 @@ import {
 import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
+import { PageHeader } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
 import { pageTitle } from "@/lib/pageTitle"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -30,17 +34,19 @@ export const Route = createFileRoute("/agents/reviews/")({
   component: ReviewsPage,
 })
 
+type ReviewsTab = "mine" | "all"
+
 function statusBadge(review: ReviewSummary) {
   if (review.status === "running") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+      <Badge variant="warning">
+        <span className="size-1.5 animate-pulse rounded-full bg-warning" />
         Reviewing
-      </span>
+      </Badge>
     )
   }
   if (review.status === "error") {
-    return <span className="text-xs text-destructive">Failed</span>
+    return <Badge variant="destructive">Failed</Badge>
   }
   return null
 }
@@ -100,56 +106,56 @@ function ReviewsPage() {
             !selection && "max-w-6xl"
           )}
         >
-          <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
-              Pull Requests
-            </h1>
-            <div className="flex items-center gap-1">
-              {(
-                [
-                  [true, "Mine"],
-                  [false, "All Reviews"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => {
+          <PageHeader
+            className="mb-0"
+            title="Pull Requests"
+            action={
+              <div className="flex items-center gap-3">
+                <Tabs
+                  value={mine ? "mine" : "all"}
+                  onValueChange={(value: ReviewsTab) =>
                     changeFilters({
-                      tab: value ? undefined : "all",
+                      tab: value === "mine" ? undefined : "all",
                       page: undefined,
                     })
-                  }}
-                  onPointerEnter={() => prefetch(value, 0)}
-                  onFocus={() => prefetch(value, 0)}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    mine === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
-                  )}
+                  }
                 >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <OpenPullRequestInput />
-            <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
-              Drag to your bookmarks bar
-            </span>
-            {!mine && (
-              <Button
-                className="ml-auto"
-                size="sm"
-                variant="outline"
-                disabled={reviews.isFetching}
-                onClick={() => void reviews.refetch()}
-              >
-                Refresh
-              </Button>
-            )}
-          </div>
+                  <TabsList>
+                    {(
+                      [
+                        ["mine", "Mine"],
+                        ["all", "All Reviews"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <TabsTrigger
+                        key={value}
+                        value={value}
+                        onPointerEnter={() => prefetch(value === "mine", 0)}
+                        onFocus={() => prefetch(value === "mine", 0)}
+                      >
+                        {label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <OpenPullRequestInput />
+                <ReviewBookmarklet />
+                <span className="hidden text-xs text-muted-foreground lg:inline">
+                  Drag to your bookmarks bar
+                </span>
+                {!mine && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={reviews.isFetching}
+                    onClick={() => void reviews.refetch()}
+                  >
+                    Refresh
+                  </Button>
+                )}
+              </div>
+            }
+          />
 
           {mine ? (
             session.data && (
@@ -183,11 +189,12 @@ function ReviewsPage() {
                 </p>
               )}
               {reviews.data && items.length === 0 && (
-                <p className="px-4 py-3 text-xs text-muted-foreground">
-                  {mine
-                    ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
-                    : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
-                </p>
+                <Empty>
+                  <EmptyDescription>
+                    No reviews yet. Enable repositories under Open SWE Review
+                    settings and open a PR.
+                  </EmptyDescription>
+                </Empty>
               )}
               <div
                 className={cn(

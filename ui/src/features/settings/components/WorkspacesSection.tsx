@@ -1,8 +1,14 @@
 import { useState, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { CaretRightIcon } from "@phosphor-icons/react"
 import { SettingsSection } from "@/components/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelLabel,
@@ -71,10 +77,13 @@ const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
   failed: "✕",
 }
 
-const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
-  running: "border-border text-foreground",
-  success: "border-border text-muted-foreground",
-  failed: "border-destructive/40 text-destructive",
+const STEP_VARIANT: Record<
+  WorkspaceRefreshStep["status"],
+  "outline" | "muted" | "destructive"
+> = {
+  running: "outline",
+  success: "muted",
+  failed: "destructive",
 }
 
 // A rebuild runs for minutes to an hour; which stage it reached is the only
@@ -83,13 +92,10 @@ function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {steps.map((step) => (
-        <span
-          key={step.label}
-          className={`rounded-full border px-2 py-0.5 text-[11px] ${STEP_CLASS[step.status]}`}
-        >
+        <Badge key={step.label} variant={STEP_VARIANT[step.status]}>
           {STEP_MARK[step.status]} {step.label}
           {step.exit_code ? ` (exit ${step.exit_code})` : ""}
-        </span>
+        </Badge>
       ))}
     </div>
   )
@@ -155,12 +161,17 @@ function WorkspaceRow({
       {/* The API omits the log for non-admins; this guard is defence in depth
           for a `bash -x` trace that can carry expanded credentials. */}
       {isAdmin && log && (
-        <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">Refresh log</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
-            {log}
-          </pre>
-        </details>
+        <Collapsible className="text-xs text-muted-foreground">
+          <CollapsibleTrigger className="group flex cursor-pointer items-center gap-1 select-none hover:text-foreground">
+            <CaretRightIcon className="size-3 transition-transform group-data-panel-open:rotate-90" />
+            Refresh log
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+              {log}
+            </pre>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   )

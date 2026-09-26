@@ -22,6 +22,8 @@ import type {
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Empty, EmptyContent, EmptyDescription } from "@/components/ui/empty"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
@@ -152,7 +154,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     thread?.worktreePath ?? thread?.cwd ?? ""
   )
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null)
-  const [terminalContexts, setTerminalContexts] = useState<Array<string>>([])
+  const [terminalContexts, setTerminalContexts] = useState<
+    Array<{ id: string; text: string }>
+  >([])
   const handlePanelCollapsedChange = useCallback(
     (next: boolean) => {
       setPanelCollapsed(next)
@@ -422,21 +426,25 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   if (!thread) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-xs text-muted-foreground">
-        {threadQuery.isPending
-          ? "Loading local Open SWE session…"
-          : threadQuery.error
-            ? errorMessage(threadQuery.error)
-            : "This local session no longer exists."}
+      <Empty className="gap-3">
+        <EmptyDescription>
+          {threadQuery.isPending
+            ? "Loading local Open SWE session…"
+            : threadQuery.error
+              ? errorMessage(threadQuery.error)
+              : "This local session no longer exists."}
+        </EmptyDescription>
         {!threadQuery.isPending && (
-          <Link
-            className="text-foreground underline underline-offset-4"
-            to="/agents"
-          >
-            Start a new task
-          </Link>
+          <EmptyContent>
+            <Link
+              className="text-foreground underline underline-offset-4"
+              to="/agents"
+            >
+              Start a new task
+            </Link>
+          </EmptyContent>
         )}
-      </div>
+      </Empty>
     )
   }
 
@@ -493,26 +501,27 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <AgentComposerDock>
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
-                {terminalContexts.map((text, index) => (
+                {terminalContexts.map((context) => (
                   <span
-                    key={`${text.slice(0, 24)}:${index}`}
+                    key={context.id}
                     className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
-                    title={text}
+                    title={context.text}
                   >
                     <span className="max-w-64 truncate">
                       Terminal selection
                     </span>
-                    <button
-                      type="button"
-                      aria-label="Remove terminal selection"
+                    <TooltipIconButton
+                      label="Remove terminal selection"
+                      size="icon-xs"
+                      className="size-4"
                       onClick={() =>
                         setTerminalContexts((current) =>
-                          current.filter((_, itemIndex) => itemIndex !== index)
+                          current.filter((item) => item.id !== context.id)
                         )
                       }
                     >
                       <X className="size-3" />
-                    </button>
+                    </TooltipIconButton>
                   </span>
                 ))}
               </div>
@@ -534,7 +543,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               }}
               onSubmit={async (prompt, images, options) => {
                 scrollControlRef.current?.scrollToBottom()
-                const terminalContext = terminalContexts.join("\n\n")
+                const terminalContext = terminalContexts
+                  .map((context) => context.text)
+                  .join("\n\n")
                 setTerminalContexts([])
                 const text = terminalContext
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
@@ -573,7 +584,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         onCollapsedChange={handlePanelCollapsedChange}
         onTerminalOpenFile={handleOpenFile}
         onTerminalAddToChat={(text) =>
-          setTerminalContexts((current) => [...current, text])
+          setTerminalContexts((current) => [
+            ...current,
+            { id: crypto.randomUUID(), text },
+          ])
         }
         renderDiff={({ fullScreen }) => (
           <ChangesPanel

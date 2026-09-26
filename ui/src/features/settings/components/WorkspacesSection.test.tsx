@@ -289,7 +289,7 @@ describe("WorkspacesSection", () => {
     expect(
       screen.getByText(/only channels the bot is in are listed/)
     ).toBeTruthy()
-    expect(taken.hasAttribute("disabled")).toBe(true)
+    expect(taken.getAttribute("aria-disabled")).toBe("true")
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()

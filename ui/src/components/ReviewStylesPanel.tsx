@@ -12,15 +12,18 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -38,6 +41,7 @@ function statusVariant(status: ReviewStyle["status"]) {
 export function ReviewStylesPanel() {
   const session = useSession()
   const qc = useQueryClient()
+  const confirm = useConfirm()
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
@@ -279,21 +283,23 @@ export function ReviewStylesPanel() {
         <div className="space-y-2">
           <p className="text-xs font-medium text-foreground">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No repositories yet.
-            </p>
+            <Empty className="border p-4">
+              <EmptyDescription>No repositories yet.</EmptyDescription>
+            </Empty>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
-                  <button
-                    type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
-                      selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-border"
-                    }`}
+                  <Button
+                    aria-pressed={selected === s.full_name}
+                    className={cn(
+                      "max-w-full justify-start gap-2",
+                      selected === s.full_name &&
+                        "border-primary bg-muted font-medium"
+                    )}
                     onClick={() => setSelected(s.full_name)}
+                    size="sm"
+                    variant="outline"
                   >
                     <span className="truncate">{s.full_name}</span>
                     <Badge
@@ -302,7 +308,7 @@ export function ReviewStylesPanel() {
                     >
                       {s.status}
                     </Badge>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -388,11 +394,14 @@ export function ReviewStylesPanel() {
                   removeStyle.isPending ||
                   (!!active.approval_policy && !session.data?.is_admin)
                 }
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    !window.confirm(
-                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`
-                    )
+                    !(await confirm({
+                      title: `Remove ${active.full_name} from review style prompts?`,
+                      description: "This cannot be undone.",
+                      confirmLabel: "Remove",
+                      destructive: true,
+                    }))
                   ) {
                     return
                   }

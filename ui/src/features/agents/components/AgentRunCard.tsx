@@ -11,6 +11,7 @@ import { SiLinear } from "react-icons/si"
 import type { ComponentType, SVGProps } from "react"
 
 import type { AgentSource, AgentThread } from "@/features/agents/lib/types"
+import { DiffStat } from "@/components/DiffStat"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
@@ -45,11 +46,11 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
             <div className="text-[11px] font-medium text-muted-foreground">
               {stats.files} {stats.files === 1 ? "file" : "files"}
             </div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium">
-              <span className="text-success-foreground">
-                +{stats.additions}
-              </span>
-              <span className="text-destructive">-{stats.deletions}</span>
+            <div className="mt-0.5 text-xs font-medium">
+              <DiffStat
+                additions={stats.additions}
+                deletions={stats.deletions}
+              />
             </div>
           </>
         ) : (

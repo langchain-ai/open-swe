@@ -44,6 +44,7 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { IconButton } from "@/components/ui/button"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
@@ -59,6 +60,18 @@ const SUPPORTED_IMAGE_TYPES = new Set([
   "image/gif",
   "image/webp",
 ])
+
+const pendingImageKeys = new WeakMap<ImageChunk, number>()
+let nextPendingImageKey = 0
+
+function pendingImageKey(image: ImageChunk): number {
+  let key = pendingImageKeys.get(image)
+  if (key === undefined) {
+    key = nextPendingImageKey++
+    pendingImageKeys.set(image, key)
+  }
+  return key
+}
 
 interface SlashCommandSpec {
   command: ComposerSlashCommand
@@ -772,28 +785,27 @@ export const ChatComposer = memo(function ChatComposer({
 
         {pendingImages.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
-            {pendingImages.map((image, index) => (
-              <div
-                className="group relative"
-                key={`${image.fileName ?? "image"}-${index}`}
-              >
+            {pendingImages.map((image) => (
+              <div className="group relative" key={pendingImageKey(image)}>
                 <img
                   alt={image.fileName || "Pending image"}
                   className="size-16 rounded-lg border border-border object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
                 />
-                <button
+                <IconButton
                   aria-label="Remove image"
-                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-foreground"
+                  className="absolute -top-1.5 -right-1.5 rounded-full border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-card hover:text-foreground focus-visible:opacity-100"
                   onClick={() =>
                     setPendingImages((prev) =>
-                      prev.filter((_, i) => i !== index)
+                      prev.filter((item) => item !== image)
                     )
                   }
+                  size="icon-xs"
                   type="button"
+                  variant="outline"
                 >
                   <X className="size-3" />
-                </button>
+                </IconButton>
               </div>
             ))}
           </div>

@@ -1,8 +1,9 @@
 import { memo } from "react"
 import { Link } from "@tanstack/react-router"
-import { ArrowUpRight, Bot, Loader2 } from "lucide-react"
+import { ArrowUpRight, Bot } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
+import { Spinner } from "@/components/ui/spinner"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -38,13 +39,10 @@ export const SubagentCard = memo(function SubagentCard({
     <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         {isRunning ? (
-          <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-primary"
-            aria-hidden
-          />
+          <Spinner className="size-3 text-primary" aria-hidden />
         ) : (
           <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-primary"}`}
+            className={`h-3 w-3 shrink-0 ${isError ? "text-destructive" : "text-primary"}`}
             aria-hidden
           />
         )}

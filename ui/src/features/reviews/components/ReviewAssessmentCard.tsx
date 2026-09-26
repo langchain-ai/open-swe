@@ -8,6 +8,11 @@ import type {
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Textarea } from "@/components/ui/textarea"
 
 interface Props {
@@ -124,18 +129,22 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      <details className="mt-2 text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">
-          {assessment.explanation}
-        </p>
-        <p className="mt-2">
-          Reviewed commit {assessment.head_sha.slice(0, 7)}. Risk ranges from 1
-          (low) to 5 (high).
-        </p>
-      </details>
+      <Collapsible className="mt-2 text-xs text-muted-foreground">
+        <CollapsibleTrigger className="cursor-pointer">
+          Why this assessment?
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">
+            {assessment.explanation}
+          </p>
+          <p className="mt-2">
+            Reviewed commit {assessment.head_sha.slice(0, 7)}. Risk ranges from
+            1 (low) to 5 (high).
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
       {headSha !== assessment.head_sha && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+        <p className="mt-2 text-xs text-warning-foreground">
           This assessment is for an earlier commit.
         </p>
       )}

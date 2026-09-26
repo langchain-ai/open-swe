@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import type { Skill } from "@/lib/api"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,6 +21,7 @@ const EMPTY_DRAFT = { description: "", instructions: "" }
 
 export function SkillsPage() {
   const session = useSession()
+  const confirm = useConfirm()
   const [organization, setOrganization] = useState(false)
   const personalSkills = usePersonalAgentSkills()
   const organizationSkills = useOrganizationAgentSkills()
@@ -84,10 +86,15 @@ export function SkillsPage() {
     }
   }
 
-  const onDelete = () => {
+  const onDelete = async () => {
     if (
       !selectedName ||
-      !window.confirm(`Delete ${selectedName}? This cannot be undone.`)
+      !(await confirm({
+        title: "Delete skill",
+        description: `Delete ${selectedName}? This cannot be undone.`,
+        confirmLabel: "Delete",
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -105,10 +112,10 @@ export function SkillsPage() {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
+        <h1 className="font-heading text-base font-medium text-foreground">
           Skills
         </h1>
-        <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
+        <p className="mt-1 text-xs text-muted-foreground">
           Reusable instructions Open SWE loads when a task matches their
           description.
         </p>
@@ -146,29 +153,29 @@ export function SkillsPage() {
                   className={cn(
                     "w-full rounded-md px-2.5 py-2 text-left transition-colors",
                     selectedName === skill.name
-                      ? "bg-[var(--ui-sidebar-hover)]"
-                      : "hover:bg-[var(--ui-sidebar-hover)]"
+                      ? "bg-sidebar-row-hover"
+                      : "hover:bg-sidebar-row-hover"
                   )}
                 >
-                  <span className="block truncate text-xs font-medium text-[var(--ui-text)]">
+                  <span className="block truncate text-xs font-medium text-foreground">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[var(--ui-text-muted)]">
+                  <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
                     {skill.description}
                   </span>
                 </button>
               ))}
               {skills.data?.length === 0 && (
-                <p className="px-2.5 py-4 text-xs text-[var(--ui-text-muted)]">
+                <p className="px-2.5 py-4 text-xs text-muted-foreground">
                   No skills yet.
                 </p>
               )}
             </div>
           </section>
 
-          <section className="space-y-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-4">
+          <section className="space-y-4 rounded-lg border border-border bg-card p-4">
             {!canEdit && !selected ? (
-              <p className="text-xs text-[var(--ui-text-muted)]">
+              <p className="text-xs text-muted-foreground">
                 Select an organization skill to view it.
               </p>
             ) : (
@@ -182,12 +189,12 @@ export function SkillsPage() {
                       onChange={(event) => setNewName(event.target.value)}
                       placeholder="address-review-feedback"
                     />
-                    <p className="text-[10px] text-[var(--ui-text-muted)]">
+                    <p className="text-[10px] text-muted-foreground">
                       Lowercase letters, numbers, and single hyphens.
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm font-medium text-[var(--ui-text)]">
+                  <p className="text-sm font-medium text-foreground">
                     {selectedName}
                   </p>
                 )}
@@ -235,7 +242,7 @@ export function SkillsPage() {
                       {creating ? "Create skill" : "Save skill"}
                     </Button>
                     {dirty && (
-                      <span className="text-xs text-[var(--ui-text-muted)]">
+                      <span className="text-xs text-muted-foreground">
                         Unsaved changes
                       </span>
                     )}
@@ -252,9 +259,7 @@ export function SkillsPage() {
                     )}
                   </div>
                 )}
-                {error && (
-                  <p className="text-xs text-[var(--ui-danger)]">{error}</p>
-                )}
+                {error && <p className="text-xs text-destructive">{error}</p>}
               </>
             )}
           </section>

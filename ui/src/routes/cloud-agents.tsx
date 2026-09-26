@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption, ProfileUpdate } from "@/lib/api"
 import {
-  AppShell,
+  AuthedAppShell,
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
@@ -18,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
   useOptions,
@@ -26,9 +25,7 @@ import {
   useProfile,
   useRepos,
 } from "@/lib/profile"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
-import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
@@ -36,7 +33,6 @@ export const Route = createFileRoute("/cloud-agents")({
 })
 
 function CloudAgentsPage() {
-  const session = useSession()
   const profile = useProfile()
   const options = useOptions()
   const repos = useRepos()
@@ -107,15 +103,6 @@ function CloudAgentsPage() {
     defaultSubagentEffort,
   ])
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
   const fallbackModel = defaultAgentModel
   const fallbackEffort = defaultAgentEffort
 
@@ -135,240 +122,257 @@ function CloudAgentsPage() {
   }
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Open SWE Agent"
       description="Personal defaults for Open SWE Agent runs you trigger. These settings only apply to your account."
     >
-      <SettingsSection title="Defaults">
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Adaptive model routing"
-            description="Automatically choose a model for each turn. Inherit uses the org-wide default; Enabled or Disabled overrides it."
-            control={
-              <Select
-                value={
-                  profile.data?.model_routing_enabled === true
-                    ? "enabled"
-                    : profile.data?.model_routing_enabled === false
-                      ? "disabled"
-                      : "inherit"
+      {() => (
+        <>
+          <SettingsSection title="Defaults">
+            <div className="divide-y divide-border">
+              <SettingsRow
+                label="Adaptive model routing"
+                description="Automatically choose a model for each turn. Inherit uses the org-wide default; Enabled or Disabled overrides it."
+                control={
+                  <Select
+                    value={
+                      profile.data?.model_routing_enabled === true
+                        ? "enabled"
+                        : profile.data?.model_routing_enabled === false
+                          ? "disabled"
+                          : "inherit"
+                    }
+                    onValueChange={(v) =>
+                      persist({
+                        model_routing_enabled:
+                          v === "enabled"
+                            ? true
+                            : v === "disabled"
+                              ? false
+                              : null,
+                      })
+                    }
+                    disabled={profile.isLoading || save.isPending}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">
+                        Inherit org default
+                      </SelectItem>
+                      <SelectItem value="enabled">Enabled</SelectItem>
+                      <SelectItem value="disabled">Disabled</SelectItem>
+                    </SelectContent>
+                  </Select>
                 }
-                onValueChange={(v) =>
-                  persist({
-                    model_routing_enabled:
-                      v === "enabled" ? true : v === "disabled" ? false : null,
-                  })
-                }
-                disabled={profile.isLoading || save.isPending}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inherit">Inherit org default</SelectItem>
-                  <SelectItem value="enabled">Enabled</SelectItem>
-                  <SelectItem value="disabled">Disabled</SelectItem>
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Recent working contexts"
-            description="Include a filtered digest of your recent threads in agent runs."
-            control={
-              <Switch
-                checked={profile.data?.recent_thread_context_enabled ?? false}
-                onCheckedChange={(v) =>
-                  persist({ recent_thread_context_enabled: v })
-                }
-                disabled={profile.isLoading || save.isPending}
               />
-            }
-          />
-          <SettingsRow
-            label="Default Model"
-            description="Used when adaptive routing is off or no model is specified"
-            control={
-              <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Pick a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {defaultModels?.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Reasoning Effort"
-            description="How hard the model thinks before answering"
-            control={
-              <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {currentModel?.efforts.map((e) => (
-                    <SelectItem key={e} value={e}>
-                      {e}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Default Subagent Model"
-            description="Used for delegated tasks; inherit follows your default model and effort"
-            control={
-              <Select
-                value={subagentModelId}
-                onValueChange={(v) => v && setSubagentModelId(v)}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Pick a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inherit">Inherit from main</SelectItem>
-                  {defaultModels?.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Subagent Reasoning Effort"
-            description="How hard delegated subagents think before answering"
-            control={
-              <Select
-                value={subagentEffort}
-                onValueChange={(v) => v && setSubagentEffort(v)}
-                disabled={subagentInheritsMain}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {currentSubagentModel?.efforts.map((e) => (
-                    <SelectItem key={e} value={e}>
-                      {e}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
-          <SettingsRow
-            label="Default Repository"
-            description="Used when no repository is specified"
-            control={
-              repos.data?.repositories.length ? (
-                <div className="w-56">
-                  <RepoSelector
-                    repos={repos.data.repositories}
-                    selectedRepo={defaultRepo || null}
-                    onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
-                    placeholder="Pick a repository…"
-                    emptySelectionLabel="No default repository"
-                    triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
-                    dropdownClassName="w-56"
+              <SettingsRow
+                label="Recent working contexts"
+                description="Include a filtered digest of your recent threads in agent runs."
+                control={
+                  <Switch
+                    checked={
+                      profile.data?.recent_thread_context_enabled ?? false
+                    }
+                    onCheckedChange={(v) =>
+                      persist({ recent_thread_context_enabled: v })
+                    }
+                    disabled={profile.isLoading || save.isPending}
                   />
-                </div>
-              ) : (
-                <Input
-                  className="w-56"
-                  placeholder="owner/repo"
-                  value={defaultRepo}
-                  onChange={(e) => setDefaultRepo(e.target.value)}
-                />
-              )
-            }
-          />
-          <SettingsRow
-            label="Base Branch"
-            description="When empty, Cloud Agent will use a repository's default branch (recommended)"
-            htmlFor="base-branch"
-            control={
-              <Input
-                id="base-branch"
-                className="w-56"
-                placeholder="Branch name…"
-                value={baseBranch}
-                onChange={(e) => setBaseBranch(e.target.value)}
+                }
               />
-            }
-          />
-          <SettingsRow
-            label="Branch Prefix"
-            description="Prefix for branch names created by Cloud Agent"
-            htmlFor="branch-prefix"
-            control={
-              <Input
-                id="branch-prefix"
-                className="w-56"
-                placeholder="open-swe/"
-                value={branchPrefix}
-                onChange={(e) => setBranchPrefix(e.target.value)}
+              <SettingsRow
+                label="Default Model"
+                description="Used when adaptive routing is off or no model is specified"
+                control={
+                  <Select
+                    value={modelId}
+                    onValueChange={(v) => v && setModelId(v)}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Pick a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {defaultModels?.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
               />
-            }
-          />
-          <div className="flex justify-end px-4 py-3">
-            <Button
-              size="sm"
-              onClick={persistDefaults}
-              disabled={save.isPending}
-            >
-              {save.isPending ? "Saving…" : "Save defaults"}
-            </Button>
-          </div>
-        </div>
-      </SettingsSection>
+              <SettingsRow
+                label="Reasoning Effort"
+                description="How hard the model thinks before answering"
+                control={
+                  <Select
+                    value={effort}
+                    onValueChange={(v) => v && setEffort(v)}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentModel?.efforts.map((e) => (
+                        <SelectItem key={e} value={e}>
+                          {e}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                label="Default Subagent Model"
+                description="Used for delegated tasks; inherit follows your default model and effort"
+                control={
+                  <Select
+                    value={subagentModelId}
+                    onValueChange={(v) => v && setSubagentModelId(v)}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Pick a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">Inherit from main</SelectItem>
+                      {defaultModels?.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                label="Subagent Reasoning Effort"
+                description="How hard delegated subagents think before answering"
+                control={
+                  <Select
+                    value={subagentEffort}
+                    onValueChange={(v) => v && setSubagentEffort(v)}
+                    disabled={subagentInheritsMain}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentSubagentModel?.efforts.map((e) => (
+                        <SelectItem key={e} value={e}>
+                          {e}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                label="Default Repository"
+                description="Used when no repository is specified"
+                control={
+                  repos.data?.repositories.length ? (
+                    <div className="w-56">
+                      <RepoSelector
+                        repos={repos.data.repositories}
+                        selectedRepo={defaultRepo || null}
+                        onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
+                        placeholder="Pick a repository…"
+                        emptySelectionLabel="No default repository"
+                        triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                        dropdownClassName="w-56"
+                      />
+                    </div>
+                  ) : (
+                    <Input
+                      className="w-56"
+                      placeholder="owner/repo"
+                      value={defaultRepo}
+                      onChange={(e) => setDefaultRepo(e.target.value)}
+                    />
+                  )
+                }
+              />
+              <SettingsRow
+                label="Base Branch"
+                description="When empty, Cloud Agent will use a repository's default branch (recommended)"
+                htmlFor="base-branch"
+                control={
+                  <Input
+                    id="base-branch"
+                    className="w-56"
+                    placeholder="Branch name…"
+                    value={baseBranch}
+                    onChange={(e) => setBaseBranch(e.target.value)}
+                  />
+                }
+              />
+              <SettingsRow
+                label="Branch Prefix"
+                description="Prefix for branch names created by Cloud Agent"
+                htmlFor="branch-prefix"
+                control={
+                  <Input
+                    id="branch-prefix"
+                    className="w-56"
+                    placeholder="open-swe/"
+                    value={branchPrefix}
+                    onChange={(e) => setBranchPrefix(e.target.value)}
+                  />
+                }
+              />
+              <div className="flex justify-end px-4 py-3">
+                <Button
+                  size="sm"
+                  onClick={persistDefaults}
+                  disabled={save.isPending}
+                >
+                  {save.isPending ? "Saving…" : "Save defaults"}
+                </Button>
+              </div>
+            </div>
+          </SettingsSection>
 
-      <SettingsSection title="Pull Requests">
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Automatically fix CI failures"
-            description="Agent will attempt to fix failing CI checks and resolve reviewer comments on PRs it opens."
-            control={
-              <Switch
-                checked={profile.data?.auto_fix_ci ?? true}
-                onCheckedChange={(v) => persist({ auto_fix_ci: v })}
+          <SettingsSection title="Pull Requests">
+            <div className="divide-y divide-border">
+              <SettingsRow
+                label="Automatically fix CI failures"
+                description="Agent will attempt to fix failing CI checks and resolve reviewer comments on PRs it opens."
+                control={
+                  <Switch
+                    checked={profile.data?.auto_fix_ci ?? true}
+                    onCheckedChange={(v) => persist({ auto_fix_ci: v })}
+                  />
+                }
               />
-            }
-          />
-        </div>
-      </SettingsSection>
+            </div>
+          </SettingsSection>
 
-      <SettingsSection title="Slack">
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Concierge mode"
-            description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
-            control={
-              <Switch
-                checked={profile.data?.concierge_mode ?? false}
-                onCheckedChange={(v) => persist({ concierge_mode: v })}
+          <SettingsSection title="Slack">
+            <div className="divide-y divide-border">
+              <SettingsRow
+                label="Concierge mode"
+                description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
+                control={
+                  <Switch
+                    checked={profile.data?.concierge_mode ?? false}
+                    onCheckedChange={(v) => persist({ concierge_mode: v })}
+                  />
+                }
               />
-            }
-          />
-        </div>
-      </SettingsSection>
+            </div>
+          </SettingsSection>
 
-      <SettingsSection title="Rules">
-        <SettingsNavRow
-          to="/agents/instructions"
-          label="Repository Instructions"
-          description="Per-repo custom instructions injected into the agent's system prompt."
-        />
-      </SettingsSection>
-    </AppShell>
+          <SettingsSection title="Rules">
+            <SettingsNavRow
+              to="/agents/instructions"
+              label="Repository Instructions"
+              description="Per-repo custom instructions injected into the agent's system prompt."
+            />
+          </SettingsSection>
+        </>
+      )}
+    </AuthedAppShell>
   )
 }

@@ -1,11 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  Check,
-  CircleAlert,
-  LoaderCircle,
-  Radio,
-  RefreshCw,
-} from "lucide-react"
+import { Check, CircleAlert, Radio, RefreshCw } from "lucide-react"
 import { useState } from "react"
 import type { ReactNode } from "react"
 
@@ -15,7 +9,13 @@ import {
   SettingsSection,
 } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { incidentsApi } from "./api"
@@ -195,49 +195,51 @@ function PolicyForm({
             />
           </div>
         </SettingsPanel>
-        <details>
-          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+        <Collapsible>
+          <CollapsibleTrigger className="w-full cursor-pointer px-4 py-3 text-left text-xs font-medium">
             Model and analysis limits
-          </summary>
-          <SettingsPanel>
-            <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
-              {[
-                {
-                  name: "max_model_calls",
-                  label: "Model calls per turn",
-                  value: initial.max_model_calls,
-                  min: 1,
-                  max: 20,
-                },
-              ].map(({ name, label, value, min, max }) => (
-                <label
-                  key={name}
-                  htmlFor={`policy-${name}`}
-                  className="space-y-2"
-                >
-                  <span className="block text-xs font-medium">{label}</span>
-                  <Input
-                    type="number"
-                    min={min}
-                    max={max}
-                    step={1}
-                    required
-                    id={`policy-${name}`}
-                    name={name}
-                    defaultValue={value}
-                    className="h-9 bg-background"
-                  />
-                </label>
-              ))}
-              <Field
-                name="model"
-                label="Model"
-                value={initial.model ?? ""}
-                placeholder="Server default"
-              />
-            </div>
-          </SettingsPanel>
-        </details>
+          </CollapsibleTrigger>
+          <CollapsibleContent keepMounted>
+            <SettingsPanel>
+              <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
+                {[
+                  {
+                    name: "max_model_calls",
+                    label: "Model calls per turn",
+                    value: initial.max_model_calls,
+                    min: 1,
+                    max: 20,
+                  },
+                ].map(({ name, label, value, min, max }) => (
+                  <label
+                    key={name}
+                    htmlFor={`policy-${name}`}
+                    className="space-y-2"
+                  >
+                    <span className="block text-xs font-medium">{label}</span>
+                    <Input
+                      type="number"
+                      min={min}
+                      max={max}
+                      step={1}
+                      required
+                      id={`policy-${name}`}
+                      name={name}
+                      defaultValue={value}
+                      className="h-9 bg-background"
+                    />
+                  </label>
+                ))}
+                <Field
+                  name="model"
+                  label="Model"
+                  value={initial.model ?? ""}
+                  placeholder="Server default"
+                />
+              </div>
+            </SettingsPanel>
+          </CollapsibleContent>
+        </Collapsible>
       </SettingsSection>
       {validation && <Notice error>{validation}</Notice>}
       {save.error && <Notice error>{save.error.message}</Notice>}
@@ -278,7 +280,7 @@ function PolicyForm({
             }
           >
             {save.isPending ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
+              <Spinner aria-hidden />
             ) : (
               <Check className="size-3.5" />
             )}

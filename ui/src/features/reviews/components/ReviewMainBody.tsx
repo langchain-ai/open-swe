@@ -16,10 +16,7 @@ import {
   BugBeetleIcon,
   CaretDownIcon,
   ChatCircleIcon,
-  CheckCircleIcon,
   CheckIcon,
-  CircleIcon,
-  CircleNotchIcon,
   CodeIcon,
   CopyIcon,
   FlagIcon,
@@ -35,7 +32,6 @@ import {
   TextBIcon,
   TextHIcon,
   TextItalicIcon,
-  XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { Link } from "@tanstack/react-router"
@@ -114,13 +110,32 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { Button, IconButton } from "@/components/ui/button"
+import { CheckStatusIcon } from "@/features/reviews/components/CheckStatus"
+import { DiffStat } from "@/components/DiffStat"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
+import { Kbd } from "@/components/ui/kbd"
+import { Popover, PopoverPopup } from "@/components/ui/popover"
 import { Sheet, SheetPopup } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -480,7 +495,7 @@ const GROUP_STYLES = {
   bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
   investigate: {
     label: "Investigate",
-    className: "text-amber-500",
+    className: "text-warning",
     Icon: FlagIcon,
   },
   informational: {
@@ -1503,14 +1518,15 @@ function ReviewBodyInner({
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {embedded && (
               <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
-                <button
-                  type="button"
+                <Button
+                  variant="outline"
+                  size="xs"
                   onClick={onExpand}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                  className="text-muted-foreground"
                 >
-                  <ArrowSquareOutIcon className="size-3" />
+                  <ArrowSquareOutIcon data-icon="inline-start" />
                   Open full review
-                </button>
+                </Button>
               </div>
             )}
             <WorkerPoolContextProvider
@@ -1564,12 +1580,7 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
-                <div
-                  className={cn(
-                    "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-card" : "bg-card"
-                  )}
-                >
+                <div className="mt-4 rounded-lg border border-border bg-card p-4">
                   {detail.pr.body ? (
                     <Markdown
                       content={detail.pr.body}
@@ -1638,9 +1649,9 @@ function ReviewBodyInner({
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No diff available.
-                    </p>
+                    <Empty className="border border-border">
+                      <EmptyDescription>No diff available.</EmptyDescription>
+                    </Empty>
                   ) : view === "ai" && groupedView ? (
                     <div className="space-y-6">
                       {groupedView.map((group) => (
@@ -1718,7 +1729,7 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
               >
                 <span className="shrink-0">
                   {current ? (
-                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                    <Spinner aria-hidden className="inline size-3" />
                   ) : (
                     "·"
                   )}
@@ -1835,11 +1846,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
         )}
       </div>
       <Button size="lg" onClick={() => scout.mutate(detail)} disabled={running}>
-        {running ? (
-          <CircleNotchIcon className="animate-spin" />
-        ) : (
-          <ListNumbersIcon />
-        )}
+        {running ? <Spinner aria-hidden /> : <ListNumbersIcon />}
         {running ? "Building…" : "Build walkthrough"}
       </Button>
     </div>
@@ -1854,50 +1861,54 @@ function DiffStyleToggle({
   onChange: (value: DiffStyle) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-      <DiffStyleButton
-        active={value === "unified"}
-        label="Unified view"
-        onClick={() => onChange("unified")}
-      >
+    <ToggleGroup
+      aria-label="Diff layout"
+      spacing={0.5}
+      size="sm"
+      value={[value]}
+      onValueChange={(values) => {
+        const next = values.find(
+          (style): style is DiffStyle =>
+            style === "unified" || style === "split"
+        )
+        if (next) onChange(next)
+      }}
+      className="rounded-md border border-border p-0.5"
+    >
+      <DiffStyleButton value="unified" label="Unified view">
         <RowsIcon className="size-3.5" />
       </DiffStyleButton>
-      <DiffStyleButton
-        active={value === "split"}
-        label="Split view"
-        onClick={() => onChange("split")}
-      >
+      <DiffStyleButton value="split" label="Split view">
         <SquareSplitHorizontalIcon className="size-3.5" />
       </DiffStyleButton>
-    </div>
+    </ToggleGroup>
   )
 }
 
 function DiffStyleButton({
-  active,
+  value,
   label,
-  onClick,
   children,
 }: {
-  active: boolean
+  value: DiffStyle
   label: string
-  onClick: () => void
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
-        active ? "bg-muted text-foreground" : "hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ToggleGroupItem
+            value={value}
+            aria-label={label}
+            className="size-5 min-w-5 rounded px-0 text-muted-foreground hover:text-foreground aria-pressed:text-foreground"
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup>{label}</TooltipPopup>
+    </Tooltip>
   )
 }
 
@@ -1933,13 +1944,8 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
           {group.index}
         </span>
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
-        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
-          {group.additions > 0 && (
-            <span className="text-emerald-500">+{group.additions}</span>
-          )}
-          {group.deletions > 0 && (
-            <span className="text-red-500">-{group.deletions}</span>
-          )}
+        <span className="flex shrink-0 items-center text-[11px]">
+          <DiffStat additions={group.additions} deletions={group.deletions} />
         </span>
       </div>
       {summary && (
@@ -2263,6 +2269,7 @@ const FileDiffCard = memo(function FileDiffCard({
       >
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => onToggleExpanded(file.path)}
           className="inline-flex items-center gap-2 text-left"
         >
@@ -2274,30 +2281,21 @@ const FileDiffCard = memo(function FileDiffCard({
           />
           <span className="font-mono font-medium">{file.path}</span>
         </button>
-        <span className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-500">+{additions}</span>
-          <span className="text-red-500">-{deletions}</span>
+        <span className="flex items-center text-[11px]">
+          <DiffStat additions={additions} deletions={deletions} />
         </span>
         {findings.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
+          <span className="inline-flex items-center gap-1 text-[11px] text-warning">
             <FlagIcon className="size-3" />
             {findings.length}
           </span>
         )}
         <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
           Mark as viewed
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={viewed}
-            onClick={() => onToggleViewed(file.path)}
-            className={cn(
-              "flex size-4 items-center justify-center rounded border border-border",
-              viewed && "bg-foreground text-background"
-            )}
-          >
-            {viewed && <CheckIcon className="size-3" />}
-          </button>
+          <Checkbox
+            checked={viewed}
+            onCheckedChange={() => onToggleViewed(file.path)}
+          />
         </label>
       </div>
       {expanded &&
@@ -2362,48 +2360,50 @@ function AddToChatPopup({
   onAdd: () => void
   onDismiss: () => void
 }) {
-  // Positioned fixed at the pointer-release point so it escapes the diff's
-  // overflow clipping. Dismiss on Escape, scroll, or any outside pointer-down.
+  // Anchored to the pointer-release point. The popover handles Escape and
+  // outside presses; scrolling (captured, to catch the diff scroller) dismisses.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onDismiss()
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest("[data-add-to-chat]"))
-        return
-      onDismiss()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("pointerdown", onPointerDown)
-    // Capture so it also catches scrolls from the diff scroll container.
     window.addEventListener("scroll", onDismiss, true)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("pointerdown", onPointerDown)
-      window.removeEventListener("scroll", onDismiss, true)
-    }
+    return () => window.removeEventListener("scroll", onDismiss, true)
   }, [onDismiss])
+  const anchor = useMemo(
+    () => ({
+      getBoundingClientRect: () =>
+        DOMRect.fromRect({ x, y, width: 0, height: 0 }),
+    }),
+    [x, y]
+  )
 
   return (
-    <div
-      data-add-to-chat
-      style={{ position: "fixed", top: y, left: x }}
-      className="z-50 -translate-y-[calc(100%+4px)] font-sans"
+    <Popover
+      open
+      onOpenChange={(open) => {
+        if (!open) onDismiss()
+      }}
     >
-      <button
-        type="button"
-        onClick={onAdd}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-[linear-gradient(var(--muted),var(--muted)),linear-gradient(var(--popover),var(--popover))]"
+      <PopoverPopup
+        data-add-to-chat
+        anchor={anchor}
+        side="top"
+        align="start"
+        initialFocus={false}
+        finalFocus={false}
+        className="rounded-md p-0.5 font-sans"
       >
-        Add to Chat
-        <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
-          ⌘L
-        </kbd>
-      </button>
-    </div>
+        <Button variant="ghost" size="xs" onClick={onAdd}>
+          Add to Chat
+          <Kbd className="h-4 text-[10px]">⌘L</Kbd>
+        </Button>
+      </PopoverPopup>
+    </Popover>
   )
 }
+
+const COMPOSER_TAB_CLASS =
+  "h-auto flex-none rounded px-2 py-0.5 text-[11px] font-normal text-muted-foreground data-active:bg-accent data-active:font-medium data-active:text-foreground dark:data-active:border-transparent dark:data-active:bg-accent"
+
+const SIDE_TAB_CLASS =
+  "h-auto flex-none px-2.5 py-1 text-xs font-normal text-muted-foreground hover:bg-muted/50 data-active:bg-muted data-active:font-medium data-active:text-foreground dark:data-active:border-transparent dark:data-active:bg-muted"
 
 type MarkdownAction =
   | "heading"
@@ -2563,13 +2563,6 @@ function CommentComposer({
       textarea.setSelectionRange(next.start, next.end)
     })
   }
-  const tabClass = (active: boolean) =>
-    cn(
-      "rounded px-2 py-0.5 text-[11px]",
-      active
-        ? "bg-accent font-medium text-foreground"
-        : "text-muted-foreground hover:text-foreground"
-    )
   return (
     <div className="px-2 py-1 font-sans">
       <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -2578,122 +2571,108 @@ function CommentComposer({
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
           </span>
-          <IconButton
-            type="button"
-            variant="ghost"
+          <TooltipIconButton
             size="icon-xs"
-            aria-label="Close comment"
+            label="Close comment"
             className="ml-auto"
             onClick={onClose}
           >
             <XIcon />
-          </IconButton>
+          </TooltipIconButton>
         </div>
-        {
-          <>
-            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
-              <button
-                type="button"
-                onClick={() => setMode("write")}
-                aria-selected={mode === "write"}
-                className={tabClass(mode === "write")}
-              >
+        <Tabs
+          value={mode}
+          onValueChange={(next) =>
+            setMode(next === "preview" ? "preview" : "write")
+          }
+          className="gap-0"
+        >
+          <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
+            <TabsList className="h-auto gap-1 bg-transparent p-0">
+              <TabsTrigger value="write" className={COMPOSER_TAB_CLASS}>
                 Write
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("preview")}
-                aria-selected={mode === "preview"}
-                className={tabClass(mode === "preview")}
-              >
+              </TabsTrigger>
+              <TabsTrigger value="preview" className={COMPOSER_TAB_CLASS}>
                 Preview
-              </button>
-              {mode === "write" && (
-                <div className="ml-auto flex items-center gap-0.5">
-                  {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
-                    <Fragment key={group[0]?.action ?? groupIndex}>
-                      {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-border" />
-                      )}
-                      {group.map(({ action, label, Icon }) => (
-                        <IconButton
-                          key={action}
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={label}
-                          title={label}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => applyAction(action)}
-                        >
-                          <Icon className="size-4" />
-                        </IconButton>
-                      ))}
-                    </Fragment>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="p-2">
-              {mode === "write" ? (
-                <Textarea
-                  ref={textareaRef}
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      (event.metaKey || event.ctrlKey) &&
-                      event.key === "Enter"
-                    ) {
-                      event.preventDefault()
-                      submit()
-                    } else if (event.key === "Escape") {
-                      event.preventDefault()
-                      onClose()
-                    }
-                  }}
-                  placeholder="Leave a comment…"
-                  rows={3}
-                  className="resize-y text-xs"
-                />
-              ) : (
-                <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
-                  {value.trim() ? (
-                    <Markdown content={value} />
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Nothing to preview
-                    </span>
-                  )}
-                </div>
-              )}
-              {mutation.isError && (
-                <p className="mt-1.5 text-[11px] text-destructive">
-                  {mutation.error instanceof Error
-                    ? mutation.error.message
-                    : "Failed to add the comment"}
-                </p>
-              )}
-              <div className="mt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!value.trim() || mutation.isPending}
-                  className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
-                >
-                  {mutation.isPending ? "Adding…" : "Add review comment"}
-                </button>
+              </TabsTrigger>
+            </TabsList>
+            {mode === "write" && (
+              <div className="ml-auto flex items-center gap-0.5">
+                {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
+                  <Fragment key={group[0]?.action ?? groupIndex}>
+                    {groupIndex > 0 && (
+                      <span className="mx-0.5 h-4 w-px bg-border" />
+                    )}
+                    {group.map(({ action, label, Icon }) => (
+                      <TooltipIconButton
+                        key={action}
+                        label={label}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyAction(action)}
+                      >
+                        <Icon className="size-4" />
+                      </TooltipIconButton>
+                    ))}
+                  </Fragment>
+                ))}
               </div>
+            )}
+          </div>
+          <div className="p-2">
+            <TabsContent value="write">
+              <Textarea
+                ref={textareaRef}
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    (event.metaKey || event.ctrlKey) &&
+                    event.key === "Enter"
+                  ) {
+                    event.preventDefault()
+                    submit()
+                  } else if (event.key === "Escape") {
+                    event.preventDefault()
+                    onClose()
+                  }
+                }}
+                placeholder="Leave a comment…"
+                rows={3}
+                className="resize-y text-xs"
+              />
+            </TabsContent>
+            <TabsContent value="preview">
+              <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
+                {value.trim() ? (
+                  <Markdown content={value} />
+                ) : (
+                  <span className="text-muted-foreground">
+                    Nothing to preview
+                  </span>
+                )}
+              </div>
+            </TabsContent>
+            {mutation.isError && (
+              <p className="mt-1.5 text-[11px] text-destructive">
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : "Failed to add the comment"}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <Button variant="outline" size="xs" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                size="xs"
+                onClick={submit}
+                disabled={!value.trim() || mutation.isPending}
+              >
+                {mutation.isPending ? "Adding…" : "Add review comment"}
+              </Button>
             </div>
-          </>
-        }
+          </div>
+        </Tabs>
       </div>
     </div>
   )
@@ -2784,15 +2763,7 @@ function InlineComment({
     >
       <div className="overflow-hidden rounded-md border border-border bg-card">
         <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          {comment.author_avatar_url ? (
-            <img
-              src={comment.author_avatar_url}
-              alt=""
-              className="size-4 shrink-0 rounded-full"
-            />
-          ) : (
-            <span className="size-4 shrink-0 rounded-full bg-muted" />
-          )}
+          <UserAvatar src={comment.author_avatar_url} />
           <span className="font-medium">{comment.author}</span>
           {comment.line !== null && (
             <span className="font-mono text-muted-foreground">
@@ -2802,35 +2773,31 @@ function InlineComment({
           )}
           <div className="ml-auto flex items-center gap-0.5">
             {editable && !editing && (
-              <IconButton
-                type="button"
-                variant="ghost"
+              <TooltipIconButton
                 size="icon-xs"
-                aria-label="Edit comment"
+                label="Edit comment"
                 onClick={() => setEditing(true)}
               >
                 <PencilSimpleIcon />
-              </IconButton>
+              </TooltipIconButton>
             )}
-            <a
-              href={comment.html_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="View on GitHub"
-              title="View on GitHub"
-              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            <TooltipIconButton
+              size="icon-xs"
+              label="View on GitHub"
+              nativeButton={false}
+              render={
+                <a href={comment.html_url} target="_blank" rel="noreferrer" />
+              }
             >
               <IoLogoGithub className="size-3" />
-            </a>
-            <IconButton
-              type="button"
-              variant="ghost"
+            </TooltipIconButton>
+            <TooltipIconButton
               size="icon-xs"
-              aria-label="Close comment"
+              label="Close comment"
               onClick={onClose}
             >
               <XIcon />
-            </IconButton>
+            </TooltipIconButton>
           </div>
         </div>
         {editing ? (
@@ -2852,23 +2819,18 @@ function InlineComment({
               autoFocus
             />
             <div className="mt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={cancel}
-                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-              >
+              <Button variant="outline" size="xs" onClick={cancel}>
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="xs"
                 onClick={submit}
                 disabled={
                   !draft.trim() || draft.trim() === body || mutation.isPending
                 }
-                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
               >
                 {mutation.isPending ? "Saving…" : "Save"}
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -2911,8 +2873,10 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
           <span className="min-w-0 flex-1 truncate text-foreground">
             {finding.title}
           </span>
-          {finding.outdated && <Badgeish>Outdated</Badgeish>}
-          {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
+          {finding.outdated && <FindingBadge>Outdated</FindingBadge>}
+          {finding.status !== "open" && (
+            <FindingBadge>{finding.status}</FindingBadge>
+          )}
           <CaretDownIcon
             className={cn(
               "size-3 shrink-0 text-muted-foreground transition-transform",
@@ -2935,20 +2899,11 @@ function FindingDetails({
   finding: ReviewFinding
   reviewUrl: string
 }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard()
   const githubUrl =
     finding.github_review_comment_id !== null
       ? `${reviewUrl}#discussion_r${finding.github_review_comment_id}`
       : null
-
-  const copy = () => {
-    void navigator.clipboard
-      .writeText(findingClipboardText(finding))
-      .then(() => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1500)
-      })
-  }
 
   return (
     <div className="border-t border-border px-3 py-2.5 font-sans">
@@ -2961,22 +2916,30 @@ function FindingDetails({
         </p>
       )}
       <div className="mt-2.5 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+        <Button
+          variant="outline"
+          size="xs"
+          className="text-muted-foreground"
+          onClick={() => void copy(findingClipboardText(finding))}
         >
-          <CopyIcon className="size-3" />
+          {copied ? (
+            <CheckIcon data-icon="inline-start" />
+          ) : (
+            <CopyIcon data-icon="inline-start" />
+          )}
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
         {githubUrl && (
           <a
             href={githubUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className={cn(
+              buttonVariants({ variant: "outline", size: "xs" }),
+              "text-muted-foreground"
+            )}
           >
-            <IoLogoGithub className="size-3" />
+            <IoLogoGithub data-icon="inline-start" />
             View on GitHub
           </a>
         )}
@@ -2985,11 +2948,20 @@ function FindingDetails({
   )
 }
 
-function Badgeish({ children }: { children: React.ReactNode }) {
+function FindingBadge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
+    <Badge variant="outline" className="text-muted-foreground capitalize">
       {children}
-    </span>
+    </Badge>
+  )
+}
+
+function UserAvatar({ src }: { src: string | null | undefined }) {
+  return (
+    <Avatar className="size-4 after:hidden">
+      {src && <AvatarImage src={src} alt="" />}
+      <AvatarFallback />
+    </Avatar>
   )
 }
 
@@ -3158,38 +3130,36 @@ function SidePanel({
           layout === "inline" && "border-l border-border"
         )}
       >
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-          {(
-            [
-              ["info", "Info"],
-              ["chat", "Chat"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onTabChange(id)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs transition-colors",
-                tab === id
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={tab}
+          onValueChange={(next) =>
+            onTabChange(next === "chat" ? "chat" : "info")
+          }
+          className="flex-1 gap-0"
+        >
+          <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+            <TabsList className="h-auto gap-1 bg-transparent p-0">
+              <TabsTrigger value="info" className={SIDE_TAB_CLASS}>
+                Info
+              </TabsTrigger>
+              <TabsTrigger value="chat" className={SIDE_TAB_CLASS}>
+                Chat
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-        {tab === "chat" ? (
-          <ReviewChat
-            owner={detail.owner}
-            repo={detail.repo}
-            number={detail.number}
-            reviewed={detail.status === "idle"}
-          />
-        ) : (
-          <div className="divide-y divide-border">
+          <TabsContent value="chat" className="flex min-h-0 flex-col">
+            <ReviewChat
+              owner={detail.owner}
+              repo={detail.repo}
+              number={detail.number}
+              reviewed={detail.status === "idle"}
+            />
+          </TabsContent>
+          <TabsContent
+            value="info"
+            className="flex-none divide-y divide-border"
+          >
             <section className="px-3 py-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium">
@@ -3201,15 +3171,16 @@ function SidePanel({
                         ? "Not analyzed yet"
                         : "PR analysis complete"}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  variant="outline"
+                  size="xs"
                   onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
-                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="text-muted-foreground"
                 >
-                  <ArrowClockwiseIcon className="size-3" />
+                  <ArrowClockwiseIcon data-icon="inline-start" />
                   {detail.status === "none" ? "Review" : "Re-review"}
-                </button>
+                </Button>
               </div>
               <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
                 <div>
@@ -3257,13 +3228,14 @@ function SidePanel({
               onFindingClick={onFindingClick}
               action={
                 detail.findings.length > 0 ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="xs"
                     onClick={onMarkAllRead}
-                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                    className="text-muted-foreground"
                   >
                     Mark all as read
-                  </button>
+                  </Button>
                 ) : null
               }
             />
@@ -3281,18 +3253,15 @@ function SidePanel({
               ) : (
                 <div className="flex flex-wrap gap-1">
                   {detail.pr.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
-                    >
+                    <Badge key={label.name} variant="outline">
                       {label.name}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               )}
             </section>
-          </div>
-        )}
+          </TabsContent>
+        </Tabs>
       </aside>
     </div>
   )
@@ -3319,28 +3288,18 @@ function FindingSection({
   onFindingClick: (finding: ReviewFinding) => void
   action?: React.ReactNode
 }) {
-  const [collapsed, setCollapsed] = useState(false)
   return (
-    <section className="px-3 py-3">
+    <Collapsible defaultOpen render={<section className="px-3 py-3" />}>
       <div className="mb-2 flex items-center justify-between text-xs">
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="inline-flex items-center gap-1.5 font-medium"
-        >
+        <CollapsibleTrigger className="group inline-flex items-center gap-1.5 font-medium">
           <HeaderIcon className="size-3.5" />
           {label}
-          <CaretDownIcon
-            className={cn(
-              "size-3 text-muted-foreground transition-transform",
-              collapsed && "-rotate-90"
-            )}
-          />
-        </button>
+          <CaretDownIcon className="size-3 -rotate-90 text-muted-foreground transition-transform group-data-panel-open:rotate-0" />
+        </CollapsibleTrigger>
         {action}
       </div>
-      {!collapsed &&
-        (findings.length === 0 ? (
+      <CollapsibleContent>
+        {findings.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
         ) : (
           <div className="space-y-0.5">
@@ -3382,9 +3341,11 @@ function FindingSection({
                           <span className="truncate font-mono">
                             {findingAnchorLabel(finding)}
                           </span>
-                          {finding.outdated && <Badgeish>Outdated</Badgeish>}
+                          {finding.outdated && (
+                            <FindingBadge>Outdated</FindingBadge>
+                          )}
                           {finding.status !== "open" && (
-                            <Badgeish>{finding.status}</Badgeish>
+                            <FindingBadge>{finding.status}</FindingBadge>
                           )}
                           {isRead && finding.status === "open" && (
                             <span>• Read</span>
@@ -3408,8 +3369,9 @@ function FindingSection({
               )
             })}
           </div>
-        ))}
-    </section>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -3449,21 +3411,6 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
   )
 }
 
-function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
-  if (check.status !== "completed") {
-    return (
-      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />
-    )
-  }
-  if (check.conclusion === "success" || check.conclusion === "neutral") {
-    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
-  }
-  if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-  }
-  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
-}
-
 function PeopleSection({
   title,
   people,
@@ -3483,15 +3430,7 @@ function PeopleSection({
               key={person.login}
               className="flex items-center gap-2 text-[11px]"
             >
-              {person.avatar_url ? (
-                <img
-                  src={person.avatar_url}
-                  alt=""
-                  className="size-4 rounded-full"
-                />
-              ) : (
-                <span className="size-4 rounded-full bg-muted" />
-              )}
+              <UserAvatar src={person.avatar_url} />
               {person.login}
             </div>
           ))}

@@ -3,13 +3,13 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 
 import type { ReviewerEvalStatus } from "@/lib/api"
-import { AppShell, SettingsSection } from "@/components/AppShell"
+import { AuthedAppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Checkbox } from "@/components/ui/checkbox"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
@@ -19,26 +19,22 @@ export const Route = createFileRoute("/admin_/evals")({
 function ReviewerEvalPage() {
   const session = useSession()
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-  if (!session.data.is_admin) return <Navigate to="/my-settings" />
+  if (session.data && !session.data.is_admin)
+    return <Navigate to="/my-settings" />
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Reviewer eval"
       description="Triggered from the Reviewer eval GitHub Action (run it on the prod branch). Progress streams here live."
       backTo={{ to: "/admin", label: "Back to Admin" }}
     >
-      <ReviewerEvalStatusSection />
-      <ReviewerEvalLogs />
-    </AppShell>
+      {() => (
+        <>
+          <ReviewerEvalStatusSection />
+          <ReviewerEvalLogs />
+        </>
+      )}
+    </AuthedAppShell>
   )
 }
 
@@ -162,20 +158,13 @@ function ReviewerEvalLogs() {
 
   const scrollRef = useRef<HTMLPreElement>(null)
   const [follow, setFollow] = useState(true)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard()
 
   useEffect(() => {
     if (follow && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [logTail, follow])
-
-  const copyLogs = async () => {
-    if (!logTail) return
-    await navigator.clipboard.writeText(logTail)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
-  }
 
   return (
     <SettingsSection
@@ -186,17 +175,15 @@ function ReviewerEvalLogs() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => void copyLogs()}
+            onClick={() => {
+              if (logTail) void copy(logTail)
+            }}
             disabled={!logTail}
           >
             {copied ? "Copied" : "Copy logs"}
           </Button>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={follow}
-              onChange={(e) => setFollow(e.target.checked)}
-            />
+            <Checkbox checked={follow} onCheckedChange={setFollow} />
             Follow
           </label>
         </div>

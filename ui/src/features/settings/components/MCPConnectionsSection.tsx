@@ -3,8 +3,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Button, IconButton } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
@@ -15,6 +24,18 @@ import { MCPOAuthFields } from "./MCPOAuthFields"
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
+type AuthMode = "headers" | "oauth"
+
+const TRANSPORTS: MCPConnection["transport"][] = ["streamable_http", "sse"]
+const TRANSPORT_LABELS: Record<MCPConnection["transport"], string> = {
+  streamable_http: "Streamable HTTP",
+  sse: "SSE",
+}
+const AUTH_MODES: AuthMode[] = ["headers", "oauth"]
+const AUTH_MODE_LABELS: Record<AuthMode, string> = {
+  headers: "Headers / API key",
+  oauth: "OAuth client credentials",
+}
 
 export type MCPScope = "instance" | "workspace" | "user"
 
@@ -367,34 +388,40 @@ export function MCPConnectionsSection({
             onChange={(e) => setDraft({ ...draft, url: e.target.value })}
           />
         </label>
-        <label className="block text-sm">
-          Transport
-          <select
-            aria-label="Transport"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+        <div className="space-y-1 text-sm">
+          <p>Transport</p>
+          <Select<MCPConnection["transport"]>
+            items={TRANSPORT_LABELS}
+            disabled={busy}
             value={draft.transport}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                transport: e.target.value as MCPConnection["transport"],
-              })
-            }
+            onValueChange={(transport) => {
+              if (transport) setDraft({ ...draft, transport })
+            }}
           >
-            <option value="streamable_http">Streamable HTTP</option>
-            <option value="sse">SSE</option>
-          </select>
-        </label>
-        <label className="block text-sm">
-          Authentication
-          <select
-            aria-label="Authentication"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            <SelectTrigger aria-label="Transport" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRANSPORTS.map((transport) => (
+                <SelectItem key={transport} value={transport}>
+                  {TRANSPORT_LABELS[transport]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 text-sm">
+          <p>Authentication</p>
+          <Select<AuthMode>
+            items={AUTH_MODE_LABELS}
+            disabled={busy}
             value={draft.oauth ? "oauth" : "headers"}
-            onChange={(event) =>
+            onValueChange={(mode) => {
+              if (!mode) return
               setDraft({
                 ...draft,
                 oauth:
-                  event.target.value === "oauth"
+                  mode === "oauth"
                     ? {
                         grant_type: "client_credentials",
                         token_url: "",
@@ -404,12 +431,20 @@ export function MCPConnectionsSection({
                       }
                     : null,
               })
-            }
+            }}
           >
-            <option value="headers">Headers / API key</option>
-            <option value="oauth">OAuth client credentials</option>
-          </select>
-        </label>
+            <SelectTrigger aria-label="Authentication" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTH_MODES.map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {AUTH_MODE_LABELS[mode]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {draft.oauth && (
           <MCPOAuthFields
             key={draft.name}
@@ -458,14 +493,9 @@ export function MCPConnectionsSection({
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <IconButton
-                  type="button"
-                  size="icon-sm"
+                <TooltipIconButton
                   variant="outline"
-                  aria-label={
-                    savedHeaders ? "Hide saved headers" : "Show saved headers"
-                  }
-                  title={
+                  label={
                     savedHeaders ? "Hide saved headers" : "Show saved headers"
                   }
                   aria-expanded={savedHeaders !== null}
@@ -482,7 +512,7 @@ export function MCPConnectionsSection({
                   ) : (
                     <EyeIcon aria-hidden="true" />
                   )}
-                </IconButton>
+                </TooltipIconButton>
                 <Button
                   type="button"
                   size="sm"
@@ -520,12 +550,10 @@ export function MCPConnectionsSection({
                       updateHeader(index, "value", e.target.value)
                     }
                   />
-                  <IconButton
-                    type="button"
-                    size="icon-sm"
+                  <TooltipIconButton
                     variant="outline"
-                    aria-label={`${header.revealed ? "Hide" : "Show"} header ${index + 1} value`}
-                    title={header.revealed ? "Hide value" : "Show value"}
+                    label={`${header.revealed ? "Hide" : "Show"} header ${index + 1} value`}
+                    tooltip={header.revealed ? "Hide value" : "Show value"}
                     aria-pressed={Boolean(header.revealed)}
                     onClick={() =>
                       setHeaders(
@@ -542,7 +570,7 @@ export function MCPConnectionsSection({
                     ) : (
                       <EyeIcon aria-hidden="true" />
                     )}
-                  </IconButton>
+                  </TooltipIconButton>
                   <Button
                     type="button"
                     size="sm"
@@ -627,15 +655,15 @@ export function MCPConnectionsSection({
               >
                 {toolNames.map((name) => (
                   <label key={name} className="flex items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="mt-1 shrink-0"
+                    <Checkbox
+                      className="mt-0.5"
+                      disabled={busy}
                       aria-label={`Allow ${name}`}
                       checked={selectedTools.has(name)}
-                      onChange={(e) =>
+                      onCheckedChange={(checked) =>
                         setDraft({
                           ...draft,
-                          allowed_tools: e.target.checked
+                          allowed_tools: checked
                             ? [...draft.allowed_tools, name]
                             : draft.allowed_tools.filter(
                                 (tool) => tool !== name
