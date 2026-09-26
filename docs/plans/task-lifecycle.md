@@ -103,6 +103,16 @@ task_assignee                  who must act now; no active rows = the agent has 
   end_reason        reviewed | passed | timed_out | removed | done | stale | null
   unique active (task_id, user_id, reason, pull_request_id) where ended_at is null
 
+task_reviewer_suggestion       input to the agent's reviewer choice
+  id                uuid7
+  task_id           uuid
+  pull_request_id   uuid
+  user_id           uuid      -> user; the suggested reviewer
+  suggested_by      uuid      -> user
+  source            chat | slack | pr_comment | github_request
+  created_at        timestamptz
+  outcome           assigned | declined | null
+
 task_event                     append-only timeline
   id, task_id, pull_request_id null, kind, from_state, to_state,
   head_sha, detail jsonb, created_at
@@ -341,6 +351,7 @@ They are deduped through `task_wakeup` and do not count toward the retry budget.
 | A PR has no agent-actionable or automation conditions left (CI green, Open SWE review done, nothing to fix) and lacks the approvals it needs | who reviews it |
 | A reviewer passed, or missed the acknowledgement deadline | who reviews instead |
 | GitHub requested a team on a PR (for example a `CODEOWNERS` auto-request) | which one member to request instead |
+| A person requested a reviewer directly on GitHub | whether to keep that request, given the reviewer's load |
 | The shepherd entered a block (`retry_budget_exhausted`, `merge_failed`, `permission_denied`) | who resolves it, and the `ask` |
 | The task reached `ready_to_merge` with auto-merge off | who merges |
 | An owner resumed a stale task | review assignments afresh |
@@ -349,6 +360,27 @@ The agent can also assign at any other time, typically because a person asked in
 chat, in Slack, or with an `@open-swe assign @login` comment. People do not assign
 directly; they ask the agent, so every assignment goes through the same call and
 the same rules.
+
+#### Suggested reviewers
+
+Authors will often suggest a reviewer. A suggestion is input to the agent's
+decision, not an assignment. Suggestions come from:
+
+- a person naming someone in the task's thread or Slack thread ("have Alex review
+  this"), which the agent records with `suggest_reviewer`
+- `@open-swe assign @login` or `@open-swe review @login` on a PR
+- a review request a person makes directly on GitHub
+
+Each is stored in `task_reviewer_suggestion` with who suggested whom for which
+PR, and shows up in `review_candidates` as `suggested_by`. A GitHub review request
+a person made also wakes the agent to decide on it.
+
+The agent weighs the suggestion against the suggested person's review load and
+the alternatives. It honours the suggestion unless that person is clearly more
+loaded than comparable candidates, or cannot be assigned under the rules. When it
+declines, it assigns someone else, withdraws the GitHub request if there was one,
+and tells the suggester why in the thread, Slack thread, or PR, for example "Alex
+has 4 open reviews and took 3 today; asked Sam, who also owns `agent/tasks/`".
 
 #### Rules `assign_task` enforces
 
@@ -377,7 +409,11 @@ These go in the assignment wake-up prompt and the `assign_task` description
   approvals or code owner review needs another person; prefer one person who
   covers several owned paths.
 - Prefer code owners and people who recently changed or reviewed the files.
-- Prefer lighter review load.
+- Weigh review load heavily: both what someone holds now and what they took in
+  their last working day. Spread reviews rather than piling onto the obvious
+  expert.
+- Honour suggested reviewers unless they are clearly more loaded than comparable
+  candidates; say why when declining.
 - Prefer people inside their working hours now; do not pick anyone marked away.
 - After changes were requested and fixed, usually re-request the same reviewers.
 - For a block, assign whoever can actually answer the `ask`: normally the owners,
@@ -401,12 +437,31 @@ members) and from recent committers and reviewers of the changed files.
 | Code ownership | `CODEOWNERS` paths they own among the changed files, with lines changed under each |
 | Change history | their commits to the changed files in the last 180 days, from the GitHub commits API per path (top 20 files by lines changed) |
 | Review history | their reviews on earlier PRs touching the same files |
-| Load | their open review requests across the org plus active `review` assignments in Open SWE |
+| Load | the counts from [Review load](#review-load) |
+| Suggested | who suggested them for this PR, if anyone |
 | Working hours | whether they are inside working hours now, and when their next working hour starts |
 | Away | Slack presence or status marking them away (vacation, out sick, away), read live at call time |
 | History on this PR | whether they already reviewed, passed, or timed out |
 
 History signals are cached per repo and path for an hour. Presence is not cached.
+
+#### Review load
+
+Review load is tracked per person and is the main input when choosing between
+candidates or deciding on a suggestion. For each registered user:
+
+| Count | Source |
+|---|---|
+| `active_reviews` | Open SWE `review` assignments not yet ended |
+| `awaiting_ack` | of those, not yet acknowledged |
+| `assigned_last_working_day` | `review` assignments made to them during their most recent working day, including ones already ended, using their stored working hours |
+| `github_review_requests` | open review requests on GitHub across the installation's orgs that are not Open SWE assignments, from GitHub search (`is:open is:pr review-requested:<login>`), cached for 10 minutes |
+
+The first three are one query over `task_assignee`, exposed as a `reviewer_load`
+view, so they are exact and cost nothing to read. `review_candidates` returns all
+four for every candidate, plus the median across the candidate list for
+comparison, and `assign_task` returns the assignee's updated load so the agent
+sees the effect of its call.
 
 #### Acknowledgement
 
@@ -450,9 +505,9 @@ The shepherd keeps assignments consistent with GitHub without choosing anyone:
 
 - A `review` assignment requests the review on GitHub; ending it withdraws the
   request.
-- A review request a person makes directly on GitHub is recorded as that person's
-  assignment of the reviewer, subject to the same rules. A team request is not
-  recorded; it triggers the "which member" wake-up above.
+- A review request a person makes directly on GitHub is recorded as a
+  suggestion (see [Suggested reviewers](#suggested-reviewers)), not an
+  assignment. A team request triggers the "which member" wake-up above.
 - An assignment ends when its job is done: the reviewer submits a review on the
   current head (approval or changes requested), the block clears, or the PR
   merges. A stale task ends all of them. Ending is not reassigning; if another
@@ -559,7 +614,8 @@ row, records a `task_event`, and posts a PR comment.
 | `release_pull_request` | Remove a PR from the task |
 | `set_task_options` | `auto_merge: bool \| null`, `merge_after: {pr: [prs]}`, `owners: {add: [login \| email], remove: [login \| email]}` (added owners must be thread participants) |
 | `request_human` | `ask`, `assignees: [login]`, `rationale`, `reason: agent_request \| no_reviewer`, `pull_request?`; blocks the task (or one PR), assigns it, and ends the run |
-| `review_candidates` | `pull_request`; review requirements and candidates with raw signals (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
+| `review_candidates` | `pull_request`; review requirements and candidates with raw signals, review load, and suggestions (see [Reviewer candidates](#reviewer-candidates-review_candidates-agenttasksreviewerspy)) |
+| `suggest_reviewer` | `pull_request`, `reviewer: login`, `suggested_by: login`; records a suggestion a participant made in conversation |
 | `assign_task` | `add: [login]`, `remove: [login]`, `reason: review \| blocked \| merge \| manual`, `pull_request?`, `rationale`; the only way anyone is assigned. `review` also requests review on GitHub |
 
 Tool descriptions live under `agent/resources/prompts/tools/`.
