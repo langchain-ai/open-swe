@@ -19,7 +19,11 @@ from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
-from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
+from agent.sandboxes.providers.langsmith import (
+    await_sandbox_egress,
+    configure_sandbox_proxy,
+    get_sandbox_proxy_config,
+)
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -350,9 +354,8 @@ async def _connect_existing_sandbox(
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
-    A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
-    pings the box first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot.
+    A ``SandboxGoneError`` propagates untouched so the caller recreates. Proxy
+    refresh and egress readiness are checked separately by the lifecycle.
     """
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -490,15 +493,23 @@ async def ensure_sandbox_for_thread(
                 ) from create_exc
             logger.info("Replacement sandbox created: %s", sandbox_backend.id)
 
+    async with aphase(thread_id, "sandbox.egress_ready"):
+        sandbox_egress_ready = (
+            await await_sandbox_egress(sandbox_backend)
+            if ENV.SANDBOX_TYPE.get() == "langsmith"
+            else True
+        )
+
     # Bind the thread only once the sandbox is created and initialized: a run
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
+    sandbox_metadata: dict[str, Any] = {"sandbox_egress_ready": sandbox_egress_ready}
     if created:
-        sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
+        sandbox_metadata["sandbox_id"] = sandbox_backend.id
         if created_proxy_config is not None:
             sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
-        async with aphase(thread_id, "sandbox.bind_thread"):
-            await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+    async with aphase(thread_id, "sandbox.bind_thread"):
+        await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
 
     # Publishing last is what makes a failure above visible. Callers reach the
     # proxy's cached backend without awaiting the startup task that produced it,
