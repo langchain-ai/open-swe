@@ -43,7 +43,16 @@ async def web_search(
                 num_results=num_results,
                 type="auto",
             )
+        results_preview = _results_preview(result)
         results = str(result)
+        if len(results) <= WEB_SEARCH_MAX_INLINE_CHARS:
+            return {
+                "success": True,
+                "results_path": None,
+                "results": results,
+                "result_chars": len(results),
+                "error": None,
+            }
         try:
             results_path = await write_sandbox_output(
                 "web-search", chunk_output_as_jsonl(results), "jsonl"
@@ -61,6 +70,7 @@ async def web_search(
             "success": True,
             "results_path": results_path,
             "results": None,
+            "results_preview": results_preview,
             "result_chars": len(results),
             "error": None,
         }
@@ -86,3 +96,16 @@ def _bounded_inline_results(results: str) -> str:
         + "\n... [results truncated: "
         + f"{WEB_SEARCH_MAX_INLINE_CHARS}/{len(results)} chars]\n"
     )
+
+
+def _results_preview(result: object) -> str:
+    result_items = getattr(result, "results", None)
+    if not isinstance(result_items, (list, tuple)):
+        return "0 results"
+
+    preview_lines = [f"{len(result_items)} results"]
+    for item in result_items:
+        title = getattr(item, "title", None) or "(untitled)"
+        url = getattr(item, "url", None) or "(no URL)"
+        preview_lines.append(f"- {title} — {url}")
+    return "\n".join(preview_lines)
