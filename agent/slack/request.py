@@ -28,6 +28,7 @@ class SlackRequest(BaseModel):
     context_thread_ts: str = ""
     context_channel_id: str = ""
     treat_all_messages_as_mentions: bool = False
+    kitchen_channel: bool = False
     message_update: bool = False
     code_channel: bool = False
     concierge_mode: bool = False
