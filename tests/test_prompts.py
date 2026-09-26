@@ -26,6 +26,15 @@ def test_jinja_prompt_requires_all_variables() -> None:
         prompt("runs/baby-sit-ready", pr_url="P", head_sha="H")
 
 
+def test_static_prompt_rejects_variables() -> None:
+    with pytest.raises(ValueError, match="does not accept variables without a Jinja template"):
+        prompt("system/shared-base", unused="value")
+
+
+def test_static_prompt_loads_without_variables() -> None:
+    assert prompt("system/shared-base") == load_prompt("system/shared-base.md")
+
+
 def test_load_prompt_rejects_paths_outside_resources() -> None:
     with pytest.raises(ValueError):
         load_prompt("../default_prompt.md")

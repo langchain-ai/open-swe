@@ -40,10 +40,12 @@ def _is_template(name: str) -> bool:
 
 
 def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: object) -> str:
-    """Render Jinja templates or load static Markdown prompts."""
+    """Render Jinja templates or load static Markdown prompts without substitutions."""
     substitutions = {**(values or {}), **kwargs}
     if _is_template(name):
         return _JINJA.get_template(f"{name}.md.jinja").render(substitutions).strip()
+    if substitutions:
+        raise ValueError(f"prompt {name!r} does not accept variables without a Jinja template")
     return load_prompt(f"{name}.md")
 
 
