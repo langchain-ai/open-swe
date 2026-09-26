@@ -38,7 +38,7 @@ async def test_thread_wins_over_everything() -> None:
     assert result == routing.WorkspaceResolution("default", "thread")
 
 
-async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStore) -> None:
+async def test_tag_then_channel_then_repo_then_user_default(fake_store: FakeStore) -> None:
     await _seed()
     await set_user_preferences(
         "alice", UserPreferencesUpdate(default_visibility="public", default_workspace="oss")
@@ -54,6 +54,21 @@ async def test_tag_then_repo_then_channel_then_user_default(fake_store: FakeStor
     assert (await routing.resolve_workspace(login="alice")).resolved_by == "user_default"
     assert (await routing.resolve_workspace(login="bob")) == routing.WorkspaceResolution(
         "default", "instance_default"
+    )
+
+
+async def test_a_bound_channel_outranks_the_repositorys_preferred_workspace() -> None:
+    """Every workspace can use every repository, so the channel a message came from decides."""
+    await _seed()
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["CCORE"]), "alice"
+    )
+
+    assert await routing.resolve_workspace(
+        repo=("acme", "oss"), slack_channel_id="CCORE"
+    ) == routing.WorkspaceResolution("core", "channel")
+    assert await routing.resolve_workspace(repo=("acme", "oss")) == routing.WorkspaceResolution(
+        "oss", "repo"
     )
 
 

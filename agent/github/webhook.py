@@ -1426,7 +1426,11 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             issue_url=issue_url,
             trusted=trusted,
         )
-    workspace = await common.workspace_for_repo_config(repo_config)
+    # A follow-up stays in the workspace its thread started in, even if the
+    # repository has since been preferred by another workspace.
+    workspace = (
+        await common.get_thread_workspace(thread_id) if existing_thread else None
+    ) or await common.workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,

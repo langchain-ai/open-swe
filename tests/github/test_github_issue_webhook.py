@@ -1625,3 +1625,69 @@ async def test_github_webhook_routes_pr_review_request_comment_to_agent(
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
     assert captured["event_type"] == "issue_comment"
+
+
+def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> None:
+    """A follow-up lands in the thread's workspace even if the repository is preferred elsewhere."""
+    captured: dict[str, object] = {}
+
+    class _FakeRunsClient:
+        async def create(self, *args, **kwargs) -> None:
+            captured["configurable"] = kwargs["config"]["configurable"]
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    async def fake_react_to_github_comment(*args: object, **kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        webhook_common,
+        "get_or_resolve_thread_github_token",
+        lambda thread_id, email: asyncio.sleep(0, result="user-token"),
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
+    )
+    monkeypatch.setattr(
+        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_thread_workspace", lambda thread_id: asyncio.sleep(0, result="core")
+    )
+    monkeypatch.setattr(
+        webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
+    )
+    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(
+        User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
+    )
+    monkeypatch.setattr(
+        User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset({"octocat"}))
+    )
+
+    asyncio.run(
+        github_webhooks.process_github_issue(
+            {
+                "issue": {
+                    "id": 12345,
+                    "number": 42,
+                    "title": "Fix the flaky test",
+                    "body": "The test is failing intermittently.",
+                    "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
+                },
+                "comment": {
+                    "id": 999,
+                    "body": "@openswe please handle this",
+                    "user": {"login": "octocat"},
+                },
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "octocat"},
+            },
+            "issue_comment",
+        )
+    )
+
+    configurable = cast(dict[str, object], captured["configurable"])
+    assert configurable["workspace"] == "core"

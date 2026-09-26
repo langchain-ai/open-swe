@@ -232,7 +232,7 @@ async def test_an_inherited_default_repository_preferred_elsewhere_is_used(
 
 
 @_needs_workspace_rows
-async def test_a_named_repository_still_outranks_a_bound_channel(
+async def test_a_bound_channel_outranks_a_named_repository(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
     captured: dict[str, Any] = {}
@@ -264,6 +264,8 @@ async def test_a_named_repository_still_outranks_a_bound_channel(
         webhook_common.SlackRepoResolution(Repo(owner="acme", name="internal"), explicit=True),
     )
 
+    # The message came from `oss`'s channel, and `oss` can work in a repository
+    # `internal` prefers, so it stays in `oss` with the named repository.
     configurable = captured["run_create"]["kwargs"]["config"]["configurable"]
-    assert configurable["workspace"] == "internal"
+    assert configurable["workspace"] == "oss"
     assert configurable["repo"] == {"owner": "acme", "name": "internal"}
