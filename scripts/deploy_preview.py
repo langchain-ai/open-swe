@@ -76,6 +76,7 @@ class Deployer:
         self.client = client
         self.path = f"/v2/deployments/{deployment_id}"
         self.expected_sha = expected_sha
+        self.deadline = time.monotonic() + TIMEOUT_SECONDS
 
     async def latest(self) -> Revision | None:
         response = await self.client.get(f"{self.path}/revisions", params={"limit": 1})
@@ -104,11 +105,10 @@ class Deployer:
         return Revision.model_validate_json(response.content)
 
     async def settle(self, revision: Revision) -> Revision:
-        deadline = time.monotonic() + TIMEOUT_SECONDS
         status = revision.status
         print(f"revision {revision.id}: {status}", flush=True)
         while revision.status in IN_PROGRESS:
-            if time.monotonic() > deadline:
+            if time.monotonic() > self.deadline:
                 raise DeployError(f"revision {revision.id} still {revision.status} after timeout")
             await asyncio.sleep(POLL_SECONDS)
             revision = await self.revision(revision.id)
