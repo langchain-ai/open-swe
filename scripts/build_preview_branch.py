@@ -614,6 +614,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
             await git("commit", "--allow-empty", "-m", "preview: force deployment")
         await git("push", "--force", "origin", f"HEAD:refs/heads/{branch}")
         set_output("changed", "true")
+        set_output("sha", await rev_parse("HEAD"))
 
     async def build(self) -> None:
         await git("config", "user.name", "github-actions[bot]")
