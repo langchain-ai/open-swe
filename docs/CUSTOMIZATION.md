@@ -202,7 +202,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`. When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe. Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`. Routing is independent of the provider-proxy gateway toggle below. The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
-Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` select the balanced route directly. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
 ### Routing through the LangSmith LLM Gateway
 

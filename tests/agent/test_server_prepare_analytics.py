@@ -184,6 +184,27 @@ async def test_routed_run_exposes_selected_model_and_effort_to_tools(
     assert prepare_harness["thread_update"]["metadata"]["effort"] == "high"
 
 
+async def test_router_failure_attributes_default_model(
+    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    config = _slack_config()
+    middleware = _middleware(config)
+    middleware._effort = "medium"
+    middleware._model_selection = MagicMock()
+    middleware._model_selection.select_route = AsyncMock(return_value="default")
+    middleware._routing_defaults = {"balanced": ("openai:routed", "high")}
+
+    prepared = await _prepare(middleware)
+
+    assert prepared["model_route"] == "default"
+    assert prepared["selected_model_id"] == "openai:gpt-5"
+    assert prepared["selected_effort"] == "medium"
+    assert config["configurable"]["resolved_agent_model_id"] == "openai:gpt-5"
+    assert prepare_harness["thread_update"]["metadata"]["model"] == "openai:gpt-5"
+
+
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
     prepare_harness: dict[str, Any], github_client: _FakeGitHubClient
 ) -> None:

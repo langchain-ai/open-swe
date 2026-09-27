@@ -22,9 +22,10 @@ def _middleware(
     routing_mode: Literal["auto", "fast"] = "auto",
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock]]:
     profiles = ("fast", "balanced", "performance")
-    models = {profile: MagicMock(name=profile) for profile in profiles}
+    models = {profile: MagicMock(name=profile) for profile in (*profiles, "default")}
     middleware = ModelSelectionMiddleware(
         cast(Any, models),
+        models["default"],
         route_model_ids=route_model_ids,
         routing_mode=routing_mode,
     )
@@ -64,7 +65,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast"])
+@pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast", "default"])
 async def test_fast_mode_skips_classifier_and_routing_event(
     monkeypatch: pytest.MonkeyPatch,
     existing_route: str | None,
@@ -145,6 +146,32 @@ async def test_legacy_plan_state_does_not_override_existing_route() -> None:
 
     state["plan_mode"] = False
     assert (await _invoke(middleware, state)).model is models["fast"]
+
+
+@pytest.mark.asyncio
+async def test_jev_unavailable_uses_default_model_and_reports_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
+    middleware, models = _middleware(route_model_ids={"default": "openai:custom-default"})
+    state = {"messages": [HumanMessage(content="Do the task")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "default"
+    assert (await _invoke(middleware, state)).model is models["default"]
+    assert events == [
+        {"type": "model_routed", "route": "default", "model_id": "openai:custom-default"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_missing_route_uses_default_model() -> None:
+    middleware, models = _middleware()
+    state = {"messages": [HumanMessage(content="Do the task")]}
+
+    assert (await _invoke(middleware, state)).model is models["default"]
 
 
 @pytest.mark.asyncio
@@ -273,7 +300,7 @@ async def test_jev_routes_or_falls_back(
     middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
     route = await middleware.select_route(state)
-    assert route == ("balanced" if failure else "fast")
+    assert route == ("default" if failure else "fast")
     assert len(requests) == 1
     assert requests[0].url == (
         "https://gateway.example.com/v1/systemone"
