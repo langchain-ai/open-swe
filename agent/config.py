@@ -340,6 +340,10 @@ ENV.var(
     "LangGraph API runtime variant.",
     default="",
 )
+ENV.var(
+    "OPENSWE_ENV",
+    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
+)
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
