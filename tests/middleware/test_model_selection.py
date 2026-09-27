@@ -15,7 +15,7 @@ def _middleware(
     routing_mode: Literal["auto", "fast"] = "auto",
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     profiles = ("fast", "balanced", "performance")
-    models = {profile: MagicMock(name=profile) for profile in profiles}
+    models = {profile: MagicMock(name=profile) for profile in (*profiles, "default")}
     structured = AsyncMock(return_value=RouteDecision(model_route=route))
     classifier = MagicMock()
     classifier.tags = None
@@ -24,6 +24,7 @@ def _middleware(
     middleware = ModelSelectionMiddleware(
         cast(Any, models),
         classifier,
+        models["default"],
         route_model_ids=route_model_ids,
         routing_mode=routing_mode,
     )
@@ -64,7 +65,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast"])
+@pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast", "default"])
 async def test_fast_mode_skips_classifier_and_routing_event(
     monkeypatch: pytest.MonkeyPatch,
     existing_route: str | None,
@@ -150,15 +151,51 @@ async def test_legacy_plan_state_does_not_override_existing_route() -> None:
 
 
 @pytest.mark.asyncio
-async def test_classifier_failure_falls_back_to_balanced_route() -> None:
-    middleware, models, classifier = _middleware()
-    classifier.side_effect = RuntimeError("unavailable")
+@pytest.mark.parametrize("decision", [RuntimeError("unavailable"), None])
+async def test_classifier_failure_uses_configured_default_model(
+    decision: Exception | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
+    middleware, models, classifier = _middleware(
+        route_model_ids={"default": "openai:custom-default"}
+    )
+    if decision is None:
+        classifier.return_value = None
+    else:
+        classifier.side_effect = decision
     state = {"messages": [HumanMessage(content="Do the task")]}
 
     state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
 
-    assert state["model_route"] == "balanced"
-    assert (await _invoke(middleware, state)).model is models["balanced"]
+    assert state["model_route"] == "default"
+    assert (await _invoke(middleware, state)).model is models["default"]
+    assert events == [
+        {"type": "model_routed", "route": "default", "model_id": "openai:custom-default"}
+    ]
+    classifier.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_classifier_setup_failure_uses_default_model() -> None:
+    models = {route: MagicMock(name=route) for route in ("fast", "balanced", "performance")}
+    classifier = MagicMock()
+    classifier.model_copy.side_effect = RuntimeError("unavailable")
+    middleware = ModelSelectionMiddleware(cast(Any, models), classifier, MagicMock())
+    state = {"messages": [HumanMessage(content="Do the task")]}
+
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+
+    assert state["model_route"] == "default"
+    assert (await _invoke(middleware, state)).model is middleware._models["default"]
+
+
+@pytest.mark.asyncio
+async def test_missing_route_uses_default_model() -> None:
+    middleware, models, _ = _middleware()
+    state = {"messages": [HumanMessage(content="Do the task")]}
+
+    assert (await _invoke(middleware, state)).model is models["default"]
 
 
 @pytest.mark.asyncio

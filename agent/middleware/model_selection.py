@@ -16,7 +16,8 @@ from agent.prompts import prompt
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
-PersistedRoute = Route | Literal["fast_alt"]
+SelectedRoute = Route | Literal["default"]
+PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
@@ -52,14 +53,14 @@ class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
 
 
-def normalize_route(route: PersistedRoute) -> Route:
+def normalize_route(route: PersistedRoute) -> SelectedRoute:
     return "fast" if route == "fast_alt" else route
 
 
 async def _emit_routed_model(
     models: Mapping[str, BaseChatModel],
     route_model_ids: Mapping[str, str],
-    route: Route,
+    route: SelectedRoute,
 ) -> None:
     """Stream the routed model's id so the UI can show it next to `Auto`."""
     model_id = route_model_ids.get(route)
@@ -82,26 +83,31 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         self,
         models: Mapping[str, BaseChatModel],
         classifier: BaseChatModel,
+        default_model: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode = "auto",
     ) -> None:
-        self._models = dict(models)
+        self._models = {**models, "default": default_model}
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
         # `nostream` keeps the routing decision out of the user-facing message
         # stream; it stays visible in traces, unlike the offloading summarizer.
-        hidden_classifier = classifier.model_copy(
-            update={"tags": [*(classifier.tags or []), "nostream"]}
-        )
-        self._classifier = hidden_classifier.with_structured_output(
-            RouteDecision, method="json_schema"
-        )
+        try:
+            hidden_classifier = classifier.model_copy(
+                update={"tags": [*(classifier.tags or []), "nostream"]}
+            )
+            self._classifier = hidden_classifier.with_structured_output(
+                RouteDecision, method="json_schema"
+            )
+        except Exception:
+            logger.exception("Model routing classifier setup failed")
+            self._classifier = None
 
     async def select_route(
         self,
         state: ModelSelectionState,
-    ) -> Route:
+    ) -> SelectedRoute:
         """Select the model route for a turn."""
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
@@ -109,20 +115,22 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "fast"
         messages = state.get("messages", [])
         task = _latest_human_task(messages)
-        route: Route = "balanced"
+        if self._classifier is None:
+            return "default"
         try:
             decision = await self._classifier.ainvoke(prompt("model-selection", task=task[-8_000:]))
             if isinstance(decision, RouteDecision):
-                route = decision.model_route
+                return decision.model_route
+            logger.warning("Model routing classifier returned an invalid decision")
         except Exception:  # noqa: BLE001
             logger.exception("Model routing classifier failed")
-        return route
+        return "default"
 
     async def abefore_model(
         self,
         state: ModelSelectionState,
         runtime: Runtime,
-    ) -> dict[str, Route]:
+    ) -> dict[str, SelectedRoute]:
         del runtime
         route = await self.select_route(state)
         if self._routing_mode == "auto":
@@ -134,8 +142,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "balanced")
-        model = self._models.get(normalize_route(route)) or self._models.get("balanced")
-        if model is None:
-            model = self._models["balanced"]
+        route: PersistedRoute = request.state.get("model_route", "default")
+        model = self._models.get(normalize_route(route)) or self._models["default"]
         return await handler(request.override(model=model))
