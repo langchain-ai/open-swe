@@ -202,7 +202,9 @@ export function WorkspaceEditor({
               channelLabel={channelLabel}
             />
           ) : (
-            <span className="text-xs text-muted-foreground">None yet</span>
+            <span className="text-xs text-muted-foreground">
+              None yet. Add a channel to turn on Kitchen mode for it.
+            </span>
           )}
           <SlackChannelPicker
             selected={draft.slackChannelIds}
