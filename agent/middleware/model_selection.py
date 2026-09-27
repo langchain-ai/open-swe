@@ -52,6 +52,13 @@ class RouteDecision(BaseModel):
     model_route: Route
 
 
+ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
+
+
+def _route_criteria() -> dict[str, str]:
+    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
+
+
 async def _select_jev_route(task: str) -> Route:
     typesafe_key = ENV.TYPESAFE_API_KEY.optional()
     gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
@@ -71,8 +78,8 @@ async def _select_jev_route(task: str) -> Route:
                     "state": task,
                     "questions": {
                         "route": Choice(
-                            instructions=prompt("model-selection", task=""),
-                            criteria=dict.fromkeys(("fast", "balanced", "performance")),
+                            instructions=prompt("model-selection/instructions"),
+                            criteria=_route_criteria(),
                         )
                     },
                 },

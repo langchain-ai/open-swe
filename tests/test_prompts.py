@@ -12,7 +12,7 @@ def sample_tool(value: str) -> str:
 
 def test_prompt_requires_all_placeholders() -> None:
     with pytest.raises(KeyError):
-        prompt("model-selection")
+        prompt("review-scout/human-input")
 
 
 def test_prompt_prefers_the_jinja_template() -> None:
