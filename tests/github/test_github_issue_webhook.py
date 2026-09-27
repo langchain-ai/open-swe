@@ -4,6 +4,7 @@ import hmac
 import importlib
 import json
 import logging
+from types import SimpleNamespace
 from typing import cast
 from xml.etree import ElementTree
 
@@ -1386,6 +1387,137 @@ def test_process_github_pr_comment_without_email_skips(
     )
 
     assert captured == {}
+
+
+def _pull_request_review_payload(*, body: str = "") -> dict[str, object]:
+    return {
+        "action": "submitted",
+        "review": {
+            "id": 9,
+            "body": body,
+            "state": "approved",
+            "user": {"login": "octocat"},
+            "submitted_at": "now",
+        },
+        "pull_request": {"number": 1244, "state": "open"},
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+        "sender": {"login": "octocat", "id": 123},
+    }
+
+
+@pytest.mark.asyncio
+async def test_untagged_bodiless_review_does_not_wake_agent(monkeypatch) -> None:
+    monkeypatch.setattr(
+        PullRequest,
+        "get",
+        lambda *args: asyncio.sleep(0, result=SimpleNamespace(agent_thread_id="thread-1")),
+    )
+    monkeypatch.setattr(github_webhooks.WATCHES, "get", lambda key: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: False)
+
+    thread_id = await github_webhooks.untagged_agent_pr_thread_id(
+        _pull_request_review_payload(), "pull_request_review"
+    )
+
+    assert thread_id is None
+
+
+@pytest.mark.asyncio
+async def test_untagged_review_with_body_wakes_agent(monkeypatch) -> None:
+    monkeypatch.setattr(
+        PullRequest,
+        "get",
+        lambda *args: asyncio.sleep(0, result=SimpleNamespace(agent_thread_id="thread-1")),
+    )
+
+    thread_id = await github_webhooks.untagged_agent_pr_thread_id(
+        _pull_request_review_payload(body="Looks good"), "pull_request_review"
+    )
+
+    assert thread_id == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_untagged_bodiless_review_with_baby_sit_wakes_agent(monkeypatch) -> None:
+    monkeypatch.setattr(
+        PullRequest,
+        "get",
+        lambda *args: asyncio.sleep(0, result=SimpleNamespace(agent_thread_id="thread-1")),
+    )
+    monkeypatch.setattr(
+        github_webhooks.WATCHES,
+        "get",
+        lambda key: asyncio.sleep(0, result=SimpleNamespace(active=True)),
+    )
+
+    thread_id = await github_webhooks.untagged_agent_pr_thread_id(
+        _pull_request_review_payload(), "pull_request_review"
+    )
+
+    assert thread_id == "thread-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "watch_active", "should_trigger"),
+    [("", False, False), ("Looks good", False, True), ("", True, True)],
+)
+async def test_process_review_dispatches_only_for_content_or_active_watch(
+    monkeypatch, body: str, watch_active: bool, should_trigger: bool
+) -> None:
+    payload = _pull_request_review_payload(body=body)
+    captured: dict[str, object] = {}
+
+    async def fake_extract_pr_context(payload: dict[str, object], event_type: str):
+        return (
+            {"owner": "langchain-ai", "name": "open-swe"},
+            1244,
+            "open-swe/00000000-0000-0000-0000-000000000001",
+            "octocat",
+            "https://github.com/langchain-ai/open-swe/pull/1244",
+            9,
+            None,
+        )
+
+    async def fake_fetch_comments(*args, **kwargs):
+        return [kwargs["event_comment"]]
+
+    async def fake_trigger_or_queue_run(*args, **kwargs) -> None:
+        captured["triggered"] = True
+
+    monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
+    monkeypatch.setattr(
+        User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "get_or_resolve_thread_github_token",
+        lambda *args: asyncio.sleep(0, result="token"),
+    )
+    monkeypatch.setattr(
+        webhook_common, "authorize_github_thread", lambda *args: asyncio.sleep(0, result={})
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_thread_metadata_safe", lambda *args: asyncio.sleep(0, result={})
+    )
+    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
+    monkeypatch.setattr(
+        webhook_common, "react_to_github_comment", lambda *args, **kwargs: asyncio.sleep(0)
+    )
+    monkeypatch.setattr(webhook_common, "fetch_pr_event_comments", fake_fetch_comments)
+    monkeypatch.setattr(webhook_common, "trigger_or_queue_run", fake_trigger_or_queue_run)
+    monkeypatch.setattr(
+        github_webhooks.WATCHES,
+        "get",
+        lambda key: asyncio.sleep(0, result=SimpleNamespace(active=True) if watch_active else None),
+    )
+    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: False)
+
+    await github_webhooks.process_github_pr_comment(
+        payload, "pull_request_review", agent_thread_id="thread-1"
+    )
+
+    assert ("triggered" in captured) is should_trigger
 
 
 def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch) -> None:

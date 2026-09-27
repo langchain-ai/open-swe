@@ -9,8 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from agent.baby_sit import handle_ci_webhook
+from agent.baby_sit import WATCHES, handle_ci_webhook, watch_key
 from agent.database import postgres
+from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.lifecycle import close_for_pull_request
 from agent.github.comments import GitHubAuthError
 from agent.github.pull_requests import PullRequest, PullRequestEvent
@@ -914,6 +915,17 @@ async def is_accepted_commenter(login: str) -> bool:
     return bool(await User.known_logins([login]))
 
 
+async def _review_has_active_wakeup(owner: str, repo: str, pr_number: int) -> bool:
+    """Whether a review state change has an active workflow waiting for it."""
+    watch = await WATCHES.get(watch_key(owner, repo, pr_number))
+    if watch is not None and watch.active:
+        return True
+    return (
+        postgres.configured()
+        and (await ExpeditedApproval.active_for(owner, repo, pr_number)) is not None
+    )
+
+
 async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) -> str | None:
     """The agent thread an untagged comment or review on a PR it opened should wake."""
     if event_type not in _UNTAGGED_PR_TRIGGER_EVENTS:
@@ -934,6 +946,12 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
         return None
     if event_type == "issue_comment" and target.pull_request is None:
         return None
+    if event_type == "pull_request_review":
+        review = payload.get("review") or {}
+        if not str(review.get("body") or "").strip() and not await _review_has_active_wakeup(
+            event.repository.owner.login, event.repository.name, target.number
+        ):
+            return None
     pull_request = await PullRequest.get(
         event.repository.owner.login, event.repository.name, target.number
     )
@@ -1069,7 +1087,7 @@ async def process_github_pr_comment(
 
     event = payload.get("review" if event_type == "pull_request_review" else "comment", {})
     event_body = event.get("body") or ""
-    if event_type == "pull_request_review" and not event_body:
+    if event_type == "pull_request_review" and not event_body.strip():
         event_body = f"_Submitted a review: {event.get('state', 'commented')}_"
     event_comment = {
         "body": event_body,
@@ -1120,6 +1138,19 @@ async def process_github_pr_comment(
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
+    if event_type == "pull_request_review" and not str(event.get("body") or "").strip():
+        has_other_comments = any(
+            comment is not event_comment and comment.get("comment_id") != comment_id
+            for comment in comments
+        )
+        if not has_other_comments and not await _review_has_active_wakeup(
+            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+        ):
+            common.logger.info(
+                "Bodiless review event; no agent turn dispatched",
+                extra={"pr_number": pr_number, "thread_id": thread_id},
+            )
+            return
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
