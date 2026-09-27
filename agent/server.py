@@ -102,6 +102,7 @@ from agent.middleware import (
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
+    NoProgressGuardMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -1364,6 +1365,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
 
     source = cfg.source or "dashboard"
+    interactive_run = source in {"slack", DASHBOARD_SOURCE}
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
@@ -1665,9 +1667,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ModelCallLimitMiddleware(
                         run_limit=incident_session.policy.max_model_calls
                         if incident_session is not None
+                        else 100
+                        if interactive_run
                         else MODEL_CALL_RECURSION_LIMIT,
                         exit_behavior="end",
                     ),
+                    NoProgressGuardMiddleware(),
                     ToolErrorMiddleware(),
                     ExcludeToolsMiddleware(excluded=excluded_tools),
                     SubdirAgentsReadMiddleware(),
@@ -1683,7 +1688,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     WorkflowPushGuardMiddleware(),
                     refresh_github_proxy_before_model,
                     *([] if stop_summary_mode else [check_message_queue_before_model]),
-                    TimeoutWrapupMiddleware(),
+                    TimeoutWrapupMiddleware(
+                        default_timeout_seconds=10 * 60 if interactive_run else 45 * 60
+                    ),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),
                         _registered_tool_name(slack_no_reply_needed),

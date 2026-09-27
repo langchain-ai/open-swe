@@ -13,15 +13,15 @@ _DEFAULT_TIMEOUT_SECONDS = 45 * 60
 _WRAPUP_INSTRUCTION = load_prompt("timeout-wrapup.md")
 
 
-def _configured_timeout_seconds() -> int:
+def _configured_timeout_seconds(default: int = _DEFAULT_TIMEOUT_SECONDS) -> int:
     raw = ENV.OPEN_SWE_WRAPUP_TIMEOUT_SECONDS.optional()
     if not raw:
-        return _DEFAULT_TIMEOUT_SECONDS
+        return default
     try:
         value = int(raw)
     except ValueError:
-        return _DEFAULT_TIMEOUT_SECONDS
-    return value if value > 0 else _DEFAULT_TIMEOUT_SECONDS
+        return default
+    return value if value > 0 else default
 
 
 def _content_with_instruction(
@@ -43,9 +43,16 @@ def _content_with_instruction(
 
 
 class TimeoutWrapupMiddleware(OpenSWEMiddleware):
-    def __init__(self, timeout_seconds: int | None = None) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int | None = None,
+        *,
+        default_timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
         super().__init__()
-        self._timeout_seconds = timeout_seconds or _configured_timeout_seconds()
+        self._timeout_seconds = timeout_seconds or _configured_timeout_seconds(
+            default_timeout_seconds
+        )
         # Graph construction should create one middleware instance per run; start
         # lazily so construction-time caching cannot age the run clock.
         self._start: float | None = None
