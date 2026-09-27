@@ -12,7 +12,6 @@ def _middleware(
     route: Literal["fast", "balanced", "performance"] = "fast",
     *,
     route_model_ids: dict[str, str] | None = None,
-    routing_mode: Literal["auto", "fast"] = "auto",
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock], AsyncMock]:
     profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in profiles}
@@ -25,7 +24,6 @@ def _middleware(
         cast(Any, models),
         classifier,
         route_model_ids=route_model_ids,
-        routing_mode=routing_mode,
     )
     classifier.model_copy.assert_called_once_with(update={"tags": ["nostream"]})
     tagged.with_structured_output.assert_called_once_with(
@@ -65,7 +63,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast"])
-async def test_fast_mode_skips_classifier_and_routing_event(
+async def test_classifier_always_runs_without_a_persisted_route(
     monkeypatch: pytest.MonkeyPatch,
     existing_route: str | None,
 ) -> None:
@@ -74,7 +72,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, models, classifier = _middleware(routing_mode="fast")
+    middleware, models, classifier = _middleware(route="fast")
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     if existing_route is not None:
@@ -85,7 +83,8 @@ async def test_fast_mode_skips_classifier_and_routing_event(
     expected_route = existing_route or "fast"
     assert state["model_route"] == expected_route
     assert (await _invoke(middleware, state)).model is models[expected_route]
-    classifier.assert_not_awaited()
+    assert classifier.await_count == (0 if existing_route is not None else 1)
+    # The event carries the routed model id only when one is configured.
     assert events == []
 
 

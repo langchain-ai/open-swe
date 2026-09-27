@@ -313,7 +313,6 @@ async def test_model_routing_is_applied_when_enabled() -> None:
     subagent_middleware = {item.name for item in general_purpose["middleware"]}
     assert "ModelSelectionMiddleware" in subagent_middleware
     assert "model_routing_mode" not in config["configurable"]
-    assert config["metadata"]["model_routing_mode"] == "auto"
     assert config["metadata"]["model_routing_applied"] is True
     calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
     assert [model for model, _ in calls[1:4]] == [
@@ -371,31 +370,6 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     assert existing_calls[-1] == fresh_calls[-1] != original_calls[-1]
     assert fresh_calls != original_calls
     assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
-
-
-@pytest.mark.asyncio
-async def test_model_routing_control_uses_fast_model() -> None:
-    config = _base_config()
-    agent = await _capture_create_deep_agent_kwargs(config, profile={"model_routing_enabled": True})
-
-    middleware_names = [
-        type(middleware).__name__ for middleware in cast(list[object], agent["middleware"])
-    ]
-    assert "ModelSelectionMiddleware" in middleware_names
-    subagents = agent["subagents"]
-    assert isinstance(subagents, list)
-    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    subagent_middleware = {item.name for item in general_purpose["middleware"]}
-    assert "ModelSelectionMiddleware" in subagent_middleware
-    assert "model_routing_mode" not in config["configurable"]
-    assert config["metadata"]["model_routing_mode"] == "fast"
-    assert config["metadata"]["model_routing_applied"] is True
-    calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
-    assert [model for model, _ in calls[1:4]] == [
-        "google_genai:gemini-3.8-flash",
-        "openai:gpt-6-sol",
-        "anthropic:claude-opus-5-5",
-    ]
 
 
 @pytest.mark.asyncio
