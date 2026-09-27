@@ -1139,13 +1139,8 @@ async def test_launch_scheduled_agent_run_starts_fresh_agent_thread(
     assert stored["scope"] == "workspace"
 
 
-async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(
-    fake_client, auth, monkeypatch, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    workspace = await WORKSPACES.create(
-        WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice"
-    )
-    record = {
+def _scheduled_record(**overrides: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
         "id": "sched_1",
         "name": "Weekly dependencies",
         "prompt": "Check dependencies and open a PR if needed",
@@ -1162,45 +1157,78 @@ async def test_launch_scheduled_agent_run_stamps_workspace_owning_repo(
         "created_at": "2026-01-01T00:00:00+00:00",
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
-    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    return {**record, **overrides}
+
+
+async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="core")
+    )
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert configurable["workspace"] == configurable["environment"] == "core"
+    opening = next(
+        update["metadata"]
+        for update in fake_client.threads.updated
+        if "source" in update["metadata"]
+    )
+    assert opening["workspace"] == "core"
+
+
+async def test_an_automation_without_a_workspace_moves_to_default(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    """Automations saved before they carried a workspace run in `default`, not their repo's."""
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record())
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    assert fake_client.runs.created[0]["config"]["configurable"]["workspace"] == "default"
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["workspace"] == "default"
+    assert (await schedules.list_agent_schedules())[0]["workspace"] == "default"
+
+
+async def test_an_automation_whose_workspace_was_deleted_does_not_run(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="gone")
+    )
 
     result = await schedules.launch_scheduled_agent_run("sched_1")
+    with pytest.raises(HTTPException) as refused:
+        await schedules.trigger_agent_schedule("sched_1")
 
-    assert result["status"] == "started"
-    run = fake_client.runs.created[0]
-    assert run["config"]["configurable"]["workspace"] == workspace.slug
-    assert run["config"]["configurable"]["environment"] == workspace.slug
+    assert result["status"] == "unknown_workspace"
+    assert refused.value.status_code == 409
+    assert fake_client.runs.created == []
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
+    assert "gone" in stored["last_error"]
 
 
-async def test_launch_scheduled_agent_run_gates_fable_by_the_repos_workspace(
+async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
     fake_client, auth, registry_db
 ) -> None:  # noqa: ANN001, ARG001
     """Fable is a per-workspace kill switch, so the run's own workspace decides.
 
-    `default` leaves it on here and the workspace owning the schedule's
-    repository does not, so a flag read from `default` would let the Fable
-    model through.
+    `default` leaves it on here and the automation's workspace does not, so a
+    flag read from `default` would let the Fable model through.
     """
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
-    record = {
-        "id": "sched_1",
-        "name": "Weekly dependencies",
-        "prompt": "Check dependencies and open a PR if needed",
-        "schedule": "0 9 * * 1",
-        "repo": {"owner": "langchain-ai", "name": "open-swe"},
-        "model": "anthropic:claude-fable-5-1",
-        "effort": "high",
-        "base_branch": "main",
-        "branch_prefix": "open-swe",
-        "enabled": True,
-        "cron_id": "cron_1",
-        "created_by": "alice",
-        "user_email": "alice@example.com",
-        "created_at": "2026-01-01T00:00:00+00:00",
-        "updated_at": "2026-01-01T00:00:00+00:00",
-    }
-    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", record)
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE,
+        "sched_1",
+        _scheduled_record(workspace="oss", model="anthropic:claude-fable-5-1", effort="high"),
+    )
 
     assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
 
@@ -1575,3 +1603,69 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
         if "source" in update["metadata"]
     )
     assert opening.get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope
+
+
+async def test_a_new_automation_defaults_to_its_repositorys_preferred_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    body = ScheduleCreateBody(
+        prompt="Triage this issue", trigger="github_issue_opened", repo="langchain-ai/open-swe"
+    )
+
+    result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert result["workspace"] == "oss"
+
+
+async def test_a_new_automation_keeps_the_workspace_it_names(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    body = ScheduleCreateBody(
+        prompt="Triage this issue",
+        trigger="github_issue_opened",
+        repo="langchain-ai/open-swe",
+        workspace="Core",
+    )
+
+    result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert result["workspace"] == "core"
+
+
+async def test_an_automation_cannot_name_a_missing_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        prompt="Triage", trigger="github_issue_opened", repo="a/b", workspace="gone"
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert refused.value.status_code == 422
+    assert fake_client.store.items == {}
+
+
+async def test_an_automation_can_move_to_another_workspace(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="default")
+    )
+
+    moved = await schedules.update_agent_schedule(
+        "sched_1", "alice", ScheduleUpdateBody(workspace="core")
+    )
+    kept = await schedules.update_agent_schedule(
+        "sched_1", "alice", ScheduleUpdateBody(name="Renamed")
+    )
+
+    assert moved["workspace"] == "core"
+    assert kept["workspace"] == "core"
+    with pytest.raises(HTTPException) as refused:
+        await schedules.update_agent_schedule(
+            "sched_1", "alice", ScheduleUpdateBody(workspace="gone")
+        )
+    assert refused.value.status_code == 422

@@ -16,3 +16,6 @@ Args:
     slack_channel_id: Optional Slack channel ID starting with C or G.
     slack_notification_mode: Post every run or only when the run takes action.
     admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
+    workspace: Slug of the workspace every run launches in, with its settings,
+        MCP connections, and sandbox image. Omitted, it is ``repo``'s preferred
+        workspace, else your default workspace, else ``default``.
