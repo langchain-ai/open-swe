@@ -835,6 +835,39 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("channel_context", "thread_ts", "expected"),
+    [
+        ({"is_im": True}, "0", True),
+        ({"is_im": True}, "1700000000.000100", False),
+        (None, "1700000000.000100", False),
+    ],
+)
+async def test_start_thread_is_offered_only_in_concierge_dms(
+    channel_context: dict[str, bool] | None, thread_ts: str, expected: bool
+) -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {
+                "channel_id": "D123",
+                "thread_ts": thread_ts,
+                "channel_context": channel_context,
+            },
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    assert ("start_thread" in {_registered_tool_name(tool) for tool in tools}) is expected
+
+
+@pytest.mark.asyncio
 async def test_agent_excludes_deepagents_grep_tool() -> None:
     captured = await _capture_create_deep_agent_kwargs()
     middleware = captured["middleware"]

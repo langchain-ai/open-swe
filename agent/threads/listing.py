@@ -34,6 +34,7 @@ from agent.threads.summary import (
     thread_is_unlisted,
     thread_source,
 )
+from agent.transcript.subagents import attach_subagents
 from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
@@ -310,7 +311,9 @@ async def _summarize_threads(
                 minimal_run_update=minimal_run_update,
             )
 
-    return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
+    summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
+    await attach_subagents(summaries)
+    return summaries
 
 
 async def _collect_thread_candidates(

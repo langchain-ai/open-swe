@@ -187,7 +187,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="Alice"
+            "thread-id", source="slack", visibility="private", owner_login="Alice", title="Thread"
         )
     )
     assert created["visibility"] == "private"
@@ -195,7 +195,7 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="public", owner_login="bob"
+            "thread-id", source="slack", visibility="public", owner_login="bob", title="Thread"
         )
     )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -212,7 +212,7 @@ def test_upsert_keeps_original_github_initiator(
     for login in ("FirstUser", "second-user"):
         asyncio.run(
             webhook_common.upsert_agent_thread_metadata(
-                "thread-id", source=source, github_login=login
+                "thread-id", source=source, github_login=login, title="Thread"
             )
         )
     metadata = cast(dict, threads.thread)["metadata"]
@@ -226,7 +226,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
 
@@ -238,7 +238,7 @@ def test_upsert_stamps_stub_thread_created_by_helper(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(legacy))
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="alice"
+            "thread-id", source="slack", visibility="private", owner_login="alice", title="Thread"
         )
     )
     assert "visibility" not in cast(dict, legacy.thread)["metadata"]
@@ -1563,8 +1563,9 @@ def test_process_slack_mention_treats_direct_message_as_implicit_mention(
 
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
+@pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
 ) -> None:
     import importlib
 
@@ -1596,6 +1597,8 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
                 user_id="U456",
                 text="<@UBOT> create the PR" if explicitly_tagged else "create the PR",
                 bot_user_id="UBOT",
+                kitchen_channel=kitchen_channel,
+                treat_all_messages_as_mentions=kitchen_channel,
             ),
             webhook_common.SlackRepoResolution(
                 Repo(owner="langchain-ai", name="open-swe"), explicit=True
@@ -2084,6 +2087,7 @@ def test_thread_workspace_round_trips_through_metadata(
             "thread-id",
             source="slack",
             workspace="staging",
+            title="Thread",
         )
     )
     assert threads.thread is not None

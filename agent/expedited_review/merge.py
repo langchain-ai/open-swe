@@ -1,8 +1,9 @@
 """Merge a pull request on its expedited approvals.
 
 The agent calls this once it believes the pull request is ready. Votes count
-for the current head only while the diff the card drew is unchanged; GitHub's
-answer to the merge is final and there is no admin bypass.
+for the current head while the diff the card drew is unchanged, or when the
+agent judges a change needs no re-review; GitHub's answer to the merge is final
+and there is no admin bypass.
 """
 
 import logging
@@ -12,7 +13,12 @@ from typing import Any, Literal
 import httpx2
 
 from agent.expedited_review.approvals import ExpeditedApproval
-from agent.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
+from agent.expedited_review.eligibility import (
+    Ineligible,
+    assess_eligibility,
+    fetch_changed_files,
+    fingerprint_matches,
+)
 from agent.expedited_review.lifecycle import mark_merged, repo_token, retire
 from agent.expedited_review.readiness import assess_readiness
 from agent.expedited_review.reviews import github_error, submit_approval
@@ -21,14 +27,23 @@ from agent.github.app import (
     get_github_app_installation_token,
 )
 from agent.github.ci import fetch_pr
+from agent.github.comments import post_github_comment
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_status import fetch_unresolved_review_threads
 
 logger = logging.getLogger(__name__)
 
 _MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 
 MergeStatus = Literal[
-    "merged", "not_ready", "needs_approvals", "invalidated", "closed", "refused", "error"
+    "merged",
+    "not_ready",
+    "needs_approvals",
+    "diff_changed",
+    "invalidated",
+    "closed",
+    "refused",
+    "error",
 ]
 
 
@@ -55,7 +70,33 @@ async def _merge_token(owner: str, repo: str) -> str | None:
     )
 
 
-async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
+async def _keep_approval(
+    approval: ExpeditedApproval, fingerprint: str, reason: str, token: str
+) -> ExpeditedApproval | None:
+    """Carry the votes over to the current diff once the PR says why no re-review was needed."""
+    pr = approval.pull_request
+    async with ExpeditedApproval.locked(approval.id) as (_, row):
+        if row is None or row.state != "open":
+            return None
+        if not await post_github_comment(
+            {"owner": pr.owner, "name": pr.repo},
+            pr.number,
+            "The diff changed after the expedited approval; the approval was kept because: "
+            f"{reason.strip()}",
+            token=token,
+        ):
+            return None
+        row.diff_fingerprint = fingerprint
+    logger.info(
+        "Kept expedited approval across a diff change",
+        extra={"approval_id": str(approval.id)},
+    )
+    return await ExpeditedApproval.get(approval.id)
+
+
+async def merge_approved(
+    approval: ExpeditedApproval, keep_approval_reason: str = ""
+) -> MergeResult:
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
@@ -79,16 +120,33 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
     if files is None:
         return MergeResult("error", "Could not read the pull request's changed files.")
     if not fingerprint_matches(files, approval.diff_fingerprint):
-        await retire(
-            approval,
-            "superseded",
-            "A later commit changed the diff shown here; votes were discarded.",
-        )
-        return MergeResult(
-            "invalidated",
-            "A commit since the card was posted changed the diff voters saw, so their votes "
-            "no longer count. Call `expedite_pr_approval` again for a fresh card.",
-        )
+        verdict = assess_eligibility(files)
+        if isinstance(verdict, Ineligible):
+            await retire(
+                approval,
+                "superseded",
+                "A later commit grew the diff past expedited review; votes were discarded.",
+            )
+            return MergeResult(
+                "invalidated",
+                f"The diff is no longer eligible for expedited review ({verdict.reason}), so "
+                "the approval was discarded. Ask for a normal GitHub review.",
+            )
+        if not keep_approval_reason.strip():
+            return MergeResult(
+                "diff_changed",
+                "A commit since the card was posted changed the non-test diff the approver "
+                "saw. Nothing was discarded. If the change does not need the approver to look "
+                "again, call `merge_expedited_pr` again with `keep_approval_reason`; "
+                "otherwise call `expedite_pr_approval` for a fresh card.",
+            )
+        kept = await _keep_approval(approval, verdict.fingerprint, keep_approval_reason, token)
+        if kept is None:
+            return MergeResult(
+                "error",
+                "Could not record why the approval was kept, so nothing was merged. Try again.",
+            )
+        approval = kept
 
     if approval.awaiting_ready:
         return MergeResult(
@@ -116,6 +174,14 @@ async def merge_approved(approval: ExpeditedApproval) -> MergeResult:
                 "not_ready",
                 "The pull request's head changed while it was being checked. Call "
                 "`merge_expedited_pr` again.",
+            )
+        async with github_client(token=token) as client:
+            threads = await fetch_unresolved_review_threads(client, pr.owner, pr.repo, pr.number)
+        if threads is None:
+            return MergeResult("error", "GitHub was unavailable while checking review threads.")
+        if threads:
+            return MergeResult(
+                "not_ready", f"Not ready to merge: {len(threads)} unresolved review threads"
             )
         for vote in row.approvals:
             # An approval on an older head still counts unless GitHub dismissed it as stale;

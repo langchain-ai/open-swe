@@ -11,7 +11,7 @@ from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
 
 
-async def merge_expedited_pr(pr_url: str) -> dict[str, Any]:
+async def merge_expedited_pr(pr_url: str, keep_approval_reason: str = "") -> dict[str, Any]:
     """Implement the `merge_expedited_pr` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
@@ -31,7 +31,7 @@ async def merge_expedited_pr(pr_url: str) -> dict[str, Any]:
         }
     if approval.thread_id and approval.thread_id != thread_id:
         return {"success": False, "error": "This expedited review belongs to another agent thread"}
-    result = await merge_approved(approval)
+    result = await merge_approved(approval, keep_approval_reason)
     return {
         "success": result.status == "merged",
         "status": result.status,

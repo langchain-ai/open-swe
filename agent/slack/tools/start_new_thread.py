@@ -20,6 +20,7 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -330,9 +331,10 @@ async def slack_start_new_thread(
         "message_ts": cfg.slack_thread.triggering_event_ts,
     }
 
+    thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "title": clean_title[:80],
+        "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
         "source_context": SourceContext.parse(
@@ -367,7 +369,9 @@ async def slack_start_new_thread(
         if value:
             new_configurable[key] = value
 
-    await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
+    await create_thread(
+        client, thread_id, title=thread_title, if_exists="do_nothing", metadata=metadata
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     run = await dispatch_agent_run(
@@ -375,6 +379,7 @@ async def slack_start_new_thread(
         await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
+        thread_title=None,
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None

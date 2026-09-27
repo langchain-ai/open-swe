@@ -15,6 +15,7 @@ import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
 
 from agent.analytics.usage import update_agent_pr_usage_from_webhook
 from agent.config import ENV
@@ -128,6 +129,7 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread, ensure_titled_thread
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
@@ -209,6 +211,7 @@ __all__ = [
     "run_id_for_logging",
     "store_current_reviewer_run_id",
     "thread_exists",
+    "track_review_check_run",
     "trigger_or_queue_run",
     "append_finding_interaction",
     "build_pr_prompt",
@@ -514,7 +517,7 @@ async def upsert_agent_thread_metadata(
     repo_config: dict[str, str] | None = None,
     github_login: str = "",
     user_email: str = "",
-    title: str = "",
+    title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
@@ -638,8 +641,12 @@ async def upsert_agent_thread_metadata(
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
-                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
             )
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
@@ -810,10 +817,10 @@ async def thread_exists(thread_id: str) -> bool:
 
 
 async def ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
@@ -1056,7 +1063,7 @@ async def trigger_or_queue_run(
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=f"PR #{pr_number}" if pr_number else "",
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
     )
@@ -1074,6 +1081,7 @@ async def trigger_or_queue_run(
             "environment": workspace,
         },
         source="github",
+        thread_title=None,
         input=input,
         metadata=AGENT_VERSION_METADATA,
     )
@@ -1149,6 +1157,51 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
+
+
+class _TrackedReviewCheck(BaseModel):
+    review_check_run_id: int | None = None
+    superseded_review_check_run_ids: list[int] = []
+
+
+async def track_review_check_run(
+    thread_id: str, *, owner: str, repo: str, token: str, check_run_id: int
+) -> None:
+    """Track ``check_run_id`` as the thread's review check, closing the ones it supersedes.
+
+    The run that owned the previous check is interrupted by the new one and never
+    settles it, so it would otherwise stay "in progress" on its commit forever.
+    Checks that fail to close are kept and retried on the next call.
+    """
+    tracked = _TrackedReviewCheck.model_validate(await get_thread_metadata_safe(thread_id) or {})
+    superseded = [
+        stale
+        for stale in dict.fromkeys(
+            [*tracked.superseded_review_check_run_ids, tracked.review_check_run_id]
+        )
+        if stale is not None and stale != check_run_id
+    ]
+    unsettled = [
+        stale
+        for stale in superseded
+        if not await complete_review_check_run(
+            owner=owner,
+            repo=repo,
+            check_run_id=stale,
+            token=token,
+            conclusion="neutral",
+            title="Superseded by a newer review",
+            summary="A newer Open SWE review run replaced this one.",
+        )
+    ]
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={
+            "review_check_run_id": check_run_id,
+            "review_check_pending_result": None,
+            "superseded_review_check_run_ids": unsettled,
+        },
+    )
 
 
 async def build_reviewer_configurable(

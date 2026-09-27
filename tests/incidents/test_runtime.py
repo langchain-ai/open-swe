@@ -271,8 +271,10 @@ async def test_postmortem_failure_records_nothing(incident, monkeypatch):
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
 
-async def test_unprompted_findings_wait_out_the_post_floor(incident, monkeypatch):
-    """Nobody asked, so a reworded conclusion holds until the floor elapses."""
+async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet(
+    incident, monkeypatch
+):
+    """Responders asked for one investigation, not a running commentary on their channel."""
     from datetime import UTC, datetime, timedelta
 
     session = await runtime.load_incident_session(config())
@@ -280,7 +282,8 @@ async def test_unprompted_findings_wait_out_the_post_floor(incident, monkeypatch
 
     await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
     first = await session._record_incident_report(
-        summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}]
+        summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}],
+        problem=[{"text": "The gateway breached its 5xx SLO", "evidence_ids": ["slack:1.0"]}],
     )
     await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())
     draft = {"summary": [{"text": "Monitors are back to OK", "evidence_ids": ["slack:2.0"]}]}
@@ -288,21 +291,46 @@ async def test_unprompted_findings_wait_out_the_post_floor(incident, monkeypatch
 
     assert (first["posted"], second["posted"]) == (True, False)
     runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    posted = runtime.post_slack_thread_reply_with_ts.await_args.args[2]
     # Nobody asked, so it must not present itself as answering anyone.
-    assert runtime.post_slack_thread_reply_with_ts.await_args.args[2].startswith(
-        "*Investigation update*"
-    )
+    assert posted.startswith("*Investigation*")
+    assert "*Problem*" in posted
+    assert (await service.REPORTS.get("incident")).investigation_posted is True
 
-    later = (datetime.now(UTC) + timedelta(minutes=31)).isoformat()
+    # A fresh conclusion much later is still not worth interrupting the channel for.
+    later = (datetime.now(UTC) + timedelta(hours=9)).isoformat()
     monkeypatch.setattr(runtime, "now_iso", lambda: later)
     third = await session._record_incident_report(**draft)
 
-    assert third["posted"] is True
-    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+    assert third["posted"] is False
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    # The report and the postmortem still move on without it.
+    assert (await service.REPORTS.get("incident")).report.summary.startswith("Monitors are back")
 
 
-async def test_questions_are_answered_inside_the_post_floor(incident):
-    """The floor never delays a responder; it only silences unprompted repetition."""
+async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(incident):
+    """Otherwise a first turn with nothing to say would silence the real investigation."""
+    session = await runtime.load_incident_session(config())
+    middleware = runtime.IncidentMiddleware(session)
+
+    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
+    empty = await session._record_incident_report(
+        summary=[{"text": "Unsupported guess", "evidence_ids": ["nope"]}]
+    )
+
+    assert empty["posted"] is False
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+
+    findings = await session._record_incident_report(
+        summary=[{"text": "Deadline exhausted on oversized uploads", "evidence_ids": ["slack:1.0"]}]
+    )
+
+    assert findings["posted"] is True
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+
+
+async def test_questions_are_answered_after_the_investigation_is_published(incident):
+    """Going quiet silences unprompted updates; it never delays a responder."""
     unprompted = await runtime.load_incident_session(config())
     await runtime.IncidentMiddleware(unprompted).awrap_model_call(
         request(context_message("1.0")), AsyncMock()
@@ -336,7 +364,7 @@ async def test_the_same_conclusion_with_a_fresh_citation_never_reposts(incident,
         summary=[{"text": conclusion, "evidence_ids": ["slack:1.0"]}]
     )
 
-    # Well past the floor, so only the digest can hold this back.
+    # Hours later, so nothing time-based could excuse a repeat either.
     later = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
     monkeypatch.setattr(runtime, "now_iso", lambda: later)
     await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())

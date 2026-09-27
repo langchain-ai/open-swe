@@ -81,14 +81,19 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
-      <div className="flex items-center justify-between gap-2 px-4 py-1">
+      <div className="px-4 py-1">
         <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
           {data.title}
         </span>
-        {hasGroups && (
-          <ReviewViewToggle view={data.view} onChange={data.onViewChange} />
-        )}
       </div>
+      {hasGroups && (
+        <ReviewViewTabs
+          view={data.view}
+          onChange={data.onViewChange}
+          stepCount={data.groups?.length ?? 0}
+          fileCount={data.files?.length ?? null}
+        />
+      )}
       <OverviewRow
         active={showAi && data.activeGroup === null}
         onSelect={data.onSelectOverview}
@@ -114,59 +119,76 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   )
 }
 
-function ReviewViewToggle({
+function ReviewViewTabs({
   view,
   onChange,
+  stepCount,
+  fileCount,
 }: {
   view: ReviewSidebarView
   onChange: (view: ReviewSidebarView) => void
+  stepCount: number
+  fileCount: number | null
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-      <ReviewViewToggleButton
+    <div
+      role="tablist"
+      aria-label="Sidebar view"
+      className="mx-3 mb-1 flex border-b border-border"
+    >
+      <ReviewViewTab
         active={view === "ai"}
-        label="AI sorted"
+        label="Walkthrough"
+        count={stepCount}
         onClick={() => onChange("ai")}
       >
         <ListBulletsIcon className="size-3.5" />
-      </ReviewViewToggleButton>
-      <ReviewViewToggleButton
+      </ReviewViewTab>
+      <ReviewViewTab
         active={view === "files"}
-        label="File tree"
+        label="Files"
+        count={fileCount}
         onClick={() => onChange("files")}
       >
         <TreeViewIcon className="size-3.5" />
-      </ReviewViewToggleButton>
+      </ReviewViewTab>
     </div>
   )
 }
 
-function ReviewViewToggleButton({
+function ReviewViewTab({
   active,
   label,
+  count,
   onClick,
   children,
 }: {
   active: boolean
   label: string
+  count: number | null
   onClick: () => void
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
       className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors",
+        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         active
-          ? "bg-sidebar-row-hover text-foreground"
-          : "hover:text-foreground"
+          ? "border-primary font-medium text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
+      {label}
+      {count !== null && (
+        <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+          {count}
+        </span>
+      )}
     </button>
   )
 }

@@ -265,6 +265,96 @@ async def test_push_event_triggers_re_review_run_when_watching() -> None:
 
 
 @pytest.mark.asyncio
+async def test_push_re_review_targets_pushed_head_and_supersedes_previous_check() -> None:
+    payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
+    # GitHub's PR API can lag a push and still report the previous head.
+    pr = {
+        "number": 7,
+        "html_url": "https://github.com/lc/repo/pull/7",
+        "title": "T",
+        "head": {"sha": "stalesha", "ref": "feat-x"},
+        "base": {"sha": "basesha", "ref": "main"},
+    }
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+
+    with (
+        patch(
+            "agent.webhooks.common.is_repo_auto_review_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "agent.webhooks.common.get_github_app_installation_token_with_expiry",
+            new_callable=AsyncMock,
+            return_value=("t", None),
+        ),
+        patch(
+            "agent.webhooks.common.fetch_open_pr_for_branch",
+            new_callable=AsyncMock,
+            return_value=pr,
+        ),
+        patch(
+            "agent.webhooks.common.get_thread_metadata_safe",
+            new_callable=AsyncMock,
+            return_value={
+                "kind": "reviewer",
+                "watch": True,
+                "last_reviewed_sha": "oldsha",
+                "review_check_run_id": 41,
+                "superseded_review_check_run_ids": [40],
+            },
+        ),
+        patch(
+            "agent.webhooks.common._fetch_compare_diff",
+            new_callable=AsyncMock,
+            side_effect=["old diff", "new diff"],
+        ),
+        patch(
+            "agent.webhooks.common.ensure_thread_exists_for_metadata",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("agent.webhooks.common.cache_github_token_for_thread"),
+        patch(
+            "agent.webhooks.common.set_reviewer_thread_metadata",
+            new_callable=AsyncMock,
+        ) as set_meta,
+        patch(
+            "agent.webhooks.common.create_review_check_run",
+            new_callable=AsyncMock,
+            return_value=99,
+        ) as create_check,
+        patch(
+            "agent.webhooks.common.complete_review_check_run",
+            new_callable=AsyncMock,
+            side_effect=lambda **kwargs: kwargs["check_run_id"] != 41,
+        ) as complete_check,
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+    ):
+        await github_webhooks.process_github_push_event(payload)
+
+    assert fake_client.runs.create.await_args is not None
+    configurable = fake_client.runs.create.await_args.kwargs["config"]["configurable"]
+    assert configurable["head_sha"] == "newsha"
+    assert create_check.await_args is not None
+    assert create_check.await_args.kwargs["head_sha"] == "newsha"
+    closed = {
+        c.kwargs["check_run_id"]: c.kwargs["conclusion"] for c in complete_check.await_args_list
+    }
+    assert closed == {40: "neutral", 41: "neutral"}
+    tracked = [
+        c.kwargs["extra"]
+        for c in set_meta.await_args_list
+        if "review_check_run_id" in (c.kwargs.get("extra") or {})
+    ]
+    assert len(tracked) == 1
+    assert tracked[0]["review_check_run_id"] == 99
+    # 41's close failed, so it stays queued for the next retry; 40 closed.
+    assert tracked[0]["superseded_review_check_run_ids"] == [41]
+
+
+@pytest.mark.asyncio
 async def test_push_event_idempotent_when_head_unchanged() -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="samesha")
     pr = {

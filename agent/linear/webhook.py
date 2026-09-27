@@ -323,6 +323,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         None,
         configurable,
         source="linear",
+        thread_title=None,
         input=run_input,
         metadata=common.AGENT_VERSION_METADATA,
     )

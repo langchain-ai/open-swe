@@ -209,6 +209,7 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         _stop_summary_prompt(bool(run_ids)),
         configurable,
         source=str(configurable["source"]),
+        thread_title=None,
         metadata=_agent_version_metadata(),
         client=client,
     )

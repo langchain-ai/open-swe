@@ -32,6 +32,7 @@ from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
+from agent.threads.creation import create_lock_thread
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,7 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
     client = get_client()
     lock_id = baby_sit_lock_thread_id(key)
     try:
-        await client.threads.create(
-            thread_id=lock_id, if_exists="raise", ttl=WATCH_LOCK_TTL_MINUTES
-        )
+        await create_lock_thread(client, lock_id, ttl_minutes=WATCH_LOCK_TTL_MINUTES)
     except ConflictError:
         yield False
         return
@@ -106,7 +105,7 @@ class BabySitWatch(BaseModel):
         )
         return configurable
 
-    def failure_prompt(self, failures: list[dict[str, Any]]) -> str:
+    def failure_prompt(self, failures: list[dict[str, Any]], *, expedited: bool) -> str:
         lines = []
         for failure in failures:
             name = _prompt_scalar(failure.get("name") or "check", 200)
@@ -120,6 +119,7 @@ class BabySitWatch(BaseModel):
             retry_count=self.retry_count,
             max_retries=MAX_RETRIES_PER_HEAD,
             signals="\n".join(lines),
+            expedited=expedited,
         )
 
 
@@ -315,6 +315,7 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
                 f"/baby-sit --terminal {watch.pr_url}\n\n{message}",
                 configurable,
                 source=str(configurable.get("source") or "dashboard"),
+                thread_title=None,
                 metadata={},
                 multitask_strategy="enqueue",
             )
@@ -350,6 +351,7 @@ async def _finish_ready(watch: BabySitWatch) -> str:
             ),
             configurable,
             source=str(configurable.get("source") or "github"),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )
@@ -525,9 +527,10 @@ async def _evaluate_watch(key: str, *, token: str | None = None) -> str:
         configurable = watch.dispatch_config()
         await dispatch_agent_run(
             watch.thread_id,
-            watch.failure_prompt(failures),
+            watch.failure_prompt(failures, expedited=await _has_expedited_card(watch)),
             configurable,
             source=str(configurable.get("source") or "github"),
+            thread_title=None,
             metadata={},
             multitask_strategy="enqueue",
         )

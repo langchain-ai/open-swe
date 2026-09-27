@@ -36,7 +36,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -58,10 +58,6 @@ from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_
 logger = logging.getLogger(__name__)
 
 STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
-
-# The per-mode procedure lives in the bundled SKILL.md playbooks (agent/skills/).
-# This base prompt only orients the agent and points it at the right skill.
-STYLE_ANALYZER_PROMPT = load_prompt("analyzer/main.md")
 
 
 async def _analyzer_workspace(cfg: RunConfig) -> str | None:

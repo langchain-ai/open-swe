@@ -175,8 +175,10 @@ async def test_routed_run_exposes_selected_model_and_effort_to_tools(
     middleware._model_selection.select_route = AsyncMock(return_value="performance")
     middleware._routing_defaults = {"performance": ("openai:routed", "high")}
 
-    await _prepare(middleware)
+    prepared = await _prepare(middleware)
 
+    assert prepared["selected_model_id"] == "openai:routed"
+    assert prepared["selected_effort"] == "high"
     assert config["configurable"]["resolved_agent_model_id"] == "openai:routed"
     assert config["configurable"]["resolved_agent_effort"] == "high"
     assert prepare_harness["thread_update"]["metadata"]["effort"] == "high"

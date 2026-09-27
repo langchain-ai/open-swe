@@ -51,7 +51,7 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.prompts import apply_tool_descriptions, prompt
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -99,9 +99,6 @@ def _chat_general_purpose_subagent() -> SubAgent:
             ],
         ),
     }
-
-
-CHAT_PROMPT = load_prompt("chat/main.md")
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:

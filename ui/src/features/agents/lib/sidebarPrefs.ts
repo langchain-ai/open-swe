@@ -28,6 +28,8 @@ export interface SidebarPrefs {
   expandedRepoKeys: Array<string>
   /** Which of "pinned" | "repos" | "recents" are collapsed. */
   collapsedSectionKeys: Array<string>
+  /** Thread rows whose subagent sub-threads are folded away. */
+  collapsedSubagentKeys: Array<string>
   organize: OrganizeMode
   sortChats: ChatSort
   sortPinned: PinnedSort
@@ -41,6 +43,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
+  collapsedSubagentKeys: [],
   organize: "workspace",
   sortChats: "created",
   sortPinned: "manual",
@@ -120,6 +123,7 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
     collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys).map((key) =>
       key === "projects" ? "repos" : key
     ),
+    collapsedSubagentKeys: asStringArray(raw.collapsedSubagentKeys),
     organize: asEnum(
       raw.organize === "project" ? "repo" : raw.organize,
       ORGANIZE_MODES,
@@ -250,6 +254,18 @@ export function useSidebarPrefs() {
     []
   )
 
+  const toggleSubagentsCollapsed = useCallback(
+    (key: string) =>
+      setPrefs((prev) => ({
+        ...prev,
+        collapsedSubagentKeys: toggleMembership(
+          prev.collapsedSubagentKeys,
+          key
+        ),
+      })),
+    []
+  )
+
   const toggleSectionCollapsed = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -274,6 +290,7 @@ export function useSidebarPrefs() {
     toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
+    toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,
     setView,
