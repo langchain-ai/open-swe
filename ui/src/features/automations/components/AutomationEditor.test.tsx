@@ -26,6 +26,16 @@ vi.mock("@/features/agents/lib/queries", () => ({
     isPending: false,
     mutate: vi.fn(),
   }),
+  useWorkspaceOptions: () => ({
+    data: {
+      default_slug: "default",
+      workspaces: [
+        { slug: "default", name: "Default", repos: [], is_default: true },
+        { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
+        { slug: "core", name: "Core", repos: [], is_default: false },
+      ],
+    },
+  }),
 }))
 vi.mock("@/features/agents/lib/provider/useModelOptions", () => ({
   useModelOptions: () => ({ models: [], defaultSelection: null }),
@@ -35,6 +45,7 @@ vi.mock("@/features/automations/lib/useUnsavedChangesWarning", () => ({
 }))
 vi.mock("@/lib/profile", () => ({
   useRepos: () => ({ data: { repositories: [] } }),
+  useMyPreferences: () => ({ data: { default_workspace: "oss" } }),
 }))
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
@@ -95,5 +106,44 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).not.toContain("Run as admin thread")
     expect(memberMarkup).toContain("This workspace automation is read-only")
     expect(memberMarkup).not.toContain("Save changes")
+  })
+
+  it("preselects the creator's default workspace for a new automation", () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: { is_admin: true },
+    } as unknown as ReturnType<typeof useSession>)
+
+    const markup = renderToStaticMarkup(<AutomationEditor mode="create" />)
+
+    expect(markup).toContain(">OSS<")
+  })
+
+  it("shows the workspace an existing automation runs in", () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: { is_admin: true },
+    } as unknown as ReturnType<typeof useSession>)
+
+    const markup = renderToStaticMarkup(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Check dependencies",
+          schedule: "0 9 * * *",
+          trigger: "schedule",
+          scope: "workspace",
+          workspace: "core",
+          repo: "acme/oss",
+          slackNotificationMode: "always",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+
+    expect(markup).toContain(">Core<")
+    expect(markup).not.toContain(">OSS<")
   })
 })

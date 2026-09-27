@@ -40,6 +40,8 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
+  /** Omitted, the repository's preferred workspace or the creator's default. */
+  workspace?: string | null
 }
 
 export interface ScheduleUpdateRequest {
@@ -54,6 +56,7 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+  workspace?: string | null
 }
 
 export interface ScheduleTriggerResult {

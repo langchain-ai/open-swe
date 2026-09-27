@@ -11,6 +11,8 @@ import type {
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
+import { pickComposerWorkspace } from "@/features/agents/lib/composerWorkspace"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
@@ -30,11 +32,12 @@ import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
   useUpdateAgentSchedule,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
-import { useRepos } from "@/lib/profile"
+import { useMyPreferences, useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 interface AutomationEditorProps {
@@ -66,6 +69,8 @@ export function AutomationEditor({
   const canManage = session.data?.is_admin === true
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
+  const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
+  const preferences = useMyPreferences()
 
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
@@ -90,6 +95,26 @@ export function AutomationEditor({
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
+  // null = untouched: an existing automation keeps its workspace, and a new one
+  // follows its repository's preferred workspace, as the server would.
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
+    null
+  )
+  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspace =
+    workspaceOverride ??
+    schedule?.workspace ??
+    pickComposerWorkspace({
+      override: null,
+      repoWorkspace: repo
+        ? (workspaces.find((option) =>
+            option.repos.some((r) => r.toLowerCase() === repo.toLowerCase())
+          )?.slug ?? null)
+        : null,
+      userDefault: preferences.data?.default_workspace,
+      instanceDefault: workspaceOptionsQuery.data?.default_slug ?? null,
+      workspaces,
+    })
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -110,6 +135,8 @@ export function AutomationEditor({
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
+      (workspaceOverride !== null &&
+        workspaceOverride !== (schedule?.workspace ?? null)) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
       activeSelection?.effort !== initialSelection?.effort)
   const allowNavigation = useUnsavedChangesWarning(isDirty)
@@ -150,6 +177,7 @@ export function AutomationEditor({
           admin_thread: adminThread,
           model_id: modelId,
           effort,
+          workspace,
         },
         {
           onSuccess: () => {
@@ -176,6 +204,9 @@ export function AutomationEditor({
           model_id: modelId,
           effort,
           enabled,
+          ...(workspaceOverride !== null
+            ? { workspace: workspaceOverride }
+            : {}),
         },
       },
       {
@@ -271,6 +302,13 @@ export function AutomationEditor({
             onRepoChange={setRepo}
             placeholder="No repository"
             triggerClassName="text-muted-foreground"
+            disabled={!canManage}
+          />
+          {workspaces.length > 1 && <span className="text-border">|</span>}
+          <WorkspaceSelector
+            workspaces={workspaces}
+            selectedSlug={workspace}
+            onChange={(slug) => setWorkspaceOverride(slug)}
             disabled={!canManage}
           />
         </div>
