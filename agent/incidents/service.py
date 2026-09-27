@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from agent.config import ENV
 from agent.incidents.evidence_tools import redact
 from agent.incidents.models import (
+    DEFAULT_NON_ACTIONABLE_SENDER,
     Activity,
     CommandReceipt,
     Incident,
@@ -113,7 +114,18 @@ async def save(record: Incident) -> None:
 
 
 async def get_policy() -> IncidentPolicy:
-    return await POLICIES.get("default") or IncidentPolicy()
+    policy = await POLICIES.get("default") or IncidentPolicy()
+    if DEFAULT_NON_ACTIONABLE_SENDER not in policy.non_actionable_senders:
+        policy = policy.model_copy(
+            update={
+                "non_actionable_senders": [
+                    *policy.non_actionable_senders,
+                    DEFAULT_NON_ACTIONABLE_SENDER,
+                ]
+            }
+        )
+        await POLICIES.put("default", policy)
+    return policy
 
 
 def channel_allowed(

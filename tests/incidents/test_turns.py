@@ -160,7 +160,11 @@ async def test_completion_reschedules_only_stranded_context(record, policy, plat
     )
     turns.create_durable_run.assert_not_awaited()
 
-    fake_store.seed(("queue", "thread-1"), "pending_messages", {"messages": [{"content": "late"}]})
+    fake_store.seed(
+        ("queue", "thread-1"),
+        "pending_messages",
+        {"messages": [{"content": turns.context_block("C1", {"user": "U1", "text": "late"})}]},
+    )
     result = await turns.handle_run_completion("thread-1", "r1", "success")
     assert result["reason"] == "queued incident context rescheduled"
     turns.create_durable_run.assert_awaited_once()

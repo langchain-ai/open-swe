@@ -70,7 +70,9 @@ async def configured(fake_store, monkeypatch):
         ),
     )
     threads = SimpleNamespace(update=AsyncMock())
-    monkeypatch.setattr(channels, "store_client", lambda: SimpleNamespace(threads=threads))
+    client = SimpleNamespace(threads=threads, store=fake_store)
+    monkeypatch.setattr(channels, "store_client", lambda: client)
+    monkeypatch.setattr(turns, "store_client", lambda: client)
     monkeypatch.setattr(turns, "queue_context", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "schedule_automatic_turn", AsyncMock(return_value=True))
     monkeypatch.setattr(turns, "dispatch_turn", AsyncMock(return_value={"run_id": "r1"}))
@@ -169,6 +171,26 @@ async def test_empty_new_channel_enrolls_without_a_first_turn(configured):
     assert record is not None and record.status == "watching"
     turns.queue_context.assert_not_awaited()
     turns.schedule_automatic_turn.assert_not_awaited()
+
+
+async def test_enrollment_batch_wakes_once_for_tracker_and_responder(configured):
+    channels.fetch_slack_thread_messages.return_value = [
+        {
+            "ts": "1.0",
+            "bot_id": "incident.io",
+            "bot_profile": {"username": "incident.io"},
+            "text": "still in triage",
+        },
+        {"ts": "1.1", "user": "U1", "text": "I found the failing deploy"},
+    ]
+
+    response, _ = await handle(
+        {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}}
+    )
+
+    assert response == {"status": "accepted"}
+    assert turns.queue_context.await_count == 2
+    turns.schedule_automatic_turn.assert_awaited_once()
 
 
 async def test_ineligible_channel_records_a_setup_failure(configured):
@@ -279,6 +301,56 @@ async def test_anyone_in_the_channel_can_pause_but_questions_need_a_connected_ac
     assert channels.post_account_link_prompt.await_args.args[:3] == ("C1", "3.1", "U9")
 
 
+@pytest.mark.parametrize(
+    "sender",
+    [
+        {"bot_id": "BTRACK"},
+        {"app_id": "APPTRACK"},
+        {"subtype": "bot_message", "username": "tracker-user"},
+        {"bot_profile": {"app_id": "APPTRACK"}},
+    ],
+)
+async def test_non_actionable_senders_stay_queued_without_scheduling(enrolled, sender):
+    await service.POLICIES.put(
+        "default",
+        IncidentPolicy(
+            enabled=True,
+            workspace_id="T1",
+            slack_app_id="A1",
+            non_actionable_senders=["BTRACK", "APPTRACK", "tracker-user"],
+        ),
+    )
+    response, _ = await handle(
+        {"type": "message", "channel": "C1", "text": "still in triage", "ts": "2.5", **sender}
+    )
+
+    assert response == {"status": "accepted"}
+    turns.queue_context.assert_awaited_once()
+    turns.schedule_automatic_turn.assert_not_awaited()
+
+
+async def test_duplicate_normalized_context_stays_queued_without_scheduling(enrolled, fake_store):
+    fake_store.seed(
+        ("queue", enrolled.thread_id),
+        "pending_messages",
+        {"messages": [{"content": turns.context_block("C1", {"text": "still in triage"})}]},
+    )
+
+    response, _ = await handle(
+        {
+            "type": "message",
+            "channel": "C1",
+            "user": "U1",
+            "text": " <@U2>  still\n in   triage ",
+            "ts": "2.6",
+        }
+    )
+
+    assert response == {"status": "accepted"}
+    turns.queue_context.assert_awaited_once()
+    turns.schedule_automatic_turn.assert_not_awaited()
+
+
 async def test_questions_dispatch_an_explicit_turn_into_their_thread(enrolled):
     threaded = {
         "type": "app_mention",
@@ -334,14 +406,39 @@ async def test_complete_posts_the_latest_summary(enrolled):
     assert (await service.INCIDENTS.get(enrolled.id)).status == "completed"
 
 
-async def test_resume_reschedules_when_context_is_waiting(enrolled):
+async def test_resume_reschedules_when_actionable_context_is_waiting(enrolled, fake_store):
     enrolled.status = "paused"
-    turns.queued_context_count.return_value = 2
+    fake_store.seed(
+        ("queue", enrolled.thread_id),
+        "pending_messages",
+        {"messages": [{"content": turns.context_block("C1", {"user": "U1", "text": "new"})}]},
+    )
 
     await channels.apply_control(enrolled, "resume", {"id": "github:sre"})
 
     assert (await service.INCIDENTS.get(enrolled.id)).status == "watching"
     turns.schedule_automatic_turn.assert_awaited_once()
+
+
+async def test_resume_does_not_schedule_non_actionable_context(enrolled, fake_store):
+    enrolled.status = "paused"
+    fake_store.seed(
+        ("queue", enrolled.thread_id),
+        "pending_messages",
+        {
+            "messages": [
+                {
+                    "content": turns.context_block(
+                        "C1", {"bot_id": "incident.io", "text": "still in triage"}
+                    )
+                }
+            ]
+        },
+    )
+
+    await channels.apply_control(enrolled, "reopen", {"id": "github:sre"})
+
+    turns.schedule_automatic_turn.assert_not_awaited()
 
 
 async def test_archive_completes_quietly(enrolled):

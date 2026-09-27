@@ -106,6 +106,20 @@ async def test_disabling_preserves_binding_without_slack_call(configured, monkey
     auth.assert_not_awaited()
 
 
+async def test_get_policy_adds_tracker_sender_to_legacy_policy_without_losing_custom_senders(
+    fake_store,
+):
+    fake_store.seed(
+        ("incidents", "policies"),
+        "default",
+        {"enabled": True, "workspace_id": "T1", "non_actionable_senders": ["custom-bot"]},
+    )
+
+    policy = await service.get_policy()
+
+    assert policy.non_actionable_senders == ["custom-bot", "incident.io"]
+
+
 @pytest.mark.parametrize(
     ("body", "version", "status"),
     [

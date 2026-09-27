@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any, Literal
 
 import httpx
@@ -43,6 +44,7 @@ _INCIDENTS_SYSTEM: SystemIdentity = {
     "display_name": "Incidents",
     "platform": "open-swe",
 }
+_SLACK_MENTION = re.compile(r"<@[A-Z0-9]{1,20}>")
 
 
 def permalink(channel_id: str, ts: str) -> str:
@@ -93,6 +95,13 @@ def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
             "display_name": f"<@{user}>",
             "platform": "slack",
         }
+    slack_sender = {
+        key: message[key]
+        for key in ("bot_id", "app_id", "username", "bot_profile")
+        if key in message
+    }
+    if slack_sender:
+        payload["slack_sender"] = slack_sender
     return payload
 
 
@@ -100,6 +109,76 @@ async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
     return await queue_message_for_thread(
         record.thread_id, context_block(record.channel_id, message)
     )
+
+
+def _normalize_context_text(text: str) -> str:
+    return re.sub(r"\s+", " ", _SLACK_MENTION.sub("", text)).strip()
+
+
+def _sender_identifiers(message: dict[str, Any]) -> set[str]:
+    profile = message.get("bot_profile")
+    values = [
+        slack_message_bot_id(message),
+        message.get("app_id"),
+        message.get("username"),
+    ]
+    if isinstance(profile, dict):
+        values.extend((profile.get("app_id"), profile.get("username")))
+    return {
+        str(value).strip().casefold()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    }
+
+
+def _queued_context(content: Any) -> tuple[str, dict[str, Any]] | None:
+    if not isinstance(content, dict):
+        return None
+    text = content.get("text")
+    if not isinstance(text, str) or not text.startswith(CONTEXT_MARKER):
+        return None
+    _, _, context_text = text.partition("\n")
+    return context_text, content.get("slack_sender", {}) if isinstance(
+        content.get("slack_sender"), dict
+    ) else {}
+
+
+async def actionable_context(
+    record: Incident, policy: IncidentPolicy, message: dict[str, Any] | None = None
+) -> bool:
+    """Return whether a current or pending context message should wake the agent."""
+    try:
+        item = await store_client().store.get_item(("queue", record.thread_id), "pending_messages")
+    except Exception:  # noqa: BLE001
+        item = None
+    value = item.get("value") if isinstance(item, dict) else None
+    messages = value.get("messages") if isinstance(value, dict) else None
+    pending = (
+        [entry for entry in messages if isinstance(entry, dict)]
+        if isinstance(messages, list)
+        else []
+    )
+    blocked_senders = {sender.strip().casefold() for sender in policy.non_actionable_senders}
+    pending_texts: set[str] = set()
+    actionable_pending = False
+    for entry in pending:
+        queued = _queued_context(entry.get("content"))
+        if queued is None:
+            continue
+        text, sender = queued
+        normalized = _normalize_context_text(text)
+        if not normalized:
+            continue
+        is_new = normalized not in pending_texts
+        pending_texts.add(normalized)
+        if is_new and not (_sender_identifiers(sender) & blocked_senders):
+            actionable_pending = True
+    if message is None:
+        return actionable_pending
+    normalized = _normalize_context_text(message_text(message))
+    if not normalized or _sender_identifiers(message) & blocked_senders:
+        return False
+    return normalized not in pending_texts
 
 
 async def _runs(thread_id: str, status: Literal["pending", "running"]) -> list[dict[str, Any]]:
@@ -296,7 +375,7 @@ async def handle_run_completion(thread_id: str, run_id: str | None, status: str)
         if (
             policy.enabled
             and record.status in {"watching", "needs_attention"}
-            and await queued_context_count(thread_id)
+            and await actionable_context(record, policy)
             and not await has_active_run(thread_id)
         ):
             await dispatch_turn(record, policy, after_seconds=AUTOMATIC_DELAY_SECONDS)

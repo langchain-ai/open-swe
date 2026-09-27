@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from agent.store import now_iso
 
+DEFAULT_NON_ACTIONABLE_SENDER = "incident.io"
+
 
 class IncidentPolicy(BaseModel):
     enabled: bool = False
@@ -15,6 +17,9 @@ class IncidentPolicy(BaseModel):
     slack_app_id: str = ""
     channel_prefix: str = "inc-"
     excluded_channel_ids: list[str] = Field(default_factory=list)
+    non_actionable_senders: list[str] = Field(
+        default_factory=lambda: [DEFAULT_NON_ACTIONABLE_SENDER]
+    )
     model: str | None = None
     max_model_calls: int = Field(default=20, ge=1, le=20)
     version: int = 0

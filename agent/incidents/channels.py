@@ -193,12 +193,13 @@ async def enroll_channel(
         service.note(record, "enrolled", f"Following #{record.channel_name}.")
         await service.save(record)
         history = await fetch_slack_thread_messages(channel_id, turns.SESSION_TS)
-        queued = 0
+        actionable = False
         for message in history[-HISTORY_LIMIT:]:
             if _is_context(message, policy):
-                queued += int(await turns.queue_context(record, message))
+                actionable = (await turns.actionable_context(record, policy, message)) or actionable
+                await turns.queue_context(record, message)
         # A brand-new channel has nothing to analyze yet; the first alert starts the first turn.
-        if queued:
+        if actionable:
             await turns.schedule_automatic_turn(record, policy)
     except Exception:
         logger.exception("Incident enrollment failed", extra={"incident_id": incident_id})
@@ -256,7 +257,7 @@ async def apply_control(
     service.note(record, "control", text.split("\n", 1)[0])
     await service.save(record)
     await _post(record, text, blocks=blocks)
-    if action in {"resume", "reopen"} and await turns.queued_context_count(record.thread_id):
+    if action in {"resume", "reopen"} and await turns.actionable_context(record, policy):
         await turns.schedule_automatic_turn(record, policy)
     return record
 
@@ -349,7 +350,8 @@ async def handle_slack_event(
         return {"status": "ignored"}
     if record.status == "completed" or not _is_context(message, policy):
         return {"status": "ignored"}
+    actionable = await turns.actionable_context(record, policy, message)
     await turns.queue_context(record, message)
-    if record.status in {"watching", "needs_attention"}:
+    if actionable and record.status in {"watching", "needs_attention"}:
         background_tasks.add_task(turns.schedule_automatic_turn, record, policy)
     return {"status": "accepted"}
