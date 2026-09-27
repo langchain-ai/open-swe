@@ -324,6 +324,28 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_router_failure_uses_same_model_as_routing_off() -> None:
+    config = _base_config()
+    config["configurable"]["thread_id"] = "thread-1"
+    profile = {
+        "default_model": "anthropic:claude-opus-5-5",
+        "reasoning_effort": "high",
+        "model_routing_enabled": True,
+    }
+    agent = await _capture_create_deep_agent_kwargs(config, profile=profile)
+    model_selection = next(
+        item
+        for item in cast(list[object], agent["middleware"])
+        if type(item).__name__ == "ModelSelectionMiddleware"
+    )
+    route = await model_selection.select_route({"messages": []})
+
+    assert route == "default"
+    assert model_selection._models[route] is agent["model"]
+    assert agent["make_model_calls"][0][0] == "anthropic:claude-opus-5-5"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_thread", [False, True])
 async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) -> None:
     initial_settings = (
