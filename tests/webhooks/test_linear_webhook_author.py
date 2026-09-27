@@ -31,6 +31,7 @@ def _run_process(
     repo_config: dict[str, str],
     *,
     full_issue: dict[str, Any] | None = None,
+    thread_workspace: str | None = None,
 ) -> tuple[dict, dict, str | None, object]:
     captured: dict[str, Any] = {}
 
@@ -60,7 +61,11 @@ def _run_process(
         source_context=None,
         workspace=None,
     ):
-        captured["upsert"] = {"github_login": github_login, "user_email": user_email}
+        captured["upsert"] = {
+            "github_login": github_login,
+            "user_email": user_email,
+            "workspace": workspace,
+        }
         return None
 
     async def fake_resolve_login(email):
@@ -80,6 +85,12 @@ def _run_process(
             linear_webhook.common, "upsert_agent_thread_metadata", side_effect=fake_upsert
         ),
         patch.object(linear_webhook.common, "resolve_agent_model_id", new_callable=AsyncMock),
+        patch.object(
+            linear_webhook.common, "get_thread_workspace", AsyncMock(return_value=thread_workspace)
+        ),
+        patch.object(
+            linear_webhook.common, "workspace_for_repo_config", AsyncMock(return_value="oss")
+        ),
         patch.object(linear_webhook.common, "model_supports_images", return_value=True),
         patch.object(
             linear_webhook.common,
@@ -108,6 +119,26 @@ def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
     assert configurable["source"] == "linear"
     assert configurable["github_login"] == "zhen"
     assert configurable["user_email"] == "zhen@example.com"
+
+
+def test_linear_follow_up_keeps_the_threads_workspace(fake_store: Any) -> None:
+    configurable, upsert, _email, _content = _run_process(
+        _issue_data(user_email="zhen@example.com"),
+        {"owner": "langchain-ai", "name": "open-swe"},
+        thread_workspace="core",
+    )
+
+    assert configurable["workspace"] == "core"
+    assert upsert["workspace"] == "core"
+
+
+def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace(fake_store: Any) -> None:
+    configurable, _upsert, _email, _content = _run_process(
+        _issue_data(user_email="zhen@example.com"),
+        {"owner": "langchain-ai", "name": "open-swe"},
+    )
+
+    assert configurable["workspace"] == "oss"
 
 
 def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:

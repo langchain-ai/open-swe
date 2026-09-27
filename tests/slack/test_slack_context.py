@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 import pytest
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -201,6 +202,33 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "Alice"
+
+
+def test_upsert_records_a_token_scope_only_on_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(raise_not_found=True)
+
+    async def create(*, thread_id: str, if_exists: str, metadata: dict) -> None:
+        threads.thread = {"metadata": dict(metadata)}
+        threads.raise_not_found = False
+
+    threads.create = create  # type: ignore[attr-defined]
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+
+    assert asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="github", title="Issue", token_repositories=["acme/oss"]
+        )
+    )
+    asyncio.run(
+        webhook_common.upsert_agent_thread_metadata(
+            "thread-id", source="github", title="Issue", token_repositories=None
+        )
+    )
+
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata[GITHUB_TOKEN_REPOSITORIES_KEY] == ["acme/oss"]
 
 
 @pytest.mark.parametrize("source", ["github", "linear"])
