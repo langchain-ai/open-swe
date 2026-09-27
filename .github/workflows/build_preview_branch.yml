@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           fetch-depth: 0
           persist-credentials: true
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -98,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
           persist-credentials: false
           sparse-checkout: scripts
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -106,6 +106,6 @@ jobs:
         env:
           DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
           EXPECTED_SHA: ${{ needs.build.outputs.sha }}
-          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
           LANGSMITH_WORKSPACE_ID: ${{ vars.PREVIEW_WORKSPACE_ID }}
         run: uv run scripts/deploy_preview.py
