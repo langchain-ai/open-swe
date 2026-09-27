@@ -162,6 +162,12 @@ async def main() -> None:
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+    except httpx.HTTPStatusError as exc:
+        print(
+            f"::error::{exc.request.method} {exc.request.url.path} returned {exc.response.status_code}: {exc.response.text}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except (DeployError, httpx.HTTPError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         sys.exit(1)
