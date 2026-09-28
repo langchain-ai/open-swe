@@ -16,7 +16,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
@@ -597,6 +599,8 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 async def test_image_fallback_temporarily_overrides_only_incompatible_pinned_models(
     pinned_model: str, source: str
 ) -> None:
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+
     config = _base_config()
     config["configurable"].update(
         source=source,
@@ -629,9 +633,35 @@ async def test_image_fallback_temporarily_overrides_only_incompatible_pinned_mod
 
     followup = _base_config()
     followup["configurable"].update(source=source, model_selection="auto")
-    await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
-    assert followup["configurable"]["resolved_agent_model_id"] == pinned_model
-    assert followup["configurable"]["resolved_agent_effort"] == "high"
+    captured = await _capture_create_deep_agent_kwargs(
+        followup,
+        thread_settings=snapshot,
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    primary = cast(BaseChatModel, captured["model"])
+    fallbacks = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, ImageModelFallbackMiddleware)
+    ]
+    screenshot = HumanMessage(
+        content=[{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
+    )
+    followup_message = HumanMessage(content="Explain the screenshot in more detail")
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    for retained_images in (True, False):
+        request = ModelRequest(
+            model=primary,
+            messages=[screenshot, followup_message] if retained_images else [followup_message],
+            state={"messages": [screenshot, followup_message]},
+        )
+        if fallbacks:
+            await fallbacks[0].awrap_model_call(request, handler)
+        else:
+            await handler(request)
+        actual = handler.call_args.args[0]
+        assert actual.model.model_id == (expected if retained_images else pinned_model)
+        assert actual.messages == request.messages
 
 
 @pytest.mark.asyncio

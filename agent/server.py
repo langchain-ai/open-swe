@@ -77,6 +77,7 @@ from agent.dashboard.options import (
     ModelOption,
     available_requested_models,
     canonical_model_pair,
+    default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
     model_supports_images,
@@ -126,6 +127,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
@@ -1647,6 +1649,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    image_fallback: ImageModelFallbackMiddleware | None = None
+    if not model_supports_images(model_id):
+        vision_model_id, vision_effort = default_vision_model_pair()
+        image_fallback = ImageModelFallbackMiddleware(
+            main_model,
+            _make_model_or_defer(
+                vision_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                ),
+            ),
+        )
     model_selection: ModelSelectionMiddleware | None = None
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
@@ -1815,6 +1830,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
+                    *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
