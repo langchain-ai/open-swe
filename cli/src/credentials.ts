@@ -21,9 +21,16 @@ export class CredentialError extends Error {
  */
 export interface Credential {
   readonly machine: boolean
+  /** What kind of credential this is and where it came from, for `oswe auth status`. */
+  readonly source: string
   /** What to tell the user when the server answers 401. */
   readonly rejected: string
   headers(backend: string): Promise<Record<string, string>>
+}
+
+export interface StoredSession {
+  session: string
+  path: string
 }
 
 /**
@@ -35,7 +42,10 @@ export class SessionCredential implements Credential {
   readonly machine = false
   readonly rejected = "your session expired — run `oswe login` again"
 
-  constructor(private readonly session: string) {}
+  constructor(
+    private readonly session: string,
+    readonly source: string
+  ) {}
 
   async headers(backend: string): Promise<Record<string, string>> {
     return { Cookie: `${SESSION_COOKIE}=${this.session}`, Origin: backend }
@@ -45,6 +55,7 @@ export class SessionCredential implements Credential {
 /** An admin-minted workspace API key (`osk_…`). */
 export class ApiKeyCredential implements Credential {
   readonly machine = true
+  readonly source = "API key (OPEN_SWE_API_KEY)"
   readonly rejected =
     "the API key was rejected — it may have expired or been revoked"
 
@@ -70,6 +81,7 @@ export function jwtExpiry(token: string): number | null {
  */
 export class GitHubActionsCredential implements Credential {
   readonly machine = true
+  readonly source = "GitHub Actions OIDC token"
   readonly rejected =
     "the GitHub Actions token was rejected — check that an admin let this repository start threads"
   private token: string | null = null
@@ -118,7 +130,7 @@ export class GitHubActionsCredential implements Credential {
  */
 export function resolveCredential(
   backend: string,
-  storedSession: string | undefined
+  stored: StoredSession | null
 ): Credential | null {
   const env = process.env
   const key = env["OPEN_SWE_API_KEY"]
@@ -132,6 +144,10 @@ export function resolveCredential(
       env["OPEN_SWE_OIDC_AUDIENCE"] || backend
     )
   }
-  const session = env["OPEN_SWE_SESSION"] || storedSession
-  return session ? new SessionCredential(session) : null
+  const session = env["OPEN_SWE_SESSION"]
+  if (session)
+    return new SessionCredential(session, "session (OPEN_SWE_SESSION)")
+  return stored === null
+    ? null
+    : new SessionCredential(stored.session, `session (${stored.path})`)
 }
