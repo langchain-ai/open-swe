@@ -527,8 +527,6 @@ async def test_update_clearing_create_params_with_null_stays_readable() -> None:
     assert [record.slug for record in await WORKSPACES.list_all()] == ["base", "default"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("registry_db")
 def test_assignment_is_validated() -> None:
     record = Workspace(slug="base")
     with pytest.raises(ValidationError):
