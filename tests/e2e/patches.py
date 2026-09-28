@@ -71,6 +71,10 @@ def apply() -> None:
 
         for module in (chat_graph, review_scout_graph):
             module.__dict__["make_model"] = _fake_make_model
+        # The review-request summary imports the factory when it runs, not at import time.
+        from agent.utils import model as model_factory
+
+        model_factory.make_model = _fake_make_model
 
     # Callers pass installation ids, repository scopes and permission maps; the
     # fake GitHub does not care, so accept whatever the real signatures take.
