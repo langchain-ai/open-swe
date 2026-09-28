@@ -95,7 +95,10 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
 
 @pytest.mark.asyncio
-async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> None:
+@pytest.mark.parametrize("storage_fails", [False, True])
+async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
+    storage_fails: bool,
+) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
         "number": 7,
@@ -109,6 +112,10 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
     set_metadata = AsyncMock()
 
     with (
+        patch(
+            "agent.github.webhook.PullRequest.link_review",
+            AsyncMock(side_effect=RuntimeError("Storage unavailable") if storage_fails else None),
+        ) as completion,
         patch(
             "agent.webhooks.common.is_repo_auto_review_enabled",
             new_callable=AsyncMock,
@@ -151,8 +158,19 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review() -> No
         ) as complete_check,
         patch("agent.webhooks.common.get_client", return_value=fake_client),
     ):
+        if storage_fails:
+            with pytest.raises(RuntimeError, match="Storage unavailable"):
+                await github_webhooks.process_github_push_event(payload)
+            set_metadata.assert_not_awaited()
+            create_check.assert_not_awaited()
+            complete_check.assert_not_awaited()
+            return
         await github_webhooks.process_github_push_event(payload)
 
+    completion.assert_awaited_once_with(
+        reviewer_thread_id=github_webhooks.reviewer_thread_id("lc", "repo", 7),
+        head_sha="newsha",
+    )
     fake_client.runs.create.assert_not_called()
     set_metadata.assert_awaited_once()
     assert set_metadata.await_args is not None

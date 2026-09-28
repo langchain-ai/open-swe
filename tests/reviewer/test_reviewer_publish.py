@@ -217,6 +217,7 @@ def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
             "agent.tools.publish_review.get_workspace_settings",
             AsyncMock(return_value=WorkspaceSettings({})),
         ),
+        patch("agent.tools.publish_review.PullRequest.link_review", AsyncMock()),
         patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
         patch("agent.tools.publish_review.replace_findings", AsyncMock()),
         patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
@@ -988,7 +989,96 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> None:
+@pytest.mark.parametrize("assessment_mode", [None, "dry_run", "approve"])
+async def test_published_review_registry_failure_does_not_complete_or_invite_duplicate(
+    assessment_mode: str | None,
+) -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch(
+            "agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=assessment_mode)
+        ),
+        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.open_swe_review_exists",
+            AsyncMock(side_effect=[False, True]),
+        ),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 999}),
+        ) as post,
+        patch(
+            "agent.tools.publish_review.PullRequest.link_review",
+            AsyncMock(side_effect=[RuntimeError("Storage unavailable"), None]),
+        ) as completion,
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()
+        ) as notify,
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+    ):
+
+        async def publish() -> dict[str, object]:
+            return await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="a" * 40,
+                token="t",
+                severity_threshold="medium",
+                cap=15,
+                is_re_review=False,
+                assessment=_assessment("a" * 40) if assessment_mode else None,
+                state={"review_approval_policy": "Docs only"},
+            )
+
+        if assessment_mode:
+            result = await publish()
+            assert result["success"] is True
+            assert result["review_id"] == 999
+            assert result["completion_recorded"] is False
+            assert "merge remains blocked" in str(result["warning"])
+            post.assert_awaited_once()
+            assert post.await_args is not None
+            assert post.await_args.kwargs["event"] == (
+                "APPROVE" if assessment_mode == "approve" else "COMMENT"
+            )
+        else:
+            with pytest.raises(RuntimeError, match="Storage unavailable"):
+                await publish()
+        completion.assert_awaited_once_with(
+            reviewer_thread_id="tid",
+            github_review_id=999,
+            head_sha="a" * 40,
+            finding_count=0,
+        )
+        assert not any("last_reviewed_sha" in call.kwargs for call in metadata.await_args_list)
+        settle.assert_not_awaited()
+        notify.assert_not_awaited()
+
+        if assessment_mode:
+            return
+        result = await publish()
+        assert result["success"] is True
+        assert result["skipped_empty_re_review"] is True
+        post.assert_awaited_once()
+        metadata.assert_awaited_once_with("tid", last_reviewed_sha="a" * 40)
+        settle.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("storage_fails", [False, True])
+async def test_publish_review_skips_post_on_re_review_with_no_new_findings(
+    storage_fails: bool,
+) -> None:
     """Re-review with nothing new to surface must not spam another comment."""
     from agent.tools.publish_review import _publish_review_async
 
@@ -1016,8 +1106,14 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
     post_review = AsyncMock()
     set_metadata = AsyncMock()
     resolve_threads = AsyncMock(return_value=1)
+    completion = AsyncMock(
+        side_effect=RuntimeError("Storage unavailable") if storage_fails else None
+    )
+    settle_check = AsyncMock()
 
     with (
+        patch("agent.tools.publish_review.PullRequest.link_review", completion),
+        patch("agent.tools.publish_review.settle_review_check_run", settle_check),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", list_async),
         patch("agent.tools.publish_review.post_pull_request_review", post_review),
@@ -1031,17 +1127,34 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
             new_callable=AsyncMock,
         ),
     ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="newsha",
-            token="t",
-            severity_threshold="medium",
-            cap=15,
-            is_re_review=True,
-        )
 
+        async def publish() -> dict[str, object]:
+            return await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="newsha",
+                token="t",
+                severity_threshold="medium",
+                cap=15,
+                is_re_review=True,
+            )
+
+        if storage_fails:
+            with pytest.raises(RuntimeError, match="Storage unavailable"):
+                await publish()
+            set_metadata.assert_not_awaited()
+            settle_check.assert_not_awaited()
+            post_review.assert_not_awaited()
+            return
+        result = await publish()
+
+    completion.assert_awaited_once_with(
+        reviewer_thread_id="tid", head_sha="newsha", finding_count=0
+    )
+    settle_check.assert_awaited_once()
+    assert settle_check.await_args is not None
+    assert settle_check.await_args.kwargs["conclusion"] == "success"
     post_review.assert_not_called()
     resolve_threads.assert_awaited_once()
     set_metadata.assert_awaited_once()

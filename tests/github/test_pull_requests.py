@@ -243,6 +243,29 @@ async def test_relinking_a_review_updates_the_row_with_the_same_github_id() -> N
     assert saved.reviews[0].url == "https://github.com/lc/repo/pull/7#pullrequestreview-11"
 
 
+async def test_completion_without_publication_is_idempotent_per_thread_and_head() -> None:
+    await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, head_sha="oldsha")
+    for head_sha in ("newsha", "newsha", "nextsha"):
+        await _pr().link_review(reviewer_thread_id="rev", head_sha=head_sha)
+    await _pr().link_review(reviewer_thread_id="other", head_sha="newsha")
+
+    stored = await PullRequest.get("lc", "repo", 7)
+    assert stored is not None
+    assert {
+        (review.reviewer_thread_id, review.head_sha, review.github_review_id)
+        for review in stored.reviews
+    } == {
+        ("rev", "oldsha", 11),
+        ("rev", "newsha", None),
+        ("rev", "nextsha", None),
+        ("other", "newsha", None),
+    }
+    assert len(stored.reviews) == 4
+    assert all(
+        review.url == stored.url for review in stored.reviews if review.github_review_id is None
+    )
+
+
 async def test_backfill_still_runs_after_a_newer_thread_was_linked_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
