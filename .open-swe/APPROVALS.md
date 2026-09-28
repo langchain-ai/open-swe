@@ -18,8 +18,8 @@ Always require human review when a pull request touches:
 - sandboxes, webhooks and their signature checks, or database migrations
   (`agent/sandboxes/`, `agent/webhooks/`, `agent/database/migrations/`);
 - the reviewer or approval logic itself (`agent/review/`, `agent/tools/publish_review.py`);
-- instructions agents follow: `APPROVALS.md`, `AGENTS.md`, `CLAUDE.md`, `.agents/`,
-  `.claude/`, or `agent/resources/prompts/`;
+- instructions agents follow: anything under `.open-swe/` (including this file),
+  `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`, or `agent/resources/prompts/`;
 - CI, build, or deployment files (`.github/`, `Dockerfile`, `compose.yaml`,
   `langgraph*.json`), or dependency manifests and lockfiles;
 - generated pages under `openwiki/`.
