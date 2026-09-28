@@ -359,14 +359,14 @@ async def test_measurement_and_projection_roll_back_together(
         await ingestion.ingest(item)
     measured = revise(measured, payload=measurement(distance_basis_points=legacy_distance or 0))
     before = await ingestion_state()
-    mark_dirty = ingestion.mark_dirty
+    project = ingestion._project
 
-    async def fail_after_mark_dirty(conn: AsyncConnection, event: EventEnvelope) -> None:
-        await mark_dirty(conn, event)
+    async def fail_after_project(conn: AsyncConnection, event: EventEnvelope) -> None:
+        await project(conn, event)
         raise RuntimeError("injected failure")
 
     with monkeypatch.context() as patch:
-        patch.setattr(ingestion, "mark_dirty", fail_after_mark_dirty)
+        patch.setattr(ingestion, "_project", fail_after_project)
         with pytest.raises(RuntimeError, match="injected failure"):
             await ingestion.ingest(measured)
     assert await ingestion_state() == before
