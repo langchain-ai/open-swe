@@ -28,7 +28,9 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_metadata,
+    narrowed_repositories,
     set_sandbox_backend,
+    thread_token_repositories,
     unwrap_sandbox_backend,
 )
 from agent.users import User
@@ -435,6 +437,10 @@ async def ensure_sandbox_for_thread(
     owner_login = _owner_login(sandbox_metadata)
     created = False
     created_proxy_config: dict[str, Any] | None = None
+    async with aphase(thread_id, "sandbox.token_scope"):
+        github_proxy_repositories = narrowed_repositories(
+            github_proxy_repositories, await thread_token_repositories(thread_id)
+        )
 
     if sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -533,6 +539,7 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
+        github_proxy_repositories=await thread_token_repositories(thread_id),
         workspace_slug=workspace_slug,
         source=source,
         owner_login=_owner_login(metadata),

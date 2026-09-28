@@ -2,6 +2,9 @@ Create a workspace automation.
 
 Args:
     prompt: Complete instructions for every run.
+    workspace: Slug of the workspace every run launches in, with its settings,
+        MCP connections, and sandbox image. Required; ask which workspace when
+        it is not clear.
     trigger: How the automation fires. "schedule" (the default) runs on a
         cron. "github_issue_opened" runs whenever an issue is opened in
         ``repo``, and passes the issue as untrusted context.

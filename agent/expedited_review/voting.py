@@ -20,6 +20,7 @@ from agent.expedited_review.lifecycle import (
     broadcast_card,
     notify_agent,
     refresh_card,
+    refresh_card_in_thread,
     repo_token,
     retire,
 )
@@ -32,7 +33,7 @@ from agent.github.ci import fetch_pr, has_repo_write_permission
 from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequestPayload
 from agent.input_messages import PersonIdentity, split_person_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
 from agent.users import User
 from agent.utils.thread_ops import langgraph_client
@@ -45,7 +46,7 @@ CardAction = VoteAction | Literal["dismiss", "broadcast"]
 
 @dataclass(frozen=True, slots=True)
 class VoteOutcome:
-    message: str
+    message: str = ""
 
 
 def _slack_link_hint() -> str:
@@ -131,25 +132,18 @@ async def handle_vote(
     if current is None:
         return VoteOutcome("This expedited review vanished.")
     problem = await _submit_review(current, voter.user.id) if added else None
-    await refresh_card(current)
-    recorded = (
-        f"Approval recorded as @{voter.github_login}. {problem}"
-        if problem
-        else f"Approved on GitHub as @{voter.github_login}."
-    )
+    await refresh_card_in_thread(current)
     if first_approval and not await notify_agent(
         current,
-        render_prompt(
-            "runs/expedited-review-approved.md",
+        prompt(
+            "runs/expedited-review-approved",
             pr_url=current.pull_request.url,
             approvers=", ".join(f"@{login}" for login in current.approvers),
         ),
     ):
-        return VoteOutcome(
-            f"{recorded} Open SWE could not be woken to merge it; tag it in the thread to "
-            "try again."
-        )
-    return VoteOutcome(recorded)
+        woken = "Open SWE could not be woken to merge it; tag it in the thread to try again."
+        return VoteOutcome(f"{problem} {woken}" if problem else woken)
+    return VoteOutcome(problem or "")
 
 
 async def _submit_review(approval: ExpeditedApproval, voter_user_id: UUID) -> str | None:
@@ -270,4 +264,5 @@ async def process_vote(
     except Exception:
         logger.exception("Expedited review vote failed", extra={"approval_id": approval_id})
         outcome = VoteOutcome("Something went wrong recording your vote. Try again.")
-    await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)
+    if outcome.message:
+        await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)

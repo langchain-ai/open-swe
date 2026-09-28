@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from agent.api_keys.models import ApiKey
 from agent.federation.github_oidc import GitHubActionsClaims
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.threads import runs
 from agent.threads.principals import Principal
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
@@ -68,12 +69,15 @@ async def _key_caller(workspace: str = "core") -> Principal:
     return Principal.of_key(key)
 
 
-def _workflow_caller(repository: str = "acme/api", workspace: str = "core") -> Principal:
+def _workflow_caller(
+    repository: str = "acme/api", workspace: str = "core", visibility: str = "private"
+) -> Principal:
     return Principal.of_workflow(
         GitHubActionsClaims(
             sub=f"repo:{repository}:ref:refs/heads/main",
             repository=repository,
             repository_owner=repository.split("/", 1)[0],
+            repository_visibility=visibility,
             workflow_ref=f"{repository}/.github/workflows/nightly.yml@refs/heads/main",
         ),
         workspace,
@@ -125,20 +129,18 @@ async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -
     assert machine.threads.created[0]["metadata"]["started_by_id"] == "github_actions:acme/api"
 
 
-async def test_a_repository_in_another_workspace_is_refused(machine: _FakeClient) -> None:
+async def test_a_repository_another_workspace_prefers_is_usable(machine: _FakeClient) -> None:
     principal = await _key_caller()
 
-    with pytest.raises(HTTPException) as refused:
-        await runs._enrich_system_run_start_command(
-            "thread-3",
-            principal,
-            _command("Upgrade the linter", thread_type="system", repo="acme/oss"),
-            metadata={},
-            creating=True,
-        )
+    await runs._enrich_system_run_start_command(
+        "thread-3",
+        principal,
+        _command("Upgrade the linter", thread_type="system", repo="acme/oss"),
+        metadata={},
+        creating=True,
+    )
 
-    assert refused.value.status_code == 403
-    assert machine.threads.created == []
+    assert machine.threads.created[0]["metadata"]["repo_name"] == "oss"
 
 
 @pytest.mark.parametrize("requested", ["workspace", "private"])
@@ -194,3 +196,21 @@ async def test_a_machine_reads_back_only_what_it_started(machine: _FakeClient) -
     with pytest.raises(HTTPException) as refused:
         theirs.assert_can_read(started)
     assert refused.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("visibility", "scope"),
+    [("public", ["acme/api"]), ("", ["acme/api"]), ("private", None), ("internal", None)],
+)
+async def test_a_workflow_on_a_public_repository_records_a_single_repository_scope(
+    machine: _FakeClient, visibility: str, scope: list[str] | None
+) -> None:
+    await runs._enrich_system_run_start_command(
+        "thread-scope",
+        _workflow_caller(visibility=visibility),
+        _command("Fix the nightly", thread_type="system"),
+        metadata={},
+        creating=True,
+    )
+
+    assert machine.threads.created[0]["metadata"].get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope

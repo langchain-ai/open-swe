@@ -119,7 +119,7 @@ async def test_each_approval_reaches_github_on_click_and_wakes_the_agent_once(
     stored = await _stored(approval)
     assert stored.state == "open"
     assert sorted(stored.approvers) == ["grace", "linus"]
-    assert "Approved on GitHub" in grace.message
+    assert grace.message == ""
     assert harness.reviews == [("grace", "def456"), ("linus", "def456")]
     assert sorted((v.github_review_id, v.github_review_sha) for v in stored.votes) == [
         (101, "def456"),
@@ -210,7 +210,6 @@ async def test_an_approval_whose_wake_up_fails_tells_the_voter(
 
     outcome = await _click(approval, "U_GRACE")
 
-    assert "Approved on GitHub" in outcome.message
     assert "tag it in the thread" in outcome.message
     assert (await _stored(approval)).approved
 
@@ -289,6 +288,23 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_closes(
     assert slack.broadcasts == [True, False]
     assert slack.deleted == ["2.0", "3.0"]
     assert stored.state == "cancelled"
+    assert not stored.slack_broadcast
+    assert stored.slack_message_ts == "4.0"
+
+
+async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
+    harness: _Harness, open_approval: OpenApproval, slack: _FakeSlack
+) -> None:
+    approval = await open_approval()
+
+    await voting.request_broadcast(await _stored(approval))
+    await _click(approval, "U_GRACE")
+
+    stored = await _stored(approval)
+    assert slack.broadcasts == [True, False]
+    assert slack.deleted == ["2.0", "3.0"]
+    assert stored.state == "open"
+    assert stored.approved
     assert not stored.slack_broadcast
     assert stored.slack_message_ts == "4.0"
 

@@ -2,24 +2,27 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
 
+import httpx2
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_typesafe import Choice, TypeSafeClassifier
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
+from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import prompt
+from agent.utils.gateway import gateway_base_url
 
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
-PersistedRoute = Route | Literal["fast_alt"]
+SelectedRoute = Route | Literal["default"]
+PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
-
-_CLASSIFIER_PROMPT = load_prompt("model-selection.md")
 
 
 def _latest_human_task(messages: Sequence[Any]) -> str:
@@ -50,18 +53,64 @@ class RouteDecision(BaseModel):
     model_route: Route
 
 
+ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
+
+
+def _route_criteria() -> dict[str, str]:
+    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
+
+
+async def _select_jev_route(task: str) -> SelectedRoute:
+    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
+    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
+    if not typesafe_key and not gateway_key:
+        logger.warning("Jev routing has no API key; using configured default model")
+        return "default"
+    try:
+        async with httpx2.AsyncClient(timeout=3.0) as client:
+            classifier = TypeSafeClassifier(
+                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
+                api_key=typesafe_key or gateway_key,
+                **({} if typesafe_key else {"base_url": gateway_base_url()}),
+                async_client=client,
+            )
+            response = await classifier.ainvoke(
+                {
+                    "state": task,
+                    "questions": {
+                        "route": Choice(
+                            instructions=prompt("model-selection/instructions"),
+                            criteria=_route_criteria(),
+                        )
+                    },
+                },
+                config={"tags": ["nostream"]},
+            )
+            answer = response.choices["route"]
+        if answer.confidence < 0.6:
+            logger.info(
+                "Jev routing confidence below threshold; using configured default model",
+                extra={"confidence": answer.confidence},
+            )
+            return "default"
+        return RouteDecision.model_validate({"model_route": answer.choice}).model_route
+    except Exception:
+        logger.exception("Jev routing failed; using configured default model")
+        return "default"
+
+
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
 
 
-def normalize_route(route: PersistedRoute) -> Route:
+def normalize_route(route: PersistedRoute) -> SelectedRoute:
     return "fast" if route == "fast_alt" else route
 
 
 async def _emit_routed_model(
     models: Mapping[str, BaseChatModel],
     route_model_ids: Mapping[str, str],
-    route: Route,
+    route: SelectedRoute,
 ) -> None:
     """Stream the routed model's id so the UI can show it next to `Auto`."""
     model_id = route_model_ids.get(route)
@@ -83,50 +132,33 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     def __init__(
         self,
         models: Mapping[str, BaseChatModel],
-        classifier: BaseChatModel,
+        default_model: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode = "auto",
     ) -> None:
-        self._models = dict(models)
+        self._models = {**models, "default": default_model}
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
-        # `nostream` keeps the routing decision out of the user-facing message
-        # stream; it stays visible in traces, unlike the offloading summarizer.
-        hidden_classifier = classifier.model_copy(
-            update={"tags": [*(classifier.tags or []), "nostream"]}
-        )
-        self._classifier = hidden_classifier.with_structured_output(
-            RouteDecision, method="json_schema"
-        )
 
     async def select_route(
         self,
         state: ModelSelectionState,
-    ) -> Route:
+    ) -> SelectedRoute:
         """Select the model route for a turn."""
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
         messages = state.get("messages", [])
-        task = _latest_human_task(messages)
-        route: Route = "balanced"
-        try:
-            decision = await self._classifier.ainvoke(
-                render_prompt("model-selection.md", task=task[-8_000:])
-            )
-            if isinstance(decision, RouteDecision):
-                route = decision.model_route
-        except Exception:  # noqa: BLE001
-            logger.exception("Model routing classifier failed")
-        return route
+        task = _latest_human_task(messages)[-8_000:]
+        return await _select_jev_route(task)
 
     async def abefore_model(
         self,
         state: ModelSelectionState,
         runtime: Runtime,
-    ) -> dict[str, Route]:
+    ) -> dict[str, SelectedRoute]:
         del runtime
         route = await self.select_route(state)
         if self._routing_mode == "auto":
@@ -138,8 +170,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "balanced")
-        model = self._models.get(normalize_route(route)) or self._models.get("balanced")
-        if model is None:
-            model = self._models["balanced"]
+        route: PersistedRoute = request.state.get("model_route", "default")
+        model = self._models.get(normalize_route(route)) or self._models["default"]
         return await handler(request.override(model=model))

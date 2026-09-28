@@ -5,10 +5,18 @@ import {
   runStartCommand,
   startRun as postRunStart,
 } from "@/features/agents/lib/transcript/api"
-import { subagentToolCalls } from "@/features/agents/lib/transcript/reducer"
+import {
+  subagentMessages,
+  subagentTask,
+  subagentToolCalls,
+} from "@/features/agents/lib/transcript/reducer"
 import { useThreadTranscript } from "@/features/agents/lib/transcript/useThreadTranscript"
 import { useCancelRun } from "./useCancelRun"
-import type { SubagentToolCall } from "@/features/agents/lib/transcript/reducer"
+import type {
+  SubagentToolCall,
+  TranscriptToolCallState,
+} from "@/features/agents/lib/transcript/reducer"
+import type { Message } from "@/features/agents/lib/types"
 import type { ThreadRunInput, TranscriptThreadSource } from "./types"
 
 /** The append-only transcript log, behind the source interface. */
@@ -39,6 +47,16 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       state ? subagentToolCalls(state, namespace) : [],
     [state]
   )
+  const subagentTranscript = useCallback(
+    (namespace: ReadonlyArray<string>): Array<Message> =>
+      state ? subagentMessages(state, namespace) : [],
+    [state]
+  )
+  const task = useCallback(
+    (toolCallId: string): TranscriptToolCallState | null =>
+      state ? subagentTask(state, toolCallId) : null,
+    [state]
+  )
 
   return useMemo(
     () => ({
@@ -55,12 +73,23 @@ export function useTranscriptSource(threadId: string): TranscriptThreadSource {
       connection: transcript.connection,
       contextTokens,
       subagentToolCalls: subagents,
+      subagentMessages: subagentTranscript,
+      subagentTask: task,
       startRun,
       stop,
       hasOlder: transcript.hasOlder,
       isLoadingOlder: transcript.isLoadingOlder,
       loadOlder: transcript.loadOlder,
     }),
-    [contextTokens, startRun, stop, subagents, threadId, transcript]
+    [
+      contextTokens,
+      startRun,
+      stop,
+      subagents,
+      subagentTranscript,
+      task,
+      threadId,
+      transcript,
+    ]
   )
 }

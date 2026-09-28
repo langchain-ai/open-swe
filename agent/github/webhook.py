@@ -23,7 +23,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
-from agent.prompts import load_prompt, render_prompt
+from agent.prompts import load_prompt, prompt
 from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
@@ -35,8 +35,13 @@ from agent.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
+from agent.threads.creation import create_thread
 from agent.users import User
 from agent.webhooks import common
+
+
+def _reviewer_thread_title(pr_title: str, pr_number: int) -> str:
+    return f"Review: {pr_title} #{pr_number}" if pr_title else f"Review #{pr_number}"
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -67,8 +72,8 @@ def build_github_issue_prompt(
     formatted_body = common.format_github_comment_body_for_prompt(
         issue_author or github_login, body, trusted=trusted
     )
-    return render_prompt(
-        "runs/github-issue.md",
+    return prompt(
+        "runs/github-issue",
         repository=f"{repo_config.get('owner')}/{repo_config.get('name')}",
         triggered_by_line=triggered_by_line,
         issue_number=issue_number,
@@ -292,7 +297,9 @@ async def trigger_pr_review_from_ref(
 
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_ref.number)
+    ):
         return {"success": False, "error": "Could not create reviewer thread"}
 
     pr_meta: ReviewerPRMeta = {
@@ -358,6 +365,7 @@ async def trigger_pr_review_from_ref(
         None,
         configurable,
         source=source,
+        thread_title=None,
         input=review_input,
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
@@ -433,7 +441,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         return
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+    ):
         return
 
     await common.set_reviewer_thread_metadata(thread_id, pr=pr_meta, watch=True, head_sha=head_sha)
@@ -446,8 +456,12 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config.get("owner", ""),
+            repo=repo_config.get("name", ""),
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     is_re_review = bool(last_reviewed_sha)
@@ -483,6 +497,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         None,
         configurable,
         source=source,
+        thread_title=None,
         input=run_input,
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
@@ -655,7 +670,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     pr_url = pr.get("html_url") or pr.get("url") or ""
     base_sha = pr.get("base", {}).get("sha", "")
     base_ref = pr.get("base", {}).get("ref", "")
-    head_sha = pr.get("head", {}).get("sha", after_sha)
+    # The PR API can still report the previous head moments after a push.
+    head_sha = after_sha
     pr_title = pr.get("title", "")
     if not isinstance(pr_number, int) or not base_sha or not head_sha:
         common.logger.warning(
@@ -701,6 +717,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             token=app_token,
         )
     ):
+        await PullRequest(
+            owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
+        ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
         await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         if postgres.configured():
             try:
@@ -748,7 +767,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         return
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
-    if not await common.ensure_thread_exists_for_metadata(thread_id, langgraph_client):
+    if not await common.ensure_thread_exists_for_metadata(
+        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+    ):
         return
     try:
         threads = await common.fetch_pr_review_threads(
@@ -789,8 +810,12 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     re_review_prompt = (
@@ -819,6 +844,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         None,
         configurable,
         source="github_push",
+        thread_title=None,
         input=_github_webhook_run_input(
             re_review_prompt,
             data={
@@ -967,8 +993,10 @@ async def process_github_pr_comment(
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
         except Exception as exc:  # noqa: BLE001
             if common.is_not_found_error(exc):
-                await langgraph_client.threads.create(
-                    thread_id=thread_id,
+                await create_thread(
+                    langgraph_client,
+                    thread_id,
+                    title=f"PR #{pr_number}",
                     if_exists="do_nothing",
                     metadata={"branch_name": branch_name},
                 )
@@ -1156,6 +1184,7 @@ async def process_github_pr_comment(
         github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
+        token_repositories=common.event_thread_token_repositories(repo_config, payload),
     )
 
 
@@ -1270,6 +1299,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
         None,
         configurable,
         source="github_review_reply",
+        thread_title=None,
         input=_github_human_run_input(
             reply_author,
             finding_reply_prompt,
@@ -1409,7 +1439,11 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             issue_url=issue_url,
             trusted=trusted,
         )
-    workspace = await common.workspace_for_repo_config(repo_config)
+    # A follow-up stays in the workspace its thread started in, even if the
+    # repository has since been preferred by another workspace.
+    workspace = (
+        await common.get_thread_workspace(thread_id) if existing_thread else None
+    ) or await common.workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
@@ -1425,15 +1459,23 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         "environment": workspace,
     }
 
-    await common.upsert_agent_thread_metadata(
+    token_repositories = common.event_thread_token_repositories(repo_config, payload)
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=title or (f"Issue #{issue_number}" if issue_number else ""),
+        title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
         workspace=workspace,
+        token_repositories=token_repositories,
     )
+    if not persisted and token_repositories is not None:
+        common.logger.error(
+            "Not starting a GitHub issue run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
@@ -1475,6 +1517,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         None,
         configurable,
         source="github_issue",
+        thread_title=None,
         input=run_input,
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,

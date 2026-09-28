@@ -32,6 +32,7 @@ const RECORD: WorkspaceRecord = {
   prompt: "Run make test.",
   repos: ["acme/oss"],
   slack_channel_ids: ["C1"],
+  kitchen_channel_ids: [],
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
@@ -67,6 +68,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "OSS",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         is_default: true,
         default_repo: null,
         has_snapshot: true,
@@ -76,6 +78,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "Core",
         repos: ["acme/api"],
         slack_channel_ids: [],
+        kitchen_channel_ids: [],
         is_default: false,
         default_repo: null,
         has_snapshot: false,
@@ -111,14 +114,14 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
-function renderPage(canEdit = true, onDeleted = vi.fn()) {
+function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
       <WorkspaceSettingsPanel
-        slug="oss"
+        slug={slug}
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
@@ -127,6 +130,14 @@ function renderPage(canEdit = true, onDeleted = vi.fn()) {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("offers no way to delete the default workspace", async () => {
+    mockApis({ ...RECORD, slug: "default", name: "Default" })
+    renderPage(true, vi.fn(), "default")
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -215,6 +226,7 @@ describe("WorkspaceSettingsPanel", () => {
         name: "OSS support",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         prompt: "Run make test.",
       })
     )
@@ -431,8 +443,22 @@ describe("WorkspaceSettingsPanel", () => {
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("offers only the workspace's own repositories as its default", async () => {
+  it("offers every accessible repository as its default", async () => {
     mockApis()
+    // The repository list loads for a signed-in user.
+    vi.spyOn(api, "me").mockResolvedValue({
+      login: "alice",
+      email: null,
+      avatar_url: null,
+      is_admin: true,
+    })
+    vi.spyOn(api, "repos").mockResolvedValue({
+      installations: [],
+      repositories: [
+        { full_name: "acme/oss", private: false },
+        { full_name: "acme/api", private: true },
+      ],
+    })
     renderPage()
 
     // The selector stays disabled until the workspace's settings have loaded.
@@ -442,11 +468,10 @@ describe("WorkspaceSettingsPanel", () => {
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
 
-    // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    const option = screen.getByRole("button", { name: "acme/oss" })
+    // Core prefers acme/api, and OSS can still default to it.
+    const option = await screen.findByRole("button", { name: "acme/api" })
     expect(option.closest("section")).toBeNull()
-    expect(screen.queryByText("acme/api")).toBeNull()
+    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
   })
 
   it("turns an inherited setting into an override and resets it back", async () => {
