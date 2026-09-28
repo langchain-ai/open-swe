@@ -130,6 +130,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
               update({
                 agent_model_id: undefined,
                 agent_effort: undefined,
+                model_selection_changed: false,
                 ...modelConfigurable(value, true),
               })
             }

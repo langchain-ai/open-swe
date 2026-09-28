@@ -20,6 +20,7 @@ import {
   threadQuery,
 } from "./threadListAdapter"
 import { toolkit } from "./Message"
+import { useModelSelectionSubmission } from "./useModelSelectionSubmission"
 
 export function useThreadMetadata() {
   const id = useAuiState((state) => state.threadListItem.externalId)
@@ -59,7 +60,7 @@ function useOpenSweThreadRuntime() {
       !metadata.data.adminThread) ||
     session.data?.is_admin === true
 
-  return useStreamRuntime({
+  const runtime = useStreamRuntime({
     client,
     assistantId: "agent",
     fetch: dashboardFetch,
@@ -67,6 +68,7 @@ function useOpenSweThreadRuntime() {
     isDisabled: !canPost || (exists && !metadata.data),
     adapters: { attachments },
     onCreated: () => {
+      acceptModelSelection()
       setExists(true)
       const remoteId = aui.threadListItem().getState().externalId
       if (remoteId)
@@ -80,6 +82,8 @@ function useOpenSweThreadRuntime() {
       void aui.threads().reload()
     },
   })
+  const acceptModelSelection = useModelSelectionSubmission(runtime)
+  return runtime
 }
 
 export function AssistantProvider({
