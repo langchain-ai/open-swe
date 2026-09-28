@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.api_keys.deps import ADMIN_KEY_DEP
 from agent.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
+from agent.dashboard.oauth import session_user_id
 from agent.users.models import User
 from agent.workspaces.store import WORKSPACES
 
@@ -87,10 +88,13 @@ async def api_create_api_key(
     body: ApiKeyCreate,
     admin: dict[str, Any] = ADMIN_KEY_DEP,
 ) -> MintedApiKey:
+    creator_id = session_user_id(admin)
+    if creator_id is None or await User.get(creator_id) is None:
+        raise HTTPException(403, "API key creation requires an admin signed in as a real user")
     workspace_id = await WORKSPACES.id_for_slug(body.workspace)
     if workspace_id is None:
         raise HTTPException(404, "workspace not found")
-    created_by = str(admin.get("sub") or "")
+    created_by = str(creator_id)
     key, secret = await ApiKey.create(
         workspace_id=workspace_id,
         workspace=body.workspace,
