@@ -53,6 +53,7 @@ from agent.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from agent.utils.thread_ops import queue_message_for_thread
+from agent.utils.thread_settings import load_thread_settings
 from agent.webhooks import common
 from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
@@ -915,11 +916,14 @@ async def _process_slack_mention_impl(
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:
-        resolved_model_id = (
-            thread_model_choice[0]
-            if thread_model_choice
-            else await common.resolve_agent_model_id(mapped_login, workspace=thread_workspace)
-        )
+        resolved_model_id = thread_model_choice[0] if thread_model_choice else None
+        if resolved_model_id is None:
+            thread_settings = await load_thread_settings(langgraph_client, thread_id)
+            resolved_model_id = thread_settings.get("model_id")
+        if resolved_model_id is None:
+            resolved_model_id = await common.resolve_agent_model_id(
+                mapped_login, workspace=thread_workspace
+            )
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
