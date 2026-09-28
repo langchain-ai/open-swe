@@ -1124,6 +1124,15 @@ async def process_github_pr_comment(
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
+    if (
+        agent_thread_id is not None
+        and event_type == "pull_request_review"
+        and event.get("state", "").lower() == "approved"
+        and not (event.get("body") or "").strip()
+        and not any(item.get("type") == "review_comment" for item in comments)
+    ):
+        return
+
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     pr_author = _PrAuthorEvent.author_of(payload)

@@ -5,6 +5,7 @@ import importlib
 import json
 import logging
 from typing import cast
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import httpx
@@ -1340,6 +1341,107 @@ async def test_request_pr_review_tool_uses_shared_trigger(monkeypatch) -> None:
     assert captured["slack_channel_id"] == "C123"
     assert captured["slack_thread_ts"] == "1700000000.000100"
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "body", "inline_feedback", "tagged", "should_dispatch"),
+    [
+        pytest.param("approved", "", False, False, False, id="empty-approval"),
+        pytest.param("approved", None, False, False, False, id="null-approval"),
+        pytest.param("approved", " \n\t", False, False, False, id="whitespace-approval"),
+        pytest.param("approved", "", True, False, True, id="approval-inline-feedback"),
+        pytest.param("approved", "Please rename this", False, False, True, id="approval-body"),
+        pytest.param("approved", "", True, True, True, id="tagged-inline-approval"),
+        pytest.param("approved", "", False, True, True, id="explicit-tagged-path"),
+        pytest.param("changes_requested", "", False, False, True, id="changes-requested"),
+    ],
+)
+async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+    body: str | None,
+    inline_feedback: bool,
+    tagged: bool,
+    should_dispatch: bool,
+) -> None:
+    thread_id = "00000000-0000-0000-0000-000000000001"
+    comments: list[dict[str, object]] = [
+        {
+            "type": "review",
+            "comment_id": 9,
+            "body": body or f"_Submitted a review: {state}_",
+            "author": "octocat",
+            "created_at": "2026-09-28T15:05:34Z",
+        }
+    ]
+    if inline_feedback:
+        comments.append(
+            {
+                "type": "review_comment",
+                "comment_id": 10,
+                "review_id": 9,
+                "body": "@open-swe please rename this" if tagged else "Please rename this",
+                "author": "octocat",
+                "created_at": "2026-09-28T15:05:30Z",
+                "path": "agent/server.py",
+                "line": 42,
+            }
+        )
+    fetch_comments = AsyncMock(return_value=comments)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        webhook_common,
+        "extract_pr_context",
+        AsyncMock(
+            return_value=(
+                {"owner": "langchain-ai", "name": "open-swe"},
+                3127,
+                f"open-swe/{thread_id}",
+                "octocat",
+                "https://github.com/langchain-ai/open-swe/pull/3127",
+                9,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(PullRequest, "link_thread", AsyncMock())
+    monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "authorize_github_thread", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        webhook_common, "get_or_resolve_thread_github_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(webhook_common, "react_to_github_comment", AsyncMock())
+    monkeypatch.setattr(webhook_common, "fetch_pr_event_comments", fetch_comments)
+    monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fetch_comments)
+    monkeypatch.setattr(webhook_common, "trigger_or_queue_run", dispatch)
+    monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="octocat@example.com"))
+    monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"octocat"})))
+    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: False)
+
+    await github_webhooks.process_github_pr_comment(
+        {
+            "action": "submitted",
+            "sender": {"login": "octocat", "id": 123},
+            "pull_request": {"user": {"login": "mdrxy"}},
+            "review": {
+                "id": 9,
+                "state": state,
+                "body": body,
+                "user": {"login": "octocat"},
+                "submitted_at": "2026-09-28T15:05:34Z",
+            },
+        },
+        "pull_request_review",
+        agent_thread_id=None if tagged else thread_id,
+    )
+
+    fetch_comments.assert_awaited_once()
+    if should_dispatch:
+        dispatch.assert_awaited_once()
+        assert dispatch.call_args.args[0] == thread_id
+    else:
+        dispatch.assert_not_awaited()
 
 
 def test_process_github_pr_comment_without_email_skips(
