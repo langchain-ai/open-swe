@@ -3,7 +3,7 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from agent.threads.claude_transcript import (
+from agent.claude_code.transcript import (
     MISSING_TOOL_RESULT,
     TranscriptError,
     parse_claude_transcript,
@@ -87,6 +87,33 @@ def test_prompt_queued_mid_turn_waits_for_open_tool_calls_and_dangling_calls_get
     ]
 
 
-def test_malformed_line_names_its_line() -> None:
-    with pytest.raises(TranscriptError, match="line 2"):
-        parse_claude_transcript(_jsonl(_user("u1", None, "hi")) + "{not json\n")
+def test_reshaped_records_and_blocks_are_skipped_without_breaking_the_chain() -> None:
+    session = parse_claude_transcript(
+        _jsonl(
+            {**_user("u1", None, "hi"), "someNewField": {"nested": True}},
+            _user("u2", "u1", {"content moved": "into an object"}),
+            {
+                "type": "assistant",
+                "uuid": "a1",
+                "parentUuid": "u2",
+                "message": {
+                    "id": "m1",
+                    "content": [
+                        {"type": "tool_use", "id": "c1"},
+                        {"type": "text", "text": "still here", "citations": []},
+                    ],
+                },
+            },
+        )
+        + "{not json\n"
+    )
+
+    assert [(type(message), message.content) for message in session.messages] == [
+        (HumanMessage, "hi"),
+        (AIMessage, "still here"),
+    ]
+
+
+def test_input_with_no_transcript_records_is_rejected() -> None:
+    with pytest.raises(TranscriptError):
+        parse_claude_transcript("{not json\nplain text\n")

@@ -18,6 +18,8 @@ from pydantic import (
     Tag,
     TypeAdapter,
     ValidationError,
+    ValidatorFunctionWrapHandler,
+    WrapValidator,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,11 +61,26 @@ def _tag(known: frozenset[str]) -> Callable[[object], str]:
     return tag
 
 
+def _or_other(value: object, handler: ValidatorFunctionWrapHandler) -> object:
+    """Claude Code reshapes blocks between releases; one that no longer parses is skipped, not fatal."""
+    try:
+        return handler(value)
+    except ValidationError:
+        kind = value.get("type") if isinstance(value, dict) else None
+        logger.warning(
+            "Skipped a Claude Code content block that did not parse",
+            extra={"block_type": kind},
+            exc_info=True,
+        )
+        return OtherBlock(type=kind if isinstance(kind, str) else "unknown")
+
+
 type ResultPart = Annotated[
     Annotated[TextBlock, Tag("text")]
     | Annotated[ImageBlock, Tag("image")]
     | Annotated[OtherBlock, Tag("other")],
     Discriminator(_tag(frozenset({"text", "image"}))),
+    WrapValidator(_or_other),
 ]
 
 
@@ -71,14 +88,18 @@ class ToolUseBlock(_Model):
     type: Literal["tool_use"]
     id: str
     name: str
-    input: dict[str, JsonValue]
+    input: JsonValue = None
+
+    @property
+    def args(self) -> dict[str, JsonValue]:
+        return self.input if isinstance(self.input, dict) else {"input": self.input}
 
 
 class ToolResultBlock(_Model):
     type: Literal["tool_result"]
     tool_use_id: str
-    content: str | list[ResultPart] = ""
-    is_error: bool = False
+    content: str | list[ResultPart] | None = None
+    is_error: bool | None = None
 
 
 type ContentBlock = Annotated[
@@ -88,6 +109,7 @@ type ContentBlock = Annotated[
     | Annotated[ToolResultBlock, Tag("tool_result")]
     | Annotated[OtherBlock, Tag("other")],
     Discriminator(_tag(frozenset({"text", "image", "tool_use", "tool_result"}))),
+    WrapValidator(_or_other),
 ]
 
 
@@ -147,6 +169,12 @@ class OtherRecord(_Model):
     type: str
 
 
+class LinkRecord(_Record):
+    """A conversation record whose shape no longer parses, kept so the parent chain through it holds."""
+
+    type: str
+
+
 type Record = Annotated[
     Annotated[UserRecord, Tag("user")]
     | Annotated[AssistantRecord, Tag("assistant")]
@@ -158,7 +186,7 @@ type Record = Annotated[
 
 _RECORD: TypeAdapter[Record] = TypeAdapter(Record)
 
-type ConversationRecord = UserRecord | AssistantRecord | AttachmentRecord
+type ConversationRecord = UserRecord | AssistantRecord | AttachmentRecord | LinkRecord
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -167,21 +195,45 @@ class ClaudeSession:
     messages: list[BaseMessage]
 
 
-def _parse_records(transcript: str) -> list[Record]:
-    records: list[Record] = []
-    for number, line in enumerate(transcript.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            records.append(_RECORD.validate_python(json.loads(line)))
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise TranscriptError(f"line {number} is not a Claude Code transcript record") from exc
+def _parse_record(number: int, line: str) -> Record | LinkRecord | None:
+    try:
+        raw = json.loads(line)
+    except json.JSONDecodeError:
+        logger.warning(
+            "Skipped a Claude Code transcript line that is not JSON",
+            extra={"transcript_line": number},
+            exc_info=True,
+        )
+        return None
+    try:
+        return _RECORD.validate_python(raw)
+    except ValidationError:
+        logger.warning(
+            "Claude Code transcript record did not parse",
+            extra={"transcript_line": number},
+            exc_info=True,
+        )
+    try:
+        return LinkRecord.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def _parse_records(transcript: str) -> list[Record | LinkRecord]:
+    lines = [
+        (number, line) for number, line in enumerate(transcript.splitlines(), 1) if line.strip()
+    ]
+    records = [
+        record for number, line in lines if (record := _parse_record(number, line)) is not None
+    ]
+    if lines and not records:
+        raise TranscriptError("no line is a Claude Code transcript record")
     return records
 
 
 def _hangs_off_branch(record: ConversationRecord) -> bool:
     """Parallel tool results and their attachments parent to their own ``tool_use`` line, off the main path."""
-    if isinstance(record, AttachmentRecord):
+    if isinstance(record, AttachmentRecord | LinkRecord):
         return True
     return (
         isinstance(record, UserRecord)
@@ -190,12 +242,12 @@ def _hangs_off_branch(record: ConversationRecord) -> bool:
     )
 
 
-def _active_branch(records: Sequence[Record]) -> list[ConversationRecord]:
+def _active_branch(records: Sequence[Record | LinkRecord]) -> list[ConversationRecord]:
     """The newest message's ancestry plus what hangs off it, in file order, so rewound branches drop out."""
     conversation = [
         record
         for record in records
-        if isinstance(record, UserRecord | AssistantRecord | AttachmentRecord)
+        if isinstance(record, UserRecord | AssistantRecord | AttachmentRecord | LinkRecord)
         and not record.is_sidechain
     ]
     if not conversation:
@@ -230,7 +282,9 @@ def _parts_text(parts: Sequence[Block]) -> str:
     return "\n\n".join(texts)
 
 
-def _content_text(content: str | Sequence[Block]) -> str:
+def _content_text(content: str | Sequence[Block] | None) -> str:
+    if content is None:
+        return ""
     return _clean(content) if isinstance(content, str) else _parts_text(content)
 
 
@@ -257,7 +311,7 @@ class _Builder:
         text = _parts_text(record.message.content)
         uses = [block for block in record.message.content if isinstance(block, ToolUseBlock)]
         calls = [
-            ToolCall(id=use.id, name=use.name, args=use.input, type="tool_call") for use in uses
+            ToolCall(id=use.id, name=use.name, args=use.args, type="tool_call") for use in uses
         ]
         existing = self._ai.get(record.message.id)
         if existing is None:

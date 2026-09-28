@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from agent.claude_code.transcript import TranscriptError, parse_claude_transcript
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.http import github_client
@@ -16,7 +17,6 @@ from agent.input_messages import SystemIdentity, build_input_messages
 from agent.prompts import prompt
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import _github_token_for_login
-from agent.threads.claude_transcript import TranscriptError, parse_claude_transcript
 from agent.threads.creation import create_thread
 from agent.threads.diffs import _safe_git_ref
 from agent.threads.runs import (
