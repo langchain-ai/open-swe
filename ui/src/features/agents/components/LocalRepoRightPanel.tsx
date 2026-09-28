@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { isDesktopBrowserAvailable } from "@/features/agents/browser/desktop/desktopBrowserBridge"
 import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import {
@@ -52,6 +53,8 @@ export function LocalRepoRightPanel({
       cwd={cwd}
       terminalAvailable
       diffAvailable
+      browserAvailable={isDesktopBrowserAvailable()}
+      browserHistoryScope={`local:${cwd}`}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (

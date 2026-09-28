@@ -18,6 +18,7 @@ import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { Toaster } from "@/components/ui/sonner"
 import { ThemeSync } from "@/lib/ThemeSync"
+import { DesktopBrowserHost } from "@/features/agents/browser/desktop/DesktopBrowserHost"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
@@ -107,6 +108,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          <DesktopBrowserHost />
           <PerfHudMount />
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>

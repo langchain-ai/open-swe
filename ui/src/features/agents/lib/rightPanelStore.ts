@@ -20,6 +20,16 @@ export function scopedThreadKey(ref: PanelThreadRef): string {
   return `${ref.scope}:${ref.threadId}`
 }
 
+export function parseScopedThreadKey(key: string): PanelThreadRef | null {
+  const separator = key.indexOf(":")
+  if (separator <= 0) return null
+  const scope = key.slice(0, separator)
+  const threadId = key.slice(separator + 1)
+  if ((scope !== "cloud" && scope !== "local") || threadId.length === 0)
+    return null
+  return { scope, threadId }
+}
+
 export const RIGHT_PANEL_KINDS = [
   "diff",
   "files",
@@ -69,7 +79,15 @@ interface RightPanelStoreState {
     ref: PanelThreadRef,
     kind: Exclude<RightPanelKind, "file" | "terminal">
   ) => void
-  openBrowser: (ref: PanelThreadRef, tabId: string | null) => void
+  /**
+   * Adds a browser tab surface. `activate: false` adds it to the strip
+   * without focusing it, for tabs the agent opened on its own.
+   */
+  openBrowser: (
+    ref: PanelThreadRef,
+    tabId: string | null,
+    options?: { activate?: boolean }
+  ) => void
   openFile: (ref: PanelThreadRef, relativePath: string, line?: number) => void
   openTerminal: (ref: PanelThreadRef, terminalId: string) => void
   activateSurface: (ref: PanelThreadRef, surfaceId: string) => void
@@ -80,6 +98,11 @@ interface RightPanelStoreState {
   reconcileTerminalSurfaces: (
     ref: PanelThreadRef,
     terminalIds: ReadonlyArray<string>
+  ) => void
+  /** Drops browser surfaces whose tab no longer exists; the placeholder stays. */
+  reconcileBrowserSurfaces: (
+    ref: PanelThreadRef,
+    tabIds: ReadonlyArray<string>
   ) => void
   show: (ref: PanelThreadRef) => void
   close: (ref: PanelThreadRef) => void
@@ -323,13 +346,23 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             }
           ),
         })),
-      openBrowser: (ref, tabId) =>
+      openBrowser: (ref, tabId, options) =>
         set((state) => ({
           byThreadKey: updateThread(
             state.byThreadKey,
             scopedThreadKey(ref),
             (current) => {
               const surface = browserSurface(tabId)
+              const activate = options?.activate ?? true
+              const exists = current.surfaces.some(
+                (entry) => entry.id === surface.id
+              )
+              if (!activate) {
+                return exists
+                  ? current
+                  : { ...current, surfaces: [...current.surfaces, surface] }
+              }
+              // A real tab replaces the "new tab" placeholder it was typed into.
               const withoutPlaceholder = tabId
                 ? current.surfaces.filter((entry) => entry.id !== "browser:new")
                 : current.surfaces
@@ -493,6 +526,34 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const surfaces = current.surfaces.filter(
                 (surface) =>
                   surface.kind !== "terminal" || live.has(surface.resourceId)
+              )
+              if (surfaces.length === current.surfaces.length) return current
+              const activeStillExists = surfaces.some(
+                (surface) => surface.id === current.activeSurfaceId
+              )
+              return {
+                ...current,
+                isOpen: surfaces.length > 0 && current.isOpen,
+                surfaces,
+                activeSurfaceId: activeStillExists
+                  ? current.activeSurfaceId
+                  : (surfaces.at(-1)?.id ?? null),
+              }
+            }
+          ),
+        })),
+      reconcileBrowserSurfaces: (ref, tabIds) =>
+        set((state) => ({
+          byThreadKey: updateThread(
+            state.byThreadKey,
+            scopedThreadKey(ref),
+            (current) => {
+              const live = new Set(tabIds)
+              const surfaces = current.surfaces.filter(
+                (surface) =>
+                  surface.kind !== "preview" ||
+                  surface.resourceId === null ||
+                  live.has(surface.resourceId)
               )
               if (surfaces.length === current.surfaces.length) return current
               const activeStillExists = surfaces.some(

@@ -124,6 +124,50 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
         ipcRenderer.removeListener("desktop:terminal-metadata", listener);
     },
   },
+  browser: {
+    getConfig: () => ipcRenderer.invoke("desktop:browser-config"),
+    createTab: (tabId, defaults) =>
+      ipcRenderer.invoke(
+        "desktop:browser-create-tab",
+        tabId,
+        defaults ? { ...defaults } : undefined,
+      ),
+    closeTab: (tabId) => ipcRenderer.invoke("desktop:browser-close-tab", tabId),
+    registerWebview: (tabId, webContentsId) =>
+      ipcRenderer.invoke(
+        "desktop:browser-register-webview",
+        tabId,
+        webContentsId,
+      ),
+    navigate: (tabId, url) =>
+      ipcRenderer.invoke("desktop:browser-navigate", tabId, url),
+    goBack: (tabId) => ipcRenderer.invoke("desktop:browser-go-back", tabId),
+    goForward: (tabId) =>
+      ipcRenderer.invoke("desktop:browser-go-forward", tabId),
+    reload: (tabId) => ipcRenderer.invoke("desktop:browser-reload", tabId),
+    hardReload: (tabId) =>
+      ipcRenderer.invoke("desktop:browser-hard-reload", tabId),
+    zoomIn: (tabId) => ipcRenderer.invoke("desktop:browser-zoom-in", tabId),
+    zoomOut: (tabId) => ipcRenderer.invoke("desktop:browser-zoom-out", tabId),
+    resetZoom: (tabId) =>
+      ipcRenderer.invoke("desktop:browser-reset-zoom", tabId),
+    setColorScheme: (tabId, colorScheme) =>
+      ipcRenderer.invoke(
+        "desktop:browser-set-color-scheme",
+        tabId,
+        colorScheme,
+      ),
+    openDevTools: (tabId) =>
+      ipcRenderer.invoke("desktop:browser-open-devtools", tabId),
+    onStateChange: (callback) => {
+      const listener = (_event, state) => {
+        if (state && typeof state === "object") callback(state);
+      };
+      ipcRenderer.on("desktop:browser-state", listener);
+      return () =>
+        ipcRenderer.removeListener("desktop:browser-state", listener);
+    },
+  },
 });
 
 ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {

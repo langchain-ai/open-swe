@@ -117,6 +117,66 @@ export type DesktopTerminalMetadataEvent =
   | { type: "upsert"; terminal: DesktopTerminalSummary }
   | (DesktopTerminalTarget & { type: "remove" })
 
+export type DesktopBrowserColorScheme = "system" | "light" | "dark"
+export type DesktopBrowserNavStatus =
+  | { kind: "idle" }
+  | { kind: "loading"; url: string; title: string }
+  | { kind: "success"; url: string; title: string }
+  | {
+      kind: "failed"
+      url: string
+      title: string
+      code: number
+      description: string
+    }
+/** Main-process view of one in-app browser tab, pushed on every change. */
+export interface DesktopBrowserTabState {
+  tabId: string
+  webContentsId: number | null
+  nav: DesktopBrowserNavStatus
+  canGoBack: boolean
+  canGoForward: boolean
+  zoomFactor: number
+  colorScheme: DesktopBrowserColorScheme
+  /** PNG data URL captured by the main process, or null. */
+  favicon: string | null
+  updatedAt: string
+}
+export interface DesktopBrowserTabDefaults {
+  zoomFactor?: number
+  colorScheme?: DesktopBrowserColorScheme
+}
+/** Attributes a `<webview>` needs so the main process accepts it. */
+export interface DesktopBrowserConfig {
+  partition: string
+  webPreferences: string
+}
+export interface DesktopBrowserBridge {
+  getConfig: () => Promise<DesktopBrowserConfig>
+  createTab: (
+    tabId: string,
+    defaults?: DesktopBrowserTabDefaults
+  ) => Promise<void>
+  closeTab: (tabId: string) => Promise<void>
+  registerWebview: (tabId: string, webContentsId: number) => Promise<void>
+  navigate: (tabId: string, url: string) => Promise<void>
+  goBack: (tabId: string) => Promise<void>
+  goForward: (tabId: string) => Promise<void>
+  reload: (tabId: string) => Promise<void>
+  hardReload: (tabId: string) => Promise<void>
+  zoomIn: (tabId: string) => Promise<void>
+  zoomOut: (tabId: string) => Promise<void>
+  resetZoom: (tabId: string) => Promise<void>
+  setColorScheme: (
+    tabId: string,
+    colorScheme: DesktopBrowserColorScheme
+  ) => Promise<void>
+  openDevTools: (tabId: string) => Promise<void>
+  onStateChange: (
+    callback: (state: DesktopBrowserTabState) => void
+  ) => () => void
+}
+
 export type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing"
   version?: string
@@ -250,6 +310,7 @@ declare global {
         localSessionId: string
       ) => Promise<WorkspaceFileIndex>
       terminal: DesktopTerminalBridge
+      browser: DesktopBrowserBridge
     }
   }
 }

@@ -44,13 +44,28 @@ STATE_TTL_SECONDS = 600
 HANDOFF_TTL_SECONDS = 120
 TERMINAL_TICKET_TTL_SECONDS = 60
 TERMINAL_TICKET_AUDIENCE = "open-swe-cloud-terminal"
+# Separate audiences keep the two sandbox capabilities apart: a ticket minted
+# for a shell cannot open a browser socket, and vice versa.
+BROWSER_TICKET_AUDIENCE = "open-swe-cloud-browser"
 JWT_ALG = "HS256"
 
+_TICKET_LABELS = {
+    TERMINAL_TICKET_AUDIENCE: "terminal",
+    BROWSER_TICKET_AUDIENCE: "browser",
+}
 
-def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+
+def issue_terminal_ticket(
+    *,
+    login: str,
+    email: str | None,
+    thread_id: str,
+    audience: str = TERMINAL_TICKET_AUDIENCE,
+) -> str:
+    """Mint a short-lived, thread-bound ticket for a sandbox websocket."""
     now = int(time.time())
     payload = {
-        "aud": TERMINAL_TICKET_AUDIENCE,
+        "aud": audience,
         "sub": login,
         "email": email,
         "thread_id": thread_id,
@@ -60,23 +75,26 @@ def issue_terminal_ticket(*, login: str, email: str | None, thread_id: str) -> s
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
 
 
-def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
+def decode_terminal_ticket(
+    token: str, *, thread_id: str, audience: str = TERMINAL_TICKET_AUDIENCE
+) -> dict[str, Any]:
+    detail = f"invalid {_TICKET_LABELS.get(audience, 'sandbox')} ticket"
     try:
         payload = jwt.decode(
             token,
             _secret(),
             algorithms=[JWT_ALG],
-            audience=TERMINAL_TICKET_AUDIENCE,
+            audience=audience,
             options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
         )
     except jwt.PyJWTError as exc:
-        raise HTTPException(401, "invalid terminal ticket") from exc
+        raise HTTPException(401, detail) from exc
     login = payload.get("sub")
     ticket_thread_id = payload.get("thread_id")
     if not isinstance(login, str) or not login or not isinstance(ticket_thread_id, str):
-        raise HTTPException(401, "invalid terminal ticket")
+        raise HTTPException(401, detail)
     if not hmac.compare_digest(ticket_thread_id, thread_id):
-        raise HTTPException(401, "invalid terminal ticket")
+        raise HTTPException(401, detail)
     email = payload.get("email")
     return {"sub": login, "email": email if isinstance(email, str) else None}
 

@@ -30,6 +30,7 @@ import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
+import { isDesktopBrowserAvailable } from "@/features/agents/browser/desktop/desktopBrowserBridge"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
   selectThreadDiffScope,
@@ -569,6 +570,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         cwd={thread.worktreePath ?? thread.cwd}
         terminalAvailable
         diffAvailable
+        browserAvailable={isDesktopBrowserAvailable()}
+        browserHistoryScope={`local:${thread.cwd}`}
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
         onTerminalOpenFile={handleOpenFile}

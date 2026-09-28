@@ -52,6 +52,10 @@ const {
   closeThreadTerminals,
 } = require("./terminal-manager.cjs");
 const {
+  configureBrowserIpc,
+  hardenWebviewAttach,
+} = require("./browser-manager.cjs");
+const {
   addProject,
   readProjects,
   removeProject,
@@ -1416,6 +1420,9 @@ function createWindow() {
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
+      // In-app browser tabs are <webview> guests; will-attach-webview below
+      // only admits our partition and re-asserts the sandbox flags.
+      webviewTag: true,
     },
   });
 
@@ -1438,8 +1445,10 @@ function createWindow() {
   window.webContents.on("will-redirect", (event, url) =>
     handleNavigation(window, event, url),
   );
-  window.webContents.on("will-attach-webview", (event) =>
-    event.preventDefault(),
+  window.webContents.on(
+    "will-attach-webview",
+    (event, webPreferences, params) =>
+      hardenWebviewAttach(event, webPreferences, params),
   );
   window.webContents.on("did-finish-load", () =>
     window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),
@@ -1681,6 +1690,11 @@ if (!hasSingleInstanceLock) {
       getSessionRoot: (id) =>
         threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
       userDataPath: app.getPath("userData"),
+    });
+    configureBrowserIpc({
+      ipcMain,
+      requireTrusted: requireTrustedDesktopIpc,
+      getWindow: () => mainWindow,
     });
 
     app.on("activate", () => {

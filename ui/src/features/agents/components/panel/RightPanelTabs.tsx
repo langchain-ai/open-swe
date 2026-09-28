@@ -32,6 +32,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { cn } from "@/lib/utils"
 
+/** Strip label for a browser tab, mirrored from the tab's live state. */
+export interface BrowserTabLabel {
+  title: string
+  favicon: string | null
+}
+
 interface RightPanelTabsProps {
   mode: RightPanelMode
   maximized?: boolean
@@ -44,6 +50,7 @@ interface RightPanelTabsProps {
   activeSurfaceId: string | null
   pendingSurfaceIds: ReadonlySet<string>
   terminalLabelsById: ReadonlyMap<string, string>
+  browserLabelsById: ReadonlyMap<string, BrowserTabLabel>
   onActivate: (surface: RightPanelSurface) => void
   onCloseSurface: (surface: RightPanelSurface) => void
   onCloseOtherSurfaces: (surface: RightPanelSurface) => void
@@ -53,8 +60,10 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void
   onAddDiff: () => void
   onAddFiles: () => void
+  onAddBrowser: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
+  browserAvailable: boolean
   children: ReactNode
 }
 
@@ -62,6 +71,7 @@ const SURFACE_DISABLED_REASONS = {
   terminal: "Terminals are only available from a running workspace.",
   diff: "Changes are only available for threads with a repository.",
   files: "Files are only available from a running workspace.",
+  browser: "The browser is only available from a running workspace.",
 } as const
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -79,6 +89,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   terminal: "Available once the workspace is running.",
   diff: "Available for Git repositories.",
   files: "Available once the workspace is running.",
+  browser: "Available once the workspace is running.",
 } as const
 
 type SurfaceShortcutEvent = Pick<
@@ -150,8 +161,10 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void
   onAddDiff: () => void
   onAddFiles: () => void
+  onAddBrowser: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
+  browserAvailable: boolean
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1)
@@ -183,6 +196,15 @@ function RightPanelEmptyState(props: {
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
       onClick: props.onAddFiles,
+    },
+    {
+      label: "Browser",
+      description: "Open a page from this workspace.",
+      icon: Globe2,
+      shortcut: "B",
+      available: props.browserAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
+      onClick: props.onAddBrowser,
     },
   ] as const
 
@@ -363,7 +385,8 @@ function RightPanelEmptyState(props: {
 
 export function surfaceTitle(
   surface: RightPanelSurface,
-  terminalLabelsById: ReadonlyMap<string, string>
+  terminalLabelsById: ReadonlyMap<string, string>,
+  browserLabelsById: ReadonlyMap<string, BrowserTabLabel> = new Map()
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -379,14 +402,31 @@ export function surfaceTitle(
     case "agents":
       return "Agents"
     case "preview":
-      return "Browser"
+      if (surface.resourceId === null) return "New tab"
+      return browserLabelsById.get(surface.resourceId)?.title || "Browser"
   }
 }
 
-function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
+function SurfaceIcon({
+  surface,
+  favicon,
+}: {
+  surface: RightPanelSurface
+  favicon: string | null
+}) {
   switch (surface.kind) {
     case "preview":
-      return <Globe2 className="size-3 shrink-0" />
+      return favicon ? (
+        <img
+          src={favicon}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="size-3 shrink-0 rounded-[2px] object-contain"
+        />
+      ) : (
+        <Globe2 className="size-3 shrink-0" />
+      )
     case "diff":
       return <FileDiff className="size-3 shrink-0" />
     case "files":
@@ -435,6 +475,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
       onClick: props.onAddFiles,
+    },
+    {
+      label: "Browser",
+      icon: Globe2,
+      shortcut: "B",
+      available: props.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: props.onAddBrowser,
     },
   ] as const
 
@@ -514,7 +562,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
-              const title = surfaceTitle(surface, props.terminalLabelsById)
+              const title = surfaceTitle(
+                surface,
+                props.terminalLabelsById,
+                props.browserLabelsById
+              )
+              const favicon =
+                surface.kind === "preview" && surface.resourceId
+                  ? (props.browserLabelsById.get(surface.resourceId)?.favicon ??
+                    null)
+                  : null
               return (
                 <div
                   key={surface.id}
@@ -538,7 +595,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={() => props.onCloseSurface(surface)}
                   >
                     <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
-                      <SurfaceIcon surface={surface} />
+                      <SurfaceIcon surface={surface} favicon={favicon} />
                       {pending ? (
                         <span
                           className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
@@ -669,8 +726,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddBrowser={props.onAddBrowser}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
+            browserAvailable={props.browserAvailable}
           />
         ) : (
           props.children

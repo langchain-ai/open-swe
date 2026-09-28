@@ -44,6 +44,14 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="2592000"                # Optional, d
 
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run. The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
+The dashboard's **Browser** panel drives a headless Chromium inside the thread's sandbox over the DevTools protocol, so dev servers the agent starts (`localhost:3000` and friends) render in the right panel. The root snapshot ships no browser: the panel offers to install one on first use, which downloads a few hundred megabytes into that sandbox alone. To make every sandbox start with it, add the install to the workspace's setup script and recapture the snapshot:
+
+```bash
+npx --yes playwright@1.62.1 install --with-deps chromium
+```
+
+The panel finds Chromium on `PATH` (`chromium`, `chromium-browser`, `google-chrome`) or in Playwright's and Puppeteer's browser caches, and starts it listening on `127.0.0.1:9222` with the profile in `/tmp/open-swe-browser`. Agents can attach to the same browser with any DevTools client, for example Playwright's `chromium.connectOverCDP("http://127.0.0.1:9222")`, so the page the user is looking at and the page the agent is testing are the same tab.
+
 For LangSmith sandboxes, Open SWE configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.

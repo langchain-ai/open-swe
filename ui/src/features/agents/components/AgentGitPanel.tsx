@@ -53,6 +53,13 @@ export function AgentGitPanel({
   }, [openSurface, revealChangesKey, threadRef])
 
   const terminalAvailable = Boolean(thread.sandboxId)
+  // The sandbox browser bridge needs a LangSmith sandbox; bridged local CLI
+  // threads have nothing to attach to.
+  const browserAvailable =
+    Boolean(thread.sandboxId) && !thread.sandboxId?.startsWith("bridge:")
+  const browserHistoryScope = thread.repoFullName
+    ? `repo:${thread.repoFullName}`
+    : undefined
 
   // Served from GitHub, so it needs a repository — with or without a PR.
   const branchScopeAvailable =
@@ -146,6 +153,8 @@ export function AgentGitPanel({
       cwd=""
       terminalAvailable={terminalAvailable}
       diffAvailable
+      browserAvailable={browserAvailable}
+      {...(browserHistoryScope ? { browserHistoryScope } : {})}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (

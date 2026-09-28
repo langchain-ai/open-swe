@@ -108,6 +108,13 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+/** Websocket endpoint plus a short-lived ticket for a thread's sandbox browser. */
+export interface CloudBrowserConnection {
+  url: string
+  protocol: string
+  ticket: string
+}
+
 export type ThreadScope = "all" | "interactive" | "automation"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -452,6 +459,11 @@ export const agentsApi = {
   connectCloudTerminal: (threadId: string) =>
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
+      { method: "POST" }
+    ),
+  connectCloudBrowser: (threadId: string) =>
+    agentsRequest<CloudBrowserConnection>(
+      `/threads/${encodeURIComponent(threadId)}/browser/connect`,
       { method: "POST" }
     ),
 }

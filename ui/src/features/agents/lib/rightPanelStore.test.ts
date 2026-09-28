@@ -54,6 +54,45 @@ describe("right panel store", () => {
     ).toBe(true)
   })
 
+  it("adds agent-opened browser tabs without stealing focus and replaces the placeholder on activation", () => {
+    const { open, openBrowser } = useRightPanelStore.getState()
+    open(ref, "diff")
+    openBrowser(ref, "agent-tab", { activate: false })
+    expect(state().activeSurfaceId).toBe("diff")
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "diff",
+      "browser:agent-tab",
+    ])
+    openBrowser(ref, null)
+    expect(state().activeSurfaceId).toBe("browser:new")
+    openBrowser(ref, "typed-tab")
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "diff",
+      "browser:agent-tab",
+      "browser:typed-tab",
+    ])
+    expect(state().activeSurfaceId).toBe("browser:typed-tab")
+  })
+
+  it("drops browser surfaces whose tab is gone but keeps the placeholder", () => {
+    const { openBrowser, reconcileBrowserSurfaces } =
+      useRightPanelStore.getState()
+    openBrowser(ref, "a")
+    openBrowser(ref, "b")
+    openBrowser(ref, null)
+    reconcileBrowserSurfaces(ref, ["b"])
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "browser:b",
+      "browser:new",
+    ])
+    expect(state().activeSurfaceId).toBe("browser:new")
+    reconcileBrowserSurfaces(ref, [])
+    expect(state().surfaces.map((surface) => surface.id)).toEqual([
+      "browser:new",
+    ])
+    expect(state().activeSurfaceId).toBe("browser:new")
+  })
+
   it("closes others and to the right relative to a surface", () => {
     const { open, openTerminal, closeSurfacesToRight, closeOtherSurfaces } =
       useRightPanelStore.getState()
