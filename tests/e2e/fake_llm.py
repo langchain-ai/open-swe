@@ -75,9 +75,8 @@ EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
 # Human review: a Slack request names an existing PR; `_HERE` names the review channel too.
 HUMAN_REVIEW_MARKER = "E2E_HUMAN_REVIEW"
 HUMAN_REVIEW_HERE_MARKER = "E2E_HUMAN_REVIEW_HERE"
-HUMAN_REVIEW_TLDR = "Makes the greeting punctuation consistent and covers it with a test."
+HUMAN_REVIEW_SUMMARY = "Makes the greeting punctuation consistent and covers it with a test."
 HUMAN_REVIEW_PICK = "bob"
-_TLDR_PROMPT_MARKER = "Summarize a pull request for a Slack card"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
@@ -506,7 +505,7 @@ def _human_review_request_step(messages: list[BaseMessage]) -> AIMessage:
     """Ask the review channel to review the pull request the user named."""
     humans = _script_humans(messages)
     text = _text(humans[0].content) if humans else ""
-    args: dict[str, Any] = {"pr_url": _pr_url_in(text)}
+    args: dict[str, Any] = {"pr_url": _pr_url_in(text), "inline_summary": HUMAN_REVIEW_SUMMARY}
     if HUMAN_REVIEW_HERE_MARKER in text:
         args["channel"] = REVIEW_CHANNEL
     return AIMessage(
@@ -539,14 +538,6 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
                 "id": f"call-human-review-assign-{len(messages)}",
             }
         ],
-        response_metadata={"model_name": "fake-scripted-model"},
-    )
-
-
-def _structured_tldr() -> AIMessage:
-    return AIMessage(
-        content="",
-        tool_calls=[{"name": "_Tldr", "args": {"tldr": HUMAN_REVIEW_TLDR}, "id": "call-tldr"}],
         response_metadata={"model_name": "fake-scripted-model"},
     )
 
@@ -1431,8 +1422,6 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
-                if _TLDR_PROMPT_MARKER in _text(message.content):
-                    return ChatResult(generations=[ChatGeneration(message=_structured_tldr())])
                 LAST_SYSTEM_PROMPT["text"] = _text(message.content)
                 break
         humans = _script_humans(messages)

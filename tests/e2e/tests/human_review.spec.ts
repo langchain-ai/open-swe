@@ -442,7 +442,7 @@ test.describe("Human review in Slack", () => {
     expect(posted.slack_thread_ts).not.toBe("");
     if (sent.thread_ts) expect(posted.slack_thread_ts).toBe(sent.thread_ts);
     expect(posted.slack_broadcast).toBe(true);
-    expect(posted.tldr).toBe("Adds a farewell helper.");
+    expect(posted.tldr).toBe(TLDR);
     const broadcast = await reviewCard(request, posted);
     expect(broadcast.reply_broadcast).toBe(true);
     await shootCard(page, "thread-broadcast");
@@ -512,7 +512,7 @@ test.describe("Human review in Slack", () => {
       repo: `${REPO.owner}/${REPO.repo}`,
       title: "Greet by name",
       author: ALICE.login,
-      body: "Uses the name in the greeting.",
+      body: `<!-- template -->\nUses the name in the greeting. ${"It also trims the whitespace around it. ".repeat(10)}`,
       check_runs: GREEN,
     });
     await page.goto("/agents/reviews");
@@ -526,6 +526,11 @@ test.describe("Human review in Slack", () => {
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.thread_id).toBe("");
+    // With no summary from an agent, the card shows the description's start, cut with an ellipsis.
+    expect(posted.tldr).toMatch(
+      /^Uses the name in the greeting\. It also trims.*…$/,
+    );
+    expect(posted.tldr.length).toBeLessThanOrEqual(280);
     // Alice wrote the PR and asked for the review, so the card names her once.
     expect(cardText(await reviewCard(request, posted))).not.toContain(
       "Requested by",

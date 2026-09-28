@@ -6,8 +6,12 @@ import pytest
 
 from agent.expedited_review.readiness import PullRequestSnapshot
 from agent.github.repo_files import RepoSettings
-from agent.human_review import tldr
-from agent.human_review.standard import merge_wait, request_blockers
+from agent.human_review.standard import (
+    SUMMARY_MAX_CHARS,
+    merge_wait,
+    request_blockers,
+    summary_line,
+)
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -90,21 +94,18 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
     assert merge_wait([], _NOW, {"hopper": "APPROVED"}, _NOW) is None
 
 
-async def test_a_short_description_is_the_tldr_without_a_model_call() -> None:
-    summarize = AsyncMock()
-    with patch.object(tldr, "_summarize", summarize):
-        text = await tldr.pull_request_tldr("Fix", "<!-- template -->\nFixes the retry loop.\n")
-    assert text == "Fixes the retry loop."
-    summarize.assert_not_awaited()
+def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
+    assert summary_line("<!-- template -->\nFixes the\nretry loop.\n") == "Fixes the retry loop."
 
 
-async def test_a_long_description_is_summarized_and_falls_back_to_a_clip() -> None:
-    body = "word " * 200
-    with patch.object(tldr, "_summarize", AsyncMock(return_value="Retries failed uploads.")):
-        assert await tldr.pull_request_tldr("Fix", body) == "Retries failed uploads."
-    with patch.object(tldr, "_summarize", AsyncMock(side_effect=TimeoutError())):
-        clipped = await tldr.pull_request_tldr("Fix", body)
-    assert clipped.endswith("…") and len(clipped) <= tldr.TLDR_MAX_CHARS
+def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
+    description = "Retries failed uploads, " * 40
+    line = summary_line(description)
+    kept = line.removesuffix("…")
+    assert line.endswith("…")
+    assert len(line) <= SUMMARY_MAX_CHARS
+    assert description.startswith(kept)
+    assert description[len(kept)] in {" ", ","}
 
 
 def _github(status: int, text: str = "") -> AsyncMock:

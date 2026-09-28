@@ -9,6 +9,7 @@ it is otherwise ready.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -38,7 +39,6 @@ from agent.human_review.lifecycle import (
 from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from agent.human_review.tldr import pull_request_tldr
 from agent.prompts import prompt
 from agent.slack.blocks import escape
 from agent.slack.channels import SlackChannel
@@ -54,6 +54,8 @@ logger = logging.getLogger(__name__)
 SCHEDULER_TASK = "human_review"
 UNCLAIMED_AFTER_MINUTES = 30
 AUTO_MERGE_AFTER_HOURS = 2
+SUMMARY_MAX_CHARS = 280
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 DeadlineStep = Literal["unclaimed", "auto_merge"]
 
 
@@ -79,6 +81,14 @@ class Origin:
 
 def _failure(error: str) -> RequestResult:
     return RequestResult(success=False, error=error)
+
+
+def summary_line(text: str) -> str:
+    """``text`` on one line, cut at a word boundary to fit the card."""
+    flat = " ".join(_HTML_COMMENT.sub("", text).split())
+    if len(flat) <= SUMMARY_MAX_CHARS:
+        return flat
+    return flat[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
 
 
 def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
@@ -157,9 +167,12 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
 
 
 async def request_review(
-    pr_ref: GitHubPrRef, origin: Origin, *, channel: str = ""
+    pr_ref: GitHubPrRef, origin: Origin, *, channel: str = "", inline_summary: str | None = None
 ) -> RequestResult:
-    """Post a standard review card for ``pr_ref``, or return the one already open."""
+    """Post a standard review card for ``pr_ref``, or return the one already open.
+
+    ``inline_summary`` is the card's summary; ``None`` shows the start of the PR description.
+    """
     token = await repo_token(pr_ref.owner, pr_ref.repo)
     if token is None:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -209,7 +222,7 @@ async def request_review(
             thread_id=origin.thread_id,
             run_config=origin.run_config,
             requested_by_user_id=origin.requester.id if origin.requester is not None else None,
-            tldr=await pull_request_tldr(details.title, details.body),
+            tldr=summary_line(details.body or "" if inline_summary is None else inline_summary),
             slack_channel_id=target.id,
             slack_thread_ts=origin.slack_thread_ts if in_thread else "",
             slack_broadcast=in_thread,

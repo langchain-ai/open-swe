@@ -37,11 +37,17 @@ async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None
     return None
 
 
-async def request_human_review(pr_url: str, channel: str = "") -> dict[str, Any]:
+async def request_human_review(
+    pr_url: str, inline_summary: str, channel: str = ""
+) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
+    if not inline_summary.strip():
+        return _failure(
+            "inline_summary is required: one or two sentences on what the change does and why."
+        )
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id
     if not thread_id:
@@ -57,7 +63,7 @@ async def request_human_review(pr_url: str, channel: str = "") -> dict[str, Any]
         slack_channel_id=own_channel,
         slack_thread_ts=own_thread,
     )
-    result = await request_review(pr_ref, origin, channel=channel)
+    result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
     if not result.success:
         return _failure(result.error)
     posted = (
