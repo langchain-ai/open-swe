@@ -1243,6 +1243,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
+    reset_model_selection = (
+        cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
+    )
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
@@ -1271,7 +1274,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         async with aphase(thread_id, "factory.settings_defaults"):
             settings, profile = await asyncio.gather(
                 cached_workspace_settings(settings_workspace),
-                _cached_profile(None if thread_settings.get("model_id") else profile_login),
+                _cached_profile(
+                    profile_login
+                    if reset_model_selection or not thread_settings.get("model_id")
+                    else None
+                ),
             )
             model_defaults = settings.default_model_pair("agent")
             routing_defaults = dict(settings.agent_routing_models)
@@ -1322,7 +1329,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if adaptive_model_routing is None:
         adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
-    if isinstance(stored_model, str):
+    if isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
@@ -1336,7 +1343,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         thread_settings["model_handoff_complete"] = True
         settings_changed = True
     elif cfg.source == "dashboard" and cfg.model_selection == "auto":
-        if cfg.model_selection_changed:
+        if reset_model_selection:
             thread_settings["requested_model"] = None
             thread_settings["model_handoff_complete"] = True
             settings_changed = True
@@ -1356,6 +1363,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
         )
         and isinstance(per_thread_model, str)
+        and (not reset_model_selection or cfg.model_override_reason == "image_input")
         and per_thread_model in SUPPORTED_MODEL_IDS
         and isinstance(per_thread_effort, str)
         and model_supports_effort(per_thread_model, per_thread_effort)
@@ -1364,7 +1372,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             "Applying per-thread model override",
             extra={"model_id": per_thread_model, "effort": per_thread_effort},
         )
-        if thread_settings.get("requested_model") and cfg.model_override_reason == "image_input":
+        if (
+            thread_settings.get("requested_model") or reset_model_selection
+        ) and cfg.model_override_reason == "image_input":
             image_model_override = (per_thread_model, per_thread_effort)
         else:
             model_id = per_thread_model

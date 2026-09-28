@@ -737,10 +737,30 @@ async def test_requested_model_uses_vision_fallback_for_image_tool_results(
 
 
 @pytest.mark.asyncio
-async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups() -> None:
+@pytest.mark.parametrize(
+    ("profile", "expected_model", "expected_effort"),
+    [
+        (None, "openai:gpt-6-sol", "medium"),
+        (
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "high"},
+            "google_genai:gemini-3.8-flash",
+            "high",
+        ),
+    ],
+)
+async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups(
+    profile: dict[str, object] | None,
+    expected_model: str,
+    expected_effort: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.server import PrepareAgentRunMiddleware
 
+    monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
+    )
     config = _base_config()
     config["configurable"].update(
         source="dashboard", model_selection="auto", model_selection_changed=True
@@ -753,17 +773,26 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         "model_routing_enabled": False,
     }
     with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
-        captured = await _capture_create_deep_agent_kwargs(config, thread_settings=settings)
+        captured = await _capture_create_deep_agent_kwargs(
+            config, thread_settings=settings, profile=profile
+        )
     snapshot = cast(dict[str, object], store.call_args.args[2])
     assert snapshot["requested_model"] is None
     assert snapshot["model_routing_enabled"] is True
     assert snapshot["model_handoff_complete"] is True
+    assert snapshot["model_id"] == expected_model
+    assert snapshot["effort"] == expected_effort
+    assert snapshot["subagent_model_id"] == expected_model
+    assert snapshot["subagent_effort"] == (expected_effort if profile else "low")
 
     followup = _base_config()
     followup["configurable"].update(source="dashboard", model_selection="auto")
     followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
     for agent in (captured, followup_agent):
         middleware = cast(list[object], agent["middleware"])
-        assert any(isinstance(item, ModelSelectionMiddleware) for item in middleware)
+        selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+        assert await selection.select_route({"messages": []}) == "default"
+        assert selection._models["default"] is agent["model"]
+        assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
