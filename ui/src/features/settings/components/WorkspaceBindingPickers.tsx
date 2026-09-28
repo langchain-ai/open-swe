@@ -1,5 +1,4 @@
 import { useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
 import {
   FolderIcon,
   GlobeIcon,
@@ -7,38 +6,17 @@ import {
   LockSimpleIcon,
 } from "@phosphor-icons/react"
 
-import {
-  api,
-  type SlackChannelDirectory,
-  type WorkspaceOption,
-} from "@/lib/api"
+import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import {
+  normalizeSlackChannelId,
+  useSlackChannelDirectory,
+} from "@/lib/slack-channels"
 import {
   OwnershipPicker,
   type PickerItem,
   type PickerOwner,
 } from "./OwnershipPicker"
-
-export const slackChannelDirectoryKey = ["slackChannels"] as const
-
-/** The channels the bot can see; a directory to browse, refreshed on its own. */
-export function useSlackChannelDirectory(enabled: boolean) {
-  return useQuery({
-    queryKey: slackChannelDirectoryKey,
-    queryFn: api.listSlackChannels,
-    enabled,
-    staleTime: 60_000,
-  })
-}
-
-/** `#name` for a channel the directory knows, else the id as stored. */
-export function slackChannelLabel(
-  directory: SlackChannelDirectory | undefined,
-  id: string
-): string {
-  const channel = directory?.channels.find((entry) => entry.id === id)
-  return channel ? `#${channel.name}` : id
-}
 
 function ownersOf(
   workspaces: Array<WorkspaceOption>,
@@ -57,7 +35,6 @@ function ownersOf(
 }
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
 interface BindingPickerProps {
   selected: Array<string>
@@ -190,10 +167,7 @@ export function SlackChannelPicker({
         label: "Slack channel ID",
         placeholder: "Paste a channel ID (for example, C0123456789)",
         hint: "In Slack, open the channel details and copy the channel ID from the About tab.",
-        normalize: (raw) => {
-          const value = raw.trim().toUpperCase()
-          return CHANNEL_ID_PATTERN.test(value) ? value : null
-        },
+        normalize: normalizeSlackChannelId,
         invalidHint: "Channel IDs start with C or G.",
       }}
       loading={directory.isLoading}
