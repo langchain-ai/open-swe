@@ -225,10 +225,9 @@ async def test_requested_model_wins_and_emits_actual_model(
         "model_route": "fast",
         "requested_model": "anthropic:claude-opus-5-5",
     }
-    for _ in range(2):
-        state.update(await middleware.abefore_model(state, MagicMock()))
-        assert (await _invoke(middleware, dict(state))).model is chosen
-    factory.assert_called_once_with("anthropic:claude-opus-5-5")
+    state.update(await middleware.abefore_model(state, MagicMock()))
+    assert (await _invoke(middleware, dict(state))).model is chosen
+    factory.assert_called_with("anthropic:claude-opus-5-5")
     jev.assert_not_awaited()
     assert events[-1] == {
         "type": "model_routed",

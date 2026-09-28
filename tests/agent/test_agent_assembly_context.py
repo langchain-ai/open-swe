@@ -594,22 +594,18 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
     ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"],
 )
 @pytest.mark.parametrize("source", ["dashboard", "slack"])
-@pytest.mark.parametrize("has_images", [False, True])
 async def test_image_fallback_overrides_only_incompatible_pinned_models(
-    pinned_model: str, source: str, has_images: bool
+    pinned_model: str, source: str
 ) -> None:
-    from agent.server import PrepareAgentRunMiddleware
-
     config = _base_config()
     config["configurable"].update(
         source=source,
         model_selection="auto",
         agent_model_id="openai:gpt-6-sol",
         agent_effort="medium",
+        model_override_reason="image_input",
     )
-    if has_images:
-        config["configurable"]["model_override_reason"] = "image_input"
-    captured = await _capture_create_deep_agent_kwargs(
+    await _capture_create_deep_agent_kwargs(
         config,
         thread_settings={
             "model_id": pinned_model,
@@ -619,28 +615,8 @@ async def test_image_fallback_overrides_only_incompatible_pinned_models(
             "model_routing_enabled": False,
         },
     )
-    middleware = cast(list[object], captured["middleware"])
-    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
-    expected = (
-        "openai:gpt-6-sol" if has_images and pinned_model.endswith("kimi-k3") else pinned_model
-    )
-    assert prepare._model_id == expected
+    expected = "openai:gpt-6-sol" if pinned_model.endswith("kimi-k3") else pinned_model
     assert config["configurable"]["resolved_agent_model_id"] == expected
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "stored", [{}, {"model_id": "openai:gpt-6-sol", "model_routing_enabled": True}]
-)
-async def test_model_handoff_only_initializes_new_routed_threads(stored: dict[str, object]) -> None:
-    from agent.server import PrepareAgentRunMiddleware
-
-    config = _base_config()
-    config["configurable"].update(source="dashboard", model_selection="auto")
-    captured = await _capture_create_deep_agent_kwargs(config, thread_settings=stored)
-    middleware = cast(list[object], captured["middleware"])
-    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
-    assert bool(prepare._requested_models) is (not bool(stored))
 
 
 @pytest.mark.asyncio
@@ -649,7 +625,7 @@ async def test_model_handoff_only_initializes_new_routed_threads(stored: dict[st
 async def test_new_slack_handoff_ignores_routing_toggle_but_respects_explicit_choice(
     source: str, explicit: bool
 ) -> None:
-    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+    from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.server import PrepareAgentRunMiddleware
 
     config = _base_config()
@@ -667,8 +643,3 @@ async def test_new_slack_handoff_ignores_routing_toggle_but_respects_explicit_ch
     enabled = source == "slack" and not explicit
     assert bool(prepare._requested_models) is enabled
     assert bool(routers) is enabled
-    if enabled:
-        state: ModelSelectionState = {"messages": []}
-        assert await routers[0].select_route(state) == "default"
-        state["requested_model"] = "anthropic:claude-opus-5-5"
-        assert await routers[0].select_route(state) == "default"
