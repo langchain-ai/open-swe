@@ -1440,6 +1440,11 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
     monkeypatch.setattr(
+        webhook_common,
+        "upsert_agent_thread_metadata",
+        lambda *a, **k: asyncio.sleep(0, result=True),
+    )
+    monkeypatch.setattr(
         User,
         "email_for_login",
         lambda login: asyncio.sleep(
@@ -1519,6 +1524,11 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(
+        webhook_common,
+        "upsert_agent_thread_metadata",
+        lambda *a, **k: asyncio.sleep(0, result=True),
+    )
     monkeypatch.setattr(
         User,
         "email_for_login",
@@ -1625,3 +1635,152 @@ async def test_github_webhook_routes_pr_review_request_comment_to_agent(
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "message": "Processing issue_comment event"}
     assert captured["event_type"] == "issue_comment"
+
+
+def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) -> None:
+    """A follow-up lands in the thread's workspace even if the repository is preferred elsewhere."""
+    captured: dict[str, object] = {}
+
+    class _FakeRunsClient:
+        async def create(self, *args, **kwargs) -> None:
+            captured["configurable"] = kwargs["config"]["configurable"]
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    async def fake_react_to_github_comment(*args: object, **kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        webhook_common,
+        "get_or_resolve_thread_github_token",
+        lambda thread_id, email: asyncio.sleep(0, result="user-token"),
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
+    )
+    monkeypatch.setattr(
+        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=True)
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_thread_workspace", lambda thread_id: asyncio.sleep(0, result="core")
+    )
+    monkeypatch.setattr(
+        webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
+    )
+    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(
+        webhook_common,
+        "upsert_agent_thread_metadata",
+        lambda *a, **k: asyncio.sleep(0, result=True),
+    )
+    monkeypatch.setattr(
+        User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
+    )
+    monkeypatch.setattr(
+        User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset({"octocat"}))
+    )
+
+    asyncio.run(
+        github_webhooks.process_github_issue(
+            {
+                "issue": {
+                    "id": 12345,
+                    "number": 42,
+                    "title": "Fix the flaky test",
+                    "body": "The test is failing intermittently.",
+                    "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
+                },
+                "comment": {
+                    "id": 999,
+                    "body": "@openswe please handle this",
+                    "user": {"login": "octocat"},
+                },
+                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "sender": {"login": "octocat"},
+            },
+            "issue_comment",
+        )
+    )
+
+    configurable = cast(dict[str, object], captured["configurable"])
+    assert configurable["workspace"] == "core"
+
+
+@pytest.mark.parametrize(
+    ("private", "persisted", "scope", "dispatched"),
+    [
+        (False, True, ["langchain-ai/open-swe"], True),
+        (None, True, ["langchain-ai/open-swe"], True),
+        (True, True, None, True),
+        (False, False, ["langchain-ai/open-swe"], False),
+    ],
+)
+def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_scope(
+    monkeypatch, private: bool | None, persisted: bool, scope: list[str] | None, dispatched: bool
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRunsClient:
+        async def create(self, *args, **kwargs) -> None:
+            captured["run_created"] = True
+
+    class _FakeLangGraphClient:
+        runs = _FakeRunsClient()
+
+    async def fake_upsert(thread_id: str, **kwargs: object) -> bool:
+        captured["token_repositories"] = kwargs.get("token_repositories")
+        return persisted
+
+    async def fake_react_to_github_comment(*args: object, **kwargs: object) -> bool:
+        return True
+
+    async def fake_fetch_issue_comments(*args: object, **kwargs: object) -> list[object]:
+        return []
+
+    monkeypatch.setattr(
+        webhook_common,
+        "get_or_resolve_thread_github_token",
+        lambda thread_id, email: asyncio.sleep(0, result="user-token"),
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_github_app_installation_token", lambda: asyncio.sleep(0, result=None)
+    )
+    monkeypatch.setattr(
+        webhook_common, "thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
+    )
+    monkeypatch.setattr(
+        webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
+    )
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", fake_upsert)
+    monkeypatch.setattr(webhook_common, "react_to_github_comment", fake_react_to_github_comment)
+    monkeypatch.setattr(webhook_common, "fetch_issue_comments", fake_fetch_issue_comments)
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(
+        User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
+    )
+    monkeypatch.setattr(User, "known_logins", lambda logins: asyncio.sleep(0, result=frozenset()))
+    repository: dict[str, object] = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
+    if private is not None:
+        repository["private"] = private
+
+    asyncio.run(
+        github_webhooks.process_github_issue(
+            {
+                "issue": {
+                    "id": 12345,
+                    "number": 42,
+                    "title": "Fix the flaky test",
+                    "body": "@openswe please handle this",
+                    "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
+                },
+                "repository": repository,
+                "sender": {"login": "octocat"},
+            },
+            "issues",
+        )
+    )
+
+    assert captured["token_repositories"] == scope
+    assert captured.get("run_created", False) is dispatched

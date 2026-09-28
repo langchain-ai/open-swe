@@ -244,6 +244,8 @@ async def delete_workspace(name: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
     try:
         deleted = await store.WORKSPACES.remove(slug)
+    except store.DefaultWorkspaceDeletionError as exc:
+        return {"ok": False, "error": str(exc)}
     except Exception as exc:
         logger.exception("Failed to delete workspace", extra={"workspace": slug})
         return {"ok": False, "error": f"failed to delete workspace: {exc}"}

@@ -16,6 +16,7 @@ class PublishedAssessment(ReviewAssessment):
     repo: str
     pr_number: int
     approved: bool = False
+    dry_run: bool = False
 
 
 class FeedbackSubmission(BaseModel):
