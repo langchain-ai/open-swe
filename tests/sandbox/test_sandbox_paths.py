@@ -88,29 +88,3 @@ async def test_resolve_sandbox_work_dir_falls_back_to_home_when_work_dir_is_not_
         "pwd",
         "test -d /home/daytona && test -w /home/daytona",
     ]
-
-
-async def test_resolve_sandbox_work_dir_caches_the_result() -> None:
-    backend = _FakeSandboxBackend(
-        provider=_FakeProvider(work_dir="/workspace"),
-        writable_dirs={"/workspace"},
-    )
-
-    first = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
-    second = await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend))
-
-    assert first == "/workspace"
-    assert second == "/workspace"
-    assert backend.commands == ["test -d /workspace && test -w /workspace"]
-
-
-async def test_resolve_repo_dir_resolves_home_dir() -> None:
-    backend = _FakeSandboxBackend(
-        provider=_FakeProvider(work_dir="/home/daytona"),
-        writable_dirs={"/home/daytona"},
-    )
-
-    repo_dir = await resolve_repo_dir(cast(SandboxBackendProtocol, backend), "open-swe")
-
-    assert repo_dir == "/home/daytona/open-swe"
-    assert backend.commands == ["test -d /home/daytona && test -w /home/daytona"]

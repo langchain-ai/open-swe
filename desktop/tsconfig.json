@@ -16,6 +16,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmitOnError": true
   },
-  "include": ["src/**/*.cts"],
+  "include": ["src/**/*.cts", "src/**/*.ts"],
   "exclude": ["build", "node_modules"]
 }

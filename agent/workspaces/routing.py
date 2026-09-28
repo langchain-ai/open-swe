@@ -51,18 +51,12 @@ async def _slug_exists(slug: str) -> bool:
 
 
 async def _repo_owner(owner: str, name: str) -> str | None:
-    """The workspace owning this repository; raises when ownership is unreadable.
-
-    A repository that no workspace owns but a not-yet-imported Store record
-    names is unreadable too: its owner exists, just not in PostgreSQL yet.
-    """
+    """The workspace owning this repository; raises when ownership is unreadable."""
     full_name = f"{owner}/{name}"
     try:
         found = await WORKSPACES.owner_of_repo(full_name)
     except Exception as exc:
         raise WorkspaceLookupError("workspace repository lookup failed") from exc
-    if found is None and WORKSPACES.repo_import_is_pending(full_name):
-        raise WorkspaceLookupError("the workspace owning this repository has not been imported yet")
     return found
 
 
@@ -110,6 +104,23 @@ async def workspace_for_slack_channel(channel_id: str) -> str | None:
         return None
 
 
+async def is_kitchen_channel(channel_id: str) -> bool:
+    """Whether untagged human messages in this Slack channel reach the agent.
+
+    Fails soft: a failed lookup reads as off, logged at error, so the channel
+    keeps requiring mentions.
+    """
+    try:
+        return await WORKSPACES.is_kitchen_channel(channel_id)
+    except Exception:
+        logger.error(
+            "kitchen channel lookup failed; treating the channel as not a kitchen channel",
+            extra={"slack_channel_id": channel_id},
+            exc_info=True,
+        )
+        return False
+
+
 def _unassigned_policy() -> str:
     value = ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.get("default").strip().lower()
     return value if value in ("default", "ignore") else "default"
@@ -118,20 +129,12 @@ def _unassigned_policy() -> str:
 async def repo_is_routable(owner: str, name: str) -> bool:
     """Whether a GitHub event for this repository should be handled at all.
 
-    Raises :class:`WorkspaceLookupError` when ownership cannot be read, and when
-    the workspaces are not populated at all: under the ``ignore`` policy a false
-    answer drops the delivery for good, and GitHub only retries a 5xx. A startup
-    import that failed leaves an empty table behind, in which every repository
-    reads as unowned, so "no workspaces yet" is not an answer either.
+    Raises :class:`WorkspaceLookupError` when ownership cannot be read: under
+    the ``ignore`` policy a false answer drops the delivery for good, and GitHub
+    only retries a 5xx.
     """
     if await _repo_owner(owner, name) is not None:
         return True
-    try:
-        populated = await WORKSPACES.routing_is_populated()
-    except Exception as exc:
-        raise WorkspaceLookupError("workspace population lookup failed") from exc
-    if not populated:
-        raise WorkspaceLookupError("workspaces have not been imported into PostgreSQL yet")
     return _unassigned_policy() == "default"
 
 

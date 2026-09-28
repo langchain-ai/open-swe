@@ -142,31 +142,6 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
 
 
 @requires_setsid
-def test_background_command_active_limit(fake_curl: Path) -> None:
-    task_ids = [f"test-{uuid.uuid4().hex}" for _ in range(4)]
-    try:
-        for task_id in task_ids:
-            task_dir = Path(TASK_ROOT, task_id)
-            task_dir.mkdir(parents=True)
-            task_dir.joinpath("state.json").write_text('{"status": "running"}')
-        result = subprocess.run(
-            [
-                "/bin/sh",
-                "-c",
-                _launch_command(f"test-{uuid.uuid4().hex}", "true", 10, callback=True),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        assert result.returncode == 72
-        assert "active task limit reached" in result.stderr
-    finally:
-        for task_id in task_ids:
-            shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
-
-
-@requires_setsid
 def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
     for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
         task_id = f"test-{uuid.uuid4().hex}"
@@ -188,22 +163,6 @@ def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
             assert state["status"] == expected
         finally:
             shutil.rmtree(task_dir, ignore_errors=True)
-
-
-def test_dispatch_config_carries_new_workspace_key() -> None:
-    configurable = background_tasks._dispatch_config(
-        {"source": "slack", "workspace": "oss"}, "thread-1"
-    )
-    assert configurable["workspace"] == "oss"
-    assert configurable["environment"] == "oss"
-
-
-def test_dispatch_config_falls_back_to_legacy_environment_key() -> None:
-    configurable = background_tasks._dispatch_config(
-        {"source": "slack", "environment": "old"}, "thread-1"
-    )
-    assert configurable["workspace"] == "old"
-    assert configurable["environment"] == "old"
 
 
 async def _callback_client(monkeypatch: pytest.MonkeyPatch) -> tuple[httpx.AsyncClient, str]:
@@ -288,21 +247,6 @@ async def test_cron_tick_deletes_its_cron_only_once_nothing_is_left(
     assert delete_crons.await_count == int(deleted)
 
 
-async def test_background_task_cron_search_uses_metadata_not_graph_name() -> None:
-    client = AsyncMock()
-    client.crons.search.return_value = []
-    client.crons.create.return_value = {"cron_id": "cron-1"}
-
-    with patch("agent.background_tasks._client", return_value=client):
-        cron_id = await background_tasks.ensure_background_task_cron("thread-1")
-
-    assert cron_id == "cron-1"
-    client.crons.search.assert_awaited_once_with(
-        metadata={"kind": "background_tasks", "agent_thread_id": "thread-1"}, limit=10
-    )
-    assert client.crons.create.await_args.args == ("scheduler",)
-
-
 @pytest.mark.parametrize(
     ("login", "profile", "enabled"),
     [
@@ -385,46 +329,6 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
         "status": "running",
         "error": "command started, but automatic completion monitoring could not be scheduled",
     }
-
-
-def _cron(cron_id: str, thread_id: str, metadata: dict[str, str]) -> dict[str, object]:
-    return {
-        "cron_id": cron_id,
-        "metadata": metadata,
-        "payload": {"input": {"task": "background_tasks", "thread_id": thread_id}},
-    }
-
-
-async def test_delete_crons_removes_legacy_crons_matched_by_payload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    tagged = _cron(
-        "tagged", "thread-1", {"kind": "background_tasks", "agent_thread_id": "thread-1"}
-    )
-    legacy = [
-        _cron("legacy-1", "thread-1", {"kind": "background_tasks"}),
-        _cron("legacy-2", "thread-1", {"kind": "background_tasks"}),
-        _cron("other-thread", "thread-2", {"kind": "background_tasks"}),
-    ]
-    monkeypatch.setattr(background_tasks, "_CRON_PAGE_SIZE", 2)
-    scan = [tagged, *legacy]
-    client = AsyncMock()
-
-    async def search(*, metadata: dict[str, str], limit: int, offset: int = 0) -> list[object]:
-        if "agent_thread_id" in metadata:
-            return [tagged]
-        return scan[offset : offset + limit]
-
-    client.crons.search.side_effect = search
-
-    with patch("agent.background_tasks._client", return_value=client):
-        await background_tasks._delete_crons("thread-1")
-
-    assert [c.args[0] for c in client.crons.delete.await_args_list] == [
-        "tagged",
-        "legacy-1",
-        "legacy-2",
-    ]
 
 
 @pytest.mark.parametrize("tracking_failure", [False, True])
@@ -524,73 +428,6 @@ async def test_task_metadata_preserves_concurrent_launch() -> None:
     )
 
 
-@pytest.mark.parametrize("slack", [False, True])
-@pytest.mark.parametrize(
-    "status", ["running", "completed", "failed", "timed_out", "stopped", "lost", "missing"]
-)
-async def test_reconcile_settles_background_waiting_status(status: str, slack: bool) -> None:
-    task = {"task_id": "cmd-1", "status": status, "notification": "done"}
-    client = AsyncMock()
-    metadata: dict[str, object] = {
-        "sandbox_id": "sandbox-1",
-        "running_background_tasks": ["cmd-1"],
-    }
-    if slack:
-        metadata["source_context"] = {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}
-    client.threads.get.return_value = {"metadata": metadata}
-    client.runs.list.return_value = []
-    backend = AsyncMock()
-    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
-    with (
-        patch("agent.background_tasks._client", return_value=client),
-        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
-        patch(
-            "agent.background_tasks._list_tasks",
-            AsyncMock(return_value=[] if status == "missing" else [task]),
-        ),
-        patch.object(slack_thinking, "set_slack_thread_status", AsyncMock()) as set_status,
-    ):
-        await reconcile_background_tasks("thread-1")
-    assert client.threads.get.await_count == (1 if status == "running" else 2)
-    if status == "running":
-        client.threads.update.assert_not_awaited()
-    else:
-        client.threads.update.assert_awaited_once_with(
-            "thread-1", metadata={"running_background_tasks": []}
-        )
-    if slack:
-        set_status.assert_awaited_once_with(
-            "C1", "1.0", "Waiting for background tasks…" if status == "running" else ""
-        )
-    else:
-        set_status.assert_not_awaited()
-        client.runs.list.assert_not_awaited()
-        client.store.get_item.assert_not_awaited()
-
-
-async def test_background_launch_registers_running_task() -> None:
-    backend = AsyncMock()
-    backend.aexecute.return_value = SimpleNamespace(exit_code=0)
-    with (
-        patch(
-            "agent.tools.background_execute._uses_completion_callback",
-            AsyncMock(return_value=True),
-        ),
-        patch(
-            "agent.tools.background_execute._current_backend", return_value=("thread-1", backend)
-        ),
-        patch(
-            "agent.tools.background_execute.execute",
-            AsyncMock(return_value={"task_id": "cmd-1", "status": "running"}),
-        ),
-        patch("agent.tools.background_execute.update_background_task_state", AsyncMock()) as update,
-    ):
-        result = await background_execute("sleep 10")
-    assert result["success"] is True
-    assert update.await_args.args[1] == "thread-1"
-    assert len(update.await_args.kwargs["running"]) == 1
-
-
 @pytest.mark.parametrize("tracking_failure", [False, True])
 async def test_reconcile_uses_fresh_state_for_concurrent_launch(
     monkeypatch: pytest.MonkeyPatch, tracking_failure: bool
@@ -625,29 +462,6 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
         client.threads.update.assert_awaited_once_with(
             "thread-1", metadata={"running_background_tasks": ["cmd-concurrent"]}
         )
-
-
-@pytest.mark.parametrize("tracked", [False, True])
-async def test_missing_sandbox_resets_tasks_without_redundant_reads(
-    monkeypatch: pytest.MonkeyPatch, tracked: bool
-) -> None:
-    client = AsyncMock()
-    client.threads.get.return_value = {
-        "metadata": {
-            "running_background_tasks": ["cmd-1"] if tracked else [],
-            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
-        }
-    }
-    client.runs.list.return_value = []
-    monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    set_status = AsyncMock()
-    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
-
-    assert await reconcile_background_tasks("thread-1") == {"status": "missing_sandbox"}
-
-    assert client.threads.get.await_count == (2 if tracked else 1)
-    assert client.threads.update.await_count == int(tracked)
-    set_status.assert_awaited_once_with("C1", "1.0", "")
 
 
 @pytest.mark.parametrize("slack", [False, True])

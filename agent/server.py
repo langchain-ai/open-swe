@@ -228,7 +228,7 @@ from agent.tools.admin_gate import (
     participant_is_admin,
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
-from agent.tools.manage_review_approval_policy import manage_review_approval_policy
+from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -1469,7 +1469,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *(ADMIN_TOOLS if admin_thread else ()),
         *((cli_result,) if cli_result_required else ()),
         *(
-            (read_only_sql, manage_feature_flags, manage_review_approval_policy)
+            (read_only_sql, manage_feature_flags, manage_review_approval_mode)
             if private_admin_surface
             else ()
         ),

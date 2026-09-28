@@ -148,16 +148,10 @@ settings and MCP connections become the `default` workspace's. Existing threads 
 workspace read as `default`. The `environment` key in thread metadata and run configuration is
 read as an alias for `workspace` so in-flight threads keep working.
 
-Environment records that predate PostgreSQL storage still live in the LangGraph Store, under the
-`["workspaces"]` namespace and the legacy `["environments"]` namespace before that. At startup,
-right after migrations run, `import_store_records()` reads both namespaces once, writes any slug
-that has no PostgreSQL row yet, and deletes the Store record once it has been dealt with — so this
-runs exactly once per record, resurrects nothing an admin has since deleted, and a later release
-can drop the whole path. A Store outage at that moment is logged and simply retried on the next
-boot; nothing blocks startup on it. A record the import cannot bring over — one that no longer
-validates, or one claiming a repository or Slack channel another workspace owns — stays in the Store for the next
-boot, the import does not count as complete, and GitHub deliveries for the repositories it names
-are answered 503 so GitHub retries them rather than routing them to `default` or dropping them.
+Workspaces live only in PostgreSQL. The one-time import of environment records from the
+LangGraph Store (`["workspaces"]` and the legacy `["environments"]` namespace) has been removed; a
+deployment still holding such records must import them with an earlier release first. A migration
+seeds the `default` workspace, so pickers always offer it.
 
 ### Non-goals
 

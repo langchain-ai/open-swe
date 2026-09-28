@@ -19,6 +19,15 @@ export type ComposerPromptSegment =
   | { type: "text"; text: string }
   | { type: "mention"; path: string; source: string }
   | { type: "skill"; name: string; source: string }
+  | { type: "channel"; channelId: string; name: string; source: string }
+
+interface ComposerChannelToken {
+  readonly channelId: string
+  readonly channelName: string
+  readonly source: string
+  readonly start: number
+  readonly end: number
+}
 
 interface ComposerSkillToken {
   readonly name: string
@@ -35,6 +44,17 @@ const FILE_LINK_TOKEN_REGEX =
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/
 const SKILL_TOKEN_REGEX = /(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g
+const CHANNEL_TOKEN_REGEX = /<#([CG][A-Z0-9]+)\|([^>|\s]+)>/g
+
+function collectChannelTokens(text: string): Array<ComposerChannelToken> {
+  return [...text.matchAll(CHANNEL_TOKEN_REGEX)].map((match) => ({
+    channelId: match[1] ?? "",
+    channelName: match[2] ?? "",
+    source: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }))
+}
 
 function collectFileLinkTokens(text: string): Array<ComposerMentionToken> {
   const tokens: Array<ComposerMentionToken> = []
@@ -123,18 +143,27 @@ export function splitPromptIntoSegments(
 
   const segments: Array<ComposerPromptSegment> = []
   let cursor = 0
-  const tokens = [...collectComposerMentions(prompt), ...skills].sort(
-    (left, right) => left.start - right.start
-  )
+  const tokens = [
+    ...collectComposerMentions(prompt),
+    ...skills,
+    ...collectChannelTokens(prompt),
+  ].sort((left, right) => left.start - right.start)
 
   for (const token of tokens) {
     if (token.start < cursor) continue
     if (token.start > cursor)
       segments.push({ type: "text", text: prompt.slice(cursor, token.start) })
     segments.push(
-      "name" in token
-        ? { type: "skill", name: token.name, source: token.source }
-        : { type: "mention", path: token.path, source: token.source }
+      "channelId" in token
+        ? {
+            type: "channel",
+            channelId: token.channelId,
+            name: token.channelName,
+            source: token.source,
+          }
+        : "name" in token
+          ? { type: "skill", name: token.name, source: token.source }
+          : { type: "mention", path: token.path, source: token.source }
     )
     cursor = token.end
   }

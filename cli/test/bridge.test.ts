@@ -91,7 +91,7 @@ function fakeBackend(
   return {
     api: new ApiClient(
       `http://127.0.0.1:${server.port}`,
-      new SessionCredential("jwt-token")
+      new SessionCredential("jwt-token", "session (test)")
     ),
     firstReply,
     opened: () => opens,

@@ -24,7 +24,6 @@ async def test_default_workspace_preference_round_trips(fake_store: FakeStore) -
 
 
 async def _seed() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
@@ -84,23 +83,6 @@ async def test_unassigned_repo_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     await _seed()
     assert await routing.repo_is_routable("acme", "unowned") is True
     monkeypatch.setenv(ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.name, "ignore")
-    assert await routing.repo_is_routable("acme", "unowned") is False
-    assert await routing.repo_is_routable("acme", "oss") is True
-
-
-async def test_an_import_that_never_ran_is_not_an_unowned_repository(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failed startup import leaves a table in which every repo reads as unowned."""
-    monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    monkeypatch.setenv(ENV.OPEN_SWE_UNASSIGNED_REPO_WORKSPACE.name, "ignore")
-
-    with pytest.raises(routing.WorkspaceLookupError):
-        await routing.repo_is_routable("acme", "oss")
-
-    # One workspace is enough to prove the tables were populated, whatever the
-    # import did: from there the policy decides again.
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
     assert await routing.repo_is_routable("acme", "unowned") is False
     assert await routing.repo_is_routable("acme", "oss") is True
 

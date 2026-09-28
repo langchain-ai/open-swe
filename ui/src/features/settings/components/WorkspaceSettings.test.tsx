@@ -32,6 +32,7 @@ const RECORD: WorkspaceRecord = {
   prompt: "Run make test.",
   repos: ["acme/oss"],
   slack_channel_ids: ["C1"],
+  kitchen_channel_ids: [],
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
@@ -67,6 +68,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "OSS",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         is_default: true,
         default_repo: null,
         has_snapshot: true,
@@ -76,6 +78,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "Core",
         repos: ["acme/api"],
         slack_channel_ids: [],
+        kitchen_channel_ids: [],
         is_default: false,
         default_repo: null,
         has_snapshot: false,
@@ -111,14 +114,14 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
-function renderPage(canEdit = true, onDeleted = vi.fn()) {
+function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
       <WorkspaceSettingsPanel
-        slug="oss"
+        slug={slug}
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
@@ -127,6 +130,14 @@ function renderPage(canEdit = true, onDeleted = vi.fn()) {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("offers no way to delete the default workspace", async () => {
+    mockApis({ ...RECORD, slug: "default", name: "Default" })
+    renderPage(true, vi.fn(), "default")
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -215,6 +226,7 @@ describe("WorkspaceSettingsPanel", () => {
         name: "OSS support",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         prompt: "Run make test.",
       })
     )
