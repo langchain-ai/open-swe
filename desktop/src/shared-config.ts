@@ -78,6 +78,40 @@ export function updateSharedConfig(
   return next;
 }
 
+export function sessionKey(backendUrl: string): string {
+  return new URL(backendUrl).origin;
+}
+
+export function shareSession(
+  path: string,
+  backendUrl: string,
+  session: string,
+): void {
+  updateSharedConfig(path, (config) => ({
+    ...config,
+    sessions: { ...config.sessions, [sessionKey(backendUrl)]: session },
+  }));
+}
+
+/** Forget `backendUrl`'s session; with `only`, just while it is still that one, so a newer sign-in survives. */
+export function unshareSession(
+  path: string,
+  backendUrl: string,
+  only: string | null = null,
+): boolean {
+  const key = sessionKey(backendUrl);
+  const current = readSharedConfig(path).sessions[key];
+  if (current === undefined || (only !== null && current !== only))
+    return false;
+  updateSharedConfig(path, (config) => ({
+    ...config,
+    sessions: Object.fromEntries(
+      Object.entries(config.sessions).filter(([name]) => name !== key),
+    ),
+  }));
+  return true;
+}
+
 export interface MigrationHost {
   home: string;
   platform: NodeJS.Platform;

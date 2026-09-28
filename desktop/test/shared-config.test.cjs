@@ -6,7 +6,9 @@ const path = require("node:path");
 const {
   migrateDesktopConfig,
   readSharedConfig,
+  shareSession,
   sharedConfigPath,
+  unshareSession,
   updateSharedConfig,
 } = require("../build/shared-config.js");
 
@@ -73,6 +75,26 @@ test("writes nothing when there is nothing to migrate", () => {
   migrateDesktopConfig(host);
 
   assert.equal(fs.existsSync(sharedConfigPath(host.home)), false);
+});
+
+test("a removed desktop session leaves a newer sign-in in place", () => {
+  const host = macHost();
+  const shared = sharedConfigPath(host.home);
+  shareSession(shared, "https://openswe.example.com/", "desktop");
+  shareSession(shared, "https://openswe.example.com", "cli");
+
+  assert.equal(
+    unshareSession(shared, "https://openswe.example.com/", "desktop"),
+    false,
+  );
+  assert.deepEqual(readSharedConfig(shared).sessions, {
+    "https://openswe.example.com": "cli",
+  });
+  assert.equal(
+    unshareSession(shared, "https://openswe.example.com/", "cli"),
+    true,
+  );
+  assert.deepEqual(readSharedConfig(shared).sessions, {});
 });
 
 test("drops keys an older CLI stored", () => {

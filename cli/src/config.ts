@@ -6,7 +6,10 @@ import {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
   migrateDesktopConfig,
   readSharedConfig,
+  sessionKey,
+  shareSession,
   sharedConfigPath,
+  unshareSession,
   updateSharedConfig,
   type SharedConfig,
 } from "../../desktop/src/shared-config.ts"
@@ -86,15 +89,10 @@ export async function readBackend(): Promise<string> {
   )
 }
 
-/**
- * Where the CLI is pointed and who it is.
- *
- * The desktop app keeps its own session in an encrypted cookie store no other
- * process can read, so the CLI's comes from `OPEN_SWE_SESSION` or `oswe login`.
- */
+/** Where the CLI is pointed and who it is; the desktop app shares its session here while signed in. */
 export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())
-  const session = sharedConfig().sessions[backend]
+  const session = sharedConfig().sessions[sessionKey(backend)]
   const credential = resolveCredential(
     backend,
     session ? { session, path: configFile() } : null
@@ -108,23 +106,17 @@ export async function storeSession(
   session: string,
   select: boolean
 ): Promise<string> {
-  updateSharedConfig(configFile(), (config) => ({
-    backendUrl: select ? backend : config.backendUrl,
-    sessions: { ...config.sessions, [backend]: session },
-  }))
+  shareSession(configFile(), backend, session)
+  if (select)
+    updateSharedConfig(configFile(), (config) => ({
+      ...config,
+      backendUrl: backend,
+    }))
   return configFile()
 }
 
 export async function forgetSession(backend: string): Promise<boolean> {
-  const { sessions } = readSharedConfig(configFile())
-  if (!(backend in sessions)) return false
-  updateSharedConfig(configFile(), (config) => ({
-    ...config,
-    sessions: Object.fromEntries(
-      Object.entries(config.sessions).filter(([key]) => key !== backend)
-    ),
-  }))
-  return true
+  return unshareSession(configFile(), backend)
 }
 
 export async function readBridgeMemory(): Promise<BridgeMemory> {

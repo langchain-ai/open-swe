@@ -87,7 +87,9 @@ const {
 const {
   migrateDesktopConfig,
   readSharedConfig,
+  shareSession,
   sharedConfigPath,
+  unshareSession,
   updateSharedConfig,
 } = require("./shared-config.js");
 
@@ -911,6 +913,42 @@ function migrateStoredConfig() {
   }
 }
 
+function isBackendSessionCookie(cookie) {
+  return (
+    Boolean(backendUrl) &&
+    cookie.name === SESSION_COOKIE_NAME &&
+    cookie.domain.replace(/^\./, "") === new URL(backendUrl).hostname
+  );
+}
+
+/** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
+async function shareBackendSession() {
+  if (isDevelopment) return;
+  session.defaultSession.cookies.on(
+    "changed",
+    (_event, cookie, cause, removed) => {
+      if (!isBackendSessionCookie(cookie)) return;
+      if (removed && cause === "overwrite") return;
+      try {
+        if (removed) unshareSession(configPath(), backendUrl, cookie.value);
+        else shareSession(configPath(), backendUrl, cookie.value);
+      } catch (error) {
+        console.warn("Could not share the desktop session with oswe", error);
+      }
+    },
+  );
+  if (!backendUrl) return;
+  try {
+    const [cookie] = await session.defaultSession.cookies.get({
+      url: backendUrl,
+      name: SESSION_COOKIE_NAME,
+    });
+    if (cookie) shareSession(configPath(), backendUrl, cookie.value);
+  } catch (error) {
+    console.warn("Could not share the desktop session with oswe", error);
+  }
+}
+
 function readStoredBackendUrl() {
   try {
     const { backendUrl } = readSharedConfig(configPath());
@@ -1635,6 +1673,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),
