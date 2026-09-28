@@ -134,6 +134,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
+  const pendingAutoSelectionRef = useRef<symbol | null>(null)
   const activeSelection = autoSelected
     ? null
     : (selection ??
@@ -143,6 +144,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
+    pendingAutoSelectionRef.current = next === null ? Symbol() : null
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -176,19 +178,24 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
+      const pendingAutoSelection =
+        content.trim() === "/offload" ? null : pendingAutoSelectionRef.current
       await sendMessage.mutateAsync({
         content,
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
-        model_selection_changed: autoSelected,
+        model_selection_changed: pendingAutoSelection !== null,
         enqueue: isStreaming && queue,
       })
+      // A picker action made during submission still belongs to the next message.
+      if (pendingAutoSelectionRef.current === pendingAutoSelection) {
+        pendingAutoSelectionRef.current = null
+      }
     },
     [
       activeSelection?.effort,
       activeSelection?.modelId,
-      autoSelected,
       followUpBehavior,
       isStreaming,
       sendMessage,
