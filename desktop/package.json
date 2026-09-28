@@ -26,7 +26,6 @@
       "owner": "langchain-ai",
       "repo": "open-swe"
     },
-    "protocols": [{ "name": "Open SWE links", "schemes": ["open-swe"] }],
     "asar": true,
     "asarUnpack": [
       "node_modules/node-pty/**/*"
@@ -89,6 +88,7 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
+      "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
       "entitlementsInherit": "entitlements.mac.plist",
       "target": [
         "dmg",

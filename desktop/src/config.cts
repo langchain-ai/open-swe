@@ -152,12 +152,9 @@ function desktopDeepLinkUrl(value, backendUrl) {
   try {
     const target = new URL(value);
     const backend = new URL(backendUrl);
-    const isWebLink =
-      target.protocol === "https:" && target.origin === backend.origin;
-    const isAppLink =
-      target.protocol === "open-swe:" && target.hostname === "link";
     if (
-      (!isWebLink && !isAppLink) ||
+      target.protocol !== "https:" ||
+      target.origin !== backend.origin ||
       !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname) ||
       target.pathname.startsWith("/agents/local/")
     )
