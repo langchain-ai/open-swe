@@ -1328,7 +1328,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     elif cfg.source == "dashboard" and cfg.model_selection == "auto":
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
-    # Capability fallbacks can also replace a pinned text-only model.
+    # Capability fallbacks can temporarily replace a pinned text-only model.
+    image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
@@ -1346,14 +1347,16 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         and model_supports_effort(per_thread_model, per_thread_effort)
     ):
         logger.info(
-            "Applying per-thread model override: model=%s effort=%s",
-            per_thread_model,
-            per_thread_effort,
+            "Applying per-thread model override",
+            extra={"model_id": per_thread_model, "effort": per_thread_effort},
         )
-        model_id = per_thread_model
-        profile_effort = per_thread_effort
-        subagent_model_id = per_thread_model
-        subagent_effort = per_thread_effort
+        if thread_settings.get("requested_model") and cfg.model_override_reason == "image_input":
+            image_model_override = (per_thread_model, per_thread_effort)
+        else:
+            model_id = per_thread_model
+            profile_effort = per_thread_effort
+            subagent_model_id = per_thread_model
+            subagent_effort = per_thread_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
@@ -1387,6 +1390,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     ):
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
+
+    if image_model_override is not None:
+        model_id, profile_effort = image_model_override
+        subagent_model_id, subagent_effort = image_model_override
 
     # A `/oswe` question runs on the asker's own default model, and never routes
     # adaptively: one question gets one answer, so there is nothing to route.

@@ -594,7 +594,7 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
     ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"],
 )
 @pytest.mark.parametrize("source", ["dashboard", "slack"])
-async def test_image_fallback_overrides_only_incompatible_pinned_models(
+async def test_image_fallback_temporarily_overrides_only_incompatible_pinned_models(
     pinned_model: str, source: str
 ) -> None:
     config = _base_config()
@@ -605,18 +605,33 @@ async def test_image_fallback_overrides_only_incompatible_pinned_models(
         agent_effort="medium",
         model_override_reason="image_input",
     )
-    await _capture_create_deep_agent_kwargs(
-        config,
-        thread_settings={
-            "model_id": pinned_model,
-            "effort": "high",
-            "requested_model": pinned_model,
-            "model_handoff_complete": True,
-            "model_routing_enabled": False,
-        },
-    )
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        await _capture_create_deep_agent_kwargs(
+            config,
+            thread_settings={
+                "model_id": pinned_model,
+                "effort": "high",
+                "subagent_model_id": "google_genai:gemini-3.8-flash",
+                "subagent_effort": "low",
+                "requested_model": pinned_model,
+                "model_handoff_complete": True,
+                "model_routing_enabled": False,
+            },
+        )
     expected = "openai:gpt-6-sol" if pinned_model.endswith("kimi-k3") else pinned_model
     assert config["configurable"]["resolved_agent_model_id"] == expected
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["model_id"] == pinned_model
+    assert snapshot["effort"] == "high"
+    assert snapshot["requested_model"] == pinned_model
+    assert snapshot["subagent_model_id"] == "google_genai:gemini-3.8-flash"
+    assert snapshot["subagent_effort"] == "low"
+
+    followup = _base_config()
+    followup["configurable"].update(source=source, model_selection="auto")
+    await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
+    assert followup["configurable"]["resolved_agent_model_id"] == pinned_model
+    assert followup["configurable"]["resolved_agent_effort"] == "high"
 
 
 @pytest.mark.asyncio
