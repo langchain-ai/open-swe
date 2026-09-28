@@ -42,7 +42,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
 
@@ -89,7 +89,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, and what it owns. A repository or Slack channel belongs to exactly one workspace."
+      description="Its name, the instructions appended to every run, the repositories it prefers, and its Slack channels. A repository is preferred by, and a Slack channel belongs to, exactly one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -178,6 +178,7 @@ export function WorkspaceSettingsPanel({
         : false,
   })
   const options = useWorkspaceOptions(true)
+  const repositories = useRepos()
   // Model options follow the workspace: the Fable flag that gates some of
   // them is one of its settings.
   const modelOptions = useOptions(slug)
@@ -289,7 +290,12 @@ export function WorkspaceSettingsPanel({
           (model) => model.can_be_default !== false
         )}
       />
-      <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <DefaultRepoSection
+        scope={scope}
+        repositories={(repositories.data?.repositories ?? []).map(
+          (repo) => repo.full_name
+        )}
+      />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />

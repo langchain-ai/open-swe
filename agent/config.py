@@ -173,6 +173,11 @@ ENV.var(
     default="https://api.host.langchain.com",
 )
 ENV.var(
+    "TYPESAFE_API_KEY",
+    "TypeSafe key for direct Jev model routing when available.",
+    secret=True,
+)
+ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
     secret=True,
@@ -339,6 +344,10 @@ ENV.var(
     "LANGSMITH_LANGGRAPH_API_VARIANT",
     "LangGraph API runtime variant.",
     default="",
+)
+ENV.var(
+    "OPENSWE_ENV",
+    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
 )
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")

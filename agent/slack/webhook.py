@@ -584,28 +584,21 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
-    """Keep a defaulted repository unless it belongs to another workspace.
+async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo:
+    """Keep a defaulted repository unless another workspace prefers it.
 
-    Nobody named this repository, so it did not pick the workspace. Handing an
-    `oss` run a repository `default` owns would cross the boundary the
-    workspace exists to draw, so that workspace's own default repository takes
-    over — and there may not be one.
+    Nobody named this repository, so it did not pick the workspace, and the
+    workspace the run landed in should not inherit a default meant for another:
+    its own default repository takes over when it has one. Every workspace can
+    use every repository, so the candidate stays otherwise.
     """
     if not workspace:
         return candidate
-    owner = await workspace_for_repo(candidate.owner, candidate.name)
-    if owner is None or owner == workspace:
+    preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
+    if preferred_by is None or preferred_by == workspace:
         return candidate
     scoped = (await common.get_workspace_settings(workspace)).default_repo
-    if not scoped:
-        return None
-    fallback = Repo.model_validate(scoped)
-    # The workspace's default may itself be inherited from the instance record.
-    fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
-    if fallback_owner is None or fallback_owner == workspace:
-        return fallback
-    return None
+    return Repo.model_validate(scoped) if scoped else candidate
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:

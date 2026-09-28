@@ -5,8 +5,11 @@ description: How an Open SWE workspace's sandbox image works and how to change i
 
 # Workspaces
 
-A workspace owns repositories, Slack channels, MCP connections, and team
-settings, plus the sandbox image its runs boot from. That image is two
+A workspace prefers repositories and owns Slack channels, MCP connections, and
+team settings, plus the sandbox image its runs boot from. Preferring a
+repository routes its GitHub and Linear events here and preloads it into the
+image; it does not limit access, since every workspace's sandbox can reach
+every repository the GitHub App installation can. That image is two
 things: a **record** (name, prompt, repos, sizing, optional scripts) and a
 published **sandbox image**, `<prefix>-environment-<slug>:latest`. Runs
 routed to a workspace boot from its image and get its prompt appended to
@@ -50,7 +53,7 @@ Two consequences:
 - The script must describe the **whole** build from base, even for a fork. By hand you only did the delta on top of the parent; the nightly does not start from the parent.
 - Leaving it off is allowed. The workspace then has no nightly check and keeps whatever image was last published.
 
-Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the repos; install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
+Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the preferred repos listed in `OPENSWE_WORKSPACE_REPOS` (runs clone any other repository on demand); install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
 
 ## `update_script` — keeping a live image fresh
 

@@ -44,6 +44,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
     assert result == ("sandbox-old", "sandbox-new")
     create.assert_awaited_once_with(
         thread_id=thread_id,
+        github_proxy_repositories=None,
         workspace_slug=None,
         source="workspace",
         owner_login="octocat",
@@ -84,7 +85,11 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
 
     assert result == ("sandbox-old", "sandbox-new")
     create.assert_awaited_once_with(
-        thread_id=thread_id, workspace_slug="langchainplus", source="base", owner_login=None
+        thread_id=thread_id,
+        github_proxy_repositories=None,
+        workspace_slug="langchainplus",
+        source="base",
+        owner_login=None,
     )
     SANDBOX_BACKENDS.clear()
 

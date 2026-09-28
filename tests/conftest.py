@@ -24,6 +24,10 @@ from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES
 
+# What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
+os.environ.setdefault("REDIS_URI", "fake")
+os.environ.setdefault("DATABASE_URI", ":memory:")
+
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
 
@@ -251,10 +255,19 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
-    ttl_cache.clear()
+    """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
+    from langgraph_api import cache
+    from langgraph_api.feature_flags import IS_POSTGRES_OR_GRPC_BACKEND
+
+    def clear() -> None:
+        ttl_cache.clear()
+        # The postgres edition caches over gRPC and has no in-process store to clear.
+        if not IS_POSTGRES_OR_GRPC_BACKEND:
+            cache._CACHE.clear()
+
+    clear()
     yield
-    ttl_cache.clear()
+    clear()
 
 
 @pytest.fixture(autouse=True)
