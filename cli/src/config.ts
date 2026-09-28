@@ -2,6 +2,12 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
+import {
+  DEFAULT_DEVELOPMENT_BACKEND_URL,
+  DESKTOP_CONFIG_FILE,
+  DEVELOPMENT_USER_DATA_DIRECTORY,
+  PACKAGED_USER_DATA_DIRECTORY,
+} from "../../desktop/src/user-data.ts"
 import { normalizeBackend } from "./api.ts"
 import { resolveCredential, type Credential } from "./credentials.ts"
 import { errorCode, isRecord, parseJson, stringAt } from "./json.ts"
@@ -25,9 +31,6 @@ function bridgesFile(): string {
 
 const DIR_MODE = 0o700
 const FILE_MODE = 0o600
-
-/** The backend the desktop app falls back to when nothing names one. */
-const DEVELOPMENT_BACKEND_URL = "http://localhost:2024"
 
 export interface CliConfig {
   backend: string
@@ -69,7 +72,7 @@ async function writePrivate(path: string, value: unknown): Promise<void> {
 /** Where the desktop app keeps the backend URL it was pointed at. */
 function desktopConfigPaths(): string[] {
   const base = home()
-  const names = ["Open SWE", "Open SWE Development"]
+  const names = [PACKAGED_USER_DATA_DIRECTORY, DEVELOPMENT_USER_DATA_DIRECTORY]
   const roots =
     platform() === "darwin"
       ? [join(base, "Library", "Application Support")]
@@ -77,7 +80,7 @@ function desktopConfigPaths(): string[] {
         ? [join(base, "AppData", "Roaming")]
         : [process.env["XDG_CONFIG_HOME"] || join(base, ".config")]
   return roots.flatMap((root) =>
-    names.map((name) => join(root, name, "desktop-config.json"))
+    names.map((name) => join(root, name, DESKTOP_CONFIG_FILE))
   )
 }
 
@@ -115,7 +118,7 @@ export async function readBackend(): Promise<string> {
     env["OPEN_SWE_DESKTOP_URL"] ||
     (await storedConfig()).backend ||
     (await desktopBackend()) ||
-    DEVELOPMENT_BACKEND_URL
+    DEFAULT_DEVELOPMENT_BACKEND_URL
   )
 }
 

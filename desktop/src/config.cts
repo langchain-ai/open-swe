@@ -6,8 +6,11 @@ const APP_NAME = "Open SWE";
 const DEVELOPMENT_APP_NAME = "Open SWE Development";
 const APP_USER_MODEL_ID = "com.langchain.openswe";
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
-const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";
-const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024";
+const {
+  DEFAULT_DEVELOPMENT_BACKEND_URL,
+  DEVELOPMENT_USER_DATA_DIRECTORY,
+  PACKAGED_USER_DATA_DIRECTORY,
+} = require("./user-data.js");
 const ALLOWED_PERMISSIONS = new Set([
   "clipboard-sanitized-write",
   "notifications",
@@ -25,9 +28,12 @@ function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
     appUserModelId: isDevelopment
       ? DEVELOPMENT_APP_USER_MODEL_ID
       : APP_USER_MODEL_ID,
-    userDataPath: isDevelopment
-      ? path.join(appDataPath, DEVELOPMENT_USER_DATA_DIRECTORY)
-      : null,
+    userDataPath: path.join(
+      appDataPath,
+      isDevelopment
+        ? DEVELOPMENT_USER_DATA_DIRECTORY
+        : PACKAGED_USER_DATA_DIRECTORY,
+    ),
   };
 }
 

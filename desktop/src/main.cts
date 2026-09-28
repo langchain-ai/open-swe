@@ -84,6 +84,7 @@ const {
   staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
+const { DESKTOP_CONFIG_FILE } = require("./user-data.js");
 
 const appRuntime = resolveAppRuntime({
   argv: process.argv,
@@ -91,11 +92,9 @@ const appRuntime = resolveAppRuntime({
   appDataPath: app.getPath("appData"),
 });
 const isDevelopment = appRuntime.isDevelopment;
-if (appRuntime.userDataPath) {
-  fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
-  app.setName(appRuntime.name);
-  app.setPath("userData", appRuntime.userDataPath);
-}
+fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
+if (isDevelopment) app.setName(appRuntime.name);
+app.setPath("userData", appRuntime.userDataPath);
 app.setAppUserModelId(appRuntime.appUserModelId);
 
 protocol.registerSchemesAsPrivileged([
@@ -882,7 +881,7 @@ function configureDesktopIpc() {
 }
 
 function configPath() {
-  return path.join(app.getPath("userData"), "desktop-config.json");
+  return path.join(app.getPath("userData"), DESKTOP_CONFIG_FILE);
 }
 
 function readStoredBackendUrl() {

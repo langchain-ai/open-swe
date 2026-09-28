@@ -42,7 +42,12 @@ describe("readBackend", () => {
     delete process.env["OPEN_SWE_BACKEND_URL"]
     delete process.env["OPEN_SWE_DESKTOP_URL"]
     const home = await mkdtemp(join(tmpdir(), "open-swe-home-"))
-    const support = join(home, "Library", "Application Support", "Open SWE")
+    const support = join(
+      home,
+      "Library",
+      "Application Support",
+      "open-swe-desktop"
+    )
     await mkdir(support, { recursive: true })
     await writeFile(
       join(support, "desktop-config.json"),
