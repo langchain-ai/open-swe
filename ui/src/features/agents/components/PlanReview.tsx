@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
-import { addPlanComment, deletePlanComment, getPlanComments } from "@/lib/plan"
+import {
+  addPlanComment,
+  deletePlanComment,
+  getPlanComments,
+  submitPlanComments,
+} from "@/lib/plan"
 import { reportError } from "@/lib/errorReporting"
 import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
@@ -42,6 +47,8 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [anchor, setAnchor] = useState<PlanTextAnchor | null>(null)
   const [draft, setDraft] = useState("")
   const [posting, setPosting] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const [focusComment, setFocusComment] = useState<{
     id: string
     key: number
@@ -83,6 +90,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     try {
       const created = await addPlanComment(plan.threadId, body, anchor)
       setComments((current) => [...current, created])
+      setSubmitted(false)
       setAnchor(null)
       setDraft("")
       setFocusComment({ id: created.id, key: Date.now() })
@@ -102,12 +110,26 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     [draft, posting, submitComment]
   )
 
+  const submitComments = useCallback(async () => {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await submitPlanComments(plan.threadId)
+      setSubmitted(true)
+    } catch (submitError) {
+      setError((submitError as Error).message)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [plan.threadId])
+
   const removeComment = useCallback(
     async (id: string) => {
       commentMutation.current += 1
       try {
         await deletePlanComment(plan.threadId, id)
         setComments((current) => current.filter((comment) => comment.id !== id))
+        setSubmitted(false)
       } catch (deleteError) {
         reportError({ title: "Couldn't delete comment", error: deleteError })
       }
@@ -290,6 +312,23 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       </div>
                     )}
                   </div>
+                  {comments.some(
+                    (comment) => comment.author_login === plan.user.login
+                  ) && (
+                    <div className="border-t border-border p-3">
+                      <Button
+                        className="w-full"
+                        disabled={submitting || posting || submitted}
+                        onClick={() => void submitComments()}
+                      >
+                        {submitting
+                          ? "Submitting…"
+                          : submitted
+                            ? "Comments submitted"
+                            : "Submit comments"}
+                      </Button>
+                    </div>
+                  )}
                 </aside>
               </div>
             ) : (

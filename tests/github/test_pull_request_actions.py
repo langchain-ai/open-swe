@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_actions as actions
 from agent.github import pull_request_dashboard_routes as pr_routes
+from agent.github import squash_message
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ def github(monkeypatch):
 
     def _install(request: AsyncMock) -> AsyncMock:
         monkeypatch.setattr(actions, "github_request", request)
+        monkeypatch.setattr(squash_message, "github_request", request)
         return request
 
     return _install
@@ -53,6 +55,71 @@ async def test_merge_requires_github_confirmation(github, status, merged):
         "json": {"sha": "a" * 40, "merge_method": "squash"},
         "max_retries": 0,
     }
+
+
+async def test_squash_merge_sends_the_description_and_commits(github):
+    commit = {
+        "commit": {"message": "fix: spelling", "author": {"name": "Ada", "email": "ada@x.com"}},
+        "author": {"login": "ada"},
+        "parents": [{"sha": "b" * 40}],
+    }
+    payloads = {
+        "https://api.github.com/repos/acme/app/pulls/1": {"title": "fix: typo", "body": "Fix."},
+        "https://api.github.com/repos/acme/app/pulls/1/commits": [commit],
+        "https://api.github.com/user": {"login": "octocat"},
+        "https://api.github.com/repos/acme/app/pulls/1/merge": {"merged": True},
+    }
+    request = github(AsyncMock(side_effect=lambda _, __, url, **___: response(payloads[url])))
+    action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
+
+    await actions.act_on_pull_request("acme", "app", 1, action, "user-token")
+
+    assert request.await_args.kwargs["json"] == {
+        "sha": "a" * 40,
+        "merge_method": "squash",
+        "commit_message": "Fix.\n\n* fix: spelling\n\nCo-authored-by: Ada <ada@x.com>",
+    }
+
+
+@pytest.mark.parametrize("status,state", [(200, "closed"), (200, "open"), (403, "open")])
+async def test_close_requires_github_confirmation(github, status, state):
+    request = github(
+        AsyncMock(return_value=response({"state": state, "message": "Not permitted"}, status))
+    )
+    action = actions.CloseAction(action="close")
+    if status == 200 and state == "closed":
+        result = await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        assert result == actions.PullRequestActionResult(action="close", done=True)
+    else:
+        with pytest.raises(HTTPException, match="Not permitted"):
+            await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+    assert request.await_args.args[1:] == ("PATCH", "https://api.github.com/repos/acme/app/pulls/7")
+    assert request.await_args.kwargs == {"json": {"state": "closed"}, "max_retries": 0}
+
+
+async def test_a_close_reason_is_posted_as_a_comment_before_closing(github):
+    request = github(
+        AsyncMock(
+            side_effect=[
+                response({"comments": 0}),
+                response({"id": 1}, 201),
+                response({"state": "closed"}),
+            ]
+        )
+    )
+    action = actions.CloseAction(action="close", reason="  Superseded by #8  ")
+
+    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+
+    calls = [(call.args[1:], call.kwargs.get("json")) for call in request.await_args_list]
+    assert calls == [
+        (("GET", "https://api.github.com/repos/acme/app/issues/7"), None),
+        (
+            ("POST", "https://api.github.com/repos/acme/app/issues/7/comments"),
+            {"body": "Superseded by #8"},
+        ),
+        (("PATCH", "https://api.github.com/repos/acme/app/pulls/7"), {"state": "closed"}),
+    ]
 
 
 async def test_retrying_a_close_does_not_post_the_same_reason_twice(github):

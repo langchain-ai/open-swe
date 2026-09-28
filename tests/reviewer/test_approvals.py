@@ -1,17 +1,74 @@
-"""Approval criteria come from APPROVALS.md at the base commit; the repository's mode gates them."""
+"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
 
 from unittest.mock import AsyncMock, patch
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 
 from agent.review.approvals import (
+    APPROVALS_MAX_CHARS,
     approval_mode_for,
+    approval_policy_for_review,
+    fetch_approvals_md,
 )
 from agent.review.routes import api_delete_review_style, api_update_review_style_prompt
 from agent.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from tests.conftest import FakeStore
+
+
+def _github(status: int, text: str = "") -> AsyncMock:
+    return AsyncMock(return_value=httpx2.Response(status, text=text))
+
+
+async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
+    request = _github(200, "  Docs-only changes may be approved.\n")
+    with patch("agent.review.approvals.github_request", request):
+        policy = await fetch_approvals_md("o", "r", "a" * 40, token="t")
+    assert policy == "Docs-only changes may be approved."
+    _client, method, url = request.await_args.args
+    assert (method, url) == (
+        "GET",
+        "https://api.github.com/repos/o/r/contents/.open-swe/APPROVALS.md",
+    )
+    assert request.await_args.kwargs["params"] == {"ref": "a" * 40}
+
+
+@pytest.mark.parametrize(
+    ("status", "text"),
+    [(404, ""), (200, "   \n"), (200, "x" * (APPROVALS_MAX_CHARS + 1)), (500, "boom")],
+    ids=["missing", "empty", "oversized", "error"],
+)
+async def test_fetch_yields_no_policy_for_unusable_files(status: int, text: str) -> None:
+    with patch("agent.review.approvals.github_request", _github(status, text)):
+        assert await fetch_approvals_md("o", "r", "main", token="t") is None
+
+
+async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
+    failing = AsyncMock(side_effect=httpx2.ConnectError("down"))
+    with patch("agent.review.approvals.github_request", failing):
+        assert await fetch_approvals_md("o", "r", "main", token="t") is None
+
+
+async def test_unset_mode_is_dry_run_and_off_skips_the_file(fake_store: FakeStore) -> None:
+    assert await approval_mode_for("o", "r") == "dry_run"
+    fetch = AsyncMock(return_value="Docs only")
+    with patch("agent.review.approvals.fetch_approvals_md", fetch):
+        assert await approval_policy_for_review("o", "r", "b" * 40, token="t") == "Docs only"
+        fetch.assert_awaited_once_with("o", "r", "b" * 40, token="t")
+
+        await REVIEW_STYLES.update_prompts("o/r", ReviewStylePromptUpdate(approval_mode="off"))
+        fetch.reset_mock()
+        assert await approval_policy_for_review("o", "r", "b" * 40, token="t") is None
+        fetch.assert_not_awaited()
+
+
+async def test_review_without_a_base_commit_has_no_policy(fake_store: FakeStore) -> None:
+    fetch = AsyncMock(return_value="Docs only")
+    with patch("agent.review.approvals.fetch_approvals_md", fetch):
+        assert await approval_policy_for_review("o", "r", "", token="t") is None
+    fetch.assert_not_awaited()
 
 
 async def test_failed_mode_lookup_never_approves() -> None:

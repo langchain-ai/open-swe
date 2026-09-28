@@ -6,6 +6,7 @@ import pytest
 
 from agent.github import pull_requests
 from agent.github.pull_requests import PullRequest
+from agent.github.repositories import Repository
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -107,6 +108,63 @@ async def test_backfill_promotes_the_oldest_thread_and_skips_reviewer_threads(
     stored = await PullRequest.get("lc", "repo", 7)
     assert stored is not None
     assert stored.primary_thread_id == "older"
+
+
+async def test_backfill_runs_once_and_later_reads_use_the_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    url = "https://github.com/lc/repo/pull/7"
+    client = _client_returning([{"thread_id": "t1", "metadata": {"pr_url": url}}])
+    monkeypatch.setattr(pull_requests, "langgraph_client", lambda: client)
+
+    await (await PullRequest.load("lc", "repo", 7)).linked_threads()
+    search_calls = client.threads.search.await_count
+    await (await PullRequest.load("lc", "repo", 7)).linked_threads()
+
+    assert client.threads.search.await_count == search_calls
+
+
+async def test_entity_rows_get_synthetic_uuid7_ids_that_survive_resaves() -> None:
+    saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11)
+    resaved = await PullRequest(owner="lc", repo="repo", number=7, title="Retitled").save()
+    repository = await Repository.get("lc/repo")
+
+    assert repository is not None
+    assert {repository.id.version, saved.id.version, saved.reviews[0].id.version} == {7}
+    assert resaved.id == saved.id
+
+
+async def test_relinking_a_review_updates_the_row_with_the_same_github_id() -> None:
+    first = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=3)
+    saved = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, finding_count=1)
+
+    assert [review.github_review_id for review in saved.reviews] == [11]
+    assert saved.reviews[0].finding_count == 1
+    assert saved.reviews[0].id == first.reviews[0].id
+    assert saved.reviews[0].url == "https://github.com/lc/repo/pull/7#pullrequestreview-11"
+
+
+async def test_completion_without_publication_is_idempotent_per_thread_and_head() -> None:
+    await _pr().link_review(reviewer_thread_id="rev", github_review_id=11, head_sha="oldsha")
+    for head_sha in ("newsha", "newsha", "nextsha"):
+        await _pr().link_review(reviewer_thread_id="rev", head_sha=head_sha)
+    await _pr().link_review(reviewer_thread_id="other", head_sha="newsha")
+
+    stored = await PullRequest.get("lc", "repo", 7)
+    assert stored is not None
+    assert {
+        (review.reviewer_thread_id, review.head_sha, review.github_review_id)
+        for review in stored.reviews
+    } == {
+        ("rev", "oldsha", 11),
+        ("rev", "newsha", None),
+        ("rev", "nextsha", None),
+        ("other", "newsha", None),
+    }
+    assert len(stored.reviews) == 4
+    assert all(
+        review.url == stored.url for review in stored.reviews if review.github_review_id is None
+    )
 
 
 async def test_backfill_still_runs_after_a_newer_thread_was_linked_first(

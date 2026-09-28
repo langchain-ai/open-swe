@@ -2,10 +2,17 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
+from sqlalchemy import select
 
+from agent.database import postgres
+from agent.github.repositories import Repository
+from agent.store import now_iso
 from agent.workspaces import store as env_store
+from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 from agent.workspaces.store import (
     WORKSPACES,
+    RefreshStep,
     Workspace,
     WorkspaceCreate,
     WorkspaceUpdate,
@@ -206,6 +213,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "name": "Default",
             "repos": [],
             "slack_channel_ids": [],
+            "kitchen_channel_ids": [],
             "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
@@ -257,6 +265,123 @@ async def test_publish_writes_definition_and_image_together() -> None:
 # --- rows ---
 
 
+def _fully_populated(now: str) -> Workspace:
+    """A record with nothing left at its default, so a dropped field shows up."""
+    return Workspace(
+        slug="base",
+        name="Base",
+        prompt="build with make",
+        setup_script="make setup",
+        update_script="git pull",
+        base_snapshot_id="snap-base",
+        repos=["acme/api"],
+        slack_channel_ids=["C0API"],
+        kitchen_channel_ids=["C0API"],
+        mem_bytes=8 * 1024**3,
+        vcpus=4,
+        fs_capacity_bytes=128 * 1024**3,
+        create_params={"_internal_runtime": "v2", "proxy_config": {"rules": [{"name": "api"}]}},
+        snapshot_id="snap-1",
+        snapshot_name="acme-monorepo",
+        snapshot_status="ready",
+        status_message="captured",
+        snapshot_tag="latest",
+        source_sandbox_id="sb-1",
+        last_captured_at=now,
+        refresh_status="success",
+        refresh_kind="update",
+        refresh_run_id="run-1",
+        refresh_started_at=now,
+        refresh_finished_at=now,
+        refresh_log="+ make setup",
+        refresh_error="a previous attempt timed out",
+        refresh_cron_id="cron-1",
+        refresh_steps=[
+            RefreshStep(
+                label="setup",
+                status="success",
+                started_at=now,
+                finished_at=now,
+                exit_code=0,
+                log_path="/open-swe/environment/logs/setup.log",
+            )
+        ],
+        refresh_sandbox_id="sb-builder",
+        created_by="ramon",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_every_field_of_a_record_round_trips_through_its_row() -> None:
+    record = _fully_populated(now_iso())
+    defaults = Workspace(slug="base")
+    assert [
+        field
+        for field in Workspace.model_fields
+        if field != "slug" and getattr(record, field) == getattr(defaults, field)
+    ] == []
+
+    await WORKSPACES.put(record.slug, record)
+
+    assert await WORKSPACES.get("base") == record
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_owner_of_repo_matches_however_the_repository_is_written() -> None:
+    """The lookup goes through ``repository.key``, which GitHub casing cannot change."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["Acme/API"]), "alice")
+
+    assert await WORKSPACES.owner_of_repo("acme/api") == "core"
+    assert await WORKSPACES.owner_of_repo("ACME/API") == "core"
+    assert await WORKSPACES.owner_of_repo("https://github.com/Acme/Api.git") == "core"
+    assert await WORKSPACES.owner_of_repo("acme/other") is None
+    # Routing asks about whatever an inbound event carried, so an unparseable
+    # name reads as unowned rather than raising.
+    assert await WORKSPACES.owner_of_repo("acme") is None
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_saving_a_workspace_is_not_activity_on_its_repositories() -> None:
+    """``repository.last_activity_at`` says when work happened, not when settings changed."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
+
+    async def last_activity() -> object:
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(Repository.last_activity_at).where(Repository.key == "acme/api")
+            )
+
+    before = await last_activity()
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="build with make"))
+
+    assert await last_activity() == before
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_write_returns_the_repository_casing_it_stored() -> None:
+    """``put`` answers with the stored view, so it agrees with ``get``."""
+    async with postgres.session() as session:
+        await Repository(full_name="acme/api").save(session)
+
+    written = await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["ACME/API"]), "alice")
+
+    assert written.repos == ["acme/api"]
+    assert await WORKSPACES.get("core") == written
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_owner_of_slack_channel_normalizes_the_channel_id() -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], slack_channel_ids=["C0API"]), "alice"
+    )
+
+    assert await WORKSPACES.owner_of_slack_channel(" c0api ") == "core"
+    assert await WORKSPACES.owner_of_slack_channel("C0OTHER") is None
+    assert await WORKSPACES.owner_of_slack_channel("") is None
+
+
 @pytest.mark.usefixtures("registry_db")
 async def test_an_update_releases_the_bindings_it_drops() -> None:
     await WORKSPACES.create(
@@ -280,6 +405,50 @@ async def test_an_update_releases_the_bindings_it_drops() -> None:
     )
     assert released.repos == ["acme/api"]
     assert await WORKSPACES.owner_of_slack_channel("C0API") == "oss"
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_kitchen_mode_is_limited_to_bound_channels() -> None:
+    with pytest.raises(ValidationError, match="bound to this workspace"):
+        WorkspaceCreate(name="Core", repos=["acme/api"], kitchen_channel_ids=["C0API"])
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="Core",
+            repos=["acme/api"],
+            slack_channel_ids=["C0API", "C0WEB"],
+            kitchen_channel_ids=["c0api"],
+        ),
+        "alice",
+    )
+    assert await WORKSPACES.is_kitchen_channel(" c0api ")
+    assert not await WORKSPACES.is_kitchen_channel("C0WEB")
+
+    with pytest.raises(ValueError, match="bound to this workspace"):
+        await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0OTHER"]))
+
+    moved = await WORKSPACES.apply_update("core", WorkspaceUpdate(kitchen_channel_ids=["C0WEB"]))
+    assert moved.kitchen_channel_ids == ["C0WEB"]
+    assert not await WORKSPACES.is_kitchen_channel("C0API")
+
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(slack_channel_ids=["C0API"]))
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.kitchen_channel_ids == []
+    assert not await WORKSPACES.is_kitchen_channel("C0WEB")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_a_binding_written_outside_the_store_is_respected() -> None:
+    """The rows are the authority, not a listing a caller built earlier."""
+    async with postgres.session() as session:
+        repository = await Repository(full_name="acme/api").save(session)
+        workspace = WorkspaceRow(slug="core", name="Core")
+        session.add(workspace)
+        await session.flush()
+        session.add(WorkspaceRepositoryRow(repository_id=repository.id, workspace_id=workspace.id))
+
+    with pytest.raises(ValueError, match="acme/api already belongs to workspace core"):
+        await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["ACME/API"]), "alice")
 
 
 @pytest.mark.usefixtures("registry_db")

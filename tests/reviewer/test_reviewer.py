@@ -11,6 +11,20 @@ from agent import reviewer
 pytestmark = pytest.mark.usefixtures("fake_store")
 
 
+def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
+    prompt = reviewer._reviewer_system_prompt(
+        "/workspace/repo",
+        repo_owner="acme",
+        repo_name="repo",
+        pr_number=42,
+        org_guidelines="Org rule text.",
+        repo_style_prompt="Repo rule text.",
+    )
+    assert prompt.index("Organization-wide review guidelines") < prompt.index(
+        "Repository-specific review style"
+    )
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
