@@ -113,6 +113,43 @@ async def test_malformed_selection_is_ignored(saved_feedback: AsyncMock, value: 
     saved_feedback.assert_not_awaited()
 
 
+async def test_down_opens_note_before_background_rating(
+    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    modal = AsyncMock(return_value=True)
+    monkeypatch.setattr(run_feedback, "open_slack_modal", modal)
+    payload = interaction("down").model_copy(update={"trigger_id": "trigger-1"})
+    await run_feedback.open_run_feedback_note(payload, payload.actions[0])
+    assert modal.await_args.args[0] == "trigger-1"
+    assert modal.await_args.args[1]["callback_id"] == run_feedback.NOTE_ACTION
+    await run_feedback.process_feedback(payload, payload.actions[0])
+    assert saved_feedback.await_args.kwargs["score"] == 0.0
+
+
+async def test_note_submission_updates_negative_feedback(
+    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = {
+        "type": "view_submission",
+        "user": {"id": "U1"},
+        "view": {
+            "callback_id": run_feedback.NOTE_ACTION,
+            "private_metadata": json.dumps(
+                {"run_id": "run-1", "channel_id": "C1", "message_ts": "2.0"}
+            ),
+            "state": {"values": {run_feedback.NOTE_BLOCK: {"comment": {"value": "  Fix tests  "}}}},
+        },
+    }
+    assert run_feedback.is_run_feedback_note(payload)
+    assert await run_feedback.submit_run_feedback_note(payload) == {}
+    assert saved_feedback.await_args.kwargs["score"] == 0.0
+    assert saved_feedback.await_args.kwargs["comment"] == "Fix tests"
+    payload["user"]["id"] = "U2"
+    saved_feedback.reset_mock()
+    assert await run_feedback.submit_run_feedback_note(payload) == {}
+    saved_feedback.assert_not_awaited()
+
+
 async def test_failed_export_is_logged_without_recording_submission(
     saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
