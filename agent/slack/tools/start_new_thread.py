@@ -12,6 +12,7 @@ from agent.run_config import RunConfig
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    append_slack_web_link_footer,
     bind_slack_thread_id,
     get_active_slack_thread,
     get_slack_permalink,
@@ -274,6 +275,7 @@ async def slack_start_new_thread(
         if isinstance(current_thread_ts, str) and current_thread_ts
         else ""
     )
+    thread_id = str(uuid.uuid4())
     requester = cfg.slack_thread.triggering_user_id
     root_parts = (
         _visible_message(clean_title),
@@ -282,7 +284,9 @@ async def slack_start_new_thread(
     )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        " · ".join(part for part in root_parts if part),
+        append_slack_web_link_footer(
+            " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+        ),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -318,7 +322,6 @@ async def slack_start_new_thread(
             "hint": _failure_hint(details_error),
         }
 
-    thread_id = str(uuid.uuid4())
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
         cfg.slack_thread.dump(),
