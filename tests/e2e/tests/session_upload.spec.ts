@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import {
   SAME_ORIGIN_HEADERS,
@@ -107,13 +108,19 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     const { number } = (await seeded.json()) as { number: number };
 
     const upload = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: SAME_ORIGIN_HEADERS,
-      data: {
-        type: "claude",
-        transcript,
-        pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
-        visibility: "private",
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/json",
+        "content-encoding": "gzip",
       },
+      data: gzipSync(
+        JSON.stringify({
+          type: "claude",
+          transcript,
+          pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
+          visibility: "private",
+        }),
+      ),
     });
     expect(upload.ok(), await upload.text()).toBeTruthy();
     threadId = (await upload.json()).id as string;

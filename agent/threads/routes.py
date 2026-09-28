@@ -101,9 +101,10 @@ async def api_list_threads(
 
 @router.post("/threads/uploads")
 async def api_upload_session(
-    body: SessionUploadBody,
+    request: Request,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
+    body = await SessionUploadBody.from_request(request)
     return await upload_session(body, session["sub"], email=session.get("email"))
 
 

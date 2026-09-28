@@ -2,11 +2,13 @@
 
 import logging
 import uuid
+import zlib
 from typing import Any, Literal, Self
 from urllib.parse import quote
 
 import httpx2
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -37,6 +39,7 @@ from agent.utils.thread_participants import (
 logger = logging.getLogger(__name__)
 
 MAX_TRANSCRIPT_CHARS = 32 * 1024 * 1024
+MAX_BODY_BYTES = 2 * MAX_TRANSCRIPT_CHARS
 _PR_LINK_SOURCE = "session_upload"
 _UPLOAD_SENDER: SystemIdentity = {
     "id": "system:session-upload",
@@ -67,6 +70,33 @@ class SessionUploadBody(BaseModel):
         elif self.repo is None or self.branch is None:
             raise ValueError("pass repo and branch, or pr_url")
         return self
+
+    @classmethod
+    async def from_request(cls, request: Request) -> Self:
+        """Clients gzip the body, since Vercel caps a request at 4.5 MB before the backend proxy."""
+        raw = await request.body()
+        encoding = request.headers.get("content-encoding", "").strip().lower()
+        if encoding == "gzip":
+            raw = cls._gunzip(raw)
+        elif encoding not in {"", "identity"}:
+            raise HTTPException(415, "session uploads must be gzip or uncompressed")
+        if len(raw) > MAX_BODY_BYTES:
+            raise HTTPException(413, "session upload is too large")
+        try:
+            return cls.model_validate_json(raw)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors(include_url=False)) from exc
+
+    @staticmethod
+    def _gunzip(raw: bytes) -> bytes:
+        inflater = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)
+        try:
+            inflated = inflater.decompress(raw, MAX_BODY_BYTES + 1)
+        except zlib.error as exc:
+            raise HTTPException(400, "session upload is not valid gzip") from exc
+        if len(inflated) > MAX_BODY_BYTES or inflater.unconsumed_tail:
+            raise HTTPException(413, "session upload is too large")
+        return inflated
 
 
 class _PullRequestRepo(BaseModel):
