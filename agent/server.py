@@ -168,6 +168,7 @@ from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     background_execute,
     background_task,
+    change_working_dir,
     configure_repository,
     create_automation,
     create_sandbox_file_download_url,
@@ -1427,6 +1428,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         web_search,
         background_execute,
         background_task,
+        change_working_dir,
         save_plan,
         save_user_instructions,
         *((save_user_settings,) if personal_settings_run_allowed(cfg) else ()),

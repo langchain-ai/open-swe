@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shlex
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -75,6 +76,19 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._working_directory: str | None = None
+
+    @property
+    def working_directory(self) -> str | None:
+        return self._working_directory
+
+    def change_working_directory(self, directory: str) -> None:
+        self._working_directory = directory
+
+    def _command_in_working_directory(self, command: str) -> str:
+        if self._working_directory is None:
+            return command
+        return f"cd -- {shlex.quote(self._working_directory)} && {command}"
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -276,7 +290,9 @@ class SandboxBackendProxy(BaseSandbox):
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
-        return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
+        return await (await self._aget_backend()).aexecute(
+            self._command_in_working_directory(command), timeout=effective_timeout
+        )
 
     def execute_with_offload(
         self,
@@ -304,10 +320,12 @@ class SandboxBackendProxy(BaseSandbox):
         if offload is None:
             return ExecuteOffloadResult(
                 offloaded=False,
-                response=await self._aplain(backend, command, effective_timeout),
+                response=await self._aplain(
+                    backend, self._command_in_working_directory(command), effective_timeout
+                ),
             )
         return await offload(
-            command,
+            self._command_in_working_directory(command),
             capture_path,
             max_inline_bytes=max_inline_bytes,
             max_capture_bytes=max_capture_bytes,
