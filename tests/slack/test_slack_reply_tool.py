@@ -190,7 +190,7 @@ async def test_slack_reply_keeps_code_highlighted_over_native_limit(
         "elements": [{"type": "text", "text": "-old\n+new"}],
         "language": "diff",
     }
-    assert blocks[0]["text"]["text"].startswith("*Heading*\n")
+    assert blocks[0]["text"]["text"] == "*Heading*"
     assert blocks[-1]["text"]["text"] == "after"
 
 

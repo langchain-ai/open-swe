@@ -1627,66 +1627,6 @@ async def slack_get_permalink(channel: str = "", message_ts: str = "") -> JSONRe
     return _ok({"permalink": f"{BASE_URL}/mock/slack"})
 
 
-# Slack's three-step external upload. Without it the expedited-review card's
-# diff image silently fails to upload and the card degrades to its text
-# fallback, so the suite would test a rendering nobody sees.
-SLACK_FILES: dict[str, bytes] = {}
-SLACK_FILES_COMPLETED: set[str] = set()
-
-
-@app.api_route("/fake-slack/files.getUploadURLExternal", methods=["GET", "POST"])
-async def slack_get_upload_url(filename: str = "") -> JSONResponse:
-    file_id = f"F{uuid.uuid4().hex[:10].upper()}"
-    SLACK_FILES[file_id] = b""
-    return _ok({"upload_url": f"{BASE_URL}/fake-slack/upload/{file_id}", "file_id": file_id})
-
-
-@app.post("/fake-slack/upload/{file_id}")
-async def slack_upload_bytes(file_id: str, request: Request) -> JSONResponse:
-    SLACK_FILES[file_id] = await request.body()
-    return JSONResponse({"ok": True})
-
-
-@app.post("/fake-slack/files.completeUploadExternal")
-async def slack_complete_upload(request: Request) -> JSONResponse:
-    # The SDK sends this one as query parameters, with ``files`` as a JSON string.
-    raw: object = request.query_params.get("files")
-    if raw is None:
-        try:
-            body: object = await request.json()
-        except ValueError:
-            body = dict(await request.form())
-        raw = body.get("files") if isinstance(body, dict) else None
-    if isinstance(raw, str):
-        raw = json.loads(raw)
-    items = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
-    SLACK_FILES_COMPLETED.update(str(item.get("id")) for item in items)
-    return _ok({"files": [{"id": item.get("id"), "title": item.get("title")} for item in items]})
-
-
-@app.api_route("/fake-slack/files.info", methods=["GET", "POST"])
-async def slack_file_info(request: Request) -> JSONResponse:
-    """Report a completed upload as processed, which is when Slack lets a block cite it."""
-    file_id = request.query_params.get("file") or str((await request.form()).get("file") or "")
-    if file_id not in SLACK_FILES:
-        return JSONResponse({"ok": False, "error": "file_not_found"})
-    ready = file_id in SLACK_FILES_COMPLETED and bool(SLACK_FILES[file_id])
-    return _ok({"file": {"id": file_id, "mimetype": "image/png" if ready else ""}})
-
-
-@app.get("/control/slack-files")
-async def control_slack_files() -> JSONResponse:
-    return JSONResponse([{"id": k, "bytes": len(v)} for k, v in SLACK_FILES.items()])
-
-
-@app.get("/mock/slack/files/{file_id}")
-async def mock_slack_file(file_id: str) -> Response:
-    content = SLACK_FILES.get(file_id)
-    if not content:
-        return Response(status_code=404)
-    return Response(content, media_type="image/png")
-
-
 # A dashboard build under ui/.output puts the UI catch-all on the app before the
 # mock pages above were registered; keep it behind them.
 keep_dashboard_ui_last(app)
