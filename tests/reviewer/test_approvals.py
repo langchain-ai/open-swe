@@ -1,4 +1,4 @@
-"""Approval criteria come from APPROVALS.md at the base commit; the repository's mode gates them."""
+"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -28,7 +28,10 @@ async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
         policy = await fetch_approvals_md("o", "r", "a" * 40, token="t")
     assert policy == "Docs-only changes may be approved."
     _client, method, url = request.await_args.args
-    assert (method, url) == ("GET", "https://api.github.com/repos/o/r/contents/APPROVALS.md")
+    assert (method, url) == (
+        "GET",
+        "https://api.github.com/repos/o/r/contents/.open-swe/APPROVALS.md",
+    )
     assert request.await_args.kwargs["params"] == {"ref": "a" * 40}
 
 
