@@ -5,24 +5,22 @@ import json
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
+    CODE_TEXT_MAX_CHARS,
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
     actions,
     button,
-    code_block,
+    code,
     context,
     divider,
     escape,
-    image,
     section,
 )
 
 BUTTON_TYPE = "expedited_review"
 
 _MAX_FILE_SECTIONS = 20
-# Slack refuses a section over 3000 characters, and refusing means no card at all.
-_MAX_PATCH_LINES = 60
 _OVERFLOW_NOTE_RESERVE = 64
 
 
@@ -46,26 +44,28 @@ def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]
     ]
 
 
-def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
+def _diff_sections(files: list[ChangedFile]) -> list[Block]:
     shown, tests = ChangedFile.split(files)
-    trailer = [*_overflow_note(shown), *_test_diffstat(tests)]
-    if diff_image_id:
-        names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
-        return [image(diff_image_id, f"Diff of {names}"), *trailer]
     sections: list[Block] = []
     for file in shown[:_MAX_FILE_SECTIONS]:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
-        sections.append(section(code_block(_clip(file.patch or ""))))
-    return [*sections, *trailer]
+        sections.append(code(_clip(file.patch or ""), language="diff"))
+    return [*sections, *_overflow_note(shown), *_test_diffstat(tests)]
 
 
 def _clip(patch: str) -> str:
-    lines = patch.splitlines()
-    if len(lines) <= _MAX_PATCH_LINES:
+    """``patch`` cut on a line boundary to fit one code block."""
+    if len(patch) <= CODE_TEXT_MAX_CHARS:
         return patch
-    return "\n".join(
-        [*lines[:_MAX_PATCH_LINES], f"… {len(lines) - _MAX_PATCH_LINES} more lines on GitHub"]
-    )
+    lines = patch.splitlines()
+    budget = CODE_TEXT_MAX_CHARS - _OVERFLOW_NOTE_RESERVE
+    kept: list[str] = []
+    for line in lines:
+        budget -= len(line) + 1
+        if budget < 0:
+            break
+        kept.append(line)
+    return "\n".join([*kept, f"… {len(lines) - len(kept)} more lines on GitHub"])
 
 
 def _overflow_note(files: list[ChangedFile]) -> list[Block]:
@@ -129,13 +129,11 @@ def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
     )
 
 
-def _voting_diff(
-    approval: ExpeditedApproval, files: list[ChangedFile], diff_image_id: str | None
-) -> list[Block]:
+def _voting_diff(approval: ExpeditedApproval, files: list[ChangedFile]) -> list[Block]:
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
         return []
-    return [*_diff_sections(files, diff_image_id), divider()]
+    return [*_diff_sections(files), divider()]
 
 
 def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
@@ -159,7 +157,6 @@ def open_card(
     title: str,
     author: str,
     files: list[ChangedFile],
-    diff_image_id: str | None = None,
     channel: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; diff and buttons go once it is approved.
@@ -171,7 +168,7 @@ def open_card(
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
-        *_voting_diff(approval, files, diff_image_id),
+        *_voting_diff(approval, files),
         *_status(approval, author, channel),
     ]
     text = f"Expedited review requested for {pr.url}"
@@ -185,7 +182,6 @@ def closed_card(
     author: str,
     files: list[ChangedFile],
     outcome: str,
-    diff_image_id: str | None = None,
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for a card whose vote is over; ``outcome`` is our own mrkdwn.
 
@@ -200,7 +196,7 @@ def closed_card(
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
-        *_voting_diff(approval, files, diff_image_id),
+        *_voting_diff(approval, files),
         section(f"*{outcome}*"),
         context(_vote_summary(approval, author)),
     ]

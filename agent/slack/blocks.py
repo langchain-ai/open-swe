@@ -17,6 +17,8 @@ from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 SECTION_TEXT_MAX_CHARS = 3000
+# Slack documents no rich-text limit; 4.5k characters is the largest block verified to render.
+CODE_TEXT_MAX_CHARS = 4000
 BUTTON_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
@@ -49,14 +51,20 @@ class DividerBlock(TypedDict):
     type: Literal["divider"]
 
 
-class SlackFileRef(TypedDict):
-    id: str
+class RichTextText(TypedDict):
+    type: Literal["text"]
+    text: str
 
 
-class ImageBlock(TypedDict):
-    type: Literal["image"]
-    slack_file: SlackFileRef
-    alt_text: str
+class RichTextPreformatted(TypedDict):
+    type: Literal["rich_text_preformatted"]
+    elements: list[RichTextText]
+    language: NotRequired[str]
+
+
+class RichTextBlock(TypedDict):
+    type: Literal["rich_text"]
+    elements: list[RichTextPreformatted]
 
 
 class ButtonElement(TypedDict):
@@ -110,7 +118,7 @@ type Block = (
     SectionBlock
     | ContextBlock
     | DividerBlock
-    | ImageBlock
+    | RichTextBlock
     | ActionsBlock
     | ContextActionsBlock
     | InputBlock
@@ -143,8 +151,17 @@ def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
 
 
-def image(file_id: str, alt_text: str) -> ImageBlock:
-    return {"type": "image", "slack_file": {"id": file_id}, "alt_text": alt_text}
+def code(body: str, *, language: str | None = None) -> RichTextBlock:
+    """A syntax-highlighted code block; unlike mrkdwn, rich text takes ``body`` literally."""
+    if len(body) > CODE_TEXT_MAX_CHARS:
+        body = body[: CODE_TEXT_MAX_CHARS - 2].rstrip() + "\n…"
+    preformatted: RichTextPreformatted = {
+        "type": "rich_text_preformatted",
+        "elements": [{"type": "text", "text": body}],
+    }
+    if language:
+        preformatted["language"] = language
+    return {"type": "rich_text", "elements": [preformatted]}
 
 
 def divider() -> DividerBlock:
@@ -225,15 +242,6 @@ def modal(
 def escape(value: str) -> str:
     """Escape the three characters Slack treats as markup in text objects."""
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def code_block(body: str, *, limit: int = SECTION_TEXT_MAX_CHARS) -> str:
-    """``body`` fenced for a section, escaped and truncated to fit ``limit``."""
-    fenced = escape(body).replace("```", "` ` `")
-    budget = limit - len("```\n\n```") - 2
-    if len(fenced) > budget:
-        fenced = fenced[:budget].rstrip() + "\n…"
-    return f"```\n{fenced}\n```"
 
 
 def block_payload(blocks: Sequence[Block]) -> list[dict[str, Any]]:
