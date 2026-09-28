@@ -257,7 +257,12 @@ class _DetailClient:
                                     'kind="human">\nFix the race\n</input-message>'
                                 ),
                                 "created_at": "2026-08-20T12:00:00Z",
-                            }
+                            },
+                            {
+                                "type": "ai",
+                                "content": "Done",
+                                "created_at": "2026-08-20T12:00:30Z",
+                            },
                         ]
                     }
                 }
@@ -347,6 +352,12 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
         "sender_id": "github:octocat",
         "timestamp": "2026-08-20T12:00:00Z",
     }
+    assert result["last_assistant_message"] == {
+        "text": "Done",
+        "truncated": False,
+        "sender_id": None,
+        "timestamp": "2026-08-20T12:00:30Z",
+    }
     assert result["cost"] == {
         "status": "available",
         "total_usd": 0.42,
@@ -372,19 +383,61 @@ async def test_get_thread_returns_links_cost_last_message_and_actions(
                 "truncated": False,
                 "sender_id": "github:octocat",
                 "timestamp": "2026-08-20T12:00:00Z",
-            }
+            },
+            {
+                "id": None,
+                "role": "assistant",
+                "text": "Done",
+                "truncated": False,
+                "sender_id": None,
+                "timestamp": "2026-08-20T12:00:30Z",
+            },
         ],
-        "message_count": 1,
-        "returned_count": 1,
+        "message_count": 2,
+        "returned_count": 2,
         "omitted_count": 0,
         "truncated": False,
     }
     assert result["recent_runs"]["runs"] == [result["latest_run"]]
     assert result["plan"]["content"] == "<html></html>"
     assert result["plan"]["comments"] == []
-    assert result["state"]["message_count"] == 1
+    assert result["state"]["message_count"] == 2
     client.runs.list.assert_any_await("thread-1", limit=threads_tool._MAX_RUNS + 1)
     client.runs.list.assert_any_await("thread-1", status="pending", limit=1000)
+
+
+async def test_record_automation_outcome_persists_stable_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
+    monkeypatch.setattr(
+        threads_tool.RunConfig,
+        "from_runtime",
+        classmethod(lambda cls: SimpleNamespace(source="schedule", thread_id="thread-1")),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+
+    result = await threads_tool.record_automation_outcome(
+        "Blocked by CI",
+        ["zeta", "alpha"],
+    )
+
+    assert result == {
+        "success": True,
+        "automation_outcome": {
+            "summary": "Blocked by CI",
+            "blocker_keys": ["alpha", "zeta"],
+        },
+    }
+    client.threads.update.assert_awaited_once_with(
+        thread_id="thread-1",
+        metadata={
+            "automation_outcome": {
+                "summary": "Blocked by CI",
+                "blocker_keys": ["alpha", "zeta"],
+            }
+        },
+    )
 
 
 async def test_get_thread_counts_pending_run_outside_history_window(

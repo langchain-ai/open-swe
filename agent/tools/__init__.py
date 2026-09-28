@@ -35,6 +35,7 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
+    "record_automation_outcome": ".threads",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
@@ -103,6 +104,7 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "record_human_input",
+    "record_automation_outcome",
     "recreate_sandbox",
     "refresh_workspace_start",
     "configure_repository",
@@ -190,7 +192,13 @@ if TYPE_CHECKING:
     from agent.tools.save_user_settings import save_user_settings
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from agent.tools.submit_thread_feedback import submit_thread_feedback
-    from agent.tools.threads import get_thread, list_threads, manage_thread, start_thread
+    from agent.tools.threads import (
+        get_thread,
+        list_threads,
+        manage_thread,
+        record_automation_outcome,
+        start_thread,
+    )
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
     from agent.tools.web_search import web_search

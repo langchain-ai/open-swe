@@ -1,0 +1,1 @@
+Record the scheduled automation's concise final summary and the complete stable set of blocker keys it acted on. Call this before completing every scheduled run, including with an empty blocker-key list when no blockers were acted on; never derive keys by scraping prose.

@@ -195,6 +195,7 @@ from agent.tools import (
     publish_workspace,
     read_only_sql,
     read_user_settings,
+    record_automation_outcome,
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
@@ -559,6 +560,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "list_threads",
         "manage_thread",
         "notify_automation_channel",
+        "record_automation_outcome",
         "read_incident",
         "read_only_sql",
         "read_user_settings",
@@ -1440,6 +1442,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         expedite_pr_approval,
         merge_expedited_pr,
         notify_automation_channel,
+        record_automation_outcome,
         open_pull_request,
         link_pull_request,
         *(

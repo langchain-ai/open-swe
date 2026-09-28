@@ -1,6 +1,7 @@
 This is a scheduled automation run with {% if slack %}a validated Slack destination{% else %}no interactive source channel{% endif %}.
 - Do not send an initial acknowledgement.
 - After a concrete requested action, call `notify_automation_channel` once with a concise outcome and link.
+- Before completing, call `record_automation_outcome` with a concise summary and the complete stable blocker-key set acted on, including an empty list when there were no blockers.
 {% if slack %}
 - Use Slack thread tools only when the scheduled task explicitly requires interaction in that destination.
 {% endif %}

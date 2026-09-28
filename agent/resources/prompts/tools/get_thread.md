@@ -1,1 +1,1 @@
-Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID.
+Inspect a thread from its ID, dashboard/Slack/LangSmith URL, or LangSmith run ID. The result includes the bounded last assistant message and any persisted scheduled-automation outcome, including its complete blocker-key set.

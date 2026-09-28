@@ -43,6 +43,8 @@ _SURFACED_SOURCES: tuple[str, ...] = (
 # PR lifecycle states surfaced to the UI for a thread's associated pull request.
 _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
+_MAX_AUTOMATION_OUTCOME_SUMMARY_CHARS = 4_000
+_MAX_AUTOMATION_BLOCKER_KEY_CHARS = 200
 
 _ThreadSortBy = Literal["created_at", "updated_at"]
 
@@ -79,6 +81,29 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
 def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else DASHBOARD_SOURCE
+
+
+def automation_outcome(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    outcome = metadata.get("automation_outcome")
+    if not isinstance(outcome, Mapping):
+        return None
+    summary = outcome.get("summary")
+    blocker_keys = outcome.get("blocker_keys")
+    if (
+        not isinstance(summary, str)
+        or not summary.strip()
+        or len(summary) > _MAX_AUTOMATION_OUTCOME_SUMMARY_CHARS
+        or not isinstance(blocker_keys, list)
+        or any(
+            not isinstance(key, str)
+            or not key.strip()
+            or len(key) > _MAX_AUTOMATION_BLOCKER_KEY_CHARS
+            for key in blocker_keys
+        )
+        or len(set(blocker_keys)) != len(blocker_keys)
+    ):
+        return None
+    return {"summary": summary, "blocker_keys": blocker_keys}
 
 
 def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
@@ -455,6 +480,8 @@ async def _thread_summary(
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
     }
+    if outcome := automation_outcome(metadata):
+        summary["automationOutcome"] = outcome
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
     pull_requests = [

@@ -19,6 +19,7 @@ from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, m
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
+from agent.run_config import RunConfig
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
@@ -34,7 +35,7 @@ from agent.threads.listing import list_dashboard_threads_page
 from agent.threads.plan_store import get_plan_content, list_plan_comments
 from agent.threads.proxy import proxy_dashboard_thread_commands
 from agent.threads.runs import ThreadMessageBody, start_dashboard_thread
-from agent.threads.summary import thread_is_owner
+from agent.threads.summary import automation_outcome, thread_is_owner
 from agent.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
@@ -383,6 +384,25 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
     for message in reversed(_state_messages(state)):
         kind = _message_kind(message)
         if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
+            continue
+        content = _message_content(message)
+        text = _plain_message_text(content)
+        if not text:
+            continue
+        truncated = len(text) > _MAX_DETAIL_MESSAGE_CHARS
+        return {
+            "text": text[:_MAX_DETAIL_MESSAGE_CHARS],
+            "truncated": truncated,
+            "sender_id": message_sender_id(content),
+            "timestamp": _message_timestamp(message),
+        }
+    return None
+
+
+def _last_assistant_message(state: Any) -> dict[str, Any] | None:
+    for message in reversed(_state_messages(state)):
+        kind = _message_kind(message)
+        if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"ai", "assistant"}:
             continue
         content = _message_content(message)
         text = _plain_message_text(content)
@@ -797,6 +817,8 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
+        "automation_outcome": automation_outcome(metadata),
         "transcript": _transcript(thread_state),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
@@ -816,6 +838,33 @@ async def get_thread(
             approvals=approvals,
         ),
     }
+
+
+async def record_automation_outcome(summary: str, blocker_keys: list[str]) -> dict[str, Any]:
+    """Record the stable outcome of a scheduled automation run."""
+    cfg = RunConfig.from_runtime()
+    if cfg.source != "schedule":
+        return _failure("This tool is only available to scheduled runs")
+    if not cfg.thread_id:
+        return _failure("Missing scheduled thread ID")
+    clean_summary = summary.strip()
+    clean_keys = [key.strip() for key in blocker_keys]
+    if not clean_summary or len(clean_summary) > _MAX_DETAIL_MESSAGE_CHARS:
+        return _failure("Summary must be between 1 and 4000 characters")
+    if any(not key or len(key) > 200 for key in clean_keys):
+        return _failure("Blocker keys must be between 1 and 200 characters")
+    if len(set(clean_keys)) != len(clean_keys):
+        return _failure("Blocker keys must be unique")
+    outcome = {"summary": clean_summary, "blocker_keys": sorted(clean_keys)}
+    try:
+        await langgraph_client().threads.update(
+            thread_id=cfg.thread_id,
+            metadata={"automation_outcome": outcome},
+        )
+    except Exception:
+        logger.exception("Could not record automation outcome", extra={"thread_id": cfg.thread_id})
+        return _failure("Could not record automation outcome")
+    return {"success": True, "automation_outcome": outcome}
 
 
 def _message_args(
