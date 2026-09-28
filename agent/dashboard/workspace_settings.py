@@ -377,7 +377,7 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
-    # Approval criteria moved to each repository's APPROVALS.md and its review style's mode.
+    # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
     "approval_policy",
     "review_auto_approve",
 )

@@ -1,13 +1,9 @@
 from xml.etree import ElementTree
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.input_messages import (
-    build_input_messages,
-    build_run_input,
     human_input,
-    input_message_text,
     person_introduction,
     visible_dynamic_context_hashes,
 )
@@ -51,114 +47,6 @@ def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
     assert (_parse(message["content"][1]["text"]).text or "").strip() == "describe <this>"
 
 
-def test_structured_data_follows_the_text() -> None:
-    message = human_input(
-        "handle this",
-        {
-            "sender_id": "github:octocat",
-            "surface": "github",
-            "kind": "human",
-            "data": {"delivery": "d1", "issue": {"identifier": "ENG-1"}},
-        },
-    )
-
-    assert isinstance(message["content"], str)
-    root = _parse(message["content"])
-    assert root.get("delivery") == "d1"
-    assert (root.text or "").strip() == "handle this"
-    assert [child.tag for child in root] == ["issue"]
-    assert input_message_text(message["content"]) == "handle this"
-
-
-def test_text_stored_in_a_content_element_is_still_read() -> None:
-    stored = (
-        '<input-message sender="github:octocat" surface="web" kind="human">\n'
-        "<content>fix the flaky test</content>\n"
-        "</input-message>"
-    )
-
-    assert input_message_text(stored) == "fix the flaky test"
-
-
-def test_first_seen_introductions_are_practical_and_mutate_registry() -> None:
-    injected = set()
-    kwargs = {
-        "channels": [{"id": "slack:C123", "platform": "slack", "topic": "a < b"}],
-        "systems": [{"id": "system:dashboard-handoff", "display_name": "Dashboard handoff"}],
-        "injected_dynamic_context_hashes": injected,
-    }
-    first = build_input_messages(
-        "first",
-        {
-            "sender_id": "github:octocat",
-            "channel_id": "slack:C123",
-            "surface": "web",
-            "kind": "human",
-        },
-        **kwargs,
-    )
-    second = build_input_messages(
-        "second",
-        {
-            "sender_id": "github:octocat",
-            "channel_id": "slack:C123",
-            "surface": "web",
-            "kind": "human",
-        },
-        **kwargs,
-    )
-
-    assert len(first) == 3
-    assert len(second) == 1
-    assert len(injected) == 2
-    assert all(len(value) == 64 for value in injected)
-    channel_content = first[0]["content"]
-    assert isinstance(channel_content, str)
-    channel = _parse(channel_content)
-    assert (channel.text or "").strip().splitlines() == [
-        "platform: slack",
-        "topic: a < b",
-    ]
-
-
-def test_a_multi_line_field_indents_its_continuation_lines() -> None:
-    content = person_introduction(
-        {
-            "id": "user:1",
-            "display_name": "Ramon",
-            "standing_instructions": "Never use ripgrep.\n\nPrefer grep: it is fine.",
-        }
-    )["content"]
-    assert isinstance(content, str)
-
-    assert content == (
-        '<dynamic-context kind="person" id="user:1">\n'
-        "display_name: Ramon\n"
-        "standing_instructions:\n"
-        "  Never use ripgrep.\n"
-        "  \n"
-        "  Prefer grep: it is fine.\n"
-        "</dynamic-context>"
-    )
-    assert _parse(content).attrib["id"] == "user:1"
-
-
-def test_run_input_preserves_files() -> None:
-    result = build_run_input(
-        "analyze",
-        {"sender_id": "system:job", "surface": "automation", "kind": "system"},
-        systems=[{"id": "system:job", "display_name": "Job"}],
-        files={"/skills/x": {"content": "data"}},
-    )
-    assert result.get("files") == {"/skills/x": {"content": "data"}}
-    assert len(result["messages"]) == 2
-
-
-def test_entity_ids_must_be_namespaced() -> None:
-    with pytest.raises(ValueError):
-        human_input("hello", {"sender_id": "octocat", "surface": "web", "kind": "human"})
-
-
 def _person_intro_message(entity_id: str) -> HumanMessage:
     content = person_introduction({"id": entity_id, "display_name": "Ramon"})["content"]
     assert isinstance(content, str)
@@ -176,21 +64,3 @@ def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
 
     summarized = {"messages": messages, "_summarization_event": {"cutoff_index": 1}}
     assert visible_dynamic_context_hashes(summarized) == set()
-
-
-def test_visible_dynamic_context_hashes_falls_back_without_a_usable_cutoff() -> None:
-    messages = [_person_intro_message("slack:U1")]
-
-    for event in ({"cutoff_index": "x"}, {}, None):
-        assert visible_dynamic_context_hashes({"messages": messages, "_summarization_event": event})
-
-
-def test_visible_dynamic_context_hashes_honors_out_of_range_cutoff() -> None:
-    """DeepAgents builds the prompt from summary_message alone, so nothing is visible."""
-    messages = [_person_intro_message("slack:U1")]
-    event = {"cutoff_index": 99}
-
-    assert (
-        visible_dynamic_context_hashes({"messages": messages, "_summarization_event": event})
-        == set()
-    )

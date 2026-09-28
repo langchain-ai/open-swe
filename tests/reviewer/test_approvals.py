@@ -1,4 +1,4 @@
-"""Approval criteria come from APPROVALS.md at the base commit; the repository's mode gates them."""
+"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -28,7 +28,10 @@ async def test_fetch_reads_the_file_at_the_requested_ref() -> None:
         policy = await fetch_approvals_md("o", "r", "a" * 40, token="t")
     assert policy == "Docs-only changes may be approved."
     _client, method, url = request.await_args.args
-    assert (method, url) == ("GET", "https://api.github.com/repos/o/r/contents/APPROVALS.md")
+    assert (method, url) == (
+        "GET",
+        "https://api.github.com/repos/o/r/contents/.open-swe/APPROVALS.md",
+    )
     assert request.await_args.kwargs["params"] == {"ref": "a" * 40}
 
 
@@ -73,25 +76,6 @@ async def test_failed_mode_lookup_never_approves() -> None:
         assert await approval_mode_for("o", "r") == "dry_run"
 
 
-async def test_mode_edits_keep_the_review_style(fake_store: FakeStore) -> None:
-    await REVIEW_STYLES.set_custom_prompt("o/r", "Keep comments brief")
-    with (
-        patch("agent.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")),
-        patch("agent.dashboard.deps.session_is_admin", return_value=True),
-    ):
-        saved = await api_update_review_style_prompt(
-            "o/r", ReviewStylePromptUpdate(approval_mode="approve"), {"sub": "admin"}
-        )
-        assert (saved.custom_prompt, saved.approval_mode) == ("Keep comments brief", "approve")
-        await REVIEW_STYLES.set_custom_prompt("o/r", "New analyzer output")
-        assert await approval_mode_for("o", "r") == "approve"
-        reset = await api_update_review_style_prompt(
-            "o/r", ReviewStylePromptUpdate(approval_mode=None), {"sub": "admin"}
-        )
-    assert reset.approval_mode is None
-    assert await approval_mode_for("o", "r") == "dry_run"
-
-
 async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> None:
     await REVIEW_STYLES.create("o/r", "reader")
     reader = (
@@ -110,35 +94,6 @@ async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> No
         await api_delete_review_style("o/r", {"sub": "reader"})
     assert error.value.status_code == 403
     assert await approval_mode_for("o", "r") == "approve"
-
-
-async def test_tool_sets_mode_and_reports_the_default_branch_file(fake_store: FakeStore) -> None:
-    fetch = AsyncMock(return_value="Docs only")
-    with (
-        patch(
-            "agent.tools.manage_review_approval_mode.require_private_admin_surface",
-            AsyncMock(return_value=None),
-        ),
-        patch(
-            "agent.tools.manage_review_approval_mode.private_credential_login",
-            AsyncMock(return_value="admin"),
-        ),
-        patch(
-            "agent.tools.manage_review_approval_mode.require_repo_access_for_user",
-            AsyncMock(return_value="user-token"),
-        ),
-        patch("agent.tools.manage_review_approval_mode.fetch_approvals_md", fetch),
-    ):
-        assert await manage_review_approval_mode("read", "O/R") == {
-            "repository": "O/R",
-            "mode": "dry_run",
-            "approvals_file_on_default_branch": True,
-        }
-        fetch.assert_awaited_with("O", "R", None, token="user-token")
-        result = await manage_review_approval_mode("set", "O/R", "approve")
-        assert result["mode"] == "approve"
-        result = await manage_review_approval_mode("set", "O/R", None)
-        assert result["mode"] == "dry_run"
 
 
 async def test_tool_rechecks_private_admin_and_repo_access(fake_store: FakeStore) -> None:

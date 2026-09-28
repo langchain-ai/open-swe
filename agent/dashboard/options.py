@@ -27,6 +27,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "anthropic:claude-sonnet-5-5",
+        "label": "Sonnet 5.5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
+    {
         "id": "anthropic:claude-fable-5-1",
         "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -136,6 +143,7 @@ CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
+    "anthropic:claude-sonnet-5-5": 1_000_000,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
     "fireworks:accounts/fireworks/models/glm-5p3-flash": 1_048_576,
 }

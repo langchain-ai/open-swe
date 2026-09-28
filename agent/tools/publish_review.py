@@ -13,8 +13,8 @@ from agent.github.checks import review_check_conclusion
 from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
     GitHubAuthError,
-    get_github_token,
     invalidate_cached_github_token,
+    resolve_thread_github_token,
 )
 from agent.review.approvals import approval_mode_for
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
@@ -124,7 +124,7 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
+    token = await resolve_thread_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
@@ -399,6 +399,9 @@ async def _publish_review_async(
             token=token,
             findings=findings,
         )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+        )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
             thread_id=thread_id,
@@ -624,6 +627,28 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
+
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -654,22 +679,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,

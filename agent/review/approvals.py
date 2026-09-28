@@ -1,4 +1,4 @@
-"""Approval criteria from a repository's ``APPROVALS.md`` and each repository's approval mode.
+"""Approval criteria from a repository's ``.open-swe/APPROVALS.md`` and its approval mode.
 
 The file supplies the criteria; the mode on the repository's review style record
 decides whether a positive assessment only comments (``dry_run``) or submits a
@@ -15,20 +15,20 @@ from agent.review.styles import REVIEW_STYLES, ApprovalMode, effective_approval_
 
 logger = logging.getLogger(__name__)
 
-APPROVALS_FILENAME = "APPROVALS.md"
+APPROVALS_PATH = ".open-swe/APPROVALS.md"
 APPROVALS_MAX_CHARS = 10_000
 
 
 async def fetch_approvals_md(
     owner: str, repo: str, ref: str | None, *, token: str | None
 ) -> str | None:
-    """``APPROVALS.md`` at ``ref`` (the default branch when ``None``).
+    """``.open-swe/APPROVALS.md`` at ``ref`` (the default branch when ``None``).
 
     ``None`` when the file is absent, empty, too large, or unreadable.
     """
     if not owner or not repo:
         return None
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{APPROVALS_FILENAME}"
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{APPROVALS_PATH}"
     extra = {"repository": f"{owner}/{repo}", "ref": ref or ""}
     try:
         async with github_client(
