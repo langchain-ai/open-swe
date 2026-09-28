@@ -14,11 +14,12 @@ import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { useConfirm } from "@/components/ConfirmDialog"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import {
   Select,
@@ -354,14 +355,13 @@ export function AutomationEditor({
 
         <SectionLabel>Slack destination</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <Input
-            value={slackChannelId}
-            onChange={(e) => setSlackChannelId(e.target.value)}
+          <SlackChannelCombobox
+            value={slackChannelId.trim() || null}
+            onValueChange={(id) => setSlackChannelId(id ?? "")}
             disabled={!canManage}
-            placeholder="C0123456789"
-            spellCheck={false}
-            aria-label="Slack channel ID"
-            className={cn(BARE_FIELD, "font-mono")}
+            placeholder="Search channels or paste a channel ID"
+            aria-label="Slack channel"
+            className="w-full"
           />
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <span className="text-xs text-muted-foreground">
@@ -395,9 +395,10 @@ export function AutomationEditor({
 
         <SectionLabel>Agent Instructions</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <Textarea
+          <SlackChannelTextarea
+            bare
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onValueChange={setPrompt}
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}

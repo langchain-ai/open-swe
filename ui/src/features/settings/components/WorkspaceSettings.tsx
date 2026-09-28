@@ -33,7 +33,7 @@ import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   draftFromWorkspace,
   WorkspaceEditor,
@@ -80,6 +80,7 @@ function GeneralSection({
         name: draft.name.trim(),
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
+        kitchen_channel_ids: draft.kitchenChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)

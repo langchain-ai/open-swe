@@ -3,7 +3,7 @@
 Ready means: open, not a draft, no merge conflict, no check still running, no
 required check failing or yet to report, no unresolved review thread, no
 standing request for changes, and — where Open SWE reviews the repository — an
-Open SWE review published for this exact head SHA. Silence from a reviewer is
+Open SWE review completed for this exact head SHA. Silence from a reviewer is
 not completion.
 
 A failing check that GitHub does not require does not block the merge.

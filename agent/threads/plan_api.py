@@ -7,6 +7,9 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
+from agent.dispatch import dispatch_agent_run
+from agent.prompts import prompt
+from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
@@ -20,10 +23,13 @@ from agent.threads.plan_store import (
     save_plan_content,
     write_plan_to_sandbox,
 )
+from agent.threads.runs import _build_dashboard_configurable
 from agent.threads.summary import (
+    _assert_thread_postable,
     thread_is_promptable,
     thread_is_readable,
 )
+from agent.utils.thread_ops import langgraph_client
 
 plan_router = APIRouter(
     prefix="/dashboard/api/plan",
@@ -179,6 +185,30 @@ async def post_plan_comment(
         body=text,
         anchor=body.anchor.model_dump() if body.anchor else None,
     )
+
+
+@plan_router.post("/{thread_id}/comments/submit")
+async def submit_plan_comments(
+    thread_id: str, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, str]:
+    metadata = await fetch_thread_metadata(thread_id)
+    login = session["sub"]
+    _assert_thread_postable(metadata, login, session.get("email"))
+    comments = await list_plan_comments(thread_id, raise_on_error=True)
+    if not any(comment.get("author_login") == login for comment in comments):
+        raise HTTPException(422, "no comments to submit")
+    await _ensure_dashboard_github_token(login)
+    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    await dispatch_agent_run(
+        thread_id,
+        prompt("threads/submit-artifact-comments"),
+        configurable,
+        source="dashboard",
+        thread_title=None,
+        client=langgraph_client(),
+        multitask_strategy="enqueue",
+    )
+    return {"status": "submitted"}
 
 
 @plan_router.delete("/{thread_id}/comments/{comment_id}")

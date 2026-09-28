@@ -30,7 +30,6 @@ import {
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
-import { KitchenChannelsSection } from "@/features/settings/components/KitchenChannelsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
@@ -95,7 +94,6 @@ function AdminPage() {
             backendUrl={user.slack_base_url ?? user.api_base_url}
           >
             <AllowedSlackBotsSection />
-            <KitchenChannelsSection />
           </SlackIntegrationSection>
 
           <TriggerReviewSection />
