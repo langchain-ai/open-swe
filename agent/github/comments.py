@@ -12,7 +12,7 @@ import httpx2
 
 from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -616,8 +616,8 @@ def build_pr_prompt(
     repo_line = ""
     if repo_config:
         repo_line = f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-    return render_prompt(
-        "runs/github-pr-mention.md",
+    return prompt(
+        "runs/github-pr-mention",
         repo_line=repo_line,
         pr_url=pr_url,
         comments=comments_text,

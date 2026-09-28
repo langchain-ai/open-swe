@@ -267,6 +267,60 @@ async def test_rename_preserves_workspace_identity_and_snapshot() -> None:
     assert edited.prompt == "new"
 
 
+_STATE_WRITES = {
+    "mark_refreshing": lambda slug: WORKSPACES.mark_refreshing(slug),
+    "start_refresh_step": lambda slug: WORKSPACES.start_refresh_step(slug, "boot"),
+    "finish_refresh_step": lambda slug: WORKSPACES.finish_refresh_step(slug, "boot", "success"),
+    "mark_refresh_builder": lambda slug: WORKSPACES.mark_refresh_builder(slug, "sb-1"),
+    "mark_refresh_settled": lambda slug: WORKSPACES.mark_refresh_settled(slug, "success"),
+    "mark_capturing": lambda slug: WORKSPACES.mark_capturing(slug),
+    "mark_capture_settled": lambda slug: WORKSPACES.mark_capture_settled(slug, "failed", "boom"),
+    "mark_captured": lambda slug: WORKSPACES.mark_captured(
+        slug, snapshot_id="snap-2", snapshot_name="core-image", source_sandbox_id="sb-2"
+    ),
+    "set_refresh_run_id": lambda slug: WORKSPACES.set_refresh_run_id(slug, "run-1"),
+    "set_refresh_cron_id": lambda slug: WORKSPACES.set_refresh_cron_id(slug, "cron-1"),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("write", sorted(_STATE_WRITES))
+async def test_refresh_state_writes_never_revert_a_definition_edit(write: str) -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "ramon")
+    # What a refresh read before an admin edited the workspace.
+    stale = await WORKSPACES.get("core")
+    await WORKSPACES.apply_update("core", WorkspaceUpdate(repos=["acme/web"], prompt="new"))
+
+    with patch.object(WORKSPACES, "get", AsyncMock(return_value=stale)):
+        await _STATE_WRITES[write]("core")
+
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.repos == ["acme/web"]
+    assert stored.prompt == "new"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_a_definition_edit_never_reverts_refresh_state() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "ramon")
+    await WORKSPACES.mark_refreshing("core")
+    # What an admin edit read before the refresh settled.
+    stale = await WORKSPACES.get("core")
+    await WORKSPACES.mark_refresh_settled("core", "success", log="done")
+
+    with patch.object(WORKSPACES, "get", AsyncMock(return_value=stale)):
+        edited = await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="edited"))
+
+    stored = await WORKSPACES.get("core")
+    assert stored is not None
+    assert stored.prompt == "edited"
+    assert stored.refresh_status == "success"
+    assert stored.refresh_log == "done"
+    assert edited == stored
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_delete_removes_record_and_snapshot() -> None:
@@ -644,11 +698,9 @@ async def test_update_rejects_slack_channel_owned_by_another_workspace() -> None
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_non_default_workspace_requires_a_repo() -> None:
-    with pytest.raises(ValueError, match="at least one repository"):
-        await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
-    record = await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
-    assert record.slug == "default" and record.repos == []
+async def test_any_workspace_may_prefer_no_repository() -> None:
+    record = await WORKSPACES.create(WorkspaceCreate(name="Empty"), "alice")
+    assert record.slug == "empty" and record.repos == []
 
 
 @pytest.mark.usefixtures("registry_db")

@@ -524,6 +524,7 @@ class PullRequestPayload(BaseModel):
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
+    head_sha: str = Field("", validation_alias=AliasPath("head", "sha"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
 
 

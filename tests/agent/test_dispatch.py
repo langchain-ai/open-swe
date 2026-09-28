@@ -97,6 +97,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "agent",
         input={"messages": [{"role": "user", "content": "hi"}]},
         source="test",
+        thread_title=None,
         config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
         client=client,
     )
@@ -149,6 +150,7 @@ async def test_create_durable_run_records_slack_conversation_type(
         "agent",
         input={"messages": []},
         source="slack",
+        thread_title=None,
         config={"configurable": {"slack_thread": {"channel_context": {"is_im": is_im}}}},
         client=client,
     )
@@ -168,6 +170,7 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_op
         "agent",
         input={"messages": []},
         source="schedule",
+        thread_title=None,
         config={"configurable": {"prepare_run_id": "existing"}},
         stream_resumable=False,
         client=client,
@@ -215,6 +218,7 @@ async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) 
         None,
         {},
         source="github",
+        thread_title=None,
         input=run_input,
         client=client,
     )
@@ -232,7 +236,12 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
 
     with pytest.raises(RuntimeError, match="dispatch failed"):
         await dispatch.dispatch_agent_run(
-            "thread-1", "Please revise the plan.", {}, source="dashboard", client=client
+            "thread-1",
+            "Please revise the plan.",
+            {},
+            source="dashboard",
+            thread_title=None,
+            client=client,
         )
 
     assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
@@ -309,6 +318,7 @@ async def test_dispatch_restores_thinking_for_slack_background_wait(
         "agent",
         input={"messages": []},
         source=source,
+        thread_title=None,
         client=client,
         config={
             "configurable": {
@@ -337,6 +347,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
         "agent",
         input={"messages": []},
         source="slack",
+        thread_title=None,
         client=client,
         config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
     )
@@ -356,6 +367,7 @@ async def test_dispatch_skips_status_reads_for_known_non_slack_thread(
         "agent",
         input={"messages": []},
         source="dashboard",
+        thread_title=None,
         client=client,
         config={"configurable": {}},
         source_context=SourceContext(),
@@ -385,6 +397,7 @@ async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
         "agent",
         input={"messages": []},
         source="slack",
+        thread_title=None,
         client=client,
         config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
     )

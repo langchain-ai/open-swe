@@ -32,6 +32,7 @@ from agent.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from agent.slack.kitchen_channels import is_kitchen_channel
 from agent.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -60,6 +61,7 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
+from agent.webhooks.event_log import EventLog, EventRefs
 
 router = APIRouter()
 
@@ -313,10 +315,23 @@ async def slack_webhook(
     _verify_signature(request, body, "events")
 
     payload = parse_json_object(body)
+    envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=envelope.kind if envelope else "",
+        delivery_id=envelope.event_id if envelope else "",
+        refs=EventRefs(
+            slack_user_id=envelope.event.resolve_user_id(),
+            slack_channel_id=envelope.event.resolve_channel_id(),
+        )
+        if envelope and envelope.event
+        else None,
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
-    envelope = SlackEventEnvelope.parse(payload)
     if envelope is None:
         return ignored("Invalid Slack event")
 
@@ -499,6 +514,14 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
+    in_kitchen_channel = (
+        not in_code_channel
+        and event.channel_type != "im"
+        and not is_dm_channel(channel_context)
+        and event.type == "message"
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+        and await is_kitchen_channel(channel_id)
+    )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
@@ -546,6 +569,11 @@ async def slack_webhook(
         explicit_mention
         or is_message_update
         or in_code_channel
+        or (
+            in_kitchen_channel
+            and event.type == "message"
+            and event.subtype in {"", "file_share", "thread_broadcast"}
+        )
         or allowed_bot is not None
         or is_direct_message
         or solo_followup
@@ -615,7 +643,9 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
+                or in_kitchen_channel
                 or solo_followup,
+                kitchen_channel=in_kitchen_channel,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
@@ -650,6 +680,14 @@ async def slack_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command")
@@ -697,6 +735,14 @@ async def slack_code_channel_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command").removeprefix("/")
@@ -735,13 +781,25 @@ async def slack_interactivity(
     form = common.parse_qs(body.decode("utf-8"))
     payload_raw = (form.get("payload") or [""])[0]
     payload = parse_json_object(payload_raw.encode("utf-8"))
+    interaction = SlackInteraction.parse(payload) if payload is not None else None
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=interaction.type if interaction else "",
+        delivery_id=interaction.trigger_id if interaction else "",
+        refs=EventRefs(
+            slack_user_id=interaction.user.id, slack_channel_id=interaction.origin_channel_id
+        )
+        if interaction
+        else None,
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
 
-    interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")
     if interaction.type == "block_actions":

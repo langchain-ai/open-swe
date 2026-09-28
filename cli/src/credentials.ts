@@ -7,6 +7,14 @@ const REFRESH_MARGIN_MS = 60_000
 /** Assumed lifetime of a workflow token whose `exp` cannot be read. */
 const FALLBACK_LIFETIME_MS = 4 * 60_000
 
+/** The CLI could not obtain a credential to present, as opposed to the network failing. */
+export class CredentialError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CredentialError"
+  }
+}
+
 /**
  * How the CLI proves who it is. A person signs in; an API key and a CI
  * workflow are machines, which the server lets start only system threads.
@@ -92,13 +100,14 @@ export class GitHubActionsCredential implements Credential {
       headers: { Authorization: `Bearer ${this.requestToken}` },
     })
     if (!response.ok) {
-      throw new Error(
+      throw new CredentialError(
         `GitHub Actions refused an OIDC token (HTTP ${response.status})`
       )
     }
     const parsed = parseJson(await response.text())
     const value = isRecord(parsed) ? stringAt(parsed, "value") : null
-    if (value === null) throw new Error("GitHub Actions returned no OIDC token")
+    if (value === null)
+      throw new CredentialError("GitHub Actions returned no OIDC token")
     return value
   }
 }

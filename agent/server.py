@@ -216,6 +216,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_start_new_thread,
+    start_thread,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
@@ -564,6 +565,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
+        "start_thread",
     }
 
 
@@ -1007,7 +1009,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 attribution_route = await self._model_selection.select_route(
                     cast(ModelSelectionState, state)
                 )
-                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+                if attribution_route != "default":
+                    attribution_model_id, attribution_effort = self._routing_defaults[
+                        attribution_route
+                    ]
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
@@ -1081,6 +1086,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "selected_model_id": attribution_model_id,
+            "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
             **({"model_route": attribution_route} if attribution_route else {}),
             "rendered_system_prompt": construct_system_prompt(
@@ -1429,6 +1436,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         list_threads,
         get_thread,
         manage_thread,
+        *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,
@@ -1575,9 +1583,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,
-            routing_models["fast"],
+            main_model,
             route_model_ids={
-                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
+                **{
+                    route: routed_model_id
+                    for route, (routed_model_id, _) in routing_defaults.items()
+                },
+                "default": model_id,
             },
             routing_mode=model_routing_mode,
         )

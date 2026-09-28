@@ -12,7 +12,7 @@ from typing_extensions import TypedDict
 
 from agent.middleware.prepare_run import BasePrepareRunMiddleware
 from agent.utils import startup_trace
-from agent.utils.startup_trace import aphase, flush_phases
+from agent.utils.startup_trace import aphase, asubphase, flush_phases
 
 
 class _FakeClient:
@@ -61,19 +61,32 @@ async def test_phase_emits_apm_span(monkeypatch: pytest.MonkeyPatch) -> None:
     context.__enter__.return_value = span
     context.__exit__.return_value = None
     apm_span = MagicMock(return_value=context)
-    monkeypatch.setattr(startup_trace, "_apm_span", apm_span)
+    monkeypatch.setattr(startup_trace, "apm_span", apm_span)
 
     async with aphase("thread-apm", "factory.graph_assembly", model="openai:gpt-5"):
         pass
 
     apm_span.assert_called_once_with(
         "agent.startup.factory.graph_assembly",
-        {"thread_id": "thread-apm", "model": "openai:gpt-5"},
+        {"startup.thread_id": "thread-apm", "startup.model": "openai:gpt-5"},
     )
 
 
+async def test_subphase_records_only_inside_a_phase() -> None:
+    async with aphase("thread-sub", "sandbox.git_identity"):
+        async with asubphase("sandbox.exec.result", sandbox_id="sb-1"):
+            pass
+    async with asubphase("sandbox.exec.result", sandbox_id="sb-1"):
+        pass
+
+    assert [phase.name for phase in startup_trace._PHASES["thread-sub"]] == [
+        "sandbox.git_identity",
+        "sandbox.git_identity/sandbox.exec.result",
+    ]
+
+
 async def test_phase_works_without_apm(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(startup_trace, "_apm_span", lambda name, metadata: nullcontext())
+    monkeypatch.setattr(startup_trace, "apm_span", lambda name, tags: nullcontext())
 
     async with aphase("thread-no-apm", "factory.total"):
         pass

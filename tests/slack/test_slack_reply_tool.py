@@ -91,14 +91,11 @@ async def test_reply_restores_status_including_completion_runs(
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     thinking_status = AsyncMock()
-    session_status = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", thinking_status)
-    monkeypatch.setattr(slack_reply_tool, "restore_slack_session_status", session_status)
 
     assert await slack_reply_tool.slack_reply("The answer", "final") == {"success": True}
     post.assert_awaited_once()
     assert thinking_status.await_count == int(thread_ts != "0")
-    assert session_status.await_count == int(thread_ts == "0")
 
 
 async def test_slack_reply_holds_mutation_lock_while_posting(
@@ -593,7 +590,7 @@ async def test_slack_reply_passes_model_reported_usage(
         return "2.0", None
 
     config = _config()
-    config["configurable"]["resolved_agent_effort"] = "high"
+    config["configurable"].update(resolved_agent_model_id="model-a", resolved_agent_effort="high")
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
     state = {
@@ -628,12 +625,14 @@ async def test_slack_reply_uses_selected_route_effort(
     config = _config()
     config["configurable"].update(
         resolved_agent_model_id="model-balanced",
-        resolved_agent_effort="high",
+        resolved_agent_effort="max",
     )
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
     state = {
         "model_route": "balanced",
+        "selected_model_id": "model-balanced",
+        "selected_effort": "high",
         "messages": [
             HumanMessage(content="request"),
             AIMessage(content="answer", response_metadata={"model_name": "model-balanced"}),

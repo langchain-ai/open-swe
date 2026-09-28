@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "analyzer"
 
 
+def _thread_title(full_name: str) -> str:
+    return f"Review style: {full_name}"
+
+
 def langgraph_client():
     """LangGraph SDK client for the current deployment (same resolution as webapp)."""
     url = ENV.LANGGRAPH_URL.optional()
@@ -150,6 +154,7 @@ async def start_bootstrap_analysis(
                 files=build_skill_files(),
             ),
             source="review-style-bootstrap",
+            thread_title=_thread_title(full_name),
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
@@ -179,6 +184,7 @@ async def start_continual_run(
             _ASSISTANT_ID,
             input=build_continual_run_input(full_name),
             source="review-style-continual",
+            thread_title=_thread_title(full_name),
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )

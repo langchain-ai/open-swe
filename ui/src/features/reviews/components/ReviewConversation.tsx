@@ -170,7 +170,12 @@ function TimelineEntry({
   )
 }
 
-function CommentBox({ owner, repo, number }: ReviewConversationProps) {
+function CommentBox({
+  owner,
+  repo,
+  number,
+  onClose,
+}: ReviewConversationProps & { onClose: () => void }) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState("")
   const mutation = useMutation({
@@ -179,6 +184,7 @@ function CommentBox({ owner, repo, number }: ReviewConversationProps) {
     meta: { errorTitle: "Couldn't post the comment", silent: true },
     onSuccess: async () => {
       setDraft("")
+      onClose()
       await queryClient.invalidateQueries({
         queryKey: reviewConversationQueryKey(owner, repo, number),
       })
@@ -194,6 +200,9 @@ function CommentBox({ owner, repo, number }: ReviewConversationProps) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault()
       submit()
+    } else if (event.key === "Escape" && !mutation.isPending) {
+      event.preventDefault()
+      onClose()
     }
   }
 
@@ -213,6 +222,7 @@ function CommentBox({ owner, repo, number }: ReviewConversationProps) {
         aria-label="Leave a comment"
         aria-invalid={mutation.isError || undefined}
         disabled={mutation.isPending}
+        autoFocus
         className="min-h-24"
       />
       {mutation.isError ? (
@@ -224,6 +234,15 @@ function CommentBox({ owner, repo, number }: ReviewConversationProps) {
         <span className="text-xs text-muted-foreground">
           Cmd/Ctrl + Enter to comment
         </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          disabled={mutation.isPending}
+        >
+          Cancel
+        </Button>
         <Button type="submit" size="sm" disabled={!canSubmit}>
           {mutation.isPending ? "Commenting…" : "Comment"}
         </Button>
@@ -236,7 +255,9 @@ export function ReviewConversation({
   owner,
   repo,
   number,
-}: ReviewConversationProps) {
+  className,
+}: ReviewConversationProps & { className?: string }) {
+  const [composing, setComposing] = useState(false)
   const query = useQuery({
     queryKey: reviewConversationQueryKey(owner, repo, number),
     queryFn: () => getReviewConversation(owner, repo, number),
@@ -282,9 +303,33 @@ export function ReviewConversation({
   }
 
   return (
-    <section className="flex flex-col gap-6">
+    <section
+      aria-label="Conversation"
+      className={cn("flex flex-col gap-3", className)}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Conversation</h2>
+        {!composing && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setComposing(true)}
+          >
+            <ChatCircleIcon />
+            Comment
+          </Button>
+        )}
+      </div>
+      {composing && (
+        <CommentBox
+          owner={owner}
+          repo={repo}
+          number={number}
+          onClose={() => setComposing(false)}
+        />
+      )}
       {timeline}
-      <CommentBox owner={owner} repo={repo} number={number} />
     </section>
   )
 }

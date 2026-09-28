@@ -21,9 +21,10 @@ from agent.dashboard.repo_access import (
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import create_durable_run
 from agent.github.comments import format_github_comment_body_for_prompt
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.schedules.slack_messages import (
     MESSAGE_PATTERN_MAX_LENGTH,
@@ -40,9 +41,10 @@ from agent.slack.client import (
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
+from agent.threads.creation import create_lock_thread, create_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import workspace_for_repo_config
+from agent.webhooks.common import repo_private_from_payload, workspace_for_repo_config
 
 logger = logging.getLogger(__name__)
 
@@ -539,19 +541,19 @@ def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> st
 
 
 def _scheduled_prompt(
-    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, prompt: str | None = None
+    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, task: str | None = None
 ) -> str:
-    prompt = str(record["prompt"]) if prompt is None else prompt
+    task = str(record["prompt"]) if task is None else task
     if slack_thread:
-        return render_prompt("runs/scheduled-slack-thread.md", prompt=prompt)
+        return prompt("runs/scheduled-slack-thread", prompt=task)
     slack_channel_id = record.get("slack_channel_id")
     if (
         _slack_notification_mode(record) == "on_action"
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
-        return render_prompt("runs/scheduled-notify-on-action.md", prompt=prompt)
-    return prompt
+        return prompt("runs/scheduled-notify-on-action", prompt=task)
+    return task
 
 
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
@@ -686,6 +688,7 @@ async def _launch_agent_schedule_record(
     test_run: bool = False,
     prompt: str | None = None,
     slack_thread: dict[str, Any] | None = None,
+    token_repositories: list[str] | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -754,12 +757,16 @@ async def _launch_agent_schedule_record(
         test_run=test_run,
         admin_thread=admin_thread,
     )
+    if token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
         metadata["system_authorization"] = {
             "schedule_id": schedule_id,
             "invocation_id": run_config["configurable"]["invocation_id"],
         }
-    await client.threads.create(thread_id=thread_id, metadata=metadata, if_exists="do_nothing")
+    await create_thread(
+        client, thread_id, title=metadata["title"], metadata=metadata, if_exists="do_nothing"
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
     input_context: InputMessageContext = {
         "sender_id": f"system:schedule:{schedule_id}",
@@ -772,7 +779,7 @@ async def _launch_agent_schedule_record(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            _scheduled_prompt(record, slack_thread, prompt=prompt),
+            _scheduled_prompt(record, slack_thread, task=prompt),
             input_context,
             systems=[
                 {
@@ -788,6 +795,7 @@ async def _launch_agent_schedule_record(
             ),
         ),
         source="schedule",
+        thread_title=None,
         config=run_config,
         client=client,
         stream_resumable=True,
@@ -867,10 +875,8 @@ def _issue_delivery_claim_thread_id(delivery_id: str, schedule_id: str) -> str:
 async def _claim_issue_delivery(delivery_id: str, schedule_id: str) -> str | None:
     claim_thread_id = _issue_delivery_claim_thread_id(delivery_id, schedule_id)
     try:
-        await langgraph_client().threads.create(
-            thread_id=claim_thread_id,
-            if_exists="raise",
-            ttl=_ISSUE_DELIVERY_CLAIM_TTL_MINUTES,
+        await create_lock_thread(
+            langgraph_client(), claim_thread_id, ttl_minutes=_ISSUE_DELIVERY_CLAIM_TTL_MINUTES
         )
     except ConflictError:
         return None
@@ -945,7 +951,13 @@ async def launch_github_issue_automations(
             continue
         try:
             result = await _launch_agent_schedule_record(
-                record, prompt=_github_issue_prompt(record, payload)
+                record,
+                prompt=_github_issue_prompt(record, payload),
+                # An outsider can open an issue on a public repository, so the
+                # run it starts reaches only that repository.
+                token_repositories=event_token_repositories(
+                    owner_login, repo_name, private=repo_private_from_payload(payload)
+                ),
             )
         except Exception:
             logger.exception(
@@ -1016,8 +1028,8 @@ async def find_slack_message_automation(channel_id: str, text: str) -> dict[str,
 async def launch_slack_message_automation(
     record: dict[str, Any], channel_id: str, message_ts: str, text: str, author: str
 ) -> None:
-    prompt = render_prompt(
-        "runs/slack-channel-message.md",
+    task = prompt(
+        "runs/slack-channel-message",
         prompt=str(record["prompt"]),
         permalink=slack_message_url(channel_id, message_ts),
         author=author,
@@ -1027,7 +1039,7 @@ async def launch_slack_message_automation(
     try:
         result = await _launch_agent_schedule_record(
             record,
-            prompt=prompt,
+            prompt=task,
             slack_thread={
                 "channel_id": channel_id,
                 "thread_ts": message_ts,

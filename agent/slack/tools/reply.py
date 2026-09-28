@@ -26,7 +26,7 @@ from agent.slack.orphan import (
     slack_thread_detached,
 )
 from agent.slack.run_feedback import feedback_block
-from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -34,6 +34,21 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = 12000
+
+
+def _usage_with_effort(
+    usage: RunUsageSummary | None, state: dict[str, Any] | None, cfg: RunConfig
+) -> RunUsageSummary | None:
+    state = state or {}
+    selected = state.get("selected_model_id")
+    model_id = selected or cfg.resolved_agent_model_id
+    if usage is None or len(usage.models) != 1 or not model_id:
+        return usage
+    reported_model = usage.models[0].rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+    if model_id.rsplit("/", 1)[-1].rsplit(":", 1)[-1] != reported_model:
+        return usage
+    effort = state.get("selected_effort") if selected else cfg.resolved_agent_effort
+    return replace(usage, reasoning_effort=effort)
 
 
 async def slack_reply(
@@ -104,9 +119,7 @@ async def slack_reply(
                     ]
                 )
             slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
-        usage = summarize_run_usage(state)
-        if usage is not None:
-            usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
+        usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
             thread_ts,
@@ -134,13 +147,9 @@ async def slack_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id:
-        # Slack drops the status when the app posts; a session keeps its on
-        # whichever message currently holds it rather than on the session itself.
-        if is_code_channel_session(str(thread_ts)):
-            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
-        else:
-            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if run_id and not is_code_channel_session(str(thread_ts)):
+        # Slack drops the status when the app posts.
+        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
 
 
@@ -175,9 +184,7 @@ async def _ephemeral_reply(
             blocks = _build_option_blocks(message, None)
         else:
             message = markdown_to_mrkdwn(message)
-    usage = summarize_run_usage(state)
-    if usage is not None:
-        usage = replace(usage, reasoning_effort=cfg.resolved_agent_effort)
+    usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
     if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
         if await replace_slack_command_message(

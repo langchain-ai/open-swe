@@ -121,11 +121,11 @@ def test_dashboard_prompt_omits_slack_tools() -> None:
 
 
 def test_construct_system_prompt_includes_shared_base_explicitly() -> None:
-    from agent.prompt import OPEN_SWE_SHARED_BASE
+    from agent.prompts import load_prompt
 
     prompt = construct_system_prompt(working_dir="/workspace")
 
-    assert prompt.endswith(OPEN_SWE_SHARED_BASE)
+    assert prompt.endswith(load_prompt("system/shared-base.md"))
     assert "base prompt replaces deepagents" not in prompt
 
 

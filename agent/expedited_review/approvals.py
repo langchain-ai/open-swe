@@ -2,8 +2,8 @@
 
 An approval pins the head SHA the card was posted for and a fingerprint of the
 diff the card drew. One approval from someone other than the author completes
-it. Votes are only recorded here; nothing reaches GitHub until the agent
-merges, and a later commit keeps them only if the fingerprint still matches.
+it. Each vote is also submitted as its voter's GitHub review, and a later
+commit keeps it only if the fingerprint still matches.
 One approval per pull request may be ``open`` at a time; a partial unique index
 enforces that. A vote names its voter by ``users.id``, never by a GitHub or
 Slack handle.
@@ -171,6 +171,19 @@ class ExpeditedApproval(Base):
                     cls.pull_request_id == pull_request_id,
                     cls.state == "superseded",
                     cls.slack_message_ts != "",
+                )
+            )
+            return list(rows)
+
+    @classmethod
+    async def with_standing_reviews(cls, pull_request_id: UUID) -> list[Self]:
+        """Closed, unmerged cards for a pull request with a GitHub review not yet dismissed."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls)).where(
+                    cls.pull_request_id == pull_request_id,
+                    cls.state.not_in(("open", "merged")),
+                    cls.votes.any(ApprovalVote.github_review_id.is_not(None)),
                 )
             )
             return list(rows)

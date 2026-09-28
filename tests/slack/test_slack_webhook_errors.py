@@ -106,6 +106,23 @@ async def test_slack_message_update_does_not_claim_thinking_status(
 
 
 @pytest.mark.asyncio
+async def test_concierge_dm_does_not_show_thinking_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = AsyncMock(return_value=True)
+    show_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhook, "_process_slack_mention_impl", process)
+    monkeypatch.setattr(slack_webhook, "restore_slack_thinking_status", show_status)
+
+    await slack_webhook.process_slack_mention(
+        _event_data().model_copy(update={"concierge_mode": True}), None
+    )
+
+    process.assert_awaited_once()
+    show_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_slack_processing_error_replies_even_without_an_agent_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
