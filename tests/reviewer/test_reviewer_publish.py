@@ -989,6 +989,71 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
 
 @pytest.mark.asyncio
+async def test_published_review_registry_failure_does_not_complete_and_retry_skips_duplicate() -> (
+    None
+):
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "agent.tools.publish_review.open_swe_review_exists",
+            AsyncMock(side_effect=[False, True]),
+        ),
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 999}),
+        ) as post,
+        patch(
+            "agent.tools.publish_review.PullRequest.link_review",
+            AsyncMock(side_effect=[RuntimeError("Storage unavailable"), None]),
+        ) as completion,
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
+        patch(
+            "agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()
+        ) as notify,
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+    ):
+
+        async def publish() -> dict[str, object]:
+            return await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="newsha",
+                token="t",
+                severity_threshold="medium",
+                cap=15,
+                is_re_review=False,
+            )
+
+        with pytest.raises(RuntimeError, match="Storage unavailable"):
+            await publish()
+        completion.assert_awaited_once_with(
+            reviewer_thread_id="tid",
+            github_review_id=999,
+            head_sha="newsha",
+            finding_count=0,
+        )
+        metadata.assert_not_awaited()
+        settle.assert_not_awaited()
+        notify.assert_not_awaited()
+
+        result = await publish()
+        assert result["success"] is True
+        assert result["skipped_empty_re_review"] is True
+        post.assert_awaited_once()
+        metadata.assert_awaited_once_with("tid", last_reviewed_sha="newsha")
+        settle.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("storage_fails", [False, True])
 async def test_publish_review_skips_post_on_re_review_with_no_new_findings(
     storage_fails: bool,

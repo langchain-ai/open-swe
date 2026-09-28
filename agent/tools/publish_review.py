@@ -627,6 +627,13 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+        reviewer_thread_id=thread_id,
+        github_review_id=review_id if isinstance(review_id, int) else None,
+        head_sha=head_sha,
+        finding_count=len(inline_comments),
+    )
+
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -657,22 +664,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,
