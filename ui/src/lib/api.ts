@@ -21,6 +21,8 @@ export interface WorkspaceApiKey {
   name: string
   key_suffix: string
   created_by: string
+  created_by_name?: string | null
+  description?: string | null
   created_at: string | null
   expires_at: string
   last_used_at: string | null
@@ -1383,6 +1385,7 @@ export const api = {
   createWorkspaceApiKey: (body: {
     workspace: string
     name: string
+    description?: string | null
     expires_at: string
   }) =>
     request<WorkspaceApiKey & { secret: string }>("/admin/api-keys", {

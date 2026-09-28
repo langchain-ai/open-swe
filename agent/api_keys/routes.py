@@ -3,6 +3,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.api_keys.deps import ADMIN_KEY_DEP
 from agent.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
+from agent.users.models import User
 from agent.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ class ApiKeyCreate(BaseModel):
     workspace: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=NAME_MAX_CHARS)
     expires_at: datetime
+    description: str | None = Field(default=None, max_length=4000)
 
     @field_validator("workspace", "name")
     @classmethod
@@ -57,12 +60,26 @@ class ApiKeyView(BaseModel):
     last_used_at: datetime | None
     revoked_at: datetime | None
     status: ApiKeyStatus
+    description: str | None = None
+    created_by_name: str | None = None
 
 
 class MintedApiKey(ApiKeyView):
     """The creation response — the only place the plaintext secret appears."""
 
     secret: str
+
+
+async def key_view(key: ApiKey) -> ApiKeyView:
+    view = ApiKeyView.model_validate(key)
+    try:
+        user_id = UUID(key.created_by)
+    except ValueError:
+        return view
+    user = await User.get(user_id)
+    if user is not None:
+        view.created_by_name = user.display_name or user.login_for("github")
+    return view
 
 
 @router.post("", status_code=201)
@@ -80,12 +97,13 @@ async def api_create_api_key(
         name=body.name,
         expires_at=body.expires_at,
         created_by=created_by,
+        description=body.description,
     )
     logger.info(
         "Minted a workspace API key",
         extra={"api_key_id": key.id, "workspace": key.workspace, "minted_by": created_by},
     )
-    return MintedApiKey(**ApiKeyView.model_validate(key).model_dump(), secret=secret)
+    return MintedApiKey(**(await key_view(key)).model_dump(), secret=secret)
 
 
 @router.get("")
@@ -94,7 +112,7 @@ async def api_list_api_keys(
     _admin: dict[str, Any] = ADMIN_KEY_DEP,
 ) -> list[ApiKeyView]:
     keys = await ApiKey.list_all(workspace.strip() if workspace else None)
-    return [ApiKeyView.model_validate(key) for key in keys]
+    return [await key_view(key) for key in keys]
 
 
 @router.delete("/{key_id}", status_code=204)

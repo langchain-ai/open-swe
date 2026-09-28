@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { api, type WorkspaceApiKey } from "@/lib/api"
 import {
@@ -23,6 +24,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
     queryFn: () => api.listWorkspaceApiKeys(slug),
   })
   const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
   const [days, setDays] = useState("90")
   const [secret, setSecret] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -39,6 +41,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
       const result = await api.createWorkspaceApiKey({
         workspace: slug,
         name: name.trim(),
+        description: description || null,
         expires_at: new Date(
           Date.now() + Number(days) * 86400000
         ).toISOString(),
@@ -46,6 +49,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
       setSecret(result.secret)
       setCopied(false)
       setName("")
+      setDescription("")
       void qc.invalidateQueries({ queryKey })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create API key")
@@ -96,6 +100,15 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                     <span className="font-mono text-xs text-muted-foreground">
                       …{key.key_suffix}
                     </span>
+                  </p>
+                  {key.description && (
+                    <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+                      {key.description}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Created by{" "}
+                    {key.created_by_name || key.created_by || "Unknown user"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {key.status} · Expires{" "}
@@ -184,6 +197,15 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 required
                 value={days}
                 onChange={(event) => setDays(event.target.value)}
+              />
+            </label>
+            <label className="w-full space-y-1 text-sm">
+              Description (optional)
+              <Textarea
+                value={description}
+                maxLength={4000}
+                placeholder="What is this key used for?"
+                onChange={(event) => setDescription(event.target.value)}
               />
             </label>
             <Button
