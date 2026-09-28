@@ -50,7 +50,7 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
-from agent.store import delete_value, now_iso, search_all_values
+from agent.store import now_iso
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -64,9 +64,7 @@ from agent.workspaces.rows import (
 
 logger = logging.getLogger(__name__)
 
-WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
 DEFAULT_WORKSPACE_SLUG = "default"
-LEGACY_ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
 MAX_SLACK_CHANNELS = 50
 # Real Slack channel ids are longer, but the fixed prefix is what a workspace
 # record actually depends on; a looser minimum keeps short test/fixture ids valid.
@@ -86,6 +84,10 @@ def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
     if len(value) > MAX_SLACK_CHANNELS:
         raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
     return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
+
+
+class DefaultWorkspaceDeletionError(ValueError):
+    """The ``default`` workspace was asked to be deleted."""
 
 
 class WorkspaceConflictError(ValueError):
@@ -709,16 +711,6 @@ class WorkspaceStore:
     it lands on the constraint and is translated into the same one.
     """
 
-    def __init__(self) -> None:
-        # Set once :func:`import_store_records` has emptied the LangGraph Store
-        # into these tables. Until then an empty ``workspace`` table may only
-        # mean this process failed to populate it, which
-        # :meth:`routing_is_populated` refuses to read as "nobody owns this".
-        self.import_completed = False
-        # Repositories named by Store records the import could not bring over,
-        # so routing fails closed on them instead of reading them as unowned.
-        self.unimported_repos: frozenset[str] = frozenset()
-
     async def get(self, slug: str) -> Workspace | None:
         """The workspace stored under ``slug``, or ``None``.
 
@@ -753,33 +745,6 @@ class WorkspaceStore:
         """The stable id behind ``slug``, for records that must outlive it."""
         async with postgres.session() as session:
             return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
-
-    def repo_import_is_pending(self, full_name: str) -> bool:
-        """Whether a Store record naming this repository still awaits import."""
-        if not self.unimported_repos:
-            return False
-        try:
-            key = normalize_repo_full_name(full_name).lower()
-        except ValueError:
-            logger.debug(
-                "Repository name cannot be normalized; treating it as not pending import",
-                extra={"repository": full_name},
-                exc_info=True,
-            )
-            return False
-        return key in self.unimported_repos
-
-    async def routing_is_populated(self) -> bool:
-        """Whether an "unowned repository" answer can be trusted.
-
-        The LangGraph Store import is what fills these tables on a deployment
-        that predates them, so until it has succeeded an empty table cannot be
-        told apart from one this process never managed to write.
-        """
-        if self.import_completed:
-            return True
-        async with postgres.session() as session:
-            return (await session.scalar(select(WorkspaceRow.id).limit(1))) is not None
 
     async def list_all(self) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
@@ -1124,6 +1089,12 @@ class WorkspaceStore:
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
+        """Delete a workspace; ``default`` refuses with :class:`DefaultWorkspaceDeletionError`.
+
+        Unrouted work lands in ``default``, so it always exists.
+        """
+        if slug == DEFAULT_WORKSPACE_SLUG:
+            raise DefaultWorkspaceDeletionError("the default workspace cannot be deleted")
         record = await self.get(slug)
         if record is None:
             return False
@@ -1447,94 +1418,6 @@ def _stamp_captured(
 
 
 WORKSPACES = WorkspaceStore()
-
-
-async def import_store_records() -> int:
-    """Copy the workspaces that still live in the LangGraph Store into PostgreSQL.
-
-    Runs once per startup and returns how many records it copied. A slug that
-    already has a row is left alone, and every record it reads is deleted from
-    the Store once it has been dealt with: that makes this idempotent, keeps a
-    legacy namespace from resurrecting a workspace an admin has since deleted,
-    and means a later release can drop this entirely.
-
-    A record the Store cannot be made sense of, or one whose repositories are
-    claimed by another workspace, stays where it is for the next startup rather
-    than being dropped on the floor. Until then the import does not count as
-    complete, and the repositories such a record names are remembered so
-    :func:`agent.workspaces.routing.repo_is_routable` fails closed on them
-    instead of reading them as unowned.
-
-    Raising leaves ``WorkspaceStore.import_completed`` unset as well, which is
-    what keeps that check from reading the empty table it may have left behind
-    as "nobody owns this repository".
-    """
-    imported = 0
-    skipped = 0
-    pending: set[str] = set()
-    for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
-        for value in await search_all_values(namespace):
-            slug = value.get("slug")
-            if not (isinstance(slug, str) and slug):
-                continue
-            try:
-                record = Workspace.model_validate(value)
-            except ValidationError:
-                skipped += 1
-                pending |= _repo_keys(value.get("repos"))
-                logger.error(
-                    "Skipping an unreadable stored workspace record",
-                    extra={"workspace": slug, "store_namespace": namespace},
-                    exc_info=True,
-                )
-                continue
-            if await WORKSPACES.get(record.slug) is None:
-                try:
-                    await WORKSPACES.put(record.slug, record)
-                except ValueError, IntegrityError:
-                    # One record another workspace has since claimed, or one a
-                    # constraint refuses, must not cost the rest their import.
-                    skipped += 1
-                    pending |= _repo_keys(record.repos)
-                    logger.error(
-                        "Could not import a stored workspace record",
-                        extra={"workspace": record.slug, "store_namespace": namespace},
-                        exc_info=True,
-                    )
-                    continue
-                imported += 1
-            await delete_value(namespace, record.slug)
-    WORKSPACES.unimported_repos = frozenset(pending)
-    WORKSPACES.import_completed = skipped == 0
-    log = logger.error if skipped else logger.info
-    log(
-        "Stored workspace records processed",
-        extra={
-            "imported_workspaces": imported,
-            "skipped_workspaces": skipped,
-            "pending_repositories": sorted(pending),
-        },
-    )
-    return imported
-
-
-def _repo_keys(entries: object) -> set[str]:
-    """Normalized keys of the repositories a raw Store record names, ignoring junk."""
-    keys: set[str] = set()
-    if not isinstance(entries, list):
-        return keys
-    for entry in entries:
-        if not isinstance(entry, str):
-            continue
-        try:
-            keys.add(normalize_repo_full_name(entry).lower())
-        except ValueError:
-            logger.warning(
-                "Stored workspace record names a malformed repository; it cannot be guarded",
-                extra={"repository": entry},
-                exc_info=True,
-            )
-    return keys
 
 
 async def load_default_workspace() -> Workspace | None:

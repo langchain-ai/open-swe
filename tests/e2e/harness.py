@@ -113,6 +113,32 @@ async def control_reset() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.post("/control/reset-default-workspace")
+async def control_reset_default_workspace() -> JSONResponse:
+    """Put back the seeded ``default`` workspace, which the app itself refuses to delete."""
+    from sqlalchemy import text
+
+    from agent.dashboard.workspace_settings import delete_workspace_settings
+    from agent.database import postgres
+    from agent.workspaces import store
+    from agent.workspaces.refresh import remove_refresh_cron
+
+    record = await store.WORKSPACES.get(store.DEFAULT_WORKSPACE_SLUG)
+    if record is not None:
+        await remove_refresh_cron(record)
+        await store._delete_snapshot(record.snapshot_id)
+        await store.WORKSPACES.delete(store.DEFAULT_WORKSPACE_SLUG)
+    async with postgres.transaction() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO workspace (id, slug, name, created_by) "
+                "VALUES (gen_random_uuid(), 'default', 'Default', 'open-swe')"
+            )
+        )
+    await delete_workspace_settings(store.DEFAULT_WORKSPACE_SLUG)
+    return JSONResponse({"ok": True})
+
+
 async def _reset_durable_pr_state() -> None:
     """Drop the per-pull-request state that outlives the in-memory fakes.
 
