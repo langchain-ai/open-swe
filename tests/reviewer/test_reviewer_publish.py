@@ -1012,7 +1012,7 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.get_github_token", return_value="token"),
+        patch("agent.tools.publish_review.resolve_thread_github_token", return_value="token"),
         patch("agent.tools.publish_review._publish_review_async", publish_async),
         patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
