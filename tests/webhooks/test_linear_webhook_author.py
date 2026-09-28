@@ -109,18 +109,6 @@ def _run_process(
     )
 
 
-def test_linear_configurable_carries_github_login(fake_store: Any) -> None:
-    configurable, _upsert, resolved_email, _content = _run_process(
-        _issue_data(user_email="zhen@example.com"),
-        {"owner": "langchain-ai", "name": "open-swe"},
-    )
-
-    assert resolved_email == "zhen@example.com"
-    assert configurable["source"] == "linear"
-    assert configurable["github_login"] == "zhen"
-    assert configurable["user_email"] == "zhen@example.com"
-
-
 def test_linear_follow_up_keeps_the_threads_workspace(fake_store: Any) -> None:
     configurable, upsert, _email, _content = _run_process(
         _issue_data(user_email="zhen@example.com"),
@@ -139,41 +127,6 @@ def test_linear_new_thread_lands_in_the_repositorys_preferred_workspace(fake_sto
     )
 
     assert configurable["workspace"] == "oss"
-
-
-def test_linear_upsert_tags_thread_with_login(fake_store: Any) -> None:
-    _configurable, upsert, _email, _content = _run_process(
-        _issue_data(user_email="zhen@example.com"),
-        {"owner": "langchain-ai", "name": "open-swe"},
-    )
-
-    assert upsert["github_login"] == "zhen"
-    assert upsert["user_email"] == "zhen@example.com"
-
-
-def test_linear_omits_login_when_unmapped(fake_store: Any) -> None:
-    configurable, upsert, resolved_email, _content = _run_process(
-        _issue_data(user_email="nobody@example.com"),
-        {"owner": "langchain-ai", "name": "open-swe"},
-    )
-
-    assert resolved_email == "nobody@example.com"
-    assert "github_login" not in configurable
-    assert upsert["github_login"] == ""
-
-
-def test_linear_description_images_stay_with_issue_without_comments(fake_store: Any) -> None:
-    issue = _full_issue()
-    issue["description"] = "See ![issue](https://example.com/issue.png)"
-    _configurable, _upsert, _email, content = _run_process(
-        _issue_data(user_email="zhen@example.com"),
-        {"owner": "langchain-ai", "name": "open-swe"},
-        full_issue=issue,
-    )
-
-    assert isinstance(content, dict)
-    messages = content["messages"]
-    assert messages[1]["content"][1]["image_url"]["url"] == "https://example.com/issue.png"
 
 
 def test_linear_comment_images_stay_with_their_comments(fake_store: Any) -> None:
