@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { isAbsolute } from "node:path"
+import { gzipSync } from "node:zlib"
 
 import * as z from "zod"
 
@@ -52,19 +53,21 @@ export const uploadedThreadSchema = z.object({ id: z.string() })
 
 type UploadSessionArgs = z.infer<z.ZodObject<typeof uploadSessionArgs>>
 
-export interface SessionUpload {
+export interface SessionUploadHeader {
   type: SessionType
-  transcript: string
   repo?: string
   branch?: string
   pr_url?: string
   visibility: "workspace" | "private"
 }
 
-/** The request body: the transcript verbatim, plus exactly one place the work was pushed. */
+/**
+ * The request body as gzipped JSONL: the header line, then the transcript
+ * verbatim. Gzip keeps a large session under Vercel's 4.5 MB request cap.
+ */
 export async function sessionUpload(
   args: UploadSessionArgs
-): Promise<SessionUpload> {
+): Promise<Uint8Array> {
   const target =
     args.pr_url !== undefined
       ? args.repo === undefined && args.branch === undefined
@@ -75,10 +78,15 @@ export async function sessionUpload(
         : null
   if (target === null)
     throw new Error("pass repo and branch, or pr_url on its own")
-  return {
+  const header: SessionUploadHeader = {
     type: args.type,
-    transcript: await readFile(args.transcript_path, "utf8"),
     visibility: args.visibility,
     ...target,
   }
+  return gzipSync(
+    Buffer.concat([
+      Buffer.from(`${JSON.stringify(header)}\n`),
+      await readFile(args.transcript_path),
+    ])
+  )
 }

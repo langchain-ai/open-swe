@@ -1,16 +1,20 @@
 """Turning a local coding-agent session into an Open SWE thread that continues its work."""
 
+import codecs
 import logging
 import uuid
+import zlib
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, Literal, Self
 from urllib.parse import quote
 
 import httpx2
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from langchain_core.messages import BaseMessage, HumanMessage
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from agent.claude_code.transcript import TranscriptError, parse_claude_transcript
+from agent.claude_code.transcript import ClaudeTranscript, TranscriptError
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.http import GITHUB_API_BASE, github_client
@@ -36,7 +40,7 @@ from agent.utils.thread_participants import (
 
 logger = logging.getLogger(__name__)
 
-MAX_TRANSCRIPT_CHARS = 32 * 1024 * 1024
+_INFLATE_CHUNK_BYTES = 1024 * 1024
 _PR_LINK_SOURCE = "session_upload"
 _UPLOAD_SENDER: SystemIdentity = {
     "id": "system:session-upload",
@@ -47,13 +51,12 @@ _UPLOAD_SENDER: SystemIdentity = {
 type SessionType = Literal["claude"]
 
 
-class SessionUploadBody(BaseModel):
-    """A local session's transcript, verbatim, and where its working directory was pushed."""
+class SessionUploadHeader(BaseModel):
+    """The upload's first line: which agent wrote the transcript that follows, and where its work was pushed."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: SessionType
-    transcript: str = Field(min_length=1, max_length=MAX_TRANSCRIPT_CHARS)
     repo: str | None = None
     branch: str | None = None
     pr_url: str | None = None
@@ -67,6 +70,83 @@ class SessionUploadBody(BaseModel):
         elif self.repo is None or self.branch is None:
             raise ValueError("pass repo and branch, or pr_url")
         return self
+
+
+UPLOAD_REQUEST_BODY: dict[str, object] = {
+    "requestBody": {
+        "required": True,
+        "description": (
+            "JSONL, optionally with Content-Encoding: gzip. The first line is a "
+            "SessionUploadHeader object; every following line is the session transcript, verbatim."
+        ),
+        "content": {
+            "application/x-ndjson": {
+                "schema": {"type": "string"},
+                "x-first-line-schema": SessionUploadHeader.model_json_schema(),
+            }
+        },
+    }
+}
+
+
+class UploadStream:
+    """The request body as JSONL lines, inflated and decoded chunk by chunk, never held whole.
+
+    Clients gzip the body because Vercel caps a request at 4.5 MB before the backend proxy.
+    """
+
+    def __init__(self, request: Request) -> None:
+        encoding = request.headers.get("content-encoding", "").strip().lower()
+        if encoding not in {"", "identity", "gzip"}:
+            raise HTTPException(415, "session uploads must be gzip or uncompressed")
+        self._request = request
+        self._inflater = (
+            zlib.decompressobj(wbits=zlib.MAX_WBITS | 16) if encoding == "gzip" else None
+        )
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+        self._partial: list[str] = []
+
+    async def lines(self) -> AsyncIterator[str]:
+        try:
+            async for chunk in self._request.stream():
+                for text in self._decoded(chunk):
+                    for line in self._split(text):
+                        yield line
+            for line in self._split(self._finish()):
+                yield line
+        except (zlib.error, UnicodeDecodeError) as exc:
+            raise HTTPException(400, "session upload is not valid gzipped UTF-8") from exc
+        if self._partial:
+            yield "".join(self._partial)
+
+    def _decoded(self, chunk: bytes) -> Iterator[str]:
+        if self._inflater is None:
+            yield self._decoder.decode(chunk)
+            return
+        yield self._decoder.decode(self._inflater.decompress(chunk, _INFLATE_CHUNK_BYTES))
+        while self._inflater.unconsumed_tail:
+            data = self._inflater.decompress(self._inflater.unconsumed_tail, _INFLATE_CHUNK_BYTES)
+            yield self._decoder.decode(data)
+
+    def _finish(self) -> str:
+        tail = b""
+        if self._inflater is not None:
+            tail = self._inflater.flush()
+            if not self._inflater.eof:
+                raise HTTPException(400, "session upload ended partway through the gzip stream")
+            if self._inflater.unused_data:
+                raise HTTPException(400, "session upload has data after the gzip stream")
+        return self._decoder.decode(tail, final=True)
+
+    def _split(self, text: str) -> Iterator[str]:
+        start = 0
+        while (end := text.find("\n", start)) != -1:
+            self._partial.append(text[start:end])
+            yield "".join(self._partial)
+            self._partial.clear()
+            start = end + 1
+        if start < len(text):
+            self._partial.append(text[start:])
 
 
 class _PullRequestRepo(BaseModel):
@@ -150,11 +230,11 @@ async def _branch_target(repo: str, branch: str, login: str) -> _Target:
     return _Target(owner=repo_config["owner"], name=repo_config["name"], branch=safe_branch)
 
 
-async def _target(body: SessionUploadBody, login: str) -> _Target:
-    if body.pr_url is not None:
-        return await _pull_request_target(body.pr_url, login)
-    if body.repo is not None and body.branch is not None:
-        return await _branch_target(body.repo, body.branch, login)
+async def _target(header: SessionUploadHeader, login: str) -> _Target:
+    if header.pr_url is not None:
+        return await _pull_request_target(header.pr_url, login)
+    if header.repo is not None and header.branch is not None:
+        return await _branch_target(header.repo, header.branch, login)
     raise HTTPException(422, "pass repo and branch, or pr_url")
 
 
@@ -183,12 +263,23 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
 
 
 async def upload_session(
-    body: SessionUploadBody, login: str, *, email: str | None = None
+    stream: UploadStream, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Create a thread seeded with the session's history; no run starts until the person sends one."""
-    target = await _target(body, login)
+    lines = stream.lines()
+    first = await anext(lines, None)
+    if first is None:
+        raise HTTPException(422, "the upload is empty")
     try:
-        session = parse_claude_transcript(body.transcript)
+        header = SessionUploadHeader.model_validate_json(first)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False)) from exc
+    target = await _target(header, login)
+    transcript = ClaudeTranscript()
+    async for line in lines:
+        transcript.add(line)
+    try:
+        session = transcript.session()
     except TranscriptError as exc:
         raise HTTPException(422, str(exc)) from exc
     if not session.messages:
@@ -207,7 +298,7 @@ async def upload_session(
         "origin": DASHBOARD_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
-        "visibility": "private" if body.visibility == "private" else "public",
+        "visibility": "private" if header.visibility == "private" else "public",
         "thread_category": "interactive",
         "trigger_kind": "user",
         PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
@@ -223,7 +314,7 @@ async def upload_session(
         "effort": profile.get("reasoning_effort"),
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
-        "uploaded_session_type": body.type,
+        "uploaded_session_type": header.type,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
         # update_state refuses a thread with no graph, and LangGraph only
