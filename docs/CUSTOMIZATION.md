@@ -198,6 +198,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:
     return create_deep_agent(model=model, ...)
 ```
 
+### Auto model routing with Jev
+
+Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`. When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe. Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`. Routing is independent of the provider-proxy gateway toggle below. The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
+
+Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second HTTP timeout, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+
 ### Routing through the LangSmith LLM Gateway
 
 Model calls can be proxied through the [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway) (private beta) instead of hitting providers directly. The gateway authenticates with a **LangSmith API key** that has the `gateway:invoke` permission and resolves the real provider key from workspace Provider Secrets, so no provider API keys are needed at runtime — and it adds central spend limits, PII/secrets redaction, and tracing. Your org must have the gateway enabled with Provider Secrets configured.
@@ -598,17 +604,16 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is assembled in `agent/prompt.py` from modular sections. You can customize behavior by editing individual sections:
+The system prompt is the template `agent/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `agent/prompt.py`. It includes each section from its own file under `agent/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
 
-| Section | What it controls |
+| File | What it controls |
 |---|---|
-| `WORKING_ENV_SECTION` | Sandbox paths and execution constraints (or `DESKTOP_WORKING_ENV_SECTION` for local desktop runs) |
-| `TASK_EXECUTION_SECTION` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
-| `DEPENDENCY_SECTION` | Installing, vetting, and managing project dependencies |
-| `COMMIT_PR_SECTION` | PR title/body format, lint/format steps, and commit conventions (or `DESKTOP_PR_SECTION`) |
-| `OPEN_SWE_SHARED_BASE` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
-
-> **Note:** General code style (`### Working with Code`), communication guidelines (`### Communication`), and core behaviors are composed as subsections of `OPEN_SWE_SHARED_BASE` rather than separate configurable constants.
+| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
+| `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
+| `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
+| `dependencies.md` | Installing, vetting, and managing project dependencies |
+| `commit-pr.md` | PR title/body format, lint/format steps, and commit conventions (plus `commit-pr-desktop.md` for desktop runs) |
+| `shared-base.md` | Shared core guidance: concise style, core behavior, sandbox operations, code style, and communication |
 
 ### Default prompt file
 

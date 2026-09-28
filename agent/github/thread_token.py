@@ -1,12 +1,13 @@
 """GitHub token lookup utilities."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from langgraph.config import get_config
 
+from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -18,8 +19,19 @@ _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS = 60
 # expiry, so entries for threads that are never read again don't accumulate.
 _GITHUB_TOKEN_MAX_TTL = timedelta(hours=24)
 _BOT_PRINCIPAL = "bot"
-# (thread_id, principal) -> (token, token_expires_at, cached_at)
-_GITHUB_TOKEN_CACHE: dict[tuple[str, str], tuple[str, str | None, datetime]] = {}
+
+
+class _CachedToken(NamedTuple):
+    token: str
+    expires_at: str | None
+    cached_at: datetime
+    # Bot tokens only; None means installation-wide.
+    repositories: tuple[str, ...] | None = None
+
+
+# (thread_id, principal) -> token. Expired bot entries stay until the 24h cap so they
+# can be re-minted at the same repository scope, never a wider one.
+_GITHUB_TOKEN_CACHE: dict[tuple[str, str], _CachedToken] = {}
 
 
 def github_token_principal(*, login: str | None = None, email: str | None = None) -> str | None:
@@ -42,8 +54,12 @@ def cache_github_token_for_thread(
     *,
     principal: str | None = None,
     is_bot_token: bool = False,
+    repositories: Sequence[str] | None = None,
 ) -> None:
-    """Cache a GitHub token in process for the current thread and principal."""
+    """Cache a GitHub token in process for the current thread and principal.
+
+    ``repositories`` is the scope a bot token was minted with (None: installation-wide).
+    """
     if not thread_id or not token:
         return
     cache_principal = _BOT_PRINCIPAL if is_bot_token else principal
@@ -51,7 +67,9 @@ def cache_github_token_for_thread(
         logger.warning("Refusing to cache an unbound user GitHub token for thread %s", thread_id)
         return
     now = datetime.now(UTC)
-    _GITHUB_TOKEN_CACHE[(thread_id, cache_principal)] = (token, expires_at, now)
+    _GITHUB_TOKEN_CACHE[(thread_id, cache_principal)] = _CachedToken(
+        token, expires_at, now, tuple(repositories) if is_bot_token and repositories else None
+    )
     _evict_expired(now=now)
 
 
@@ -86,19 +104,25 @@ def _is_expired(expires_at: Any, *, now: datetime | None = None) -> bool:
     return (parsed - current).total_seconds() <= _GITHUB_TOKEN_EXPIRY_SKEW_SECONDS
 
 
-def _entry_expired(expires_at: str | None, cached_at: datetime, *, now: datetime) -> bool:
+def _past_max_ttl(entry: _CachedToken, *, now: datetime) -> bool:
+    return now - entry.cached_at >= _GITHUB_TOKEN_MAX_TTL
+
+
+def _entry_expired(entry: _CachedToken, *, now: datetime) -> bool:
     """Expired when past the token's own expiry or the 24h cache cap."""
-    if now - cached_at >= _GITHUB_TOKEN_MAX_TTL:
-        return True
-    return _is_expired(expires_at, now=now)
+    return _past_max_ttl(entry, now=now) or _is_expired(entry.expires_at, now=now)
+
+
+def _evictable(key: tuple[str, str], entry: _CachedToken, *, now: datetime) -> bool:
+    if key[1] == _BOT_PRINCIPAL:
+        return _past_max_ttl(entry, now=now)
+    return _entry_expired(entry, now=now)
 
 
 def _evict_expired(*, now: datetime | None = None) -> None:
     current = now or datetime.now(UTC)
     stale = [
-        key
-        for key, (_token, expires_at, cached_at) in _GITHUB_TOKEN_CACHE.items()
-        if _entry_expired(expires_at, cached_at, now=current)
+        key for key, entry in _GITHUB_TOKEN_CACHE.items() if _evictable(key, entry, now=current)
     ]
     for key in stale:
         _GITHUB_TOKEN_CACHE.pop(key, None)
@@ -113,16 +137,17 @@ def _cached_token_if_fresh(
     if principal:
         keys.append((thread_id, principal))
     keys.append((thread_id, _BOT_PRINCIPAL))
+    now = datetime.now(UTC)
     for key in keys:
         cached = _GITHUB_TOKEN_CACHE.get(key)
         if not cached:
             continue
-        token, expires_at, cached_at = cached
-        if _entry_expired(expires_at, cached_at, now=datetime.now(UTC)):
-            _GITHUB_TOKEN_CACHE.pop(key, None)
+        if _entry_expired(cached, now=now):
+            if _evictable(key, cached, now=now):
+                _GITHUB_TOKEN_CACHE.pop(key, None)
             logger.info("Cached GitHub token for thread %s has expired; re-resolving", thread_id)
             continue
-        return token, expires_at
+        return cached.token, cached.expires_at
     return None, None
 
 
@@ -140,6 +165,29 @@ def get_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
     resolved = run_config if run_config is not None else get_config()
     token, _expires_at = _cached_token_if_fresh(
         _thread_id_from_config(resolved), _principal_from_config(resolved)
+    )
+    return token
+
+
+async def resolve_thread_github_token(run_config: Mapping[str, Any] | None = None) -> str | None:
+    """Resolve the current thread's GitHub token, re-minting an expired bot token."""
+    resolved = run_config if run_config is not None else get_config()
+    if token := get_github_token(resolved):
+        return token
+    thread_id = _thread_id_from_config(resolved)
+    expired_bot = _GITHUB_TOKEN_CACHE.get((thread_id, _BOT_PRINCIPAL)) if thread_id else None
+    if not thread_id or expired_bot is None:
+        return None
+    repositories = expired_bot.repositories
+    token, expires_at = await get_github_app_installation_token_with_expiry(
+        repositories=repositories
+    )
+    if not token:
+        logger.warning("Could not re-mint expired bot GitHub token", extra={"thread_id": thread_id})
+        return None
+    logger.info("Re-minted expired bot GitHub token", extra={"thread_id": thread_id})
+    cache_github_token_for_thread(
+        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
     )
     return token
 

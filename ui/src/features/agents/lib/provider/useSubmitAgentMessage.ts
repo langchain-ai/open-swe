@@ -53,6 +53,7 @@ export function useSubmitAgentMessage(threadId: string) {
   const source = useThreadSource()
 
   return useMutation({
+    meta: { errorTitle: "Couldn't send message" },
     mutationFn: async (vars: SendAgentMessageVariables) => {
       if (vars.content.trim() === "/offload") {
         if (source.isRunning) {

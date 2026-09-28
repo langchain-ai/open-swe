@@ -21,6 +21,7 @@ class RunUsageSummary:
     session_cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)

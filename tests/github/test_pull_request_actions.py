@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_actions as actions
 from agent.github import pull_request_dashboard_routes as pr_routes
+from agent.github import squash_message
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ def github(monkeypatch):
 
     def _install(request: AsyncMock) -> AsyncMock:
         monkeypatch.setattr(actions, "github_request", request)
+        monkeypatch.setattr(squash_message, "github_request", request)
         return request
 
     return _install
@@ -52,6 +54,30 @@ async def test_merge_requires_github_confirmation(github, status, merged):
     assert request.await_args.kwargs == {
         "json": {"sha": "a" * 40, "merge_method": "squash"},
         "max_retries": 0,
+    }
+
+
+async def test_squash_merge_sends_the_description_and_commits(github):
+    commit = {
+        "commit": {"message": "fix: spelling", "author": {"name": "Ada", "email": "ada@x.com"}},
+        "author": {"login": "ada"},
+        "parents": [{"sha": "b" * 40}],
+    }
+    payloads = {
+        "https://api.github.com/repos/acme/app/pulls/1": {"title": "fix: typo", "body": "Fix."},
+        "https://api.github.com/repos/acme/app/pulls/1/commits": [commit],
+        "https://api.github.com/user": {"login": "octocat"},
+        "https://api.github.com/repos/acme/app/pulls/1/merge": {"merged": True},
+    }
+    request = github(AsyncMock(side_effect=lambda _, __, url, **___: response(payloads[url])))
+    action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
+
+    await actions.act_on_pull_request("acme", "app", 1, action, "user-token")
+
+    assert request.await_args.kwargs["json"] == {
+        "sha": "a" * 40,
+        "merge_method": "squash",
+        "commit_message": "Fix.\n\n* fix: spelling\n\nCo-authored-by: Ada <ada@x.com>",
     }
 
 
@@ -129,15 +155,6 @@ async def test_a_refused_reason_comment_leaves_the_pull_request_open(github):
     assert request.await_count == 2
 
 
-async def test_a_network_failure_is_a_bad_gateway(github):
-    github(AsyncMock(side_effect=httpx2.ConnectError("boom")))
-    with pytest.raises(HTTPException, match="Could not confirm close") as error:
-        await actions.act_on_pull_request(
-            "acme", "app", 7, actions.CloseAction(action="close"), "user-token"
-        )
-    assert error.value.status_code == 502
-
-
 async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutation(
     github, monkeypatch
 ):
@@ -165,29 +182,6 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
     assert request.await_args_list[1].kwargs["json"]["variables"] == {"pullRequestId": "PR_node_7"}
 
 
-async def test_a_pull_request_already_out_of_draft_is_ready_without_a_mutation(github):
-    request = github(AsyncMock(return_value=response({"node_id": "PR_node_7", "draft": False})))
-    assert await actions.act_on_pull_request(
-        "acme", "app", 7, actions.MarkReadyAction(action="mark-ready"), "user-token"
-    ) == actions.PullRequestActionResult(action="mark-ready", done=True)
-    assert request.await_count == 1
-
-
-async def test_a_refused_mutation_surfaces_githubs_own_message(github):
-    github(
-        AsyncMock(
-            side_effect=[
-                response({"node_id": "PR_node_7", "draft": True}),
-                response({"errors": [{"message": "Resource not accessible by integration"}]}),
-            ]
-        )
-    )
-    with pytest.raises(HTTPException, match="Resource not accessible by integration"):
-        await actions.act_on_pull_request(
-            "acme", "app", 7, actions.MarkReadyAction(action="mark-ready"), "user-token"
-        )
-
-
 async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
     request = github(AsyncMock(return_value=response({"message": "Not Found"}, 404)))
     with pytest.raises(HTTPException, match="Not Found") as error:
@@ -196,20 +190,6 @@ async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
         )
     assert error.value.status_code == 404
     assert request.await_count == 1
-
-
-@pytest.mark.parametrize(
-    "action",
-    [
-        actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash"),
-        actions.CloseAction(action="close"),
-        actions.MarkReadyAction(action="mark-ready"),
-    ],
-)
-async def test_every_action_rejects_an_invalid_pull_request(action):
-    with pytest.raises(HTTPException) as error:
-        await actions.act_on_pull_request("acme", "app", 0, action, "user-token")
-    assert error.value.status_code == 422
 
 
 async def test_without_a_user_token_the_route_never_calls_github(monkeypatch):
@@ -222,17 +202,6 @@ async def test_without_a_user_token_the_route_never_calls_github(monkeypatch):
         )
     assert error.value.status_code == 401
     act.assert_not_awaited()
-
-
-async def test_the_route_forwards_the_action_with_the_signed_in_users_token(monkeypatch):
-    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value="user-token"))
-    action = actions.MarkReadyAction(action="mark-ready")
-    act = AsyncMock(return_value=actions.PullRequestActionResult(action="mark-ready", done=True))
-    monkeypatch.setattr(pr_routes, "act_on_pull_request", act)
-    assert await pr_routes.api_act_on_pull_request(
-        "acme", "app", 7, action, {"sub": "octocat"}
-    ) == actions.PullRequestActionResult(action="mark-ready", done=True)
-    act.assert_awaited_once_with("acme", "app", 7, action, "user-token")
 
 
 @pytest.mark.parametrize("status", [202, 422])

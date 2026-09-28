@@ -59,7 +59,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
           comments(first: 1) {
             nodes {
               author { login }
-              body
+              body: bodyText
               url
             }
           }

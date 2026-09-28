@@ -197,6 +197,8 @@ class Highlighter:
             return None
 
     def _span(self, token: _TokenType, value: str) -> Span:
+        while not self._style.styles_token(token) and token.parent is not None:
+            token = token.parent
         style = self._style.style_for_token(token)
         color = style.get("color")
         return Span(

@@ -14,9 +14,7 @@ def test_native_image_blocks_are_validated_against_the_model(url: str | dict[str
     assert images[0].mime_type == "image/png"
     assert images[0].base64 == "aGVsbG8="
     with pytest.raises(HTTPException) as failure:
-        _validate_command_images(
-            content, model_id="fireworks:accounts/fireworks/models/deepseek-v4-pro"
-        )
+        _validate_command_images(content, model_id="fireworks:accounts/fireworks/models/kimi-k3")
     assert failure.value.status_code == 422
 
 

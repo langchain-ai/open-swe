@@ -31,6 +31,7 @@ from agent.slack.http import (
 )
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
+from agent.threads.creation import create_lock_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -508,6 +509,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
@@ -1432,10 +1435,8 @@ async def slack_thread_mutation_lock(
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
-            await langgraph_client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            await create_lock_thread(
+                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
             )
             break
         except ConflictError:

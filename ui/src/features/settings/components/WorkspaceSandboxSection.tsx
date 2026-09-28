@@ -66,6 +66,7 @@ export function WorkspaceSandboxSection({
     updateScript !== (record.update_script ?? "")
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: () =>
       api.updateWorkspace(record.slug, {
         setup_script: setupScript,
@@ -74,6 +75,7 @@ export function WorkspaceSandboxSection({
     onSuccess: onSaved,
   })
   const rebuild = useMutation({
+    meta: { errorTitle: "Couldn't start the image rebuild" },
     mutationFn: () => api.refreshWorkspace(record.slug),
     onSuccess: onRebuildStarted,
   })
@@ -125,8 +127,9 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <label htmlFor={setupId}>Setup script</label>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Selected repositories
-            are available in <WorkspaceReposPopover repos={record.repos} />.
+            Runs on the base snapshot to build the image. Preferred repositories
+            are available in <WorkspaceReposPopover repos={record.repos} /> to
+            preload; runs clone any other repository on demand.
           </span>
           <Textarea
             id={setupId}
@@ -150,9 +153,9 @@ export function WorkspaceSandboxSection({
             onChange={(e) => setUpdateScript(e.target.value)}
           />
         </div>
-        {(save.error || rebuild.error) && (
+        {save.error && (
           <p role="alert" className="text-xs text-destructive">
-            {(save.error ?? rebuild.error)?.message}
+            {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (

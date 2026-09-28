@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
+from agent.webhooks.event_log import EventLog, EventRefs
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
@@ -34,6 +35,14 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    await EventLog.record(
+        request,
+        body,
+        "github",
+        event_type=event_type,
+        delivery_id=delivery_id,
+        refs=EventRefs.github(body),
+    )
     common.logger.info(
         "GitHub webhook received",
         extra={
@@ -103,6 +112,8 @@ async def github_webhook(
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
+        if action == "closed":
+            background_tasks.add_task(service.settle_expedited_review_on_close, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -189,6 +200,14 @@ async def github_webhook(
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
 
+    sender_login = str((payload.get("sender") or {}).get("login") or "")
+    if not await service.is_accepted_commenter(sender_login):
+        common.logger.debug(
+            "Ignoring GitHub comment from an unregistered sender",
+            extra={"github_event": event_type, "sender_login": sender_login},
+        )
+        return {"status": "ignored", "reason": "Sender is not a registered Open SWE user"}
+
     if (
         event_type == "pull_request_review_comment"
         and common.review_comment_reply_parent_id(payload) is not None
@@ -200,6 +219,22 @@ async def github_webhook(
         return {"status": "accepted", "message": "Processing review finding reply"}
 
     if not common.mentions_open_swe(comment_body):
+        agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event_type)
+        if agent_thread_id is not None:
+            gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
+            if gate_rejection is not None:
+                return gate_rejection
+            common.logger.info(
+                "Accepted untagged GitHub comment on an agent-opened PR",
+                extra={"github_event": event_type, "thread_id": agent_thread_id},
+            )
+            background_tasks.add_task(
+                service.process_github_pr_comment,
+                payload,
+                event_type,
+                agent_thread_id=agent_thread_id,
+            )
+            return {"status": "accepted", "message": f"Processing untagged {event_type} event"}
         tags = common.describe_open_swe_tags()
         common.logger.debug(
             "Ignoring GitHub %s%s that does not mention %s",

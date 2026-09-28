@@ -35,7 +35,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
-from agent.slack.dm import dm_thread_title, is_dm_channel, is_dm_session
+from agent.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
 from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.request import SlackRequest
@@ -58,7 +58,7 @@ from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
-_DM_CONTEXT = load_prompt("runs/slack-dm.md")
+_CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -111,6 +111,7 @@ async def _dispatch_or_queue_slack_run(
             None,
             configurable,
             source="slack",
+            thread_title=None,
             input=run_input,
             metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
             client=client,
@@ -546,13 +547,13 @@ async def process_slack_mention(
     request: SlackRequest, repo: common.SlackRepoResolution | None
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
-    status_ts = (
-        (request.reply_thread_ts or request.original_message_ts or request.event_ts)
-        if request.dm_session
-        else request.thread_ts
-    )
+    status_ts = request.thread_ts
     show_status = bool(
-        request.channel_id and status_ts and not request.code_channel and not request.message_update
+        request.channel_id
+        and status_ts
+        and not request.code_channel
+        and not request.concierge_mode
+        and not request.message_update
     )
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
@@ -583,28 +584,21 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
-    """Keep a defaulted repository unless it belongs to another workspace.
+async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo:
+    """Keep a defaulted repository unless another workspace prefers it.
 
-    Nobody named this repository, so it did not pick the workspace. Handing an
-    `oss` run a repository `default` owns would cross the boundary the
-    workspace exists to draw, so that workspace's own default repository takes
-    over — and there may not be one.
+    Nobody named this repository, so it did not pick the workspace, and the
+    workspace the run landed in should not inherit a default meant for another:
+    its own default repository takes over when it has one. Every workspace can
+    use every repository, so the candidate stays otherwise.
     """
     if not workspace:
         return candidate
-    owner = await workspace_for_repo(candidate.owner, candidate.name)
-    if owner is None or owner == workspace:
+    preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
+    if preferred_by is None or preferred_by == workspace:
         return candidate
     scoped = (await common.get_workspace_settings(workspace)).default_repo
-    if not scoped:
-        return None
-    fallback = Repo.model_validate(scoped)
-    # The workspace's default may itself be inherited from the instance record.
-    fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
-    if fallback_owner is None or fallback_owner == workspace:
-        return fallback
-    return None
+    return Repo.model_validate(scoped) if scoped else candidate
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
@@ -618,9 +612,9 @@ async def _slack_login(user_id: str, user_email: str | None = None) -> str | Non
     return await User.login_for_email(user_email) if user_email else None
 
 
-def _slack_thread_title(request_text: str, dm_session: bool, name: str) -> str:
+def _slack_thread_title(request_text: str, concierge_mode: bool, name: str) -> str:
     """A DM thread is named for the person, not for whatever they asked first."""
-    return dm_thread_title(name) if dm_session else request_text
+    return dm_thread_title(name) if concierge_mode else request_text
 
 
 def _slack_thread_visibility(channel_context: SlackChannelContext | None) -> str:
@@ -636,7 +630,9 @@ async def _mark_slack_thread_errored(
     try:
         owner_login = await _slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
-        dm_session = request.dm_session or is_dm_session(request.channel_context, request.thread_ts)
+        concierge_mode = request.concierge_mode or is_concierge_thread(
+            request.channel_context, request.thread_ts
+        )
         # An unlinked sender is turned away at the account gate; a private thread
         # nobody owns would be unreachable, so persist nothing for them.
         if not request.triggering_bot_id and (visibility == "public" or owner_login):
@@ -650,8 +646,8 @@ async def _mark_slack_thread_errored(
                 thread_id,
                 source="slack",
                 repo_config=repo.model_dump() if repo else None,
-                title=_slack_thread_title(clean_text, dm_session, request.user_name),
-                static_title=dm_session,
+                title=_slack_thread_title(clean_text, concierge_mode, request.user_name),
+                static_title=concierge_mode,
                 source_context=SourceContext(
                     slack_thread=SlackThreadRef(
                         channel_id=request.channel_id,
@@ -704,7 +700,7 @@ async def _process_slack_mention_impl(
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
     code_channel = request.code_channel
-    dm_session = request.dm_session or is_dm_session(channel_context, thread_ts)
+    concierge_mode = request.concierge_mode or is_concierge_thread(channel_context, thread_ts)
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -775,11 +771,13 @@ async def _process_slack_mention_impl(
     thread_metadata = await common.authorize_github_thread(
         thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
-    context_thread_ts = reply_thread_ts or thread_ts
+    context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
     thread_messages = (
         []
         if message_update
-        else await common.fetch_slack_thread_messages(channel_id, context_thread_ts)
+        else await common.fetch_slack_thread_messages(
+            request.context_channel_id or channel_id, context_thread_ts
+        )
     )
     current_message = next(
         (message for message in thread_messages if str(message.get("ts")) == original_message_ts),
@@ -802,13 +800,17 @@ async def _process_slack_mention_impl(
     elif current_message is not None and attachments and not current_message.get("attachments"):
         current_message["attachments"] = attachments
 
-    context_messages = common.select_slack_context_messages(
-        thread_messages,
-        event_ts,
-        bot_user_id,
-        common.SLACK_BOT_USERNAME,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
-    )[0]
+    context_messages = (
+        sorted(thread_messages, key=lambda message: common.parse_slack_ts(message.get("ts")))
+        if request.context_thread_ts
+        else common.select_slack_context_messages(
+            thread_messages,
+            event_ts,
+            bot_user_id,
+            common.SLACK_BOT_USERNAME,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        )[0]
+    )
     source_messages = (
         [{"ts": event_ts, "text": text, "user": user_id, "attachments": attachments}]
         if message_update
@@ -880,7 +882,9 @@ async def _process_slack_mention_impl(
     mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
-    thread_model_choice = None if dm_session else await common.get_thread_model_choice(thread_id)
+    thread_model_choice = (
+        None if concierge_mode else await common.get_thread_model_choice(thread_id)
+    )
 
     # Routing comes before the run's repository: a repository nobody named
     # must not outrank the channel's binding, and once a workspace has won, a
@@ -896,7 +900,7 @@ async def _process_slack_mention_impl(
         # tool can move it afterwards and metadata carries that to later messages.
         thread_workspace = (
             DEFAULT_WORKSPACE_SLUG
-            if dm_session and not tagged_slug
+            if concierge_mode and not tagged_slug
             else (
                 await resolve_workspace(
                     tag=tagged_slug,
@@ -999,7 +1003,7 @@ async def _process_slack_mention_impl(
         slack_thread_context["triggering_bot_id"] = allowed_bot.bot_id
         slack_thread_context["triggering_bot_app_id"] = allowed_bot.app_id
         slack_thread_context["team_id"] = allowed_bot.team_id
-    if (code_channel or dm_session) and reply_thread_ts:
+    if (code_channel or concierge_mode) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
     if repo is not None and not resolution.explicit:
@@ -1015,7 +1019,7 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
-            _DM_CONTEXT if dm_session else "",
+            _CONCIERGE_CONTEXT if concierge_mode else "",
         )
         if section
     )
@@ -1042,6 +1046,8 @@ async def _process_slack_mention_impl(
     # admins, and a non-admin's DM gets nothing extra.
     if is_dm_channel(channel_context):
         configurable["admin_thread"] = True
+    if request.context_thread_ts:
+        configurable["slack_breakout"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace
@@ -1067,10 +1073,10 @@ async def _process_slack_mention_impl(
         user_email=user_email or "",
         # A DM offers its title on every message: the upsert keeps the first one
         # written, so a name Slack could not resolve earlier still lands later.
-        title=_slack_thread_title(clean_text, dm_session, user_name)
-        if (is_first_mention or dm_session)
+        title=_slack_thread_title(clean_text, concierge_mode, user_name)
+        if (is_first_mention or concierge_mode)
         else "",
-        static_title=dm_session,
+        static_title=concierge_mode,
         source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
         workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
@@ -1108,10 +1114,11 @@ async def _process_slack_mention_impl(
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
     # behind it.
-    explicitly_tagged = dm_session or _interrupts_active_run(
+    explicitly_tagged = concierge_mode or _interrupts_active_run(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions
+        and not request.kitchen_channel,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,
@@ -1214,15 +1221,12 @@ async def _process_slack_mention_impl(
                 triggering_user_id=user_id,
                 agent_thread_id=thread_id,
             )
-    if not code_channel and isinstance(run_id, str) and run_id:
+    if not code_channel and not concierge_mode and isinstance(run_id, str) and run_id:
         await show_slack_thinking_status(
             client=langgraph_client,
             thread_id=thread_id,
             run_id=run_id,
             channel_id=channel_id,
-            # A DM session names no Slack thread, so the status hangs on the
-            # message being answered and the session owns only that one.
-            thread_ts=(reply_thread_ts or original_message_ts) if dm_session else thread_ts,
-            session_ts=thread_ts if dm_session else "",
+            thread_ts=thread_ts,
         )
     return bool(isinstance(run_id, str) and run_id)

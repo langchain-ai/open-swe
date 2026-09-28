@@ -11,7 +11,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
+import { api } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 afterEach(() => {
   cleanup()
@@ -719,5 +723,98 @@ it("reviews imported connections one at a time without writing on import or skip
       ([, init]) => init?.method === "PUT" || init?.method === "POST"
     )
   ).toBe(false)
+  client.clear()
+})
+
+it("keeps a row's pending flip when another row's save finishes first", async () => {
+  const connection = (name: string): MCPConnection => ({
+    name,
+    url: `https://mcp.${name}.app/mcp`,
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: [],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  })
+  const finish = new Map<string, () => void>()
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([
+    connection("linear"),
+    connection("github"),
+  ])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    (update) =>
+      new Promise<MCPConnection>((resolve) =>
+        finish.set(update.name, () =>
+          resolve({ ...connection(update.name), enabled: false })
+        )
+      )
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  fireEvent.click(screen.getByRole("button", { name: "Disable github" }))
+  await waitFor(() => expect(finish.size).toBe(2))
+
+  finish.get("linear")!()
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Enable linear" })
+        .hasAttribute("disabled")
+    ).toBe(false)
+  )
+  expect(screen.getByRole("button", { name: "Enable github" })).toBeTruthy()
+  expect(api.getMyMCPs).toHaveBeenCalledTimes(1)
+  client.clear()
+})
+
+it("flips a connection at once and flips it back when the save fails", async () => {
+  const saved: MCPConnection = {
+    name: "linear",
+    url: "https://mcp.linear.app/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: ["search"],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  }
+  let failSave: (error: Error) => void = () => {}
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([saved])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    () => new Promise<MCPConnection>((_resolve, reject) => (failSave = reject))
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  const enable = await screen.findByRole("button", { name: "Enable linear" })
+  expect(screen.getByText(/· Disabled ·/)).toBeTruthy()
+  await waitFor(() => expect(api.saveMyMCP).toHaveBeenCalledTimes(1))
+  expect(enable.hasAttribute("disabled")).toBe(true)
+  fireEvent.click(enable)
+  expect(api.saveMyMCP).toHaveBeenCalledTimes(1)
+
+  failSave(new Error("MCP server unreachable"))
+  const disable = await screen.findByRole("button", { name: "Disable linear" })
+  await waitFor(() => expect(disable.hasAttribute("disabled")).toBe(false))
+  expect(reportError).toHaveBeenCalledWith({
+    title: "Couldn't disable linear",
+    error: new Error("MCP server unreachable"),
+  })
   client.clear()
 })

@@ -5,7 +5,7 @@ from typing import Annotated, ClassVar, Literal
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from agent.github.http import (
     GITHUB_API_BASE,
@@ -18,6 +18,7 @@ from agent.github.pull_request_status import (
     pull_request_identity,
 )
 from agent.github.repo_merge_methods import MergeMethod
+from agent.github.squash_message import GitHubUser, SquashSource
 
 logger = logging.getLogger(__name__)
 
@@ -125,14 +126,38 @@ class MergeAction(_PullRequestActionBase):
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> None:
+        payload: dict[str, object] = {"sha": self.sha, "merge_method": self.merge_method}
+        if self.merge_method == "squash":
+            message = await self._squash_message(client, owner, repo, number)
+            if message is not None:
+                payload["commit_message"] = message
         await self._confirm(
             client,
             "PUT",
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/merge",
-            {"sha": self.sha, "merge_method": self.merge_method},
+            payload,
             "merged",
             True,
         )
+
+    async def _squash_message(
+        self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    ) -> str | None:
+        source = await SquashSource.fetch(client, owner, repo, number)
+        if source is None:
+            return None
+        try:
+            response = await github_request(client, "GET", f"{GITHUB_API_BASE}/user")
+            response.raise_for_status()
+            merger = GitHubUser.model_validate(response.json()).login
+        except httpx2.HTTPError, ValueError, ValidationError:
+            logger.warning(
+                "Could not read the merging user; keeping them as a co-author",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+                exc_info=True,
+            )
+            merger = None
+        return source.message(merger)
 
 
 class CloseAction(_PullRequestActionBase):

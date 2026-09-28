@@ -27,6 +27,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "anthropic:claude-sonnet-5-5",
+        "label": "Sonnet 5.5",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "default_effort": "high",
+        "supports_images": True,
+    },
+    {
         "id": "anthropic:claude-fable-5-1",
         "label": "Fable 5.1",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
@@ -71,20 +78,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": False,
     },
     {
-        "id": "fireworks:accounts/fireworks/models/deepseek-v4-pro",
-        "label": "DeepSeek V4 Pro",
-        "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
-        "default_effort": "high",
-        "supports_images": False,
-    },
-    {
-        "id": "fireworks:accounts/fireworks/models/glm-5p3",
-        "label": "GLM 5.3",
-        "efforts": ["none", "high", "max"],
-        "default_effort": "high",
-        "supports_images": False,
-    },
-    {
         "id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
         "label": "GLM-5.3 Flash",
         "efforts": ["low", "high", "max"],
@@ -118,6 +111,8 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
         "fireworks:accounts/fireworks/models/kimi-k2p7-code",
         "fireworks:accounts/fireworks/models/kimi-k3-code",
         "fireworks:accounts/fireworks/models/glm-5p2",
+        "fireworks:accounts/fireworks/models/glm-5p3",
+        "fireworks:accounts/fireworks/models/deepseek-v4-pro",
     }
 )
 
@@ -139,8 +134,8 @@ CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-6-luna": 272_000,
 }
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
+    "anthropic:claude-sonnet-5-5": 1_000_000,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
-    "fireworks:accounts/fireworks/models/glm-5p3": 1_048_576,
     "fireworks:accounts/fireworks/models/glm-5p3-flash": 1_048_576,
 }
 

@@ -10,6 +10,8 @@ from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.github.pull_requests import PullRequest
+from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.slack.oauth import SLACK_TEAM_ID
@@ -112,7 +114,13 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:
-    """Private threads are visible to their immutable owner and to workspace admins."""
+    """Private threads are visible to their immutable owner and to workspace admins.
+
+    A review chat is readable only by the user it belongs to, so its sidebar row
+    can be pinned, archived and marked read.
+    """
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        return review.owned_by(login)
     return thread_source(metadata) in _SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
@@ -337,6 +345,18 @@ def _pull_request_summary(record: object, fallback_title: str) -> dict[str, Any]
     }
 
 
+async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
+    try:
+        stored = await PullRequest.diff_stats_for(
+            [(pr["repoFullName"], pr["number"]) for pr in pull_requests]
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to load stored pull request diff stats", exc_info=True)
+        return
+    for pr in pull_requests:
+        pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -465,12 +485,26 @@ async def _thread_summary(
         if legacy_pr:
             pull_requests.append(legacy_pr)
     if pull_requests:
+        await _apply_stored_diff_stats(pull_requests)
         latest_pr = pull_requests[-1]
         summary["pullRequests"] = pull_requests
         summary["pr"] = {
             key: latest_pr[key] for key in ("number", "title", "state", "headRef", "baseRef", "url")
         }
         summary["diffStats"] = latest_pr["diffStats"]
+    if (review := ReviewSessionMetadata.parse(metadata)) is not None:
+        summary["reviewPage"] = {
+            "owner": review.repo_owner,
+            "repo": review.repo_name,
+            "number": review.pr_number,
+        }
+        if review.walkthrough_state == "building":
+            summary["status"] = "running"
+        elif status != "running" and review.walkthrough_state == "failed":
+            summary["status"] = "error"
+        elif status == "idle" and review.walkthrough_state == "ready":
+            summary["status"] = "finished"
+        summary["viewed"] = summary["viewed"] and not review.unseen_walkthrough
     # The transcript hydrates client-side from the SDK (`GET …/state` →
     # `stream.messages`); the summary only carries metadata.
     summary["messages"] = []
@@ -485,9 +519,11 @@ def _status_of(run: Any) -> str | None:
 async def _latest_run_info(client: Any, thread_id: str) -> tuple[str | None, str | None]:
     try:
         runs = await client.runs.list(thread_id, limit=1)
-        # Follow-ups queued behind the live run are newer than it; the live run
-        # is still the one that says what the thread is doing.
-        if runs and _status_of(runs[0]) == "pending":
+        # Follow-ups queued behind the live run are newer than it, and so is one
+        # withdrawn from the queue; the live run is still the one that says what
+        # the thread is doing. LangGraph also marks the thread idle when that
+        # withdrawal cancels a pending run, so this is the only busy signal left.
+        if runs and _status_of(runs[0]) in {"pending", "interrupted"}:
             runs = await client.runs.list(thread_id, status="running", limit=1) or runs
     except Exception:  # noqa: BLE001
         logger.debug("Could not fetch latest run for thread %s", thread_id, exc_info=True)

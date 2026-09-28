@@ -36,6 +36,23 @@ jobs:
       - name: Run format check
         run: make format-check
 
+  swagger:
+    name: Agent swagger check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Regenerate swagger.json
+        run: make swagger
+      - name: Fail if swagger.json is stale
+        run: |
+          if ! git diff --exit-code --stat swagger.json; then
+            echo "::error file=swagger.json::swagger.json is out of date. Run 'make swagger' and commit the result."
+            exit 1
+          fi
+
   typecheck:
     name: Agent typecheck
     runs-on: ubuntu-latest
@@ -71,8 +88,15 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
+      # Every DROP DATABASE forces a checkpoint; without fsync, parallel workers stop queueing on them.
+      - name: Tune throwaway PostgreSQL for tests
+        run: >-
+          docker exec ${{ job.services.postgres.id }} psql -U postgres
+          -c "ALTER SYSTEM SET fsync = off"
+          -c "ALTER SYSTEM SET full_page_writes = off"
+          -c "SELECT pg_reload_conf()"
       - name: Run unit tests
-        run: make test
+        run: make test PYTEST_ARGS="-n auto"
 
   js-format:
     name: JS format check
@@ -155,7 +179,26 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
       - name: Run desktop checks
-        run: pnpm run check
+        run: pnpm run check --filter open-swe-desktop
+
+  cli:
+    name: CLI checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+      - name: Run CLI checks
+        run: pnpm --filter open-swe-cli run check
+      - name: Build CLI binary
+        run: pnpm --filter open-swe-cli run build
 
   e2e-changes:
     name: Detect E2E changes

@@ -10,15 +10,16 @@ from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from agent.slack.channels import SlackChannel
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
     start_refresh_run,
 )
-from agent.workspaces.routing import workspace_for_repo
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
+    DefaultWorkspaceDeletionError,
     RepositorySettings,
     Workspace,
     WorkspaceConflictError,
@@ -51,6 +52,20 @@ def _save_conflict(error: ValueError) -> HTTPException:
     return HTTPException(400, str(error))
 
 
+async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
+    """Reject newly enabled kitchen channels Slack would not deliver messages from."""
+    channels = await asyncio.gather(
+        *(SlackChannel.load(channel_id, use_cache=False) for channel_id in channel_ids)
+    )
+    for channel_id, channel in zip(channel_ids, channels, strict=True):
+        if channel is None or not channel.can_be_kitchen:
+            raise HTTPException(
+                400,
+                f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
+                "Slack channel that Open SWE has joined.",
+            )
+
+
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -66,6 +81,7 @@ async def api_create_workspace(
     body: WorkspaceCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -76,17 +92,9 @@ async def api_create_workspace(
 
 
 async def _default_repo_for(slug: str) -> str | None:
-    """The repository a run composed in ``slug`` starts from when none is picked.
-
-    Resolved through the settings tiers, then subject to ownership: a default
-    the workspace inherited from the instance is withheld when another
-    workspace owns that repository, the same rule Slack routing applies.
-    """
+    """The repository a run composed in ``slug`` starts from when none is picked."""
     repo = (await get_workspace_settings(slug)).default_repo
     if not repo:
-        return None
-    owner = await workspace_for_repo(repo["owner"], repo["name"])
-    if owner is not None and owner != slug:
         return None
     return f"{repo['owner']}/{repo['name']}"
 
@@ -133,14 +141,26 @@ async def api_update_workspace(
     )
     if repos_changed and is_refresh_in_flight(previous):
         raise HTTPException(409, "a refresh of this workspace is already running")
+    if body.kitchen_channel_ids is not None:
+        already = set(previous.kitchen_channel_ids) if previous is not None else set()
+        await _require_kitchen_eligible(
+            [channel for channel in body.kitchen_channel_ids if channel not in already]
+        )
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
-        if repos_changed and await start_refresh_run(record.slug) is None:
-            raise HTTPException(502, "workspace was saved but its snapshot rebuild could not start")
+        if repos_changed:
+            run_id = await start_refresh_run(record.slug)
+            if run_id is None:
+                raise HTTPException(
+                    502, "workspace was saved but its snapshot rebuild could not start"
+                )
+            return record.model_copy(
+                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
+            )
     return record
 
 
@@ -219,7 +239,11 @@ async def api_delete_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
     normalized = _normalized_slug(slug)
-    if not await WORKSPACES.remove(normalized):
+    try:
+        removed = await WORKSPACES.remove(normalized)
+    except DefaultWorkspaceDeletionError as e:
+        raise HTTPException(409, str(e)) from e
+    if not removed:
         raise HTTPException(404, "workspace not found")
     # A later workspace under the same slug must start from the instance record.
     await delete_workspace_settings(normalized)

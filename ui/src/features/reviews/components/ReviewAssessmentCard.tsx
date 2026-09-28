@@ -71,6 +71,7 @@ function AssessmentCard({
         assessment.review_id,
         input
       ),
+    meta: { errorTitle: "Couldn't save feedback" },
     onSuccess: async (saved) => {
       await queryClient.cancelQueries({ queryKey })
       queryClient.setQueryData(queryKey, saved)
@@ -97,7 +98,11 @@ function AssessmentCard({
                 : "Needs human review"}
           </span>
           <span className="text-xs text-muted-foreground">
-            {assessment.approved ? "Automatic approval" : "Advisory"}
+            {assessment.approved
+              ? "Automatic approval"
+              : assessment.dry_run
+                ? "Dry run"
+                : "Advisory"}
           </span>
         </div>
         {!editing && login && feedback.isSuccess && (
@@ -216,12 +221,6 @@ function AssessmentCard({
               </Button>
             </div>
           </fieldset>
-          {save.isError && (
-            <p role="alert" className="text-xs text-destructive">
-              Could not save feedback. Your draft is still here; please try
-              again.
-            </p>
-          )}
         </form>
       )}
     </section>

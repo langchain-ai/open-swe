@@ -1,6 +1,7 @@
 packages:
   - ui
   - desktop
+  - cli
   - tests/e2e
 
 allowBuilds:

@@ -147,6 +147,7 @@ class RunConfig(BaseModel):
     # Model selection
     agent_model_id: str | None = None
     resolved_agent_model_id: str | None = None
+    resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
     reviewer_model_id: str | None = None
@@ -159,6 +160,8 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     stop_summary: bool | None = None
     slack_ask: bool | None = None
+    # First run of a thread broken out from another Slack thread.
+    slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.

@@ -19,7 +19,7 @@ from agent.expedited_review.lifecycle import post_card, remove_superseded_cards,
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
 from agent.slack.channels import SlackChannel
@@ -49,7 +49,8 @@ def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
         else "The approval card is posted in the Slack thread."
     )
     posted += (
-        " Clicks only record votes. Call `merge_expedited_pr` once checks and reviews are "
+        " An approval goes to GitHub as the voter's review when they click. Call "
+        "`merge_expedited_pr` once checks and reviews are "
         "clean; keep a `/baby-sit` watch on the PR so you are woken when they are. You are "
         "also woken when someone approves the card. Do not poll."
     )
@@ -74,12 +75,18 @@ async def _context_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
     return channel_id, thread_ts
 
 
+async def _discard(approval: ExpeditedApproval) -> None:
+    async with ExpeditedApproval.locked(approval.id) as (session, row):
+        if row is not None:
+            await session.delete(row)
+
+
 async def _post_root_message(
     channel: SlackChannel, pr_ref: GitHubPrRef, title: str
 ) -> tuple[str | None, str | None]:
     """Open a thread in ``channel`` for the card, joining it when the bot is outside."""
-    text = render_prompt(
-        "slack/expedited-review-requested.md",
+    text = prompt(
+        "slack/expedited-review-requested",
         pr_url=pr_ref.url,
         label=f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}",
         title=escape(title),
@@ -175,7 +182,11 @@ async def expedite_pr_approval(
     active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
-    if active is not None and fingerprint_matches(files, active.diff_fingerprint):
+    if (
+        active is not None
+        and active.slack_message_ts
+        and fingerprint_matches(files, active.diff_fingerprint)
+    ):
         return {
             "success": True,
             "approval_id": str(active.id),
@@ -221,11 +232,13 @@ async def expedite_pr_approval(
         slack_thread_ts=thread_ts,
         run_config=dispatch_run_config(cfg, thread_id, None),
     ).save()
-    message_ts, error = await post_card(approval, title=payload.title, files=files)
+    try:
+        message_ts, error = await post_card(approval, title=payload.title, files=files)
+    except BaseException:
+        await _discard(approval)
+        raise
     if not message_ts:
-        async with ExpeditedApproval.locked(approval.id) as (session, row):
-            if row is not None:
-                await session.delete(row)
+        await _discard(approval)
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()

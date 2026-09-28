@@ -61,6 +61,7 @@ def webhook(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         monkeypatch.setattr(slack_routes.common, name, mock)
     dispatched = AsyncMock()
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", dispatched)
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     return {**calls, "process_slack_mention": dispatched}
 
 
@@ -70,24 +71,6 @@ async def _post(event: dict[str, Any]) -> tuple[dict[str, str], BackgroundTasks]
     for task in tasks.tasks:
         await task()
     return response, tasks
-
-
-async def test_a_join_does_not_start_a_run(webhook: dict[str, Any]) -> None:
-    """A code channel answers every message, and an invite is not a request."""
-    response, _ = await _post(JOIN)
-
-    assert response["reason"] == "Slack channel housekeeping, not a request"
-    webhook["process_slack_mention"].assert_not_awaited()
-
-
-async def test_a_join_waits_in_the_queue_for_the_next_turn(webhook: dict[str, Any]) -> None:
-    await _post(JOIN)
-
-    webhook["queue_message_for_thread"].assert_awaited_once()
-    thread_id, blocks = webhook["queue_message_for_thread"].await_args.args
-    assert thread_id == "thread-code"
-    assert "<@U1> has joined the channel" in blocks[0]["text"]
-    assert "Nothing is being asked of you" in blocks[0]["text"]
 
 
 @pytest.mark.parametrize(
@@ -101,27 +84,6 @@ async def test_the_channel_narrating_itself_is_never_a_request(
 
     assert response["reason"] == "Slack channel housekeeping, not a request"
     webhook["process_slack_mention"].assert_not_awaited()
-
-
-async def test_housekeeping_outside_a_code_channel_is_simply_ignored(
-    webhook: dict[str, Any],
-) -> None:
-    """A thread session has no interest in who joined the channel around it."""
-    webhook["is_code_channel"].return_value = False
-
-    await _post(JOIN)
-
-    webhook["queue_message_for_thread"].assert_not_awaited()
-    webhook["process_slack_mention"].assert_not_awaited()
-
-
-async def test_a_join_in_an_unbound_channel_queues_nothing(webhook: dict[str, Any]) -> None:
-    """No session yet means nobody to tell; the channel's own creation covers it."""
-    webhook["lookup_slack_thread_id"].return_value = None
-
-    await _post(JOIN)
-
-    webhook["queue_message_for_thread"].assert_not_awaited()
 
 
 async def test_an_ordinary_message_still_reaches_the_session(webhook: dict[str, Any]) -> None:

@@ -7,7 +7,7 @@ const DEVELOPMENT_APP_NAME = "Open SWE Development";
 const APP_USER_MODEL_ID = "com.langchain.openswe";
 const DEVELOPMENT_APP_USER_MODEL_ID = "com.langchain.openswe.dev";
 const DEVELOPMENT_USER_DATA_DIRECTORY = "Open SWE Development";
-const DEFAULT_DEVELOPMENT_BACKEND_URL = "http://localhost:2024";
+const { DEFAULT_DEVELOPMENT_BACKEND_URL } = require("./shared-config.js");
 const ALLOWED_PERMISSIONS = new Set([
   "clipboard-sanitized-write",
   "notifications",
