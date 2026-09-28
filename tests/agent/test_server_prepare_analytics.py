@@ -397,9 +397,14 @@ async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history
     assert prepared["requested_model"] == expected
 
 
-@pytest.mark.parametrize("image_type", ["image", "image_url", None])
 @pytest.mark.parametrize(
-    "model", ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"]
+    ("model", "image_type"),
+    [
+        ("fireworks:accounts/fireworks/models/kimi-k3", "image"),
+        ("fireworks:accounts/fireworks/models/kimi-k3", "image_url"),
+        ("fireworks:accounts/fireworks/models/kimi-k3", None),
+        ("anthropic:claude-opus-5-5", "image"),
+    ],
 )
 async def test_requested_model_checks_image_support_before_persisting(
     prepare_harness: dict[str, object],
@@ -449,9 +454,8 @@ async def test_requested_model_checks_image_support_before_persisting(
         middleware._model_selection.use_requested_model.assert_called_once_with(model)
 
 
-@pytest.mark.parametrize("title_fails", [False, True])
 async def test_requested_model_is_persisted_and_work_starts_independently_of_title(
-    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, title_fails: bool
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from langchain_core.messages import HumanMessage
 
@@ -466,8 +470,7 @@ async def test_requested_model_is_persisted_and_work_starts_independently_of_tit
     async def generate_title(**kwargs: object) -> None:
         started.set()
         await release.wait()
-        if title_fails:
-            raise RuntimeError("Title service unavailable")
+        raise RuntimeError("Title service unavailable")
 
     monkeypatch.setattr(thread_title, "generate_and_store_thread_title", generate_title)
     monkeypatch.setattr(

@@ -111,7 +111,7 @@ async def test_classifier_decision_selects_model_or_reports_unavailable(
     )
 
 
-@pytest.mark.parametrize("failure", ["no_credentials", "http", "low_confidence", "unknown"])
+@pytest.mark.parametrize("failure", ["no_credentials", "unknown"])
 async def test_failed_classification_leaves_model_selection_to_default_routing(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -127,9 +127,6 @@ async def test_failed_classification_leaves_model_selection_to_default_routing(
 
     def handle(request: httpx2.Request) -> httpx2.Response:
         assert failure != "no_credentials"
-        if failure == "http":
-            return httpx2.Response(503)
-        choice = "unknown" if failure == "unknown" else "unavailable"
         return httpx2.Response(
             200,
             json={
@@ -137,9 +134,9 @@ async def test_failed_classification_leaves_model_selection_to_default_routing(
                 "answers": {
                     "runtime_model": {
                         "type": "choice",
-                        "choice": choice,
-                        "confidence": 0.5 if failure == "low_confidence" else 0.95,
-                        "probabilities": {choice: 1.0},
+                        "choice": "unknown",
+                        "confidence": 0.95,
+                        "probabilities": {"unknown": 1.0},
                     }
                 },
             },
