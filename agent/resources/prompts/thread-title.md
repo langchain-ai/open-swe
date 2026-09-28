@@ -1,5 +1,5 @@
 Generate a title that will help the user recognize this coding-agent thread later.
-Return only the structured title field.
+Return the requested structured fields.
 
 Rules:
 - Use 3-8 words and no more than 80 characters.

@@ -1063,3 +1063,56 @@ def test_workspace_slug_reads_workspace_then_environment() -> None:
     assert workspace_slug(RunConfig(workspace="oss")) == "oss"
     assert workspace_slug(RunConfig(environment="legacy")) == "legacy"
     assert workspace_slug(RunConfig()) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_requested_model_survives_auto_followups_but_explicit_selection_wins(
+    source: str,
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    configurable = config["configurable"]
+    configurable.update(
+        source=source,
+        model_selection="auto",
+        agent_model_id="openai:gpt-6-sol",
+        agent_effort="low",
+    )
+    settings = {
+        "model_id": "anthropic:claude-opus-5-5",
+        "effort": "high",
+        "requested_model": "anthropic:claude-opus-5-5",
+        "model_handoff_complete": True,
+        "model_routing_enabled": False,
+    }
+    captured = await _capture_create_deep_agent_kwargs(config, thread_settings=settings)
+    middleware = cast(list[object], captured["middleware"])
+    assert not any(isinstance(item, ModelSelectionMiddleware) for item in middleware)
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    assert prepare._model_id == "anthropic:claude-opus-5-5"
+    configurable.update(
+        model_selection="explicit", agent_model_id="openai:gpt-6-sol", agent_effort="low"
+    )
+    captured = await _capture_create_deep_agent_kwargs(config, thread_settings=settings)
+    middleware = cast(list[object], captured["middleware"])
+    assert not any(isinstance(item, ModelSelectionMiddleware) for item in middleware)
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    assert prepare._model_id == "openai:gpt-6-sol"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored", [{}, {"model_id": "openai:gpt-6-sol", "model_routing_enabled": True}]
+)
+async def test_model_handoff_only_initializes_new_routed_threads(stored: dict[str, object]) -> None:
+    from agent.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(source="dashboard", model_selection="auto")
+    captured = await _capture_create_deep_agent_kwargs(config, thread_settings=stored)
+    middleware = cast(list[object], captured["middleware"])
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    assert bool(prepare._requested_models) is (not bool(stored))

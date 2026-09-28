@@ -74,6 +74,8 @@ from agent.dashboard.agent_overrides import (
 )
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    ModelOption,
+    available_requested_models,
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -161,7 +163,11 @@ from agent.sandboxes.tool_access import tools_base_url
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
-from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.thread_title import (
+    TITLE_GENERATION_MAX_TOKENS,
+    initial_thread_handoff,
+    schedule_thread_title_generation,
+)
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -819,7 +825,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
+        requested_models: Mapping[str, ModelOption] | None = None,
     ) -> None:
+        self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
         self._profile_login = profile_login
@@ -907,12 +915,49 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        schedule_thread_title_generation(
-            thread_id=self._thread_id,
-            messages=state.get("messages") or [],
-            model=self._title_model,
-            client=client,
-        )
+        requested_model: str | None = None
+        if self._requested_models is not None and self._model_selection is not None:
+            settings = (await load_thread_settings(client, self._thread_id)).copy()
+            if not settings.get("model_handoff_complete"):
+                handoff = await initial_thread_handoff(
+                    thread_id=self._thread_id,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                    client=client,
+                    requested_models=self._requested_models,
+                )
+                if handoff is not None:
+                    requested_model = handoff.requested_model
+                    if handoff.unavailable_model or (
+                        requested_model and requested_model not in self._requested_models
+                    ):
+                        raise ValueError(
+                            "The requested runtime model is unavailable; select an available model."
+                        )
+                settings["model_handoff_complete"] = True
+                settings["requested_model"] = requested_model
+                if requested_model:
+                    option = self._requested_models[requested_model]
+                    settings.update(
+                        model_id=requested_model,
+                        effort=option["default_effort"],
+                        model_routing_enabled=False,
+                    )
+                await store_thread_settings(client, self._thread_id, settings, strict=True)
+            else:
+                requested_model = settings.get("requested_model")
+            if requested_model:
+                option = self._requested_models[requested_model]
+                self._model_selection.use_requested_model(requested_model)
+                self._model_id = requested_model
+                self._effort = option["default_effort"]
+        else:
+            schedule_thread_title_generation(
+                thread_id=self._thread_id,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+                client=client,
+            )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
@@ -1005,8 +1050,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_effort = self._effort
             attribution_route = None
             if self._model_selection is not None:
-                attribution_route = await self._model_selection.select_route(
-                    cast(ModelSelectionState, state)
+                attribution_route = (
+                    "default"
+                    if requested_model
+                    else await self._model_selection.select_route(cast(ModelSelectionState, state))
                 )
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[
@@ -1085,6 +1132,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "requested_model": requested_model,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
@@ -1259,8 +1307,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.source == "dashboard" and cfg.model_selection in {"auto", "explicit"}:
-        adaptive_model_routing = cfg.model_selection == "auto"
+    if cfg.model_selection == "explicit":
+        adaptive_model_routing = False
+        thread_settings["requested_model"] = None
+        thread_settings["model_handoff_complete"] = True
+        settings_changed = True
+    elif cfg.source == "dashboard" and cfg.model_selection == "auto":
+        adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
     # An explicit per-run model choice is the one thing allowed to move a thread
     # off its stored settings; the new choice is then stored in turn.
@@ -1270,7 +1323,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
     if (
-        isinstance(per_thread_model, str)
+        (not thread_settings.get("requested_model") or cfg.model_selection == "explicit")
+        and isinstance(per_thread_model, str)
         and per_thread_model in SUPPORTED_MODEL_IDS
         and isinstance(per_thread_effort, str)
         and model_supports_effort(per_thread_model, per_thread_effort)
@@ -1305,6 +1359,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
         "model_routing_enabled": adaptive_model_routing,
+        "model_handoff_complete": thread_settings.get("model_handoff_complete", bool(stored_model)),
         "routing_models": {
             route: {"model_id": routed_model_id, "effort": effort}
             for route, (routed_model_id, effort) in routing_defaults.items()
@@ -1570,6 +1625,29 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     model_selection: ModelSelectionMiddleware | None = None
+    requested_models = (
+        available_requested_models(fable_enabled=fable_enabled)
+        if adaptive_model_routing
+        and not thread_settings.get("model_handoff_complete", bool(stored_model))
+        and source in {"dashboard", "slack"}
+        and not local_run
+        and not stop_summary_mode
+        and incident_session is None
+        and not cfg.background_task_completion
+        and not cfg.continued_from_thread_id
+        else None
+    )
+
+    def requested_model_factory(requested_model: str) -> BaseChatModel:
+        option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
+        return _make_model_or_defer(
+            requested_model,
+            use_gateway=use_gateway,
+            **provider_model_kwargs(
+                requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
+            ),
+        )
+
     if adaptive_model_routing:
         assert model_routing_mode is not None
         routing_models = {
@@ -1595,6 +1673,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 "default": model_id,
             },
             routing_mode=model_routing_mode,
+            requested_model_factory=requested_model_factory if requested_models else None,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -1664,6 +1743,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         admin_workspaces=admin_thread,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
+                        requested_models=requested_models,
                     ),
                     TranscriptMiddleware(),
                     *(

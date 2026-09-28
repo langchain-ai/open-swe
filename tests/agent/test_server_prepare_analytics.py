@@ -305,3 +305,78 @@ async def test_public_scope_name_fallback(
     assert recorded["github_user_id"] == expected_id
     assert recorded["display_name"] == expected_name
     assert recorded["display_name_source"] == expected_source
+
+
+@pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", None])
+async def test_initial_handoff_persists_before_work_and_attributes_selected_model(
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, requested: str | None
+) -> None:
+    from agent.dashboard.options import available_requested_models
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.thread_title import ThreadHandoff
+    from agent.utils.thread_settings import ThreadSettings
+
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    settings: ThreadSettings = {"model_id": "openai:gpt-6-sol", "repo_instructions": "retain"}
+    monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value=settings))
+
+    async def persist(
+        client: object, thread_id: str, value: ThreadSettings, *, strict: bool
+    ) -> None:
+        settings.update(value)
+
+    store = AsyncMock(side_effect=persist)
+    monkeypatch.setattr(server, "store_thread_settings", store)
+    handoff = AsyncMock(return_value=ThreadHandoff(title="A title", requested_model=requested))
+    monkeypatch.setattr(server, "initial_thread_handoff", handoff)
+    middleware = _middleware(_slack_config())
+    chosen = MagicMock()
+    router = ModelSelectionMiddleware(
+        {"fast": MagicMock()},
+        MagicMock(),
+        routing_mode="fast",
+        requested_model_factory=lambda _: chosen,
+    )
+    middleware._model_selection = router
+    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
+    prepared = await _prepare(middleware)
+    assert settings["model_handoff_complete"] is True
+    assert settings["repo_instructions"] == "retain"
+    assert prepared["selected_model_id"] == (requested or "openai:gpt-6-luna")
+    assert prepared["selected_effort"] == ("high" if requested else "low")
+    assert prepared["requested_model"] == requested
+    if requested:
+        assert settings["model_id"] == requested
+        assert settings["model_routing_enabled"] is False
+    store.assert_awaited_once_with(server.client, "thread-1", settings, strict=True)
+    prepared_again = await _prepare(middleware)
+    assert prepared_again["selected_model_id"] == prepared["selected_model_id"]
+    handoff.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "persistence"])
+async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from agent.dashboard.options import available_requested_models
+    from agent.thread_title import ThreadHandoff
+
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value={}))
+    model = "anthropic:claude-fable-5-1" if failure == "unavailable" else "openai:gpt-6-sol"
+    monkeypatch.setattr(
+        server,
+        "initial_thread_handoff",
+        AsyncMock(return_value=ThreadHandoff(title="A title", requested_model=model)),
+    )
+    store = AsyncMock(side_effect=RuntimeError("write failed"))
+    monkeypatch.setattr(server, "store_thread_settings", store)
+    middleware = _middleware(_slack_config())
+    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._model_selection = MagicMock()
+    with pytest.raises((ValueError, RuntimeError)):
+        await _prepare(middleware)
+    middleware._model_selection.use_requested_model.assert_not_called()
+    assert prepare_harness["recorded"] is None

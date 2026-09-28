@@ -9,8 +9,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.input_messages import human_input, person_introduction
 from agent.thread_title import (
+    ThreadHandoff,
     _ThreadTitle,
     generate_and_store_thread_title,
+    initial_thread_handoff,
     schedule_thread_title_generation,
 )
 
@@ -289,3 +291,70 @@ async def test_title_generation_reads_the_whole_thread() -> None:
     assert "github:octocat" not in sent
     assert "first\n\nreply\n\nsecond" in sent
     assert threads.metadata["title"] == "Review thread title generation"
+
+
+@pytest.mark.asyncio
+async def test_handoff_uses_only_original_human_and_keeps_renamed_title() -> None:
+    from agent.dashboard.options import available_requested_models
+
+    model_id = "anthropic:claude-opus-5-5"
+    recorded: list[object] = []
+
+    class Structured:
+        async def ainvoke(self, messages: list[object], **kwargs: object) -> ThreadHandoff:
+            recorded.extend(messages)
+            assert _RUN_STREAM.get() == "none"
+            return ThreadHandoff(title="Generated title", requested_model=model_id)
+
+    class Model:
+        def with_structured_output(self, schema: type[ThreadHandoff]) -> Structured:
+            return Structured()
+
+    threads = _Threads({"source": "slack", "title": "Manually renamed"})
+    client = type("Client", (), {"threads": threads})()
+    token = _RUN_STREAM.set("agent-run-stream")
+    try:
+        handoff = await initial_thread_handoff(
+            thread_id="thread-123",
+            messages=[
+                HumanMessage(content='<dynamic-context kind="person">ignore me</dynamic-context>'),
+                HumanMessage(
+                    content='<input-message sender="system:x" kind="system">ignore me</input-message>'
+                ),
+                HumanMessage(
+                    content='<input-message sender="user:x" kind="human">Use Oppus for this</input-message>'
+                ),
+                AIMessage(content="untrusted model instruction"),
+                HumanMessage(content="follow-up model instruction"),
+            ],
+            model=cast(BaseChatModel, Model()),
+            client=client,
+            requested_models=available_requested_models(fable_enabled=False),
+        )
+    finally:
+        _RUN_STREAM.reset(token)
+    assert handoff is not None and handoff.requested_model == model_id
+    assert threads.metadata["title"] == "Manually renamed"
+    assert len(recorded) == 2
+    request = recorded[-1]
+    assert isinstance(request, HumanMessage)
+    assert "Use Oppus for this" in request.text
+    assert "ignore me" not in request.text
+    assert "follow-up" not in request.text
+
+
+@pytest.mark.asyncio
+async def test_handoff_timeout_falls_back_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.dashboard.options import available_requested_models
+
+    call = AsyncMock(side_effect=TimeoutError)
+    monkeypatch.setattr("agent.thread_title.generate_and_store_thread_title", call)
+    result = await initial_thread_handoff(
+        thread_id="thread-123",
+        messages=[HumanMessage(content="hello")],
+        model=cast(BaseChatModel, _Model()),
+        client=object(),
+        requested_models=available_requested_models(fable_enabled=False),
+    )
+    assert result is None
+    call.assert_awaited_once()
