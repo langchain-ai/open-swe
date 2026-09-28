@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
@@ -60,21 +60,29 @@ class WorkspaceSettingsUpdate(BaseModel):
     default; on a workspace's record, None inherits the instance value.
     """
 
-    review_draft_prs: bool | None = None
-    pr_summaries: bool | None = None
-    review_trace_links: bool | None = None
+    review_draft_prs: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    pr_summaries: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    review_trace_links: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
     # on the instance is off (routing is opt-in); None on a workspace inherits.
-    model_routing_enabled: bool | None = None
-    gateway_enabled: bool | None = None
-    fable_enabled: bool | None = None
-    expedited_review_enabled: bool | None = None
+    model_routing_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    gateway_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     org_guidelines: str | None = None
-    approval_policy: str | None = None
-    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -95,7 +103,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
-    @field_validator("org_guidelines", "approval_policy", mode="before")
+    @field_validator("org_guidelines", mode="before")
     @classmethod
     def _normalize_review_instructions(cls, v: object) -> str | None:
         if v is None:
@@ -314,8 +322,6 @@ def _default_settings() -> dict[str, Any]:
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "org_guidelines": None,
-        "approval_policy": None,
-        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
@@ -371,6 +377,9 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
+    # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
+    "approval_policy",
+    "review_auto_approve",
 )
 
 

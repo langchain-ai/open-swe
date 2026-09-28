@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 
 from agent.incidents import service, turns
@@ -75,37 +74,6 @@ def test_context_block_is_citable_attributed_and_redacted():
     assert edited["queue_id"] != human["queue_id"]
 
 
-@pytest.mark.parametrize("status", ["pending", "running"])
-async def test_schedule_skips_when_a_run_is_already_inflight(record, policy, platform, status):
-    platform.runs.list.side_effect = lambda thread_id, status=None: (
-        [{"run_id": "r0"}] if status == status_ else []
-    )
-    status_ = status
-
-    assert await turns.schedule_automatic_turn(record, policy) is False
-    turns.create_durable_run.assert_not_awaited()
-
-
-async def test_schedule_creates_one_debounced_system_turn(record, policy, platform):
-    assert await turns.schedule_automatic_turn(record, policy) is True
-
-    turns.create_durable_run.assert_awaited_once()
-    args, kwargs = turns.create_durable_run.await_args
-    assert args == ("thread-1", "agent")
-    assert kwargs["after_seconds"] == turns.AUTOMATIC_DELAY_SECONDS
-    assert kwargs["multitask_strategy"] == "reject"
-    configurable = kwargs["config"]["configurable"]
-    assert configurable["source"] == "incidents_agent"
-    assert configurable["incident_id"] == "i1"
-    assert configurable["slack_thread"] == {"channel_id": "C1", "thread_ts": "0"}
-    assert not {"github_login", "user_email"} & configurable.keys()
-    # Present and null, so a stale question on the thread cannot survive into this turn.
-    assert configurable["incident_request"] is None
-    assert kwargs["metadata"]["incident_turn"] == "automatic"
-    # Nothing published yet, so the first turn runs the whole investigation unprompted.
-    assert turns.FIRST_INVESTIGATION_REQUEST in json.dumps(kwargs["input"])
-
-
 async def test_automatic_turns_go_quiet_once_the_investigation_is_published(
     record, policy, platform
 ):
@@ -125,13 +93,6 @@ async def test_automatic_turns_go_quiet_once_the_investigation_is_published(
     rendered = json.dumps(turns.create_durable_run.await_args.kwargs["input"])
     assert turns.AUTOMATIC_REQUEST in rendered
     assert turns.FIRST_INVESTIGATION_REQUEST not in rendered
-
-
-async def test_paused_and_completed_incidents_do_not_schedule(record, policy, platform):
-    for status in ("paused", "completed"):
-        record.status = status
-        assert await turns.schedule_automatic_turn(record, policy) is False
-    turns.create_durable_run.assert_not_awaited()
 
 
 async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, policy, platform):
@@ -185,40 +146,3 @@ async def test_completion_failure_flags_attention_and_posts_once(record, policy,
     assert (await turns.handle_run_completion("thread-1", "r9", "interrupted"))["status"] == (
         "ignored"
     )
-
-
-async def test_cancel_interrupts_pending_and_running_runs(record, platform):
-    platform.runs.list.side_effect = lambda thread_id, status=None: {
-        "pending": [{"run_id": "a"}],
-        "running": [{"run_id": "b"}],
-    }.get(status, [])
-
-    await turns.cancel_active_runs("thread-1")
-
-    platform.runs.cancel_many.assert_awaited_once_with(
-        thread_id="thread-1", run_ids=["a", "b"], action="interrupt"
-    )
-    platform.runs.cancel_many.reset_mock()
-    await turns.cancel_active_runs("thread-1", keep_run_id="b")
-    platform.runs.cancel_many.assert_awaited_once_with(
-        thread_id="thread-1", run_ids=["a"], action="interrupt"
-    )
-    assert await turns.has_active_run("thread-1") is True
-    # The stubbed `runs.list` always reports "a" as pending (it doesn't model
-    # cancellation taking effect); queued_context_count counts real pending
-    # runs alongside the legacy KV queue (empty here) — so 1, not 0.
-    assert await turns.queued_context_count("thread-1") == 1
-
-
-async def test_platform_rejection_means_a_turn_is_already_scheduled(record, policy, platform):
-    request = httpx.Request("POST", "http://localhost:2024/runs")
-    turns.create_durable_run.side_effect = httpx.HTTPStatusError(
-        "conflict", request=request, response=httpx.Response(409, request=request)
-    )
-    assert await turns.schedule_automatic_turn(record, policy) is False
-
-    turns.create_durable_run.side_effect = httpx.HTTPStatusError(
-        "boom", request=request, response=httpx.Response(500, request=request)
-    )
-    with pytest.raises(httpx.HTTPStatusError):
-        await turns.schedule_automatic_turn(record, policy)

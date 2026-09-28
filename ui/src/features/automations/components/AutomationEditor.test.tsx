@@ -39,6 +39,14 @@ vi.mock("@/lib/profile", () => ({
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
 }))
+vi.mock("@/lib/slack-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
+  useSlackChannelDirectory: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+}))
 vi.mock("@/features/settings/components/RepoSelector", () => ({
   RepoSelector: () => <div />,
 }))

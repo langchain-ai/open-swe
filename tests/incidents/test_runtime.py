@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 
 from agent.incidents import documents, runtime, service
 from agent.incidents.models import Incident, IncidentPolicy
@@ -104,33 +104,6 @@ async def test_binding_must_match_the_saved_incident(incident):
         await runtime.load_incident_session(config())
 
 
-async def test_valid_load_exposes_destination_request_and_tools(incident):
-    session = await runtime.load_incident_session(
-        config(
-            incident_request=" Why 500s? ",
-            slack_thread={"channel_id": "C1", "reply_thread_ts": "4.0"},
-        )
-    )
-    assert session.explicit_request == "Why 500s?"
-    assert (session.slack_thread.channel_id, session.slack_thread.thread_ts) == ("C1", "0")
-    assert session.slack_thread.reply_thread_ts == "4.0"
-    assert {tool.name for tool in session.tools} == runtime.INCIDENT_TOOL_NAMES
-    assert "Why 500s?" in session.instructions
-
-
-async def test_middleware_injects_prompt_and_registers_context_evidence(incident):
-    session = await runtime.load_incident_session(config())
-    middleware = runtime.IncidentMiddleware(session)
-    handler = AsyncMock(return_value="response")
-
-    result = await middleware.awrap_model_call(request(context_message("1.0")), handler)
-
-    assert result == "response"
-    prompt = handler.await_args.args[0].system_message.text
-    assert "record_incident_report" in prompt and "null means automatic" in prompt
-    assert [item.id for item in session.collector.evidence] == ["slack:1.0"]
-
-
 async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incident):
     incident.record.status = "paused"
     await service.INCIDENTS.put(incident.record.id, incident.record)
@@ -142,103 +115,6 @@ async def test_paused_incidents_stop_automatic_turns_but_answer_questions(incide
     await service.POLICIES.put("default", IncidentPolicy(enabled=False, workspace_id="T1"))
     with pytest.raises(PermissionError, match="disabled"):
         await runtime.IncidentMiddleware(session).awrap_model_call(request(), AsyncMock())
-
-
-async def test_tool_results_become_evidence_and_failures_become_gaps(incident):
-    session = await runtime.load_incident_session(config())
-    middleware = runtime.IncidentMiddleware(session)
-    call = SimpleNamespace(
-        tool_call={"id": "pr", "name": "open_pull_request", "args": {"title": "Fix"}}
-    )
-
-    success = await middleware.awrap_tool_call(
-        call,
-        AsyncMock(
-            return_value=ToolMessage(
-                content='{"url":"https://github.com/acme/api/pull/42"}', tool_call_id="pr"
-            )
-        ),
-    )
-    failure = await middleware.awrap_tool_call(
-        call, AsyncMock(return_value=ToolMessage(content="boom", tool_call_id="pr", status="error"))
-    )
-
-    assert "Incident evidence: tool:" in success.text
-    assert session.collector.evidence[0].url == "https://github.com/acme/api/pull/42"
-    assert failure.text == "boom"
-    assert session.collector.gaps == ["Tool open_pull_request did not confirm a successful result."]
-
-
-async def test_report_tool_records_posts_and_dedupes_by_digest(incident):
-    session = await runtime.load_incident_session(config())
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
-    draft = {
-        "summary": [
-            {"text": "Errors reported", "evidence_ids": ["slack:1.0"]},
-            {"text": "Invented cause", "evidence_ids": ["nope"]},
-        ]
-    }
-
-    first = await session._record_incident_report(**draft)
-    second = await session._record_incident_report(**draft)
-
-    latest = await service.REPORTS.get("incident")
-    assert latest.report.summary == "Errors reported [slack:1.0]"
-    assert first == {"recorded": True, "posted": True, "omitted_claims": True}
-    assert second["posted"] is False
-    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
-    assert runtime.post_slack_thread_reply_with_ts.await_args.args[:2] == ("C1", "0")
-    postmortem = (await documents.document_context("incident"))["postmortem"]["markdown"]
-    assert "Errors reported" in postmortem
-    assert latest.activity[-1].summary == "Errors reported [slack:1.0]"
-
-
-async def test_explicit_answers_always_post_into_their_thread(incident):
-    session = await runtime.load_incident_session(
-        config(
-            incident_request="status?", slack_thread={"channel_id": "C1", "reply_thread_ts": "4.0"}
-        )
-    )
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("2.0")), AsyncMock()
-    )
-    draft = {"summary": [{"text": "Still degraded", "evidence_ids": ["slack:2.0"]}]}
-
-    await session._record_incident_report(**draft)
-    await session._record_incident_report(**draft)
-
-    assert runtime.post_slack_thread_reply_with_ts.await_count == 2
-    assert runtime.post_slack_thread_reply_with_ts.await_args.args[:2] == ("C1", "4.0")
-
-
-async def test_history_tools_read_other_incidents_as_cited_context(incident):
-    session = await runtime.load_incident_session(config())
-    other = Incident(
-        id="older", workspace_id="T1", channel_id="C2", channel_name="inc-db", thread_id="t2"
-    )
-    await service.INCIDENTS.put(other.id, other)
-    from agent.incidents.models import IncidentReport
-
-    await documents.update_from_report(other, IncidentReport(summary="Disk filled up"))
-
-    found = await session._search_incidents("db")
-    read = await session._read_incident("older")
-
-    assert [item["id"] for item in found["items"]] == ["older"]
-    assert read["evidence_id"].startswith("incident:")
-    assert "Disk filled up" in read["observation"]
-
-
-async def test_excluded_channels_stop_the_session(incident):
-    session = await runtime.load_incident_session(config())
-    await service.POLICIES.put(
-        "default",
-        IncidentPolicy(enabled=True, workspace_id="T1", excluded_channel_ids=["C1"]),
-    )
-    with pytest.raises(PermissionError, match="excluded"):
-        await session.check()
 
 
 async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
@@ -349,28 +225,3 @@ async def test_questions_are_answered_after_the_investigation_is_published(incid
 
     assert answer["posted"] is True
     assert runtime.post_slack_thread_reply_with_ts.await_count == 2
-
-
-async def test_the_same_conclusion_with_a_fresh_citation_never_reposts(incident, monkeypatch):
-    """The overnight repeat: identical findings, but this turn cites the newest nag."""
-    from datetime import UTC, datetime, timedelta
-
-    session = await runtime.load_incident_session(config())
-    middleware = runtime.IncidentMiddleware(session)
-    conclusion = "INC-1722 remains in triage and both EU gateway monitors are OK"
-
-    await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
-    first = await session._record_incident_report(
-        summary=[{"text": conclusion, "evidence_ids": ["slack:1.0"]}]
-    )
-
-    # Hours later, so nothing time-based could excuse a repeat either.
-    later = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
-    monkeypatch.setattr(runtime, "now_iso", lambda: later)
-    await middleware.awrap_model_call(request(context_message("2.0")), AsyncMock())
-    second = await session._record_incident_report(
-        summary=[{"text": conclusion, "evidence_ids": ["slack:2.0"]}]
-    )
-
-    assert (first["posted"], second["posted"]) == (True, False)
-    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()

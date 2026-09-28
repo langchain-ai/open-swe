@@ -456,8 +456,12 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config.get("owner", ""),
+            repo=repo_config.get("name", ""),
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     is_re_review = bool(last_reviewed_sha)
@@ -666,7 +670,8 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
     pr_url = pr.get("html_url") or pr.get("url") or ""
     base_sha = pr.get("base", {}).get("sha", "")
     base_ref = pr.get("base", {}).get("ref", "")
-    head_sha = pr.get("head", {}).get("sha", after_sha)
+    # The PR API can still report the previous head moments after a push.
+    head_sha = after_sha
     pr_title = pr.get("title", "")
     if not isinstance(pr_number, int) or not base_sha or not head_sha:
         common.logger.warning(
@@ -712,6 +717,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             token=app_token,
         )
     ):
+        await PullRequest(
+            owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
+        ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
         await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         if postgres.configured():
             try:
@@ -802,8 +810,12 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         details_url=common.dashboard_thread_url(thread_id),
     )
     if check_run_id is not None:
-        await common.set_reviewer_thread_metadata(
-            thread_id, extra={"review_check_run_id": check_run_id}
+        await common.track_review_check_run(
+            thread_id,
+            owner=repo_config["owner"],
+            repo=repo_config["name"],
+            token=app_token,
+            check_run_id=check_run_id,
         )
 
     re_review_prompt = (
@@ -1172,6 +1184,7 @@ async def process_github_pr_comment(
         github_user_id=github_user_id,
         repo_config=repo_config,
         pr_number=pr_number,
+        token_repositories=common.event_thread_token_repositories(repo_config, payload),
     )
 
 
@@ -1426,7 +1439,11 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             issue_url=issue_url,
             trusted=trusted,
         )
-    workspace = await common.workspace_for_repo_config(repo_config)
+    # A follow-up stays in the workspace its thread started in, even if the
+    # repository has since been preferred by another workspace.
+    workspace = (
+        await common.get_thread_workspace(thread_id) if existing_thread else None
+    ) or await common.workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
@@ -1442,7 +1459,8 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         "environment": workspace,
     }
 
-    await common.upsert_agent_thread_metadata(
+    token_repositories = common.event_thread_token_repositories(repo_config, payload)
+    persisted = await common.upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
@@ -1450,7 +1468,14 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         title=title or (f"Issue #{issue_number}" if issue_number else "GitHub issue"),
         source_context=SourceContext.parse({"github_issue": configurable["github_issue"]}),
         workspace=workspace,
+        token_repositories=token_repositories,
     )
+    if not persisted and token_repositories is not None:
+        common.logger.error(
+            "Not starting a GitHub issue run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return
 
     common.logger.info("Dispatching LangGraph run for thread %s from GitHub issue", thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)

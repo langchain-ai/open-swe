@@ -62,6 +62,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.review.approvals import approval_policy_for_review
 from agent.review.diff import (
     changed_files,
     compute_diff_line_set,
@@ -76,7 +77,6 @@ from agent.review.findings import (
 )
 from agent.review.publish import fetch_pr_review_threads
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.review.styles import get_approval_policy
 from agent.review.walkthrough import WalkthroughView
 from agent.review_scout.launch import ReviewScoutTarget
 from agent.run_config import RunConfig
@@ -516,10 +516,6 @@ async def _cached_org_guidelines(workspace: str | None) -> str | None:
     return (await cached_workspace_settings(workspace)).org_review_guidelines
 
 
-async def _review_approval_policy(owner: str, repo: str, workspace: str | None) -> str | None:
-    return await get_approval_policy(owner, repo, await cached_workspace_settings(workspace))
-
-
 async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     cfg: RunConfig,
@@ -752,6 +748,14 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
             return content
 
+        async def _fetch_approval_policy() -> str | None:
+            # Read at the base commit so a pull request cannot rewrite the policy it is judged by.
+            if reviewer_eval:
+                return None
+            return await approval_policy_for_review(
+                repo_owner, repo_name, base_sha, token=github_token
+            )
+
         diff_context_task = asyncio.create_task(_fetch_diff_context())
         pr_overview_task = asyncio.create_task(_fetch_pr_overview())
         walkthrough_task = asyncio.create_task(_await_walkthrough())
@@ -759,11 +763,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
         org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
-        approval_policy = (
-            None
-            if reviewer_eval
-            else await _review_approval_policy(repo_owner, repo_name, cfg.workspace_slug)
-        )
+        approval_policy_task = asyncio.create_task(_fetch_approval_policy())
         api_standards_task = asyncio.create_task(_cached_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
@@ -782,6 +782,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         agents_md_content = await agents_md_task
         scoped_agents_md = await scoped_agents_md_task
         org_guidelines = await org_guidelines_task
+        approval_policy = await approval_policy_task
         api_standards_skill = await api_standards_task
         pr_title, pr_body = pr_overview
 

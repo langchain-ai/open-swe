@@ -37,11 +37,19 @@ import logging
 import re
 import shlex
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Literal, TypedDict
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, NamedTuple, Self, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,20 +58,21 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
-from agent.store import delete_value, now_iso, search_all_values
+from agent.store import now_iso
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
     WorkspaceSlackChannelRow,
+    apply_definition,
+    apply_state,
     apply_workspace,
+    stamp_updated,
     to_workspace,
 )
 
 logger = logging.getLogger(__name__)
 
-WORKSPACES_NAMESPACE: list[str] = ["workspaces"]
 DEFAULT_WORKSPACE_SLUG = "default"
-LEGACY_ENVIRONMENTS_NAMESPACE: list[str] = ["environments"]
 MAX_SLACK_CHANNELS = 50
 # Real Slack channel ids are longer, but the fixed prefix is what a workspace
 # record actually depends on; a looser minimum keeps short test/fixture ids valid.
@@ -83,6 +92,22 @@ def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
     if len(value) > MAX_SLACK_CHANNELS:
         raise ValueError(f"at most {MAX_SLACK_CHANNELS} Slack channels per workspace")
     return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
+
+
+def _require_bound_kitchen_channels(kitchen: list[str], channels: list[str]) -> None:
+    if unbound := [channel for channel in kitchen if channel not in channels]:
+        raise ValueError(
+            "kitchen channels must be Slack channels bound to this workspace: " + ", ".join(unbound)
+        )
+
+
+class _ChannelBindings(NamedTuple):
+    channels: list[str]
+    kitchen: list[str]
+
+
+class DefaultWorkspaceDeletionError(ValueError):
+    """The ``default`` workspace was asked to be deleted."""
 
 
 class WorkspaceConflictError(ValueError):
@@ -414,6 +439,7 @@ class WorkspaceCreate(BaseModel):
     snapshot_name: str | None = None
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
+    kitchen_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -449,7 +475,7 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
-    @field_validator("slack_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
@@ -458,6 +484,11 @@ class WorkspaceCreate(BaseModel):
     @classmethod
     def _check_create_params(cls, v: dict[str, JsonValue]) -> dict[str, JsonValue]:
         return _validate_create_params(v)
+
+    @model_validator(mode="after")
+    def _check_kitchen_channels_bound(self) -> Self:
+        _require_bound_kitchen_channels(self.kitchen_channel_ids, self.slack_channel_ids)
+        return self
 
 
 class WorkspaceUpdate(BaseModel):
@@ -471,6 +502,7 @@ class WorkspaceUpdate(BaseModel):
     snapshot_name: str | None = None
     repos: list[str] | None = None
     slack_channel_ids: list[str] | None = None
+    kitchen_channel_ids: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -501,7 +533,7 @@ class WorkspaceUpdate(BaseModel):
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
 
-    @field_validator("slack_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_slack_channel_ids(v)
@@ -557,6 +589,7 @@ class Workspace(BaseModel):
     base_snapshot_id: str | None = None
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
+    kitchen_channel_ids: list[str] = Field(default_factory=list)
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -595,7 +628,7 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
-    @field_validator("slack_channel_ids")
+    @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
         return _validate_slack_channel_ids(v)
@@ -613,6 +646,7 @@ class Workspace(BaseModel):
             snapshot_name=create.snapshot_name or default_snapshot_name_for(slugify(create.name)),
             repos=create.repos,
             slack_channel_ids=create.slack_channel_ids,
+            kitchen_channel_ids=create.kitchen_channel_ids,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -682,6 +716,7 @@ class Workspace(BaseModel):
             "name": self.name,
             "repos": list(self.repos),
             "slack_channel_ids": list(self.slack_channel_ids),
+            "kitchen_channel_ids": list(self.kitchen_channel_ids),
             "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.snapshot_status == "ready",
             "refresh_status": self.refresh_status,
@@ -706,16 +741,6 @@ class WorkspaceStore:
     it lands on the constraint and is translated into the same one.
     """
 
-    def __init__(self) -> None:
-        # Set once :func:`import_store_records` has emptied the LangGraph Store
-        # into these tables. Until then an empty ``workspace`` table may only
-        # mean this process failed to populate it, which
-        # :meth:`routing_is_populated` refuses to read as "nobody owns this".
-        self.import_completed = False
-        # Repositories named by Store records the import could not bring over,
-        # so routing fails closed on them instead of reading them as unowned.
-        self.unimported_repos: frozenset[str] = frozenset()
-
     async def get(self, slug: str) -> Workspace | None:
         """The workspace stored under ``slug``, or ``None``.
 
@@ -730,7 +755,7 @@ class WorkspaceStore:
             repos = await _bound_repos(session, row.id)
             channels = await _bound_channels(session, row.id)
         try:
-            return to_workspace(row, repos, channels)
+            return to_workspace(row, repos, channels.channels, channels.kitchen)
         except ValidationError:
             logger.error(
                 "Unreadable workspace record", extra={"workspace_slug": slug}, exc_info=True
@@ -751,33 +776,6 @@ class WorkspaceStore:
         async with postgres.session() as session:
             return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
 
-    def repo_import_is_pending(self, full_name: str) -> bool:
-        """Whether a Store record naming this repository still awaits import."""
-        if not self.unimported_repos:
-            return False
-        try:
-            key = normalize_repo_full_name(full_name).lower()
-        except ValueError:
-            logger.debug(
-                "Repository name cannot be normalized; treating it as not pending import",
-                extra={"repository": full_name},
-                exc_info=True,
-            )
-            return False
-        return key in self.unimported_repos
-
-    async def routing_is_populated(self) -> bool:
-        """Whether an "unowned repository" answer can be trusted.
-
-        The LangGraph Store import is what fills these tables on a deployment
-        that predates them, so until it has succeeded an empty table cannot be
-        told apart from one this process never managed to write.
-        """
-        if self.import_completed:
-            return True
-        async with postgres.session() as session:
-            return (await session.scalar(select(WorkspaceRow.id).limit(1))) is not None
-
     async def list_all(self) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
 
@@ -791,8 +789,11 @@ class WorkspaceStore:
             channels = await _channels_by_workspace(session)
         records: list[Workspace] = []
         for row in rows:
+            bound = channels.get(row.id, _ChannelBindings([], []))
             try:
-                records.append(to_workspace(row, repos.get(row.id, []), channels.get(row.id, [])))
+                records.append(
+                    to_workspace(row, repos.get(row.id, []), bound.channels, bound.kitchen)
+                )
             except ValidationError:
                 logger.error(
                     "Skipping unreadable workspace record",
@@ -801,32 +802,60 @@ class WorkspaceStore:
                 )
         return records
 
-    async def put(self, slug: str, record: Workspace, *, create_only: bool = False) -> Workspace:
+    async def put(
+        self,
+        slug: str,
+        record: Workspace,
+        *,
+        create_only: bool = False,
+        definition_only: bool = False,
+    ) -> Workspace:
         """Write the row and replace its bindings, in one transaction.
 
         Returns the stored view rather than the record it was handed: a
         repository already known under another capitalization keeps the casing
         its ``repository`` row carries, which is what :meth:`get` reads back.
+        With ``definition_only`` the snapshot and refresh state already stored
+        is kept, and the returned record carries it.
         """
         try:
             async with postgres.session() as session:
                 row = (
                     None
                     if create_only
-                    else await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
+                    else await session.scalar(
+                        select(WorkspaceRow).where(WorkspaceRow.slug == slug).with_for_update()
+                    )
                 )
                 if row is None:
+                    if definition_only:
+                        raise ValueError(f"no workspace named {slug!r}")
                     row = WorkspaceRow(slug=slug, name=record.name)
                     session.add(row)
-                apply_workspace(row, record)
+                if definition_only:
+                    apply_definition(row, record)
+                    stamp_updated(row, record)
+                else:
+                    apply_workspace(row, record)
                 await session.flush()
                 await _bind_repos(session, row.id, record.repos)
-                await _bind_channels(session, row.id, record.slack_channel_ids)
+                await _bind_channels(
+                    session, row.id, record.slack_channel_ids, record.kitchen_channel_ids
+                )
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
+                if definition_only:
+                    await session.refresh(row)
+                    return to_workspace(
+                        row, stored_repos, stored_channels.channels, stored_channels.kitchen
+                    )
             return record.model_copy(
-                update={"repos": stored_repos, "slack_channel_ids": stored_channels}
+                update={
+                    "repos": stored_repos,
+                    "slack_channel_ids": stored_channels.channels,
+                    "kitchen_channel_ids": stored_channels.kitchen,
+                }
             )
         except IntegrityError as exc:
             conflict = await self._conflict(exc, slug, record)
@@ -990,9 +1019,20 @@ class WorkspaceStore:
                 .where(WorkspaceSlackChannelRow.channel_id == channel)
             )
 
+    async def is_kitchen_channel(self, channel_id: str) -> bool:
+        """Whether this Slack channel is bound to a workspace with kitchen mode on."""
+        channel = (channel_id or "").strip().upper()
+        if not channel:
+            return False
+        async with postgres.session() as session:
+            kitchen = await session.scalar(
+                select(WorkspaceSlackChannelRow.kitchen).where(
+                    WorkspaceSlackChannelRow.channel_id == channel
+                )
+            )
+        return kitchen is True
+
     async def _assert_unique(self, record: Workspace) -> None:
-        if record.slug != DEFAULT_WORKSPACE_SLUG and not record.repos:
-            raise ValueError("a workspace must list at least one repository")
         await self._assert_bindings_free(record)
 
     async def _assert_bindings_free(self, record: Workspace) -> None:
@@ -1028,7 +1068,32 @@ class WorkspaceStore:
             raise ValueError(f"no workspace named {slug!r}")
         record = _apply(record, update)
         await self._assert_unique(record)
-        return await self.save(record)
+        record.updated_at = now_iso()
+        return await self.put(slug, record, definition_only=True)
+
+    async def update_state(
+        self, slug: str, change: Callable[[Workspace], None]
+    ) -> Workspace | None:
+        """Change a workspace's snapshot and refresh state under a row lock.
+
+        Only the state columns are written, so a refresh that runs for minutes
+        never writes back a definition it read before an admin edited it.
+        """
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(WorkspaceRow).where(WorkspaceRow.slug == slug).with_for_update()
+            )
+            if row is None:
+                return None
+            channels = await _bound_channels(session, row.id)
+            record = to_workspace(
+                row, await _bound_repos(session, row.id), channels.channels, channels.kitchen
+            )
+            change(record)
+            record.updated_at = now_iso()
+            apply_state(row, record)
+            stamp_updated(row, record)
+            return record
 
     async def assert_publishable(
         self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate
@@ -1079,6 +1144,12 @@ class WorkspaceStore:
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
+        """Delete a workspace; ``default`` refuses with :class:`DefaultWorkspaceDeletionError`.
+
+        Unrouted work lands in ``default``, so it always exists.
+        """
+        if slug == DEFAULT_WORKSPACE_SLUG:
+            raise DefaultWorkspaceDeletionError("the default workspace cannot be deleted")
         record = await self.get(slug)
         if record is None:
             return False
@@ -1090,23 +1161,22 @@ class WorkspaceStore:
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.snapshot_status = "capturing"
-        record.status_message = None
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.snapshot_status = "capturing"
+            record.status_message = None
+
+        return await self.update_state(slug, change)
 
     async def mark_capture_settled(
         self, slug: str, status: SnapshotStatus, message: str
     ) -> Workspace | None:
         """Land a failed capture on ``status``, keeping a previously ready snapshot."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.snapshot_status = status
-        record.status_message = message
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.snapshot_status = status
+            record.status_message = message
+
+        return await self.update_state(slug, change)
 
     async def mark_captured(
         self,
@@ -1117,68 +1187,65 @@ class WorkspaceStore:
         source_sandbox_id: str,
         snapshot_tag: str = SNAPSHOT_TAG,
     ) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        _stamp_captured(
-            record,
-            snapshot_id=snapshot_id,
-            snapshot_name=snapshot_name,
-            source_sandbox_id=source_sandbox_id,
-            snapshot_tag=snapshot_tag,
-        )
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            _stamp_captured(
+                record,
+                snapshot_id=snapshot_id,
+                snapshot_name=snapshot_name,
+                source_sandbox_id=source_sandbox_id,
+                snapshot_tag=snapshot_tag,
+            )
+
+        return await self.update_state(slug, change)
 
     async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_status = "refreshing"
-        record.refresh_kind = kind
-        record.refresh_started_at = now_iso()
-        record.refresh_finished_at = None
-        record.refresh_log = None
-        record.refresh_error = None
-        record.refresh_steps = []
-        record.refresh_sandbox_id = None
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.refresh_status = "refreshing"
+            record.refresh_kind = kind
+            record.refresh_started_at = now_iso()
+            record.refresh_finished_at = None
+            record.refresh_log = None
+            record.refresh_error = None
+            record.refresh_steps = []
+            record.refresh_sandbox_id = None
+
+        return await self.update_state(slug, change)
 
     async def start_refresh_step(
         self, slug: str, label: str, *, log_path: str | None = None
     ) -> Workspace | None:
         """Open a step, replacing any earlier one with the same label."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_steps = [
-            *(step for step in record.refresh_steps if step.label != label),
-            RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
-        ]
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_steps = [
+                *(step for step in record.refresh_steps if step.label != label),
+                RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
+            ]
+
+        return await self.update_state(slug, change)
 
     async def finish_refresh_step(
         self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
     ) -> Workspace | None:
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_steps = [
-            step.model_copy(
-                update={"status": status, "finished_at": now_iso(), "exit_code": exit_code}
-            )
-            if step.label == label
-            else step
-            for step in record.refresh_steps
-        ]
-        return await self.save(record)
+        def change(record: Workspace) -> None:
+            record.refresh_steps = [
+                step.model_copy(
+                    update={"status": status, "finished_at": now_iso(), "exit_code": exit_code}
+                )
+                if step.label == label
+                else step
+                for step in record.refresh_steps
+            ]
+
+        return await self.update_state(slug, change)
 
     async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Workspace | None:
         """Publish (or clear) the builder a poll may read the live trace from."""
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_sandbox_id = sandbox_id
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_sandbox_id = sandbox_id
+
+        return await self.update_state(slug, change)
 
     async def mark_refresh_settled(
         self,
@@ -1194,23 +1261,37 @@ class WorkspaceStore:
         "did the last rebuild work". A failed refresh leaves the previous
         snapshot ``ready``, so the two must not share a field.
         """
-        record = await self.get(slug)
-        if record is None:
-            return None
-        record.refresh_status = status
-        record.refresh_finished_at = now_iso()
-        record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
-        record.refresh_error = error[:1000] if error else None
-        # The builder is released with the refresh, so its id stops being a
-        # readable source the moment this lands.
-        record.refresh_sandbox_id = None
-        record.refresh_steps = [
-            step.model_copy(update={"status": "failed", "finished_at": now_iso()})
-            if step.status == "running"
-            else step
-            for step in record.refresh_steps
-        ]
-        return await self.save(record)
+
+        def change(record: Workspace) -> None:
+            record.refresh_status = status
+            record.refresh_finished_at = now_iso()
+            record.refresh_log = (log or "")[-REFRESH_LOG_MAX_CHARS:] or None
+            record.refresh_error = error[:1000] if error else None
+            # The builder is released with the refresh, so its id stops being a
+            # readable source the moment this lands.
+            record.refresh_sandbox_id = None
+            record.refresh_steps = [
+                step.model_copy(update={"status": "failed", "finished_at": now_iso()})
+                if step.status == "running"
+                else step
+                for step in record.refresh_steps
+            ]
+
+        return await self.update_state(slug, change)
+
+    async def set_refresh_run_id(self, slug: str, run_id: str) -> Workspace | None:
+        """Record the run a refresh is running in, so a poll can tell it from a later one."""
+
+        def change(record: Workspace) -> None:
+            record.refresh_run_id = run_id
+
+        return await self.update_state(slug, change)
+
+    async def set_refresh_cron_id(self, slug: str, cron_id: str) -> Workspace | None:
+        def change(record: Workspace) -> None:
+            record.refresh_cron_id = cron_id
+
+        return await self.update_state(slug, change)
 
 
 async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:
@@ -1224,14 +1305,20 @@ async def _bound_repos(session: AsyncSession, workspace_id: UUID) -> list[str]:
     )
 
 
-async def _bound_channels(session: AsyncSession, workspace_id: UUID) -> list[str]:
-    return list(
-        await session.scalars(
-            select(WorkspaceSlackChannelRow.channel_id)
+async def _bound_channels(session: AsyncSession, workspace_id: UUID) -> _ChannelBindings:
+    rows = (
+        await session.execute(
+            select(WorkspaceSlackChannelRow.channel_id, WorkspaceSlackChannelRow.kitchen)
             .where(WorkspaceSlackChannelRow.workspace_id == workspace_id)
             .order_by(WorkspaceSlackChannelRow.channel_id)
         )
-    )
+    ).tuples()
+    bound = _ChannelBindings([], [])
+    for channel_id, kitchen in rows:
+        bound.channels.append(channel_id)
+        if kitchen:
+            bound.kitchen.append(channel_id)
+    return bound
 
 
 async def _repos_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
@@ -1247,15 +1334,20 @@ async def _repos_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
     return grouped
 
 
-async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, list[str]]:
-    grouped: dict[UUID, list[str]] = defaultdict(list)
+async def _channels_by_workspace(session: AsyncSession) -> dict[UUID, _ChannelBindings]:
+    grouped: dict[UUID, _ChannelBindings] = defaultdict(lambda: _ChannelBindings([], []))
     rows = await session.execute(
-        select(WorkspaceSlackChannelRow.workspace_id, WorkspaceSlackChannelRow.channel_id).order_by(
-            WorkspaceSlackChannelRow.channel_id
-        )
+        select(
+            WorkspaceSlackChannelRow.workspace_id,
+            WorkspaceSlackChannelRow.channel_id,
+            WorkspaceSlackChannelRow.kitchen,
+        ).order_by(WorkspaceSlackChannelRow.channel_id)
     )
-    for workspace_id, channel_id in rows:
-        grouped[workspace_id].append(channel_id)
+    for workspace_id, channel_id, kitchen in rows.tuples():
+        bound = grouped[workspace_id]
+        bound.channels.append(channel_id)
+        if kitchen:
+            bound.kitchen.append(channel_id)
     return grouped
 
 
@@ -1301,24 +1393,50 @@ async def _bind_repos(session: AsyncSession, workspace_id: UUID, repos: list[str
         session.add(WorkspaceRepositoryRow(repository_id=repository_id, workspace_id=workspace_id))
 
 
-async def _bind_channels(session: AsyncSession, workspace_id: UUID, channels: list[str]) -> None:
+async def _bind_channels(
+    session: AsyncSession, workspace_id: UUID, channels: list[str], kitchen: list[str]
+) -> None:
+    """Make this workspace's channel rows exactly ``channels``, flagged per ``kitchen``."""
     wanted = set(channels)
-    current = set(
-        await session.scalars(
-            select(WorkspaceSlackChannelRow.channel_id).where(
-                WorkspaceSlackChannelRow.workspace_id == workspace_id
+    flagged = set(kitchen) & wanted
+    current: dict[str, bool] = dict(
+        (
+            await session.execute(
+                select(WorkspaceSlackChannelRow.channel_id, WorkspaceSlackChannelRow.kitchen).where(
+                    WorkspaceSlackChannelRow.workspace_id == workspace_id
+                )
             )
         )
+        .tuples()
+        .all()
     )
-    if stale := current - wanted:
+    if stale := current.keys() - wanted:
         await session.execute(
             delete(WorkspaceSlackChannelRow).where(
                 WorkspaceSlackChannelRow.workspace_id == workspace_id,
                 WorkspaceSlackChannelRow.channel_id.in_(stale),
             )
         )
-    for channel_id in wanted - current:
-        session.add(WorkspaceSlackChannelRow(channel_id=channel_id, workspace_id=workspace_id))
+    enable = {channel_id for channel_id in flagged if current.get(channel_id) is False}
+    disable = {
+        channel_id for channel_id, on in current.items() if on and channel_id in wanted - flagged
+    }
+    for enabled, changed in ((True, enable), (False, disable)):
+        if changed:
+            await session.execute(
+                update(WorkspaceSlackChannelRow)
+                .where(
+                    WorkspaceSlackChannelRow.workspace_id == workspace_id,
+                    WorkspaceSlackChannelRow.channel_id.in_(changed),
+                )
+                .values(kitchen=enabled)
+            )
+    for channel_id in wanted - current.keys():
+        session.add(
+            WorkspaceSlackChannelRow(
+                channel_id=channel_id, workspace_id=workspace_id, kitchen=channel_id in flagged
+            )
+        )
 
 
 async def _repo_owners(session: AsyncSession, repos: list[str], excluding: str) -> dict[str, str]:
@@ -1357,6 +1475,13 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         record.repos = update.repos
     if update.slack_channel_ids is not None:
         record.slack_channel_ids = update.slack_channel_ids
+    if update.kitchen_channel_ids is not None:
+        _require_bound_kitchen_channels(update.kitchen_channel_ids, record.slack_channel_ids)
+        record.kitchen_channel_ids = update.kitchen_channel_ids
+    else:
+        record.kitchen_channel_ids = [
+            channel for channel in record.kitchen_channel_ids if channel in record.slack_channel_ids
+        ]
     if update.setup_script is not None:
         record.setup_script = update.setup_script
     if update.update_script is not None:
@@ -1392,94 +1517,6 @@ def _stamp_captured(
 
 
 WORKSPACES = WorkspaceStore()
-
-
-async def import_store_records() -> int:
-    """Copy the workspaces that still live in the LangGraph Store into PostgreSQL.
-
-    Runs once per startup and returns how many records it copied. A slug that
-    already has a row is left alone, and every record it reads is deleted from
-    the Store once it has been dealt with: that makes this idempotent, keeps a
-    legacy namespace from resurrecting a workspace an admin has since deleted,
-    and means a later release can drop this entirely.
-
-    A record the Store cannot be made sense of, or one whose repositories are
-    claimed by another workspace, stays where it is for the next startup rather
-    than being dropped on the floor. Until then the import does not count as
-    complete, and the repositories such a record names are remembered so
-    :func:`agent.workspaces.routing.repo_is_routable` fails closed on them
-    instead of reading them as unowned.
-
-    Raising leaves ``WorkspaceStore.import_completed`` unset as well, which is
-    what keeps that check from reading the empty table it may have left behind
-    as "nobody owns this repository".
-    """
-    imported = 0
-    skipped = 0
-    pending: set[str] = set()
-    for namespace in (WORKSPACES_NAMESPACE, LEGACY_ENVIRONMENTS_NAMESPACE):
-        for value in await search_all_values(namespace):
-            slug = value.get("slug")
-            if not (isinstance(slug, str) and slug):
-                continue
-            try:
-                record = Workspace.model_validate(value)
-            except ValidationError:
-                skipped += 1
-                pending |= _repo_keys(value.get("repos"))
-                logger.error(
-                    "Skipping an unreadable stored workspace record",
-                    extra={"workspace": slug, "store_namespace": namespace},
-                    exc_info=True,
-                )
-                continue
-            if await WORKSPACES.get(record.slug) is None:
-                try:
-                    await WORKSPACES.put(record.slug, record)
-                except ValueError, IntegrityError:
-                    # One record another workspace has since claimed, or one a
-                    # constraint refuses, must not cost the rest their import.
-                    skipped += 1
-                    pending |= _repo_keys(record.repos)
-                    logger.error(
-                        "Could not import a stored workspace record",
-                        extra={"workspace": record.slug, "store_namespace": namespace},
-                        exc_info=True,
-                    )
-                    continue
-                imported += 1
-            await delete_value(namespace, record.slug)
-    WORKSPACES.unimported_repos = frozenset(pending)
-    WORKSPACES.import_completed = skipped == 0
-    log = logger.error if skipped else logger.info
-    log(
-        "Stored workspace records processed",
-        extra={
-            "imported_workspaces": imported,
-            "skipped_workspaces": skipped,
-            "pending_repositories": sorted(pending),
-        },
-    )
-    return imported
-
-
-def _repo_keys(entries: object) -> set[str]:
-    """Normalized keys of the repositories a raw Store record names, ignoring junk."""
-    keys: set[str] = set()
-    if not isinstance(entries, list):
-        return keys
-    for entry in entries:
-        if not isinstance(entry, str):
-            continue
-        try:
-            keys.add(normalize_repo_full_name(entry).lower())
-        except ValueError:
-            logger.warning(
-                "Stored workspace record names a malformed repository; it cannot be guarded",
-                extra={"repository": entry},
-                exc_info=True,
-            )
-    return keys
 
 
 async def load_default_workspace() -> Workspace | None:

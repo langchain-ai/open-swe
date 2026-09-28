@@ -579,13 +579,13 @@ async def process_slack_mention(
     request: SlackRequest, repo: common.SlackRepoResolution | None
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
-    status_ts = (
-        (request.reply_thread_ts or request.original_message_ts or request.event_ts)
-        if request.concierge_mode
-        else request.thread_ts
-    )
+    status_ts = request.thread_ts
     show_status = bool(
-        request.channel_id and status_ts and not request.code_channel and not request.message_update
+        request.channel_id
+        and status_ts
+        and not request.code_channel
+        and not request.concierge_mode
+        and not request.message_update
     )
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
@@ -616,28 +616,21 @@ async def _notify_slack_processing_error(
     await report_slack_failure(request.model_copy(update={"thread_id": thread_id}).target, exc)
 
 
-async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo | None:
-    """Keep a defaulted repository unless it belongs to another workspace.
+async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) -> Repo:
+    """Keep a defaulted repository unless another workspace prefers it.
 
-    Nobody named this repository, so it did not pick the workspace. Handing an
-    `oss` run a repository `default` owns would cross the boundary the
-    workspace exists to draw, so that workspace's own default repository takes
-    over — and there may not be one.
+    Nobody named this repository, so it did not pick the workspace, and the
+    workspace the run landed in should not inherit a default meant for another:
+    its own default repository takes over when it has one. Every workspace can
+    use every repository, so the candidate stays otherwise.
     """
     if not workspace:
         return candidate
-    owner = await workspace_for_repo(candidate.owner, candidate.name)
-    if owner is None or owner == workspace:
+    preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
+    if preferred_by is None or preferred_by == workspace:
         return candidate
     scoped = (await common.get_workspace_settings(workspace)).default_repo
-    if not scoped:
-        return None
-    fallback = Repo.model_validate(scoped)
-    # The workspace's default may itself be inherited from the instance record.
-    fallback_owner = await workspace_for_repo(fallback.owner, fallback.name)
-    if fallback_owner is None or fallback_owner == workspace:
-        return fallback
-    return None
+    return Repo.model_validate(scoped) if scoped else candidate
 
 
 async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
@@ -1175,7 +1168,8 @@ async def _process_slack_mention_impl(
     explicitly_tagged = concierge_mode or _interrupts_active_run(
         text,
         bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions,
+        treat_all_messages_as_mentions=treat_all_messages_as_mentions
+        and not request.kitchen_channel,
         code_channel=code_channel,
         message_update=message_update,
         explicit_request=request.explicit_request,

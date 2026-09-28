@@ -1,1 +1,0 @@
-This thread is for $url. Before working on the request, check out the pull request's head branch in the sandbox with `gh pr checkout $url` so you start from its current code.

@@ -16,12 +16,14 @@ const mocks = vi.hoisted(() => ({
   addPlanComment: vi.fn(),
   getPlanComments: vi.fn(),
   deletePlanComment: vi.fn(),
+  submitPlanComments: vi.fn(),
 }))
 
 vi.mock("@/lib/plan", () => ({
   addPlanComment: mocks.addPlanComment,
   deletePlanComment: mocks.deletePlanComment,
   getPlanComments: mocks.getPlanComments,
+  submitPlanComments: mocks.submitPlanComments,
 }))
 vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   PlanArtifactFrame: ({
@@ -89,6 +91,7 @@ beforeEach(() => {
   mocks.getPlanComments.mockResolvedValue([])
   mocks.addPlanComment.mockResolvedValue(comment)
   mocks.deletePlanComment.mockResolvedValue({ ok: true })
+  mocks.submitPlanComments.mockResolvedValue({ status: "submitted" })
 })
 
 afterEach(() => {
@@ -113,32 +116,78 @@ describe("PlanReview", () => {
     expect(screen.getByTestId("plan-comments")).toBeTruthy()
   })
 
-  it("adds a comment anchored to selected preview text", async () => {
-    render(<PlanReview plan={plan} />)
+  it.each(["click", "metaKey", "ctrlKey"])(
+    "adds an anchored comment via %s",
+    async (method) => {
+      render(<PlanReview plan={plan} />)
 
+      fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+      expect(screen.getByTestId("comment-composer").textContent).toContain(
+        "Plan"
+      )
+      fireEvent.change(screen.getByTestId("comment-input"), {
+        target: { value: "Clarify this step" },
+      })
+      fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
+      expect(mocks.addPlanComment).not.toHaveBeenCalled()
+      if (method === "click") {
+        fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+      } else {
+        fireEvent.keyDown(screen.getByTestId("comment-input"), {
+          key: "Enter",
+          [method]: true,
+        })
+      }
+
+      await waitFor(() =>
+        expect(mocks.addPlanComment).toHaveBeenCalledWith(
+          "thread-1",
+          "Clarify this step",
+          {
+            exact: "Plan",
+            prefix: "",
+            suffix: " details",
+            start: 0,
+            end: 4,
+          }
+        )
+      )
+      expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+        "Clarify this step"
+      )
+    }
+  )
+
+  it("submits comments once and allows another submission after new feedback", async () => {
+    render(<PlanReview plan={plan} />)
+    expect(screen.queryByRole("button", { name: "Submit comments" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
-    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
     fireEvent.change(screen.getByTestId("comment-input"), {
       target: { value: "Clarify this step" },
     })
-    fireEvent.click(screen.getByTestId("comment-submit"))
-
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Submit comments" })
+    )
     await waitFor(() =>
-      expect(mocks.addPlanComment).toHaveBeenCalledWith(
-        "thread-1",
-        "Clarify this step",
-        {
-          exact: "Plan",
-          prefix: "",
-          suffix: " details",
-          start: 0,
-          end: 4,
-        }
-      )
+      expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )
-    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
-      "Clarify this step"
-    )
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Comments submitted",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    mocks.addPlanComment.mockResolvedValueOnce({ ...comment, id: "comment-2" })
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "One more thing" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    expect(
+      await screen.findByRole("button", { name: "Submit comments" })
+    ).toBeTruthy()
   })
 
   it("shows historical artifacts without approval or implementation actions", async () => {
