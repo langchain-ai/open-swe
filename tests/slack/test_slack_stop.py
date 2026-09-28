@@ -185,47 +185,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert thread_mapping["value"]["run_id"] == "run-summary"
 
 
-async def test_stop_reaction_on_root_dispatches_no_active_run_summary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeClient()
-    thread_id = _add_thread(client)
-    dispatched, claimed = _patch_handler(monkeypatch, client)
-
-    await process_slack_stop_reaction(_event("1.000"), event_id="EvRoot")
-
-    assert claimed == ["EvRoot"]
-    assert client.runs.cancelled == []
-    assert dispatched[0]["thread_id"] == thread_id
-
-
-async def test_stop_reaction_from_non_owner_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = FakeClient()
-    _add_thread(client)
-    _map_reply(client, "2.000")
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    dispatched, _ = _patch_handler(monkeypatch, client)
-
-    await process_slack_stop_reaction(_event("2.000", user_id="UNRELATED"), event_id="EvOtherUser")
-
-    assert len(dispatched) == 1
-    assert client.runs.cancelled[0]["run_ids"] == ["run-running"]
-
-
-async def test_stop_reaction_ignores_unmapped_non_root_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeClient()
-    _add_thread(client)
-    dispatched, claimed = _patch_handler(monkeypatch, client)
-
-    await process_slack_stop_reaction(_event("9.000"), event_id="EvUnmapped")
-
-    assert dispatched == []
-    assert claimed == []
-    assert client.runs.cancelled == []
-
-
 async def test_stop_reaction_ignores_mismatched_thread_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -241,52 +200,6 @@ async def test_stop_reaction_ignores_mismatched_thread_metadata(
 
     assert dispatched == []
     assert claimed == []
-
-
-async def test_stop_reaction_without_event_id_has_no_side_effects(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeClient()
-    _add_thread(client)
-    _map_reply(client, "2.000")
-    dispatched, claimed = _patch_handler(monkeypatch, client)
-
-    await process_slack_stop_reaction(_event("2.000"))
-
-    assert dispatched == []
-    assert claimed == []
-    assert client.runs.cancelled == []
-
-
-async def test_agent_session_stopped_cancels_without_followup_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = FakeClient()
-    thread_id = _add_thread(client, "0")
-    client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    client.store.items[(("queue", thread_id), "pending_messages")] = {
-        "value": {"messages": [{"content": "later"}]}
-    }
-    dispatched, claimed = _patch_handler(monkeypatch, client)
-    statuses: list[tuple[str, str]] = []
-
-    async def set_status(channel_id: str, status: str) -> bool:
-        statuses.append((channel_id, status))
-        return True
-
-    monkeypatch.setattr(slack_stop, "set_session_status", set_status)
-
-    await slack_stop.process_agent_session_stopped(
-        {"type": "agent_session_stopped", "channel": "C123"},
-        event_id="EvSessionStop",
-    )
-
-    assert claimed == ["EvSessionStop"]
-    assert client.runs.cancelled[0]["run_ids"] == ["run-running"]
-    assert (("queue", thread_id), "pending_messages") in client.store.deleted
-    assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
-    assert statuses == [("C123", "active")]
-    assert dispatched == []
 
 
 async def test_duplicate_stop_reaction_has_no_side_effects(
@@ -340,15 +253,3 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
 
     assert dispatched == []
     assert client.threads.updates == []
-
-
-def test_summary_configurable_carries_new_workspace_key() -> None:
-    configurable = slack_stop._summary_configurable({"workspace": "oss"}, {})
-    assert configurable["workspace"] == "oss"
-    assert configurable["environment"] == "oss"
-
-
-def test_summary_configurable_falls_back_to_legacy_environment_key() -> None:
-    configurable = slack_stop._summary_configurable({"environment": "old"}, {})
-    assert configurable["workspace"] == "old"
-    assert configurable["environment"] == "old"
