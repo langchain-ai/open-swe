@@ -37,6 +37,7 @@ from agent.threads.summary import (
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import langgraph_client, langgraph_url
+from agent.utils.thread_pr_state import agent_thread_pr_state_lock
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,33 @@ async def _observe_dashboard_run_ttft(
 
 
 async def proxy_dashboard_thread_commands(
+    thread_id: str,
+    login: str,
+    body: bytes,
+    *,
+    email: str | None = None,
+    content_type: str = "application/json",
+    principal: Principal | None = None,
+) -> tuple[int, bytes, str | None]:
+    require_json_content_type(content_type)
+    try:
+        command = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "command body must be a JSON object") from exc
+    if not isinstance(command, dict):
+        raise HTTPException(400, "command body must be a JSON object")
+
+    if command.get("method") == "run.start":
+        async with agent_thread_pr_state_lock(langgraph_client(), f"run-start:{thread_id}"):
+            return await _proxy_dashboard_thread_commands(
+                thread_id, login, body, email=email, content_type=content_type, principal=principal
+            )
+    return await _proxy_dashboard_thread_commands(
+        thread_id, login, body, email=email, content_type=content_type, principal=principal
+    )
+
+
+async def _proxy_dashboard_thread_commands(
     thread_id: str,
     login: str,
     body: bytes,

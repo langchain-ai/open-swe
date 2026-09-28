@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
@@ -1444,6 +1445,80 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     }
 
 
+async def test_early_follow_up_steers_after_run_start_finishes(monkeypatch) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    lock = asyncio.Lock()
+    metadata: dict[str, object] = {"owner_login": "octocat", "source": "dashboard"}
+    forwarded: list[str] = []
+    steered: list[str] = []
+
+    @asynccontextmanager
+    async def serialize(*args, **kwargs):
+        async with lock:
+            yield
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"status": "idle", "metadata": dict(metadata)}
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            if "latest_run_id" in metadata:
+                thread_metadata.update(metadata)
+
+    thread_metadata = metadata
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    class FakeResponse:
+        status_code = 200
+        content = b'{"type":"success","result":{"run_id":"run-1"}}'
+        headers = {"content-type": "application/json"}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url: str, *, content: bytes, headers: dict[str, str]):
+            forwarded.append("run.start")
+            started.set()
+            await release.wait()
+            return FakeResponse()
+
+    async def enrich(thread_id, login, command, **kwargs):
+        return {**command, "params": {**command["params"], "metadata": {}, "config": {}}}
+
+    async def steer(thread_id, login, command, **kwargs):
+        steered.append("steer")
+        return {"type": "success", "result": {"steered": True}}
+
+    monkeypatch.setattr(thread_proxy, "agent_thread_pr_state_lock", serialize)
+    monkeypatch.setattr(thread_proxy, "langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
+    monkeypatch.setattr(thread_proxy, "steer_running_thread", steer)
+    monkeypatch.setattr(thread_proxy, "_observe_dashboard_run_ttft", AsyncMock())
+    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", lambda **kwargs: FakeAsyncClient())
+    monkeypatch.setattr(thread_proxy, "langgraph_url", lambda: "https://example.com")
+    body = b'{"method":"run.start","params":{"input":{"messages":[{"role":"user","content":"hello"}]}}}'
+    first = asyncio.create_task(
+        thread_proxy.proxy_dashboard_thread_commands("tid", "octocat", body)
+    )
+    await started.wait()
+    second = asyncio.create_task(
+        thread_proxy.proxy_dashboard_thread_commands("tid", "octocat", body)
+    )
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert forwarded == ["run.start"]
+    assert steered == ["steer"]
+
+
 async def test_run_ttft_observer_records_first_assistant_text(
     monkeypatch,
 ) -> None:
@@ -1638,6 +1713,7 @@ async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> 
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin")
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
+    monkeypatch.setattr(thread_proxy, "agent_thread_pr_state_lock", _unlocked)
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_proxy.proxy_dashboard_thread_commands(
