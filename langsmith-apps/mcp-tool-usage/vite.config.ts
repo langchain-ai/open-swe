@@ -1,5 +1,5 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
 
 // Library-mode build: the sandbox this app runs in evaluates a single
 // dependency-free CJS file exporting { render(data, root, metadata) } — not a
@@ -12,17 +12,17 @@ export default defineConfig({
   // iframe (or any browser), so without this the bundle throws
   // "ReferenceError: process is not defined" the moment it's required.
   define: {
-    'process.env.NODE_ENV': '"production"',
+    "process.env.NODE_ENV": '"production"',
   },
   build: {
-    outDir: 'dist',
+    outDir: "dist",
     emptyOutDir: true,
     lib: {
-      entry: 'src/entry.tsx',
-      formats: ['cjs'],
-      fileName: () => 'bundle.js',
+      entry: "src/entry.tsx",
+      formats: ["cjs"],
+      fileName: () => "bundle.js",
     },
     // The sandbox loads only bundle.js; lazy chunks (CodeLite languages) would 404.
     rolldownOptions: { output: { codeSplitting: false } },
   },
-});
+})

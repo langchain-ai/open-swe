@@ -1,15 +1,15 @@
-import { ChartCard } from '@langchain/macaw-components/ChartCard';
-import { EmptyState } from '@langchain/macaw-components/EmptyState';
-import { TopList, type TopListItem } from '@langchain/macaw-components/TopList';
-import { getFillChartColorForKey } from '@langchain/macaw-components/utils/chartColors';
-import { useMemo } from 'react';
-import { formatCount } from '../lib/tools';
-import type { TopTools } from '../types';
+import { ChartCard } from "@langchain/macaw-components/ChartCard"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { TopList, type TopListItem } from "@langchain/macaw-components/TopList"
+import { getFillChartColorForKey } from "@langchain/macaw-components/utils/chartColors"
+import { useMemo } from "react"
+import { formatCount } from "../lib/tools"
+import type { TopTools } from "../types"
 
-type RankedTool = TopListItem & { connection: string };
+type RankedTool = TopListItem & { connection: string }
 
-const ROW_HEIGHT = 30;
-const AXIS_HEIGHT = 48;
+const ROW_HEIGHT = 30
+const AXIS_HEIGHT = 48
 
 export function ToolRanking({
   data,
@@ -17,10 +17,10 @@ export function ToolRanking({
   selected,
   onSelect,
 }: {
-  data: TopTools | null;
-  state: 'ready' | 'loading' | 'error';
-  selected: string | null;
-  onSelect: (runName: string) => void;
+  data: TopTools | null
+  state: "ready" | "loading" | "error"
+  selected: string | null
+  onSelect: (runName: string) => void
 }) {
   const items = useMemo<RankedTool[]>(
     () =>
@@ -32,14 +32,14 @@ export function ToolRanking({
         color: getFillChartColorForKey(tool.connection),
       })),
     [data]
-  );
+  )
 
-  const shown = items.reduce((sum, item) => sum + item.value, 0);
+  const shown = items.reduce((sum, item) => sum + item.value, 0)
   const description = data
     ? `${formatCount(data.total)} MCP calls · top ${items.length} cover ${
         data.total ? Math.round((shown / data.total) * 100) : 0
       }% · click a bar`
-    : 'Tool runs tagged with mcp_tool_name';
+    : "Tool runs tagged with mcp_tool_name"
 
   return (
     <ChartCard
@@ -66,5 +66,5 @@ export function ToolRanking({
         </div>
       )}
     </ChartCard>
-  );
+  )
 }

@@ -1,8 +1,8 @@
-import { Badge } from '@langchain/macaw-components/Badge';
-import { Banner } from '@langchain/macaw-components/Banner';
-import { EmptyState } from '@langchain/macaw-components/EmptyState';
-import { Spinner } from '@langchain/macaw-components/Spinner';
-import { Text } from '@langchain/macaw-components/Text';
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { Text } from "@langchain/macaw-components/Text"
 
 export function GuideState({
   step,
@@ -11,22 +11,22 @@ export function GuideState({
   spinner,
   tone,
 }: {
-  step?: number;
-  heading: string;
-  subtext?: string;
-  spinner?: boolean;
-  tone?: 'error';
+  step?: number
+  heading: string
+  subtext?: string
+  spinner?: boolean
+  tone?: "error"
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-space-3 py-space-12">
+    <div className="gap-space-3 py-space-12 flex h-full flex-col items-center justify-center">
       {spinner ? (
-        <div role="status" className="flex items-center gap-space-3">
+        <div role="status" className="gap-space-3 flex items-center">
           <Spinner size="md" />
           <Text variant="sm" color="tertiary">
             {heading}
           </Text>
         </div>
-      ) : tone === 'error' ? (
+      ) : tone === "error" ? (
         <div role="alert">
           <Banner intent="error" title={heading}>
             {subtext}
@@ -39,5 +39,5 @@ export function GuideState({
         </>
       )}
     </div>
-  );
+  )
 }
