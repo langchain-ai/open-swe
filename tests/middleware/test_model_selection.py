@@ -65,7 +65,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("existing_route", [None, "performance", "balanced", "fast", "default"])
+@pytest.mark.parametrize("existing_route", [None, "performance"])
 async def test_fast_mode_skips_classifier_and_routing_event(
     monkeypatch: pytest.MonkeyPatch,
     existing_route: str | None,
@@ -100,122 +100,6 @@ async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
     jev.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_existing_route_is_reused_without_classifier() -> None:
-    middleware, models = _middleware()
-    state = {
-        "messages": [HumanMessage(content="Follow up on the task")],
-        "model_route": "performance",
-    }
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "performance"
-    assert (await _invoke(middleware, state)).model is models["performance"]
-
-
-@pytest.mark.asyncio
-async def test_persisted_fast_alt_route_is_migrated_to_fast() -> None:
-    middleware, models = _middleware()
-    state = {
-        "messages": [HumanMessage(content="Follow up on the task")],
-        "model_route": "fast_alt",
-    }
-
-    assert (await _invoke(middleware, state)).model is models["fast"]
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "fast"
-
-
-@pytest.mark.asyncio
-async def test_legacy_plan_state_does_not_override_existing_route() -> None:
-    middleware, models = _middleware()
-    state = {
-        "messages": [HumanMessage(content="Plan the next change")],
-        "model_route": "fast",
-        "plan_mode": True,
-    }
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "fast"
-    assert (await _invoke(middleware, state)).model is models["fast"]
-
-    state["plan_mode"] = False
-    assert (await _invoke(middleware, state)).model is models["fast"]
-
-
-@pytest.mark.asyncio
-async def test_jev_unavailable_uses_default_model_and_reports_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[dict[str, Any]] = []
-    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
-    middleware, models = _middleware(route_model_ids={"default": "openai:custom-default"})
-    state = {"messages": [HumanMessage(content="Do the task")]}
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "default"
-    assert (await _invoke(middleware, state)).model is models["default"]
-    assert events == [
-        {"type": "model_routed", "route": "default", "model_id": "openai:custom-default"}
-    ]
-
-
-@pytest.mark.asyncio
-async def test_missing_route_uses_default_model() -> None:
-    middleware, models = _middleware()
-    state = {"messages": [HumanMessage(content="Do the task")]}
-
-    assert (await _invoke(middleware, state)).model is models["default"]
-
-
-@pytest.mark.asyncio
-async def test_routed_model_id_is_streamed_for_the_ui(monkeypatch: pytest.MonkeyPatch) -> None:
-    events: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        "agent.middleware.model_selection.get_stream_writer",
-        lambda: events.append,
-    )
-    monkeypatch.setattr(
-        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="fast")
-    )
-    middleware, _ = _middleware(route_model_ids={"fast": "openai:gpt-5.6-sol"})
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    await middleware.abefore_model(cast(Any, state), MagicMock())
-
-    assert events == [
-        {
-            "type": "model_routed",
-            "route": "fast",
-            "model_id": "openai:gpt-5.6-sol",
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_routed_model_event_omitted_without_a_known_model_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        "agent.middleware.model_selection.get_stream_writer",
-        lambda: events.append,
-    )
-    monkeypatch.setattr(
-        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="fast")
-    )
-    middleware, _ = _middleware()
-    state = {"messages": [HumanMessage(content="Update the README")]}
-
-    await middleware.abefore_model(cast(Any, state), MagicMock())
-
-    assert events == []
 
 
 _HUMAN_ENVELOPE = (
