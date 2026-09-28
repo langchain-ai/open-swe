@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, select
+from sqlalchemy import BigInteger, ForeignKey, Text, and_, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -25,7 +25,7 @@ from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
-from agent.users import User
+from agent.users import User, UserIdentity
 from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,37 @@ class ExpeditedApproval(Base):
                 )
             )
             return list(rows)
+
+    @classmethod
+    async def submitted_review(
+        cls, owner: str, repo: str, number: int, *, github_user_id: str, review_id: int
+    ) -> bool:
+        """Whether a GitHub review on this PR is one a Slack vote submitted.
+
+        An open card's vote counts before its review id is stored, because the webhook
+        can arrive while the POST that created the review still holds the row lock.
+        """
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(ApprovalVote.approval_id)
+                .join(cls, cls.id == ApprovalVote.approval_id)
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .join(UserIdentity, UserIdentity.user_id == ApprovalVote.voter_user_id)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                    UserIdentity.provider == "github",
+                    UserIdentity.external_id == github_user_id,
+                    ApprovalVote.decision == "approve",
+                    or_(
+                        ApprovalVote.github_review_id == review_id,
+                        and_(ApprovalVote.github_review_id.is_(None), cls.state == "open"),
+                    ),
+                )
+                .limit(1)
+            )
+        return found is not None
 
     @classmethod
     async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
