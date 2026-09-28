@@ -244,15 +244,21 @@ test.describe("Expedited Slack review", () => {
     expect(posted.awaiting_ready).toBe(true);
     expect(posted.head_sha).toBe(opened.head_sha);
 
+    // The card carries the whole diff as a rendered PNG. The text fallback only
+    // appears when rendering or upload failed, so asserting the image keeps this
+    // test on the real path.
     await page.goto("/mock/slack");
     await expect(card(page)).toContainText(/Draft\./);
     await expect(
       card(page).getByRole("button", { name: "Approve" }),
     ).toHaveCount(0);
-    await expect(card(page)).toContainText("greet.py");
-    const diff = card(page).locator('pre.block-code[data-language="diff"]');
-    await expect(diff).toHaveCount(1);
-    await expect(diff).toContainText('+    return "Hello!!"');
+    const diff = card(page).locator("img.block-image");
+    await expect(diff).toBeVisible();
+    await expect(diff).toHaveAttribute("alt", /greet\.py/);
+    expect(
+      await diff.evaluate((img: HTMLImageElement) => img.naturalWidth),
+      "the diff PNG should have rendered, uploaded and decoded",
+    ).toBeGreaterThan(0);
     await shootCard(page, "draft");
 
     // 3. Only the author can mark it ready. Their click undrafts the PR and
@@ -304,7 +310,7 @@ test.describe("Expedited Slack review", () => {
       new RegExp(`Approved by (<@${reviewer.slack_id}>|@${reviewer.slack_id})`),
     );
     await expect(card(page).getByRole("button")).toHaveCount(0);
-    await expect(card(page).locator("pre.block-code")).toHaveCount(0);
+    await expect(card(page).locator("img.block-image")).toHaveCount(0);
     await shootCard(page, "approved");
     await expect
       .poll(

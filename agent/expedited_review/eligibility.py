@@ -15,7 +15,6 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.slack.blocks import MESSAGE_MAX_BLOCKS, RichTextBlock, code_blocks
 
 MAX_CHANGED_LINES = 20
 # What is actually enforced. A change that lands a few lines over is no harder to
@@ -23,8 +22,6 @@ MAX_CHANGED_LINES = 20
 # slack costs the voters; the agent is told 20 so it aims there.
 ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 100
-# The card's header, dividers, test list, and buttons use the rest of Slack's block limit.
-CARD_DIFF_MAX_BLOCKS = MESSAGE_MAX_BLOCKS - 7
 
 _TEST_PATH = re.compile(
     r"(?:^|/)(?:tests?|__tests__|testdata|e2e)/"
@@ -59,10 +56,6 @@ class ChangedFile(BaseModel):
     @property
     def changed_lines(self) -> int:
         return self.additions + self.deletions
-
-    @property
-    def patch_blocks(self) -> list[RichTextBlock]:
-        return code_blocks(self.patch or "", language="diff")
 
     @classmethod
     def split(cls, files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
@@ -128,8 +121,6 @@ def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:
             f"the pull request changes {changed} lines outside tests; the limit is "
             f"{MAX_CHANGED_LINES}"
         )
-    if sum(1 + len(file.patch_blocks) for file in reviewed) > CARD_DIFF_MAX_BLOCKS:
-        return Ineligible("the diff is too long to show in full on the Slack card")
     return EligibleDiff(
         files=list(files),
         changed_lines=changed,

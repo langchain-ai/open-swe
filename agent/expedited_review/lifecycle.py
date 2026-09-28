@@ -4,6 +4,7 @@ Every Slack write here edits or posts the one card, and only because the agent
 or a voter just acted: nothing runs in the background.
 """
 
+import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -13,6 +14,7 @@ from langgraph_sdk import get_client
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card
 from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
+from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.app import (
@@ -28,6 +30,8 @@ from agent.slack.client import (
     delete_slack_message,
     post_slack_thread_reply_with_ts,
     update_slack_message,
+    upload_slack_thread_file,
+    wait_for_slack_file,
 )
 from agent.slack.code_channels import is_code_channel_session
 
@@ -87,18 +91,55 @@ async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFil
     return files or []
 
 
+async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
+    """A hosted-but-unposted PNG of the diff, which the card renders inline."""
+    shown, _ = ChangedFile.split(files)
+    if not shown:
+        return None
+    try:
+        png = await asyncio.to_thread(render_diff_png, shown)
+    except Exception:
+        logger.warning(
+            "Failed to render expedited review diff image; posting the text diff",
+            extra={"approval_id": str(approval.id)},
+            exc_info=True,
+        )
+        return None
+    file_id, error = await upload_slack_thread_file(
+        None, None, f"diff-{approval.head_sha[:12]}.png", png, title="Diff"
+    )
+    if not file_id:
+        logger.warning(
+            "Failed to upload expedited review diff image",
+            extra={"approval_id": str(approval.id), "slack_error": error},
+        )
+        return None
+    if not await wait_for_slack_file(file_id):
+        logger.warning(
+            "Slack did not finish processing the expedited review diff image",
+            extra={"approval_id": str(approval.id), "slack_file_id": file_id},
+        )
+        return None
+    return file_id
+
+
 async def post_card(
     approval: ExpeditedApproval, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
-    """Post the card into the approval's thread: ``(message_ts, slack_error)``."""
+    """Post the card into the approval's thread: ``(message_ts, slack_error)``.
+
+    Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
+    """
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
+    approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     text, blocks = card.open_card(
         approval,
         title=title,
         author=await approval.author_mention(),
         files=files,
+        diff_image_id=approval.slack_diff_file_id or None,
         channel=await _broadcast_channel(approval),
     )
     return await post_slack_thread_reply_with_ts(
@@ -122,6 +163,7 @@ async def _render(approval: ExpeditedApproval, outcome: str | None) -> tuple[str
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
     files = await _files_for(approval, token) if token else []
+    diff_image_id = approval.slack_diff_file_id or None
     author = await approval.author_mention()
     if outcome is None:
         return card.open_card(
@@ -129,9 +171,17 @@ async def _render(approval: ExpeditedApproval, outcome: str | None) -> tuple[str
             title=pr.title,
             author=author,
             files=files,
+            diff_image_id=diff_image_id,
             channel=await _broadcast_channel(approval),
         )
-    return card.closed_card(approval, title=pr.title, author=author, files=files, outcome=outcome)
+    return card.closed_card(
+        approval,
+        title=pr.title,
+        author=author,
+        files=files,
+        outcome=outcome,
+        diff_image_id=diff_image_id,
+    )
 
 
 async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = None) -> None:

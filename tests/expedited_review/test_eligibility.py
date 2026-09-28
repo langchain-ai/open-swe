@@ -64,19 +64,3 @@ def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
 
     assert not moved.is_test
     assert isinstance(assess_eligibility([moved]), Ineligible)
-
-
-def test_a_long_patch_splits_across_blocks_until_the_card_cannot_hold_it() -> None:
-    long_line = "+" + "x" * 3999
-    split = assess_eligibility([_file("a.py", patch="\n".join([long_line] * 3))])
-    too_long = assess_eligibility([_file("a.py", patch="+" + "x" * 4000 * 50)])
-
-    assert isinstance(split, EligibleDiff)
-    assert (
-        "".join(
-            block["elements"][0]["elements"][0]["text"] for block in split.files[0].patch_blocks
-        )
-        == long_line * 3
-    )
-    assert isinstance(too_long, Ineligible)
-    assert "Slack card" in too_long.reason

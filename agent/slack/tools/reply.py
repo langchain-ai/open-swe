@@ -109,12 +109,12 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
-        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            if options:
-                return _oversized_options_error(message)
-            long_blocks = markdown_blocks(message, reserve=1)
-            slack_blocks = block_payload(long_blocks) if long_blocks else None
+        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            return _oversized_options_error(message)
+        slack_blocks = _reply_blocks(message, options, blocks or [], reserve=1)
+        if slack_blocks is None and blocks:
+            return _too_many_blocks_error(len(blocks))
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
         if response_type == "final" and run_id and _triggering_user_id(cfg):
             if slack_blocks is None:
@@ -184,11 +184,12 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    if blocks is None:
-        long_blocks = markdown_blocks(message)
-        blocks = block_payload(long_blocks) if long_blocks else None
-        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            message = markdown_to_mrkdwn(message)
+    extra = blocks or []
+    blocks = _reply_blocks(message, None, extra, reserve=0)
+    if blocks is None and extra:
+        return _too_many_blocks_error(len(extra))
+    if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+        message = markdown_to_mrkdwn(message)
     usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
     if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
@@ -277,12 +278,32 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
     }
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+def _too_many_blocks_error(extra: int) -> dict[str, str | int | bool]:
+    return {
+        "success": False,
+        "error": "message and blocks together exceed Slack's 50-block limit",
+        "extra_blocks": extra,
+        "retry": True,
+        "hint": "Nothing was posted. Retry with fewer blocks or a shorter message.",
+    }
+
+
+def _reply_blocks(
+    message: str, options: list[str] | None, extra: list[dict[str, Any]], *, reserve: int
+) -> list[dict[str, Any]] | None:
+    """``message``, then ``extra``, then option buttons; ``None`` when they cannot fit."""
+    actions = _option_actions(options)
+    body = markdown_blocks(message, reserve=reserve + len(extra) + len(actions))
+    if body is None:
+        return None
+    return [*block_payload(body), *extra, *actions]
+
+
+def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
     clean_options = [option.strip() for option in options or [] if option.strip()]
-    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return blocks
-    blocks.append(
+        return []
+    return [
         {
             "type": "actions",
             "elements": [
@@ -295,8 +316,7 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 for index, option in enumerate(clean_options[:5])
             ],
         }
-    )
-    return blocks
+    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

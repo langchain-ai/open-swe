@@ -174,8 +174,8 @@ async def expedite_pr_approval(
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
             f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests, and "
-            "every one of those files has to have a readable text diff short enough to show "
-            "in full on the Slack card. Test files are not counted. Ask for a normal review."
+            "every one of those files has to have a readable text diff. Test files are "
+            "not counted. Ask for a normal review."
         )
 
     payload = PullRequestPayload.model_validate(pr)

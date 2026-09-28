@@ -59,6 +59,16 @@ class DividerBlock(TypedDict):
     type: Literal["divider"]
 
 
+class SlackFileRef(TypedDict):
+    id: str
+
+
+class ImageBlock(TypedDict):
+    type: Literal["image"]
+    slack_file: SlackFileRef
+    alt_text: str
+
+
 class RichTextText(TypedDict):
     type: Literal["text"]
     text: str
@@ -127,6 +137,7 @@ type Block = (
     | MarkdownBlock
     | ContextBlock
     | DividerBlock
+    | ImageBlock
     | RichTextBlock
     | ActionsBlock
     | ContextActionsBlock
@@ -164,6 +175,10 @@ def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
 
 
+def image(file_id: str, alt_text: str) -> ImageBlock:
+    return {"type": "image", "slack_file": {"id": file_id}, "alt_text": alt_text}
+
+
 def split_lines(text: str, limit: int) -> list[str]:
     """``text`` cut on line boundaries into non-blank pieces of at most ``limit`` characters."""
     chunks: list[str] = []
@@ -181,21 +196,17 @@ def split_lines(text: str, limit: int) -> list[str]:
 
 
 def code_blocks(body: str, *, language: str | None = None) -> list[RichTextBlock]:
-    """All of ``body``, as many code blocks as it takes."""
-    return [code(chunk, language=language) for chunk in split_lines(body, CODE_TEXT_MAX_CHARS)]
-
-
-def code(body: str, *, language: str | None = None) -> RichTextBlock:
-    """A syntax-highlighted code block; unlike mrkdwn, rich text takes ``body`` literally."""
-    if len(body) > CODE_TEXT_MAX_CHARS:
-        body = body[: CODE_TEXT_MAX_CHARS - 2].rstrip() + "\n…"
-    preformatted: RichTextPreformatted = {
-        "type": "rich_text_preformatted",
-        "elements": [{"type": "text", "text": body}],
-    }
-    if language:
-        preformatted["language"] = language
-    return {"type": "rich_text", "elements": [preformatted]}
+    """All of ``body`` as syntax-highlighted code; unlike mrkdwn, rich text takes it literally."""
+    blocks: list[RichTextBlock] = []
+    for chunk in split_lines(body, CODE_TEXT_MAX_CHARS):
+        preformatted: RichTextPreformatted = {
+            "type": "rich_text_preformatted",
+            "elements": [{"type": "text", "text": chunk}],
+        }
+        if language:
+            preformatted["language"] = language
+        blocks.append({"type": "rich_text", "elements": [preformatted]})
+    return blocks
 
 
 def divider() -> DividerBlock:
@@ -276,6 +287,15 @@ def modal(
 def escape(value: str) -> str:
     """Escape the three characters Slack treats as markup in text objects."""
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def code_block(body: str, *, limit: int = SECTION_TEXT_MAX_CHARS) -> str:
+    """``body`` fenced for a section, escaped and truncated to fit ``limit``."""
+    fenced = escape(body).replace("```", "` ` `")
+    budget = limit - len("```\n\n```") - 2
+    if len(fenced) > budget:
+        fenced = fenced[:budget].rstrip() + "\n…"
+    return f"```\n{fenced}\n```"
 
 
 def block_payload(blocks: Sequence[Block]) -> list[dict[str, Any]]:
