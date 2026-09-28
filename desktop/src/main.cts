@@ -952,8 +952,8 @@ async function shareBackendSession() {
 
 function readStoredBackendUrl() {
   try {
-    const { backendUrl } = readSharedConfig(configPath());
-    return backendUrl ? validateBackendUrl(backendUrl) : undefined;
+    const { backendUrl: storedBackendUrl } = readSharedConfig(configPath());
+    return storedBackendUrl ? validateBackendUrl(storedBackendUrl) : undefined;
   } catch (error) {
     console.warn("Could not read the stored backend URL", error);
     return undefined;
