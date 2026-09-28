@@ -208,4 +208,3 @@ async def test_a_prompt_edit_during_a_refresh_outlives_it(
     stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
     assert stored["prompt"] == "new"
     assert stored["refresh_status"] == "success"
-
