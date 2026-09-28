@@ -1,7 +1,7 @@
 """Build actionable model context from a live GitHub pull request."""
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 import httpx2
@@ -409,9 +409,9 @@ def _field(value: object) -> str:
     return text.replace("{", "{{").replace("}", "}}")
 
 
-def _prompt_comment(value: Mapping[str, Any], trusted: Collection[str]) -> str:
+def _prompt_comment(value: Mapping[str, Any]) -> str:
     body = _field(value.get("body")) or "(empty comment)"
-    if _text(value.get("author")).lower() in trusted:
+    if value.get("registered") is True:
         return body
     return f"\n{UNTRUSTED_GITHUB_COMMENT_OPEN_TAG}\n{body}\n{UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}"
 
@@ -483,12 +483,8 @@ def _stack_lines(context: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def build_fix_prompt(context: Mapping[str, Any], *, trusted: Collection[str]) -> str:
-    """Render bounded PR context into a model-ready request.
-
-    ``trusted`` is the lowercased logins of known Open SWE users; anyone else's
-    comments are fenced as untrusted.
-    """
+def build_fix_prompt(context: Mapping[str, Any]) -> str:
+    """Render bounded PR context into a model-ready request."""
     lines = [
         "Fresh GitHub scan:",
         f"- Head SHA: {context.get('headSha') or 'unavailable'}",
@@ -520,7 +516,7 @@ def build_fix_prompt(context: Mapping[str, Any], *, trusted: Collection[str]) ->
             if not isinstance(review, Mapping):
                 continue
             author = _field(review.get("author")) or "unknown"
-            body = _prompt_comment(review, trusted)
+            body = _prompt_comment(review)
             lines.append(f"- {author}: {body}")
     else:
         lines.append("- None found." if context.get("reviewsAvailable") else "- Unavailable.")
@@ -542,7 +538,7 @@ def build_fix_prompt(context: Mapping[str, Any], *, trusted: Collection[str]) ->
                     if not isinstance(comment, Mapping):
                         continue
                     author = _field(comment.get("author")) or "unknown"
-                    body = _prompt_comment(comment, trusted)
+                    body = _prompt_comment(comment)
                     lines.append(f"  {author}: {body}")
             if thread.get("commentsTruncated") is True:
                 lines.append("  Additional replies were truncated; inspect the linked PR.")
@@ -594,19 +590,18 @@ async def get_pull_request_context(record: object, token: str) -> dict[str, Any]
             (checks and checks.get("truncated")) or (reviews and reviews.get("truncated"))
         ),
     }
-    authors = [
-        str(comment.get("author") or "")
-        for comment in [
-            *context["changesRequestedReviews"],
-            *(
-                comment
-                for thread in context["unresolvedReviewThreads"]
-                for comment in thread.get("comments", [])
-            ),
-        ]
+    comments: list[dict[str, Any]] = [
+        *context["changesRequestedReviews"],
+        *(
+            comment
+            for thread in context["unresolvedReviewThreads"]
+            for comment in thread.get("comments", [])
+        ),
     ]
-    trusted = await User.known_logins(authors)
-    return {"context": context, "prompt": build_fix_prompt(context, trusted=trusted)}
+    registered = await User.known_logins(str(comment["author"]) for comment in comments)
+    for comment in comments:
+        comment["registered"] = str(comment["author"]).lower() in registered
+    return {"context": context, "prompt": build_fix_prompt(context)}
 
 
 def parse_pull_request_url(url: str) -> tuple[str, str, int] | None:

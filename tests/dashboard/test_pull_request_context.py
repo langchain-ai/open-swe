@@ -26,11 +26,12 @@ def test_fix_prompt_sanitizes_fields_and_escapes_braces() -> None:
                 }
             ],
             "reviewsAvailable": True,
-            "changesRequestedReviews": [{"author": "reviewer", "body": "fix {this}", "url": None}],
+            "changesRequestedReviews": [
+                {"author": "reviewer", "body": "fix {this}", "url": None, "registered": True}
+            ],
             "unresolvedReviewThreads": [],
             "truncated": False,
-        },
-        trusted={"reviewer"},
+        }
     )
 
     assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG not in prompt
@@ -47,13 +48,18 @@ def test_fix_prompt_fences_only_comments_from_unregistered_authors() -> None:
             "checks": [],
             "reviewsAvailable": True,
             "changesRequestedReviews": [
-                {"author": "Outsider", "body": "external review", "url": None}
+                {"author": "outsider", "body": "external review", "url": None, "registered": False}
             ],
             "unresolvedReviewThreads": [
                 {
                     "path": "a.py",
                     "comments": [
-                        {"author": "Owner", "body": "registered comment", "url": None},
+                        {
+                            "author": "owner",
+                            "body": "registered comment",
+                            "url": None,
+                            "registered": True,
+                        },
                         {"author": "outsider", "body": "external comment", "url": None},
                     ],
                     "commentsTruncated": False,
@@ -61,8 +67,7 @@ def test_fix_prompt_fences_only_comments_from_unregistered_authors() -> None:
                 }
             ],
             "truncated": False,
-        },
-        trusted={"owner"},
+        }
     )
 
     opening = pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
