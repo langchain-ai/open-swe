@@ -40,6 +40,7 @@ async def list_automations() -> dict[str, Any]:
 
 async def create_automation(
     prompt: str,
+    workspace: str,
     schedule: str | None = None,
     trigger: schedules.AutomationTrigger = "schedule",
     name: str | None = None,
@@ -71,6 +72,7 @@ async def create_automation(
                 slack_channel_id=slack_channel_id,
                 slack_notification_mode=slack_notification_mode,
                 admin_thread=admin_thread,
+                workspace=workspace,
             ),
             email=email,
             allow_admin_thread=True,
@@ -96,6 +98,7 @@ async def update_automation(
     clear_slack_channel: bool = False,
     slack_notification_mode: schedules.SlackNotificationMode | None = None,
     admin_thread: bool | None = None,
+    workspace: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
     if error := await require_admin("manage workspace automations"):
@@ -120,6 +123,7 @@ async def update_automation(
         "enabled": enabled,
         "slack_notification_mode": slack_notification_mode,
         "admin_thread": admin_thread,
+        "workspace": workspace,
     }
     values = {key: value for key, value in values.items() if value is not None}
     if repo is not None or clear_repo:

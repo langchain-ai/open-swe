@@ -7,12 +7,16 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
+from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import repo_access
+from agent.dashboard.options import fable_disabled_fallback
+from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _FakeStore:
@@ -50,6 +54,11 @@ class _FakeStore:
                 if all(value.get(key) == expected for key, expected in filter.items())
             ]
         return {"items": [{"value": value} for value in values[offset : offset + limit]]}
+
+
+# Automations name a workspace, and launching or saving one checks that its row
+# exists, so every test runs against a migrated database (which seeds `default`).
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 class _FakeCrons:
@@ -151,6 +160,7 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
 
 async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Daily report",
         prompt="Summarize merged PRs",
         schedule="0 9 * * 1-5",
@@ -175,6 +185,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
 
 async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Admin cleanup",
         prompt="Clean up workspace environments",
         schedule="0 9 * * *",
@@ -198,6 +209,7 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
         await schedules.create_agent_schedule(
             "alice",
             ScheduleCreateBody(
+                workspace="default",
                 prompt="hello",
                 schedule="0 9 * * 1",
                 repo="victim/private",
@@ -246,7 +258,10 @@ async def test_issue_trigger_rejects_stale_cron_and_preserves_failed_cleanup(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            prompt="Triage issues", schedule="0 9 * * *", repo="langchain-ai/open-swe"
+            workspace="default",
+            prompt="Triage issues",
+            schedule="0 9 * * *",
+            repo="langchain-ai/open-swe",
         ),
     )
     cron_delete = AsyncMock(side_effect=RuntimeError("cron service unavailable"))
@@ -365,6 +380,7 @@ async def test_issue_delivery_stays_claimed_after_dispatched_run_bookkeeping_fai
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
+            workspace="default",
             prompt="Triage issues",
             trigger="github_issue_opened",
             repo="langchain-ai/open-swe",
@@ -403,7 +419,10 @@ async def test_issue_delivery_can_retry_failed_dispatch(
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            prompt="Triage issues", trigger="github_issue_opened", repo="langchain-ai/open-swe"
+            workspace="default",
+            prompt="Triage issues",
+            trigger="github_issue_opened",
+            repo="langchain-ai/open-swe",
         ),
     )
     payload = {
@@ -456,6 +475,114 @@ async def test_launch_github_issue_automations_isolates_claim_failures(
     )
 
     assert results == [{"status": "started", "schedule_id": "working"}]
+
+
+def _scheduled_record(**overrides: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "id": "sched_1",
+        "name": "Weekly dependencies",
+        "prompt": "Check dependencies and open a PR if needed",
+        "schedule": "0 9 * * 1",
+        "repo": {"owner": "langchain-ai", "name": "open-swe"},
+        "model": "Default",
+        "effort": None,
+        "base_branch": "main",
+        "branch_prefix": "open-swe",
+        "enabled": True,
+        "cron_id": "cron_1",
+        "created_by": "alice",
+        "user_email": "alice@example.com",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    return {**record, **overrides}
+
+
+async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="core")
+    )
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert configurable["workspace"] == configurable["environment"] == "core"
+    opening = next(
+        update["metadata"]
+        for update in fake_client.threads.updated
+        if "source" in update["metadata"]
+    )
+    assert opening["workspace"] == "core"
+
+
+async def test_the_startup_migration_moves_automations_without_a_workspace_to_default(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    """Automations saved before they carried a workspace run in `default`, not their repo's."""
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record())
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_2", _scheduled_record(id="sched_2", workspace="oss")
+    )
+
+    assert await schedules.migrate_automation_workspaces() == 1
+    assert await schedules.migrate_automation_workspaces() == 0
+
+    stored = {
+        schedule_id: fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), schedule_id)]
+        for schedule_id in ("sched_1", "sched_2")
+    }
+    assert stored["sched_1"]["workspace"] == "default"
+    assert stored["sched_2"]["workspace"] == "oss"
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+    assert fake_client.runs.created[0]["config"]["configurable"]["workspace"] == "default"
+
+
+async def test_an_automation_whose_workspace_was_deleted_does_not_run(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="gone")
+    )
+
+    result = await schedules.launch_scheduled_agent_run("sched_1")
+    with pytest.raises(HTTPException) as refused:
+        await schedules.trigger_agent_schedule("sched_1")
+
+    assert result["status"] == "unknown_workspace"
+    assert refused.value.status_code == 409
+    assert fake_client.runs.created == []
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
+    assert "gone" in stored["last_error"]
+
+
+async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    """Fable is a per-workspace kill switch, so the run's own workspace decides.
+
+    `default` leaves it on here and the automation's workspace does not, so a
+    flag read from `default` would let the Fable model through.
+    """
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE,
+        "sched_1",
+        _scheduled_record(workspace="oss", model="anthropic:claude-fable-5-1", effort="high"),
+    )
+
+    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
+
+    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    assert configurable["workspace"] == "oss"
+    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
+        fable_disabled_fallback("high")
+    )
 
 
 @pytest.mark.parametrize("creator", [None, "alice"])
@@ -553,7 +680,11 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         monkeypatch.setattr(schedules, name, no_personal_access)
     child = await automations.create_automation(
-        "Check workspace repos", "0 9 * * *", repo="langchain-ai/open-swe", admin_thread=True
+        "Check workspace repos",
+        workspace="default",
+        schedule="0 9 * * *",
+        repo="langchain-ai/open-swe",
+        admin_thread=True,
     )
     assert child["ok"] is True
     child_id = child["automation"]["id"]
@@ -822,3 +953,136 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
         if "source" in update["metadata"]
     )
     assert opening.get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope
+
+
+def test_a_new_automation_must_name_its_workspace() -> None:
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody.model_validate(
+            {"prompt": "Triage this issue", "trigger": "github_issue_opened", "repo": "a/b"}
+        )
+
+
+async def test_a_new_automation_keeps_the_workspace_it_names(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    body = ScheduleCreateBody(
+        prompt="Triage this issue",
+        trigger="github_issue_opened",
+        repo="langchain-ai/open-swe",
+        workspace="Core",
+    )
+
+    result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert result["workspace"] == "core"
+
+
+async def test_an_automation_cannot_name_a_missing_workspace(
+    fake_client, auth, registry_db
+) -> None:  # noqa: ANN001, ARG001
+    body = ScheduleCreateBody(
+        prompt="Triage", trigger="github_issue_opened", repo="a/b", workspace="gone"
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await schedules.create_agent_schedule("alice", body, email="alice@example.com")
+
+    assert refused.value.status_code == 422
+    assert fake_client.store.items == {}
+
+
+async def test_an_automation_can_move_to_another_workspace(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="default")
+    )
+
+    moved = await schedules.update_agent_schedule(
+        "sched_1", "alice", ScheduleUpdateBody(workspace="core")
+    )
+    kept = await schedules.update_agent_schedule(
+        "sched_1", "alice", ScheduleUpdateBody(name="Renamed")
+    )
+
+    assert moved["workspace"] == "core"
+    assert kept["workspace"] == "core"
+    with pytest.raises(HTTPException) as refused:
+        await schedules.update_agent_schedule(
+            "sched_1", "alice", ScheduleUpdateBody(workspace="gone")
+        )
+    assert refused.value.status_code == 422
+
+
+async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    for schedule_id, workspace in (("sched_1", "core"), ("sched_2", "default")):
+        await fake_client.store.put_item(
+            schedules.SCHEDULES_NAMESPACE,
+            schedule_id,
+            _scheduled_record(id=schedule_id, workspace=workspace, cron_id=f"cron_{schedule_id}"),
+        )
+
+    assert await WORKSPACES.remove("core")
+
+    remaining = {item["id"] for item in await schedules.list_agent_schedules()}
+    assert remaining == {"sched_2"}
+    assert fake_client.crons.deleted == ["cron_sched_1"]
+
+
+async def test_retrying_a_failed_workspace_delete_finishes_it(
+    fake_client, auth, registry_db, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    """The automations go first, so a failure leaves a workspace that can be deleted again."""
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE,
+        "sched_1",
+        _scheduled_record(workspace="core", cron_id="cron_1"),
+    )
+    real_delete = WORKSPACES.delete
+    monkeypatch.setattr(WORKSPACES, "delete", AsyncMock(side_effect=RuntimeError("db down")))
+
+    with pytest.raises(RuntimeError):
+        await WORKSPACES.remove("core")
+    assert await WORKSPACES.get("core") is not None
+
+    monkeypatch.setattr(WORKSPACES, "delete", real_delete)
+    assert await WORKSPACES.remove("core")
+
+    assert await WORKSPACES.get("core") is None
+    assert await schedules.list_agent_schedules() == []
+    assert fake_client.crons.deleted == ["cron_1"]
+
+
+async def test_workspace_cleanup_spares_an_automation_moved_since_it_looked(
+    fake_client, auth, registry_db, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="oss")
+    )
+    stale = [_scheduled_record(workspace="core")]
+    monkeypatch.setattr(schedules, "search_all_values", AsyncMock(return_value=stale))
+
+    assert await schedules.delete_workspace_automations("core") == 0
+
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["workspace"] == "oss"
+
+
+async def test_the_startup_migration_writes_onto_the_current_record(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    """Another replica's edit, or delete, since the search is not undone."""
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(prompt="edited since")
+    )
+    stale = [_scheduled_record(), _scheduled_record(id="sched_gone")]
+    monkeypatch.setattr(schedules, "search_all_values", AsyncMock(return_value=stale))
+
+    assert await schedules.migrate_automation_workspaces() == 1
+
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert (stored["prompt"], stored["workspace"]) == ("edited since", "default")
+    assert (tuple(schedules.SCHEDULES_NAMESPACE), "sched_gone") not in fake_client.store.items

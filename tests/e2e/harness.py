@@ -951,7 +951,11 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
             "avatar_url": f"{BASE_URL}/logo-mark.png",
         },
         "merged_at": pr.get("merged_at"),
-        "head": {"ref": pr["head"], "sha": pr["head_sha"]},
+        "head": {
+            "ref": pr["head"],
+            "sha": pr["head_sha"],
+            "repo": {"full_name": f"{pr['owner']}/{pr['repo']}"},
+        },
         "base": {
             "ref": pr["base"],
             "sha": fakes.base_sha(pr),

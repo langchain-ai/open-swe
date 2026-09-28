@@ -313,7 +313,9 @@ export function SidebarThreadRow({
       ? activeSubagentId
       : null
   const subagentsCollapsed =
-    !activeSubagent && prefs.collapsedSubagentKeys.includes(item.key)
+    !activeSubagent &&
+    prefs.collapseSubagentsByDefault !==
+      prefs.collapsedSubagentKeys.includes(item.key)
   const rowIsActive = isActive && !activeSubagent
   const source =
     item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null

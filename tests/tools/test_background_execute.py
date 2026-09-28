@@ -7,7 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from langgraph_sdk.errors import NotFoundError
 
 from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks
@@ -312,3 +314,18 @@ async def test_monitor_refreshes_task_state_after_completion_dispatch(
     else:
         set_status.assert_not_awaited()
         client.runs.list.assert_not_awaited()
+
+
+async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = AsyncMock()
+    client.threads.get.side_effect = NotFoundError(
+        "not found",
+        response=httpx.Response(404, request=httpx.Request("GET", "http://test")),
+        body=None,
+    )
+    delete_crons = AsyncMock()
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    monkeypatch.setattr(background_tasks, "_delete_crons", delete_crons)
+
+    assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}
+    delete_crons.assert_awaited_once_with("thread-1")
