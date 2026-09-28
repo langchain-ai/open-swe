@@ -11,7 +11,7 @@ import asyncio
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
@@ -550,6 +550,250 @@ async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None
     gp = next(item for item in subagents if item["name"] == "general-purpose")
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     assert ("slack_read_channel_messages" in subagent_names) is private_thread
+
+
+@pytest.fixture
+def pinned_settings() -> dict[str, object]:
+    return {
+        "model_id": "anthropic:claude-opus-5-5",
+        "effort": "high",
+        "requested_model": "anthropic:claude-opus-5-5",
+        "model_handoff_complete": True,
+        "model_routing_enabled": False,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_requested_model_survives_auto_followups_but_explicit_selection_wins(
+    source: str,
+    pinned_settings: dict[str, object],
+) -> None:
+    config = _base_config()
+    configurable = config["configurable"]
+    configurable.update(
+        source=source,
+        model_selection="auto",
+        agent_model_id="openai:gpt-6-sol",
+        agent_effort="low",
+    )
+    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    assert configurable["resolved_agent_model_id"] == "anthropic:claude-opus-5-5"
+    configurable.update(
+        model_selection="explicit", agent_model_id="openai:gpt-6-sol", agent_effort="low"
+    )
+    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    assert configurable["resolved_agent_model_id"] == "openai:gpt-6-sol"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pinned_model",
+    ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"],
+)
+async def test_image_fallback_temporarily_overrides_only_incompatible_pinned_models(
+    pinned_model: str,
+    pinned_settings: dict[str, object],
+) -> None:
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+
+    config = _base_config()
+    config["configurable"].update(
+        source="dashboard",
+        model_selection="auto",
+        agent_model_id="openai:gpt-6-sol",
+        agent_effort="medium",
+        model_override_reason="image_input",
+    )
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        await _capture_create_deep_agent_kwargs(
+            config,
+            thread_settings={
+                **pinned_settings,
+                "model_id": pinned_model,
+                "subagent_model_id": "google_genai:gemini-3.8-flash",
+                "subagent_effort": "low",
+                "requested_model": pinned_model,
+            },
+        )
+    expected = "openai:gpt-6-sol" if pinned_model.endswith("kimi-k3") else pinned_model
+    assert config["configurable"]["resolved_agent_model_id"] == expected
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["model_id"] == pinned_model
+    assert snapshot["effort"] == "high"
+    assert snapshot["requested_model"] == pinned_model
+    assert snapshot["subagent_model_id"] == "google_genai:gemini-3.8-flash"
+    assert snapshot["subagent_effort"] == "low"
+
+    followup = _base_config()
+    followup["configurable"].update(source="dashboard", model_selection="auto")
+    captured = await _capture_create_deep_agent_kwargs(
+        followup,
+        thread_settings=snapshot,
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    primary = cast(BaseChatModel, captured["model"])
+    fallbacks = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, ImageModelFallbackMiddleware)
+    ]
+    screenshot = HumanMessage(
+        content=[{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
+    )
+    followup_message = HumanMessage(content="Explain the screenshot in more detail")
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    for retained_images in (True, False):
+        request = ModelRequest(
+            model=primary,
+            messages=[screenshot, followup_message] if retained_images else [followup_message],
+            state={"messages": [screenshot, followup_message]},
+        )
+        if fallbacks:
+            await fallbacks[0].awrap_model_call(request, handler)
+        else:
+            await handler(request)
+        actual = handler.call_args.args[0]
+        assert actual.model.model_id == (expected if retained_images else pinned_model)
+        assert actual.messages == request.messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("default_model", "requested_model", "image_model"),
+    [
+        pytest.param(
+            "google_genai:gemini-3.8-flash",
+            "fireworks:accounts/fireworks/models/kimi-k3",
+            "google_genai:gemini-3.8-flash",
+            id="vision-default",
+        ),
+        pytest.param(
+            "fireworks:accounts/fireworks/models/kimi-k3",
+            "fireworks:accounts/fireworks/models/kimi-k3",
+            None,
+            id="text-only-default",
+        ),
+        pytest.param(
+            "fireworks:accounts/fireworks/models/kimi-k3",
+            "anthropic:claude-opus-5-5",
+            "anthropic:claude-opus-5-5",
+            id="vision-request",
+        ),
+    ],
+)
+async def test_requested_model_uses_vision_fallback_for_image_tool_results(
+    default_model: str, requested_model: str, image_model: str | None
+) -> None:
+    from agent.dashboard.options import default_vision_model_pair
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+
+    config = _base_config()
+    config["configurable"].update(source="dashboard")
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"model_routing_enabled": True},
+        workspace_settings=WorkspaceSettings(
+            {**_MODEL_DEFAULTS, "default_agent_model": default_model}
+        ),
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    middleware = cast(list[object], captured["middleware"])
+    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+    fallback = next(
+        (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
+    )
+    state: ModelSelectionState = {
+        "messages": [HumanMessage(content="Read the screenshot")],
+        "requested_model": requested_model,
+    }
+    with patch(
+        "agent.server.make_model", side_effect=lambda model_id, **_: MagicMock(model_id=model_id)
+    ):
+        state.update(await selection.abefore_model(state, MagicMock()))
+
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+
+    async def handle_selected(request: ModelRequest) -> ModelResponse:
+        if fallback is not None:
+            return await fallback.awrap_model_call(request, handler)
+        return await handler(request)
+
+    screenshot = ToolMessage(
+        name="read_file",
+        tool_call_id="read-screenshot",
+        content=[{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}],
+    )
+    for with_image in (False, True, False):
+        request = ModelRequest(
+            model=cast(BaseChatModel, captured["model"]),
+            messages=[*state["messages"], screenshot] if with_image else state["messages"],
+            state=state,
+        )
+        await selection.awrap_model_call(request, handle_selected)
+        actual = handler.call_args.args[0]
+        expected = (
+            (image_model or default_vision_model_pair()[0]) if with_image else requested_model
+        )
+        assert actual.model.model_id == expected
+        assert actual.messages == request.messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "expected_model", "expected_effort"),
+    [
+        (None, "openai:gpt-6-sol", "medium"),
+        (
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "high"},
+            "google_genai:gemini-3.8-flash",
+            "high",
+        ),
+    ],
+)
+async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups(
+    profile: dict[str, object] | None,
+    expected_model: str,
+    expected_effort: str,
+    pinned_settings: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.server import PrepareAgentRunMiddleware
+
+    monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
+    )
+    config = _base_config()
+    config["configurable"].update(
+        source="dashboard", model_selection="auto", model_selection_changed=True
+    )
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        captured = await _capture_create_deep_agent_kwargs(
+            config, thread_settings=pinned_settings, profile=profile
+        )
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["requested_model"] is None
+    assert snapshot["model_routing_enabled"] is True
+    assert snapshot["model_handoff_complete"] is True
+    assert snapshot["model_id"] == expected_model
+    assert snapshot["effort"] == expected_effort
+    assert snapshot["subagent_model_id"] == expected_model
+    assert snapshot["subagent_effort"] == (expected_effort if profile else "low")
+
+    followup = _base_config()
+    followup["configurable"].update(source="dashboard", model_selection="auto")
+    followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
+    for agent in (captured, followup_agent):
+        middleware = cast(list[object], agent["middleware"])
+        selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+        assert await selection.select_route({"messages": []}) == "default"
+        assert selection._models["default"] is agent["model"]
+        assert agent["make_model_calls"][0][0] == expected_model
+        prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+        assert prepare._requested_models is None
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:

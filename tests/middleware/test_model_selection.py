@@ -201,3 +201,52 @@ async def test_jev_routes_or_falls_back(
     state["model_route"] = route
     assert await middleware.select_route(state) == route
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("routing_mode", ["auto", None])
+async def test_requested_model_wins_and_emits_actual_model(
+    monkeypatch: pytest.MonkeyPatch, routing_mode: Literal["auto"] | None
+) -> None:
+    events: list[object] = []
+    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
+    jev = AsyncMock()
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    chosen = MagicMock()
+    factory = MagicMock(return_value=chosen)
+    middleware = ModelSelectionMiddleware(
+        {"fast": MagicMock()},
+        MagicMock(),
+        routing_mode=routing_mode,
+        requested_model_factory=factory,
+    )
+    state: ModelSelectionState = {
+        "messages": [HumanMessage(content="hello")],
+        "model_route": "fast",
+        "requested_model": "anthropic:claude-opus-5-5",
+    }
+    state.update(await middleware.abefore_model(state, MagicMock()))
+    assert (await _invoke(middleware, dict(state))).model is chosen
+    factory.assert_called_with("anthropic:claude-opus-5-5")
+    jev.assert_not_awaited()
+    assert events[-1] == {
+        "type": "model_routed",
+        "route": "default",
+        "model_id": "anthropic:claude-opus-5-5",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    jev = AsyncMock()
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    default = MagicMock()
+    middleware = ModelSelectionMiddleware({}, default, routing_mode=None)
+    state: ModelSelectionState = {
+        "messages": [HumanMessage(content="Fix this")],
+        "model_route": "fast",
+    }
+    state.update(await middleware.abefore_model(state, MagicMock()))
+    assert state["model_route"] == "default"
+    assert (await _invoke(middleware, dict(state))).model is default
+    jev.assert_not_awaited()
