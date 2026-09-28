@@ -2318,6 +2318,17 @@
             ],
             "title": "Draft Prs"
           },
+          "experimental_act_as_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Act As Approval"
+          },
           "experimental_assistant_ui": {
             "agent_feature_flag": true,
             "anyOf": [
