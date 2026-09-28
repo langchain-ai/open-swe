@@ -155,8 +155,7 @@ function desktopDeepLinkUrl(value, backendUrl) {
     if (
       target.protocol !== "https:" ||
       target.origin !== backend.origin ||
-      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname) ||
-      target.pathname.startsWith("/agents/local/")
+      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
     )
       return null;
     return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;

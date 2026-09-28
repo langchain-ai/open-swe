@@ -237,9 +237,12 @@ test("opens only dashboard links from the configured backend", () => {
     desktopDeepLinkUrl(`${backend}/review`, backend),
     `${APP_URL}review`,
   );
+  assert.equal(
+    desktopDeepLinkUrl(`${backend}/agents/local/private-thread`, backend),
+    `${APP_URL}agents/local/private-thread`,
+  );
   for (const url of [
     "https://openswe.vercel.app/agents/thread-1",
-    `${backend}/agents/local/private-thread`,
     `${backend}/dashboard/api/auth/callback?code=secret`,
     `${backend}/assets/app.js`,
     "open-swe://link/agents/thread-1",

@@ -5,7 +5,7 @@ export default function appleAppSiteAssociation() {
       details: [
         {
           appID: "H253X88X9F.com.langchain.openswe",
-          paths: ["NOT /agents/local/*", "/agents/*", "/review", "/review/*"],
+          paths: ["/agents/*", "/review", "/review/*"],
         },
       ],
     },
