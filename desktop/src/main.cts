@@ -84,6 +84,14 @@ const {
   staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
+const {
+  migrateDesktopConfig,
+  readSharedConfig,
+  shareSession,
+  sharedConfigPath,
+  unshareSession,
+  updateSharedConfig,
+} = require("./shared-config.js");
 
 const appRuntime = resolveAppRuntime({
   argv: process.argv,
@@ -881,31 +889,82 @@ function configureDesktopIpc() {
   });
 }
 
-function configPath() {
+function profileConfigPath() {
   return path.join(app.getPath("userData"), "desktop-config.json");
+}
+
+/** Development builds keep their own profile, so they never repoint the packaged app or the CLI. */
+function configPath() {
+  return isDevelopment
+    ? profileConfigPath()
+    : sharedConfigPath(require("node:os").homedir());
+}
+
+function migrateStoredConfig() {
+  if (isDevelopment) return;
+  try {
+    migrateDesktopConfig({
+      home: require("node:os").homedir(),
+      platform: process.platform,
+      env: process.env,
+    });
+  } catch (error) {
+    console.warn("Could not migrate desktop-config.json", error);
+  }
+}
+
+function isBackendSessionCookie(cookie) {
+  return (
+    Boolean(backendUrl) &&
+    cookie.name === SESSION_COOKIE_NAME &&
+    cookie.domain.replace(/^\./, "") === new URL(backendUrl).hostname
+  );
+}
+
+/** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
+async function shareBackendSession() {
+  if (isDevelopment) return;
+  session.defaultSession.cookies.on(
+    "changed",
+    (_event, cookie, cause, removed) => {
+      if (!isBackendSessionCookie(cookie)) return;
+      if (removed && cause === "overwrite") return;
+      try {
+        if (removed) unshareSession(configPath(), backendUrl, cookie.value);
+        else shareSession(configPath(), backendUrl, cookie.value);
+      } catch (error) {
+        console.warn("Could not share the desktop session with oswe", error);
+      }
+    },
+  );
+  if (!backendUrl) return;
+  try {
+    const [cookie] = await session.defaultSession.cookies.get({
+      url: backendUrl,
+      name: SESSION_COOKIE_NAME,
+    });
+    if (cookie) shareSession(configPath(), backendUrl, cookie.value);
+  } catch (error) {
+    console.warn("Could not share the desktop session with oswe", error);
+  }
 }
 
 function readStoredBackendUrl() {
   try {
-    const config = JSON.parse(fs.readFileSync(configPath(), "utf8"));
-    return typeof config.backendUrl === "string"
-      ? validateBackendUrl(config.backendUrl)
-      : undefined;
-  } catch {
+    const { backendUrl } = readSharedConfig(configPath());
+    return backendUrl ? validateBackendUrl(backendUrl) : undefined;
+  } catch (error) {
+    console.warn("Could not read the stored backend URL", error);
     return undefined;
   }
 }
 
 function storeBackendUrl(value) {
   const url = validateBackendUrl(value.trim());
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(
-    configPath(),
-    `${JSON.stringify({ backendUrl: url }, null, 2)}\n`,
-    {
-      mode: 0o600,
-    },
-  );
+  updateSharedConfig(configPath(), (config) => ({
+    ...config,
+    backendUrl: url,
+  }));
   return url;
 }
 
@@ -1598,6 +1657,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),
@@ -1613,6 +1673,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),

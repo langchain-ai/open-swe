@@ -5,6 +5,7 @@ import {
   SlackLogoIcon,
 } from "@phosphor-icons/react"
 
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import type { SlackMessagePreviewRequest } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
 import { useSlackMessagePreview } from "@/features/agents/lib/queries"
@@ -54,18 +55,17 @@ export function SlackMessageTriggerFields({
 
   return (
     <div className="flex flex-col gap-3 px-3 py-2.5">
-      <label className="flex items-center gap-3">
+      <div className="flex items-center gap-3">
         <SlackLogoIcon className="size-4 shrink-0 text-muted-foreground" />
-        <input
-          value={channelId}
-          onChange={(e) => onChannelIdChange(e.target.value)}
+        <SlackChannelCombobox
+          value={channelId.trim() || null}
+          onValueChange={(id) => onChannelIdChange(id ?? "")}
           disabled={disabled}
-          placeholder="Channel ID, e.g. C0123456789"
-          spellCheck={false}
-          aria-label="Watched Slack channel ID"
-          className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+          placeholder="Search channels or paste a channel ID"
+          aria-label="Watched Slack channel"
+          className="flex-1"
         />
-      </label>
+      </div>
       <label className="flex items-center gap-3">
         <MagnifyingGlassIcon className="size-4 shrink-0 text-muted-foreground" />
         <input

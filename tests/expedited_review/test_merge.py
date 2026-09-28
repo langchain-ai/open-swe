@@ -103,6 +103,8 @@ class _GitHub:
     async def _request(
         self, client: object, method: str, url: str, **kwargs: Any
     ) -> httpx2.Response:
+        if method == "GET":
+            return httpx2.Response(404, json={}, request=httpx2.Request(method, url))
         if url.endswith("/dismissals"):
             self.dismissed.append(url.rsplit("/", 2)[-2])
             return httpx2.Response(

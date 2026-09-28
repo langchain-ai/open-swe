@@ -12,6 +12,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.slack.channels import SlackChannel
 from agent.workspaces import routes as workspace_routes
 from agent.workspaces.store import WORKSPACES
 from tests.conftest import FakeStore
@@ -190,6 +191,54 @@ async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
     assert "already" in conflict.json()["detail"]
 
 
+_ELIGIBLE = {"is_member": True, "is_ext_shared": False, "is_pending_ext_shared": False}
+
+
+@pytest.mark.parametrize(
+    ("payload", "allowed"),
+    [
+        (_ELIGIBLE, True),
+        ({**_ELIGIBLE, "is_pending_ext_shared": True}, False),
+        ({**_ELIGIBLE, "is_ext_shared": True}, False),
+        ({**_ELIGIBLE, "is_member": False}, False),
+    ],
+)
+async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
+    admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
+) -> None:
+    with patch.object(
+        workspace_routes.SlackChannel,
+        "load",
+        AsyncMock(return_value=SlackChannel(id="C0API", payload=_ELIGIBLE)),
+    ):
+        created = await admin_client.post(
+            "/dashboard/api/workspaces",
+            json={
+                "name": "OSS",
+                "repos": ["acme/oss"],
+                "slack_channel_ids": ["C0API", "C0NEW"],
+                "kitchen_channel_ids": ["C0API"],
+            },
+        )
+    assert created.status_code == 200
+
+    load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
+    with patch.object(workspace_routes.SlackChannel, "load", load):
+        response = await admin_client.put(
+            "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
+        )
+
+    load.assert_awaited_once_with("C0NEW", use_cache=False)
+    stored = (await admin_client.get("/dashboard/api/workspaces/oss")).json()
+    if allowed:
+        assert response.status_code == 200
+        assert stored["kitchen_channel_ids"] == ["C0API", "C0NEW"]
+    else:
+        assert response.status_code == 400
+        assert "C0NEW" in response.json()["detail"]
+        assert stored["kitchen_channel_ids"] == ["C0API"]
+
+
 async def test_a_prompt_edit_during_a_refresh_outlives_it(
     admin_client: httpx.AsyncClient,
 ) -> None:
@@ -208,3 +257,10 @@ async def test_a_prompt_edit_during_a_refresh_outlives_it(
     stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
     assert stored["prompt"] == "new"
     assert stored["refresh_status"] == "success"
+
+
+async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.AsyncClient) -> None:
+    response = await admin_client.delete("/dashboard/api/workspaces/default")
+
+    assert response.status_code == 409
+    assert (await admin_client.get("/dashboard/api/workspaces/default")).status_code == 200

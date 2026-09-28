@@ -21,14 +21,19 @@ import {
   useWorkspaceOptions,
   workspaceOptionKeys,
 } from "@/features/agents/lib/queries"
-import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import {
+  api,
+  DEFAULT_WORKSPACE_SLUG,
+  type WorkspaceOption,
+  type WorkspaceRecord,
+} from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   draftFromWorkspace,
   WorkspaceEditor,
@@ -75,6 +80,7 @@ function GeneralSection({
         name: draft.name.trim(),
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
+        kitchen_channel_ids: draft.kitchenChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)
@@ -302,7 +308,7 @@ export function WorkspaceSettingsPanel({
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
-      {canEdit && (
+      {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
