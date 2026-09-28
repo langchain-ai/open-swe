@@ -66,6 +66,16 @@ for the same session the desktop app stores. Requests then carry it as the
 dashboard's own `osw_session` cookie. The session and backend URL live in
 `~/.open-swe/config.json` (mode 0600), and `oswe logout` deletes the file.
 
+### Check the credential
+
+```sh
+oswe auth status
+```
+
+Prints the backend, which credential is in use and where it came from, then
+asks the server whether it accepts it: a session reports who it signs in as.
+Exits 1 when there is no credential or the server rejects it.
+
 ### Run in GitHub Actions
 
 ```yaml
@@ -146,6 +156,22 @@ Options:
 Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
 prompt when no arguments are given. Stdin is only read when it is a pipe or a
 redirected file, so a CI runner's open stdin never blocks a run.
+
+## MCP server
+
+`oswe mcp` serves a [Model Context Protocol](https://modelcontextprotocol.io)
+server on stdio, signed in with the same credential as the rest of the CLI:
+
+```json
+{ "mcpServers": { "oswe": { "command": "oswe", "args": ["mcp"] } } }
+```
+
+Its one tool, `list_threads`, lists your threads newest first with the
+dashboard sidebar's filters: `repo` (owner/name) or `no_repo`,
+`include_archived`, `include_automations`, `sort` (`created` or `updated`),
+plus `status`, `unread`, `source`, `query`, `limit` and `offset`. Archived
+threads and automation runs are left out unless asked for. It needs a person's
+session; API keys and CI tokens cannot list threads.
 
 ## Environment the agent gets
 

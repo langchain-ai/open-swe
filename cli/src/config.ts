@@ -128,7 +128,11 @@ export async function readBackend(): Promise<string> {
  */
 export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())
-  const credential = resolveCredential(backend, (await storedConfig()).session)
+  const { session } = await storedConfig()
+  const credential = resolveCredential(
+    backend,
+    session ? { session, path: configFile() } : null
+  )
   return credential === null ? null : { backend, credential }
 }
 
