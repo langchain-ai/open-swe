@@ -47,10 +47,8 @@ The CLI uses the first credential it finds:
    job's own OIDC token, requested with the backend URL as its audience
    (override with `OPEN_SWE_OIDC_AUDIENCE`). An admin must first let the
    repository start threads in its workspace's settings.
-3. **A person's session** — `OPEN_SWE_SESSION`, or the one stored in
-   `~/.open-swe/config.json` for the current backend. The desktop app writes
-   its own session there whenever it is signed in, so on a machine with the
-   app signed in `oswe` needs no login of its own.
+3. **A person's session** — `OPEN_SWE_SESSION`, or the one `oswe login`
+   stored.
 
 An API key and a workflow are machines: their threads are always `system`
 threads. A person's threads are `workspace` threads unless `--visibility
