@@ -18,7 +18,7 @@ import langgraph_sdk
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
@@ -661,6 +661,81 @@ async def test_image_fallback_temporarily_overrides_only_incompatible_pinned_mod
             await handler(request)
         actual = handler.call_args.args[0]
         assert actual.model.model_id == (expected if retained_images else pinned_model)
+        assert actual.messages == request.messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
+@pytest.mark.parametrize(
+    "default_model",
+    [
+        "openai:gpt-6-sol",
+        "google_genai:gemini-3.8-flash",
+        "fireworks:accounts/fireworks/models/kimi-k3",
+    ],
+)
+@pytest.mark.parametrize(
+    "requested_model", ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"]
+)
+async def test_requested_model_uses_vision_fallback_for_image_tool_results(
+    source: str, default_model: str, requested_model: str
+) -> None:
+    from agent.dashboard.options import default_vision_model_pair, model_supports_images
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+
+    config = _base_config()
+    config["configurable"].update(source=source)
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        profile={"model_routing_enabled": True},
+        workspace_settings=WorkspaceSettings(
+            {**_MODEL_DEFAULTS, "default_agent_model": default_model}
+        ),
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    middleware = cast(list[object], captured["middleware"])
+    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+    fallback = next(
+        (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
+    )
+    state: ModelSelectionState = {
+        "messages": [HumanMessage(content="Read the screenshot")],
+        "requested_model": requested_model,
+    }
+    with patch(
+        "agent.server.make_model", side_effect=lambda model_id, **_: MagicMock(model_id=model_id)
+    ):
+        state.update(await selection.abefore_model(state, MagicMock()))
+
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+
+    async def handle_selected(request: ModelRequest) -> ModelResponse:
+        if fallback is not None:
+            return await fallback.awrap_model_call(request, handler)
+        return await handler(request)
+
+    screenshot = ToolMessage(
+        name="read_file",
+        tool_call_id="read-screenshot",
+        content=[{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}],
+    )
+    for with_image in (False, True, False):
+        request = ModelRequest(
+            model=cast(BaseChatModel, captured["model"]),
+            messages=[*state["messages"], screenshot] if with_image else state["messages"],
+            state=state,
+        )
+        await selection.awrap_model_call(request, handle_selected)
+        actual = handler.call_args.args[0]
+        expected = requested_model
+        if with_image and not model_supports_images(requested_model):
+            expected = (
+                default_model
+                if model_supports_images(default_model)
+                else default_vision_model_pair()[0]
+            )
+        assert actual.model.model_id == expected
         assert actual.messages == request.messages
 
 

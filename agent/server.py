@@ -1661,19 +1661,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    image_fallback: ImageModelFallbackMiddleware | None = None
-    if not model_supports_images(model_id):
-        vision_model_id, vision_effort = default_vision_model_pair()
-        image_fallback = ImageModelFallbackMiddleware(
-            main_model,
-            _make_model_or_defer(
-                vision_model_id,
-                use_gateway=use_gateway,
-                **provider_model_kwargs(
-                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                ),
-            ),
-        )
     model_selection: ModelSelectionMiddleware | None = None
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
@@ -1687,16 +1674,36 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         and not cfg.continued_from_thread_id
         else None
     )
+    image_fallback: ImageModelFallbackMiddleware | None = None
+    if not model_supports_images(model_id) or any(
+        not option["supports_images"] for option in (requested_models or {}).values()
+    ):
+        vision_model = main_model
+        if not model_supports_images(model_id):
+            vision_model_id, vision_effort = default_vision_model_pair()
+            vision_model = _make_model_or_defer(
+                vision_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                ),
+            )
+        image_fallback = ImageModelFallbackMiddleware(vision_model)
+        if not model_supports_images(model_id):
+            image_fallback.add_text_only_model(main_model)
 
     def requested_model_factory(requested_model: str) -> BaseChatModel:
         option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
-        return _make_model_or_defer(
+        model = _make_model_or_defer(
             requested_model,
             use_gateway=use_gateway,
             **provider_model_kwargs(
                 requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
             ),
         )
+        if image_fallback is not None and not option["supports_images"]:
+            image_fallback.add_text_only_model(model)
+        return model
 
     if adaptive_model_routing or requested_models is not None:
         routing_models = {
