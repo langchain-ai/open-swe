@@ -83,8 +83,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     org_guidelines: str | None = None
-    approval_policy: str | None = None
-    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -105,7 +103,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
-    @field_validator("org_guidelines", "approval_policy", mode="before")
+    @field_validator("org_guidelines", mode="before")
     @classmethod
     def _normalize_review_instructions(cls, v: object) -> str | None:
         if v is None:
@@ -324,8 +322,6 @@ def _default_settings() -> dict[str, Any]:
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "org_guidelines": None,
-        "approval_policy": None,
-        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
@@ -381,6 +377,9 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
+    # Approval criteria moved to each repository's APPROVALS.md and its review style's mode.
+    "approval_policy",
+    "review_auto_approve",
 )
 
 
