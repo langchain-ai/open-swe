@@ -66,7 +66,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
-from agent.threads.session_upload import SessionUploadBody, upload_session
+from agent.threads.session_upload import UploadStream, upload_session
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -104,8 +104,7 @@ async def api_upload_session(
     request: Request,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    body = await SessionUploadBody.from_request(request)
-    return await upload_session(body, session["sub"], email=session.get("email"))
+    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/resolve-all")

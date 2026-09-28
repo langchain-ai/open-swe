@@ -1,5 +1,3 @@
-import { gzipSync } from "node:zlib"
-
 import {
   arrayAt,
   isRecord,
@@ -16,7 +14,7 @@ import {
   type Identity,
   type ThreadsPage,
 } from "./threads.ts"
-import { uploadedThreadSchema, type SessionUpload } from "./upload.ts"
+import { uploadedThreadSchema } from "./upload.ts"
 
 export class ApiError extends Error {
   constructor(
@@ -39,6 +37,12 @@ export interface BridgeSession {
   bridgeId: string
   heartbeatIntervalSeconds: number
   aliveThresholdSeconds: number
+}
+
+/** A pre-encoded request body and the headers that describe it. */
+interface RawBody {
+  data: Uint8Array
+  headers: Record<string, string>
 }
 
 export interface BridgeRequest {
@@ -120,24 +124,21 @@ export class ApiClient {
     path: string,
     options: {
       body?: unknown
-      gzip?: boolean
+      raw?: RawBody
       accept?: string
       signal?: AbortSignal
     } = {}
   ): Promise<Response> {
-    const headers = await this.headers(options.accept ?? "application/json")
-    const json =
-      options.body === undefined ? undefined : JSON.stringify(options.body)
-    let body: string | Uint8Array | undefined = json
-    // Vercel caps a request body at 4.5 MB before it reaches the backend proxy.
-    if (json !== undefined && options.gzip) {
-      body = gzipSync(json)
-      headers["Content-Encoding"] = "gzip"
+    const headers = {
+      ...(await this.headers(options.accept ?? "application/json")),
+      ...options.raw?.headers,
     }
     const response = await fetch(this.url(path), {
       method,
       headers,
-      body,
+      body:
+        options.raw?.data ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
       signal: options.signal,
     })
     if (!response.ok) {
@@ -152,7 +153,7 @@ export class ApiClient {
   private async json(
     method: string,
     path: string,
-    options: { body?: unknown; gzip?: boolean; signal?: AbortSignal } = {}
+    options: { body?: unknown; raw?: RawBody; signal?: AbortSignal } = {}
   ): Promise<unknown> {
     const response = await this.send(method, path, options)
     if (response.status === 204) return null
@@ -181,10 +182,18 @@ export class ApiClient {
     return parsed.data
   }
 
-  /** Create a thread from a local session's transcript; returns its id. */
-  async uploadSession(upload: SessionUpload): Promise<string> {
+  /** Create a thread from a gzipped JSONL session upload; returns its id. */
+  async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
     const parsed = uploadedThreadSchema.safeParse(
-      await this.json("POST", "/threads/uploads", { body: upload, gzip: true })
+      await this.json("POST", "/threads/uploads", {
+        raw: {
+          data: gzippedJsonl,
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            "Content-Encoding": "gzip",
+          },
+        },
+      })
     )
     if (!parsed.success)
       throw new ProtocolError("/threads/uploads response is malformed")

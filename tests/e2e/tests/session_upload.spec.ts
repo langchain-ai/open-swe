@@ -68,6 +68,10 @@ const toolResults = new Map(
   ),
 );
 
+function jsonlUpload(header: Record<string, string>, body: string): Buffer {
+  return Buffer.from(`${JSON.stringify(header)}\n${body}`);
+}
+
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -85,13 +89,14 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
   try {
     await loginAs(page, SAME_USER);
     const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: SAME_ORIGIN_HEADERS,
-      data: {
-        type: "claude",
-        transcript,
-        repo: "fakeorg/demo",
-        branch: "never-pushed",
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/x-ndjson",
       },
+      data: jsonlUpload(
+        { type: "claude", repo: "fakeorg/demo", branch: "never-pushed" },
+        transcript,
+      ),
     });
     expect(unpushed.status()).toBe(422);
     expect(await unpushed.text()).toContain("push it first");
@@ -110,16 +115,18 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     const upload = await page.request.post("/dashboard/api/threads/uploads", {
       headers: {
         ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/json",
+        "content-type": "application/x-ndjson",
         "content-encoding": "gzip",
       },
       data: gzipSync(
-        JSON.stringify({
-          type: "claude",
+        jsonlUpload(
+          {
+            type: "claude",
+            pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
+            visibility: "private",
+          },
           transcript,
-          pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
-          visibility: "private",
-        }),
+        ),
       ),
     });
     expect(upload.ok(), await upload.text()).toBeTruthy();

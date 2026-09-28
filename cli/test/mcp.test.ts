@@ -163,7 +163,7 @@ describe("list_threads", () => {
 })
 
 describe("upload_session", () => {
-  test("posts the transcript verbatim, gzipped, and links the new thread", async () => {
+  test("streams a header line and the transcript verbatim as gzipped JSONL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oswe-upload-"))
     stops.push(() => rm(dir, { recursive: true, force: true }))
     const transcript =
@@ -186,13 +186,15 @@ describe("upload_session", () => {
 
     expect(result.isError).toBeFalsy()
     expect(encodings[0]).toBe("gzip")
-    expect(JSON.parse(bodies[0] ?? "")).toEqual({
+    const body = bodies[0] ?? ""
+    const newline = body.indexOf("\n")
+    expect(JSON.parse(body.slice(0, newline))).toEqual({
       type: "claude",
-      transcript,
       repo: "acme/web",
       branch: "fix-login",
       visibility: "workspace",
     })
+    expect(body.slice(newline + 1)).toBe(transcript)
     expect(result.structuredContent).toMatchObject({
       thread_id: "t-9",
       url: expect.stringMatching(/\/agents\/t-9$/),

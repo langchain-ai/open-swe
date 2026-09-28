@@ -5,8 +5,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.claude_code.transcript import (
     MISSING_TOOL_RESULT,
+    ClaudeTranscript,
     TranscriptError,
-    parse_claude_transcript,
 )
 
 
@@ -36,7 +36,7 @@ def _result(call_id: str, text: str) -> list[dict[str, object]]:
 
 
 def test_rewound_branch_is_dropped_and_parallel_results_are_kept() -> None:
-    session = parse_claude_transcript(
+    session = ClaudeTranscript.parse(
         _jsonl(
             _user("u1", None, "first try"),
             _assistant("a1", "u1", "m1", {"type": "text", "text": "abandoned"}),
@@ -64,7 +64,7 @@ def test_rewound_branch_is_dropped_and_parallel_results_are_kept() -> None:
 
 
 def test_prompt_queued_mid_turn_waits_for_open_tool_calls_and_dangling_calls_get_a_result() -> None:
-    session = parse_claude_transcript(
+    session = ClaudeTranscript.parse(
         _jsonl(
             _user("u1", None, "go"),
             _assistant("a1", "u1", "m1", _tool_use("c1")),
@@ -88,7 +88,7 @@ def test_prompt_queued_mid_turn_waits_for_open_tool_calls_and_dangling_calls_get
 
 
 def test_reshaped_records_and_blocks_are_skipped_without_breaking_the_chain() -> None:
-    session = parse_claude_transcript(
+    session = ClaudeTranscript.parse(
         _jsonl(
             {**_user("u1", None, "hi"), "someNewField": {"nested": True}},
             _user("u2", "u1", {"content moved": "into an object"}),
@@ -115,7 +115,7 @@ def test_reshaped_records_and_blocks_are_skipped_without_breaking_the_chain() ->
 
 
 def test_chain_runs_through_records_that_carry_no_message() -> None:
-    session = parse_claude_transcript(
+    session = ClaudeTranscript.parse(
         _jsonl(
             _user("u1", None, "first"),
             _assistant("a1", "u1", "m1", {"type": "text", "text": "one"}),
@@ -130,4 +130,4 @@ def test_chain_runs_through_records_that_carry_no_message() -> None:
 
 def test_input_with_no_transcript_records_is_rejected() -> None:
     with pytest.raises(TranscriptError):
-        parse_claude_transcript("{not json\nplain text\n")
+        ClaudeTranscript.parse("{not json\nplain text\n")
