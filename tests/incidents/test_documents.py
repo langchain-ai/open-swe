@@ -87,7 +87,9 @@ async def test_curated_history_keeps_titles_but_follows_channel_access(record):
         "API availability"
     )
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": False}
-    assert (await documents.search_history())["items"] == []
+    denied = await documents.search_history()
+    assert denied["items"] == []
+    assert denied["partial"] is False
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == 404
@@ -99,6 +101,16 @@ async def test_document_reads_distinguish_outages_from_revocation(record, info, 
     with pytest.raises(HTTPException) as error:
         await current(record)
     assert error.value.status_code == status
+
+
+async def test_history_marks_transient_access_failures_as_partial(record):
+    await documents.update_from_report(record, report())
+    SlackChannel.fetch.return_value = None
+
+    result = await documents.search_history()
+
+    assert result["items"] == []
+    assert result["partial"] is True
 
 
 async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):

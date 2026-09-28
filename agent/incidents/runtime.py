@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 import langgraph_sdk
+from fastapi import HTTPException
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -120,9 +121,6 @@ class IncidentSession:
         digest = service.fingerprint(digest_fields(report))
         previous = await service.REPORTS.get(record.id)
         run_id = current_run_id()
-        # The postmortem update runs first: if it fails, nothing is recorded and the agent
-        # sees the error instead of a report that was never fully written.
-        await documents.update_from_report(record, report)
         latest = IncidentReportRecord(
             incident_id=record.id,
             report=report,
@@ -137,6 +135,34 @@ class IncidentSession:
         )
         service.note(latest, "findings", report.summary)
         await service.REPORTS.put(record.id, latest)
+        try:
+            await documents.update_from_report(record, report)
+        except service.SlackAccessUnavailable:
+            logger.warning(
+                "Incident report recorded but postmortem refresh was unavailable",
+                extra={"incident_id": record.id},
+            )
+            return {
+                "recorded": True,
+                "posted": False,
+                "postmortem_updated": False,
+                "omitted_claims": any("omitted" in gap for gap in report.gaps),
+                "warning": "The postmortem summary could not be refreshed.",
+            }
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            logger.warning(
+                "Incident report recorded but postmortem refresh was unavailable",
+                extra={"incident_id": record.id},
+            )
+            return {
+                "recorded": True,
+                "posted": False,
+                "postmortem_updated": False,
+                "omitted_claims": any("omitted" in gap for gap in report.gaps),
+                "warning": "The postmortem summary could not be refreshed.",
+            }
         explicit = self.explicit_request is not None
         delivered = latest.posted_digest == digest
         delivered_this_run = delivered and bool(run_id) and latest.posted_run_id == run_id
@@ -181,6 +207,7 @@ class IncidentSession:
         return {
             "recorded": True,
             "posted": posted,
+            "postmortem_updated": True,
             "omitted_claims": any("omitted" in gap for gap in report.gaps),
         }
 

@@ -129,6 +129,12 @@ class SlackChannel(Base):
         return dict(channel.payload) if channel is not None else None
 
     @classmethod
+    async def cached_fetch(cls, channel_id: str) -> JsonObject | None:
+        """The raw channel object from the directory cache, even when stale."""
+        channel = await cls._row(channel_id)
+        return dict(channel.payload) if channel is not None else None
+
+    @classmethod
     async def context_for(cls, channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         """One channel's context, empty but for its id when the channel is unreadable."""
         channel = await cls.load(channel_id, use_cache=use_cache)

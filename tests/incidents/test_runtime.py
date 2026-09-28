@@ -186,7 +186,12 @@ async def test_report_tool_records_posts_and_dedupes_by_digest(incident):
 
     latest = await service.REPORTS.get("incident")
     assert latest.report.summary == "Errors reported [slack:1.0]"
-    assert first == {"recorded": True, "posted": True, "omitted_claims": True}
+    assert first == {
+        "recorded": True,
+        "posted": True,
+        "postmortem_updated": True,
+        "omitted_claims": True,
+    }
     assert second["posted"] is False
     runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
     assert runtime.post_slack_thread_reply_with_ts.await_args.args[:2] == ("C1", "0")
@@ -260,14 +265,35 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
     assert latest.posted_digest == latest.digest
 
 
-async def test_postmortem_failure_records_nothing(incident, monkeypatch):
+async def test_postmortem_failure_preserves_the_record(incident, monkeypatch):
     session = await runtime.load_incident_session(config())
     monkeypatch.setattr(
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
     )
     with pytest.raises(RuntimeError, match="store"):
         await session._record_incident_report(summary=[])
-    assert await service.REPORTS.get("incident") is None
+    assert (await service.REPORTS.get("incident")).report.summary
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+
+
+async def test_unavailable_postmortem_returns_a_recorded_warning(incident, monkeypatch):
+    session = await runtime.load_incident_session(config())
+    monkeypatch.setattr(
+        documents,
+        "update_from_report",
+        AsyncMock(side_effect=service.SlackAccessUnavailable()),
+    )
+
+    result = await session._record_incident_report(summary=[])
+
+    assert result == {
+        "recorded": True,
+        "posted": False,
+        "postmortem_updated": False,
+        "omitted_claims": False,
+        "warning": "The postmortem summary could not be refreshed.",
+    }
+    assert await service.REPORTS.get("incident") is not None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
 

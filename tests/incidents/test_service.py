@@ -220,6 +220,43 @@ async def test_revoked_channel_access_hides_the_incident(configured):
     assert error.value.status_code == 503
 
 
+async def test_readable_retries_fresh_probe_before_denying(configured, monkeypatch):
+    record = await _record()
+    fresh = {**CHANNEL, "id": record.channel_id}
+    fetch = AsyncMock(side_effect=[None, None, fresh])
+    monkeypatch.setattr(SlackChannel, "fetch", fetch)
+    cached = AsyncMock()
+    monkeypatch.setattr(SlackChannel, "cached_fetch", cached)
+
+    assert await service.readable(record, await service.get_policy(), raise_on_unavailable=True)
+    assert fetch.await_count == 3
+    cached.assert_not_awaited()
+
+
+async def test_readable_uses_stale_cache_after_fresh_probe_fails(configured, monkeypatch):
+    record = await _record()
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        SlackChannel,
+        "cached_fetch",
+        AsyncMock(return_value={**CHANNEL, "id": record.channel_id}),
+    )
+
+    assert await service.readable(record, await service.get_policy(), raise_on_unavailable=True)
+
+
+async def test_cached_denial_remains_denied(configured, monkeypatch):
+    record = await _record()
+    monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        SlackChannel,
+        "cached_fetch",
+        AsyncMock(return_value={**CHANNEL, "id": record.channel_id, "is_member": False}),
+    )
+
+    assert not await service.readable(record, await service.get_policy(), raise_on_unavailable=True)
+
+
 async def test_questions_dispatch_explicit_turns_with_server_identity(configured, monkeypatch):
     record = await _record()
     dispatch = AsyncMock(return_value={"run_id": "r1"})

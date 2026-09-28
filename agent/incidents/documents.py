@@ -116,11 +116,20 @@ async def search_history(
     q: str | None = None, *, limit: int = 25, cursor: str | None = None
 ) -> dict[str, Any]:
     items = []
+    partial = False
     for history in await HISTORY.search_all():
         try:
             record = await require_access(history.id)
-        except HTTPException:
+        except service.SlackAccessUnavailable:
+            partial = True
             continue
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            if exc.status_code == 503:
+                partial = True
+                continue
+            raise
         markdown = await _saved_markdown(record)
         if (
             q
@@ -131,4 +140,6 @@ async def search_history(
         item = history.model_dump(exclude={"workspace_id", "channel_id"})
         item["status"] = record.status
         items.append(item)
-    return service.paginate(service.sort_newest_first(items), cursor, limit)
+    result = service.paginate(service.sort_newest_first(items), cursor, limit)
+    result["partial"] = partial
+    return result

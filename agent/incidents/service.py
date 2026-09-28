@@ -1,5 +1,6 @@
 """Incident policy, records, dashboard projections, and responder commands."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -43,6 +44,13 @@ REQUIRED_SLACK_SCOPES = frozenset(
         "users:read.email",
     }
 )
+
+
+class SlackAccessUnavailable(HTTPException):
+    """Slack did not provide enough information to verify channel access."""
+
+    def __init__(self) -> None:
+        super().__init__(503, "Slack access verification is temporarily unavailable. Try again.")
 
 
 def incident_id(workspace_id: str, channel_id: str) -> str:
@@ -151,12 +159,18 @@ async def readable(
         or record.channel_id in policy.excluded_channel_ids
     ):
         return False
-    info = await SlackChannel.fetch(record.channel_id, use_cache=False)
+    info = None
+    for attempt in range(3):
+        info = await SlackChannel.fetch(record.channel_id, use_cache=False)
+        if info is not None:
+            break
+        if attempt < 2:
+            await asyncio.sleep(0.05)
+    if info is None:
+        info = await SlackChannel.cached_fetch(record.channel_id)
     if info is None:
         if raise_on_unavailable:
-            raise HTTPException(
-                503, "Slack access verification is temporarily unavailable. Try again."
-            )
+            raise SlackAccessUnavailable()
         return False
     return channel_allowed(info, policy, for_read=True)
 
@@ -313,12 +327,18 @@ async def list_incidents(
     policy = await get_policy()
     records = await INCIDENTS.search_all()
     items = []
+    partial = False
     for record in records:
         if record.workspace_id != policy.workspace_id:
             continue
         if view and view != "all" and record.status not in _VIEWS.get(view, {view}):
             continue
-        if await readable(record, policy):
+        try:
+            readable_now = await readable(record, policy, raise_on_unavailable=True)
+        except SlackAccessUnavailable:
+            partial = True
+            readable_now = False
+        if readable_now:
             item = summary(record, await REPORTS.get(record.id))
         elif include_setup and record.reason == "setup_failed":
             item = setup_summary(record)
@@ -327,7 +347,9 @@ async def list_incidents(
         if q and q.lower() not in f"{item['title']} {item['channel_name']}".lower():
             continue
         items.append(item)
-    return paginate(sort_newest_first(items), cursor, limit)
+    result = paginate(sort_newest_first(items), cursor, limit)
+    result["partial"] = partial
+    return result
 
 
 async def get_incident(id: str, *, include_setup: bool = False) -> dict[str, Any]:
