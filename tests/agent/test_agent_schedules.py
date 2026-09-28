@@ -1714,20 +1714,29 @@ async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, r
     assert fake_client.crons.deleted == ["cron_sched_1"]
 
 
-async def test_a_failed_workspace_delete_keeps_its_automations(
+async def test_retrying_a_failed_workspace_delete_finishes_it(
     fake_client, auth, registry_db, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
+    """The automations go first, so a failure leaves a workspace that can be deleted again."""
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     await fake_client.store.put_item(
-        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="core")
+        schedules.SCHEDULES_NAMESPACE,
+        "sched_1",
+        _scheduled_record(workspace="core", cron_id="cron_1"),
     )
+    real_delete = WORKSPACES.delete
     monkeypatch.setattr(WORKSPACES, "delete", AsyncMock(side_effect=RuntimeError("db down")))
 
     with pytest.raises(RuntimeError):
         await WORKSPACES.remove("core")
+    assert await WORKSPACES.get("core") is not None
 
-    assert [item["id"] for item in await schedules.list_agent_schedules()] == ["sched_1"]
-    assert fake_client.crons.deleted == []
+    monkeypatch.setattr(WORKSPACES, "delete", real_delete)
+    assert await WORKSPACES.remove("core")
+
+    assert await WORKSPACES.get("core") is None
+    assert await schedules.list_agent_schedules() == []
+    assert fake_client.crons.deleted == ["cron_1"]
 
 
 async def test_workspace_cleanup_spares_an_automation_moved_since_it_looked(

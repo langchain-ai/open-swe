@@ -1098,19 +1098,14 @@ class WorkspaceStore:
         record = await self.get(slug)
         if record is None:
             return False
-        await self.delete(slug)
-        # Its automations go only once the workspace has: they live in the
-        # LangGraph Store, which shares no transaction with this delete, and
-        # from here on every run of theirs would be refused. One this misses is
-        # refused at launch and can be moved from the editor.
+        # Its automations go first. They live in the LangGraph Store, which
+        # shares no transaction with this delete, so a failure part way leaves
+        # the workspace in place, and deleting it again finishes the job; the
+        # other order would strand automations nothing can delete by retrying.
         from agent.schedules.store import delete_workspace_automations
 
-        try:
-            await delete_workspace_automations(slug)
-        except Exception:
-            logger.exception(
-                "Deleting a removed workspace's automations failed", extra={"workspace": slug}
-            )
+        await delete_workspace_automations(slug)
+        await self.delete(slug)
         from agent.workspaces.refresh import remove_refresh_cron
 
         await remove_refresh_cron(record)
