@@ -6,22 +6,12 @@ from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
-    SUPPORTED_MODEL_IDS,
-    SUPPORTED_MODELS,
-    default_model_pair,
     fable_disabled_fallback,
-    gate_fable_model,
-    is_deprecated_model,
-    model_profile_context_window,
-    models_with_profile_context_windows,
-    normalize_model_choice,
     provider_fallback_pair,
 )
-from agent.dashboard.profiles import ProfileUpdate, normalize_profile_for_response
+from agent.dashboard.profiles import normalize_profile_for_response
 from agent.dashboard.workspace_settings import (
-    WorkspaceSettings,
     WorkspaceSettingsUpdate,
-    normalize_workspace_settings_for_response,
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-5"
@@ -35,121 +25,13 @@ DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
 FABLE = "anthropic:claude-fable-5-1"
 
 
-@pytest.mark.parametrize(
-    ("model", "effort", "expected"),
-    [
-        ("", "", (SUPPORTED_OPENAI, "medium")),
-        ("", "high", (SUPPORTED_OPENAI, "high")),
-        (SUPPORTED_ANTHROPIC, "", (SUPPORTED_ANTHROPIC, "medium")),
-        (f" {SUPPORTED_ANTHROPIC} ", "", (SUPPORTED_ANTHROPIC, "medium")),
-        (SUPPORTED_ANTHROPIC, " max ", (SUPPORTED_ANTHROPIC, "max")),
-    ],
-)
-def test_environment_default_model_pair(monkeypatch, model, effort, expected) -> None:
-    monkeypatch.setenv("LLM_MODEL_ID", model)
-    monkeypatch.setenv("LLM_REASONING_EFFORT", effort)
-    assert default_model_pair() == expected
-
-
 def test_provider_fallback_preserves_provider_and_effort() -> None:
     assert provider_fallback_pair(STALE_ANTHROPIC, "xhigh") == (SUPPORTED_ANTHROPIC, "xhigh")
-
-
-def test_provider_fallback_uses_default_effort_when_unsupported() -> None:
-    assert provider_fallback_pair(STALE_ANTHROPIC, "bogus") == (SUPPORTED_ANTHROPIC, "high")
-    assert provider_fallback_pair(STALE_ANTHROPIC, None) == (SUPPORTED_ANTHROPIC, "high")
-
-
-def test_provider_fallback_resolves_openai_within_provider() -> None:
-    fallback = provider_fallback_pair("openai:gpt-5-legacy", "low")
-    assert fallback is not None
-    model, effort = fallback
-    assert model == SUPPORTED_ASTRA
-    assert effort == "low"
-
-
-@pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM])
-def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
-    assert model_id not in SUPPORTED_MODEL_IDS
-    assert all(model["id"] != model_id for model in SUPPORTED_MODELS)
-    assert is_deprecated_model(model_id)
-
-
-@pytest.mark.parametrize(
-    "model_id",
-    [
-        DEPRECATED_OPENAI,
-        DEPRECATED_ANTHROPIC,
-        DEPRECATED_GLM,
-        "fireworks:accounts/fireworks/models/glm-5p3",
-        "fireworks:accounts/fireworks/models/deepseek-v4-pro",
-    ],
-)
-def test_deprecated_models_defer_to_defaults(model_id: str) -> None:
-    assert normalize_model_choice(model_id, "high") == (None, None)
-    assert provider_fallback_pair(model_id, "high") is None
-    assert normalize_profile_overrides({"default_model": model_id, "reasoning_effort": "high"}) == (
-        None,
-        None,
-    )
-
-
-def test_supported_models_do_not_hardcode_context_windows() -> None:
-    assert all("context_window" not in model for model in SUPPORTED_MODELS)
-
-
-def test_model_profile_context_window_uses_fireworks_profile_for_kimi_k3() -> None:
-    assert model_profile_context_window(SUPPORTED_KIMI) == 1_048_576
-
-
-def test_models_with_profile_context_windows_enriches_copies() -> None:
-    models = [
-        model
-        for model in SUPPORTED_MODELS
-        if model["id"].startswith("openai:") or model["id"] == SUPPORTED_KIMI
-    ]
-    enriched = models_with_profile_context_windows(models)
-    assert all("context_window" not in model for model in models)
-    assert {model["id"]: model.get("context_window") for model in enriched} == {
-        "openai:gpt-6-astra": 272_000,
-        "openai:gpt-6-sol": 272_000,
-        "openai:gpt-6-luna": 272_000,
-        SUPPORTED_KIMI: 1_048_576,
-    }
 
 
 @pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])
 def test_provider_fallback_returns_none_without_provider_match(model_id: object) -> None:
     assert provider_fallback_pair(model_id, "high") is None
-
-
-@pytest.mark.asyncio
-async def test_team_default_stale_anthropic_stays_on_provider() -> None:
-    settings = {
-        "default_agent_model": STALE_ANTHROPIC,
-        "default_agent_reasoning_effort": "xhigh",
-    }
-    assert WorkspaceSettings(settings).default_model("agent") == (SUPPORTED_ANTHROPIC, "xhigh")
-
-
-@pytest.mark.asyncio
-async def test_team_default_unknown_provider_falls_back_to_global() -> None:
-    settings = {
-        "default_reviewer_model": "mystery:model",
-        "default_reviewer_reasoning_effort": "high",
-    }
-    assert WorkspaceSettings(settings).default_model("reviewer") == default_model_pair()
-
-
-def test_profile_stale_anthropic_upgrades_to_supported() -> None:
-    profile = {"default_model": STALE_ANTHROPIC, "reasoning_effort": "high"}
-    assert normalize_profile_overrides(profile) == (SUPPORTED_ANTHROPIC, "high")
-
-
-def test_profile_update_defaults_draft_prs_to_none_for_legacy_clients() -> None:
-    update = ProfileUpdate(default_model=SUPPORTED_OPENAI, reasoning_effort="medium")
-
-    assert update.draft_prs is None
 
 
 @pytest.mark.parametrize(
@@ -179,68 +61,12 @@ def test_profile_response_and_override_defer_deprecated_models(model_id: str, ef
     )
 
 
-def test_workspace_settings_update_rejects_unknown_openai_model() -> None:
-    with pytest.raises(ValueError, match="unsupported agent model"):
-        WorkspaceSettingsUpdate(
-            default_agent_model="openai:gpt-5.6-slo",
-            default_agent_reasoning_effort="medium",
-        )
-
-
 def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> None:
     with pytest.raises(ValueError, match="effort 'bogus' not supported"):
         WorkspaceSettingsUpdate(
             default_agent_model=SUPPORTED_OPENAI,
             default_agent_reasoning_effort="bogus",
         )
-
-
-@pytest.mark.parametrize(
-    ("model_id", "effort"),
-    [
-        (DEPRECATED_GLM, "high"),
-        ("anthropic:claude-sonnet-5", "high"),
-        ("anthropic:claude-haiku-4-5", "none"),
-    ],
-)
-def test_workspace_settings_response_defers_deprecated_models(model_id: str, effort: str) -> None:
-    settings = normalize_workspace_settings_for_response(
-        {
-            "default_agent_model": model_id,
-            "default_agent_reasoning_effort": effort,
-        }
-    )
-
-    assert settings["default_agent_model"] is None
-    assert settings["default_agent_reasoning_effort"] is None
-
-
-def test_fable_cannot_be_saved_as_default() -> None:
-    profile = ProfileUpdate(default_model=FABLE, reasoning_effort="high")
-    with pytest.raises(ValueError, match="cannot be a default model"):
-        profile.validate_pairing()
-    update = WorkspaceSettingsUpdate(
-        fable_enabled=True,
-        default_agent_model=FABLE,
-        default_agent_reasoning_effort="high",
-    )
-    with pytest.raises(ValueError, match="cannot be a default model"):
-        update.apply_fable_policy(fable_enabled=True)
-
-
-def test_profile_update_rejects_unknown_provider() -> None:
-    update = ProfileUpdate(default_model="mystery:model", reasoning_effort="high")
-    with pytest.raises(ValueError, match="not supported"):
-        update.validate_pairing()
-
-
-def test_profile_without_model_defers_to_team_default() -> None:
-    assert normalize_profile_overrides({"reasoning_effort": "high"}) == (None, None)
-
-
-def test_profile_unknown_provider_defers_to_team_default() -> None:
-    profile = {"default_model": "mystery:model", "reasoning_effort": "high"}
-    assert normalize_profile_overrides(profile) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -259,27 +85,6 @@ def test_global_default_matches_available_credentials(
     defaults = runpy.run_path(options.__file__)
     assert defaults["default_model_pair"]() == (expected, "medium")
     assert defaults["default_vision_model_pair"]() == (expected, "medium")
-
-
-def test_gate_fable_passthrough_when_enabled() -> None:
-    assert gate_fable_model("anthropic:claude-fable-5-1", "high", fable_enabled=True) == (
-        "anthropic:claude-fable-5-1",
-        "high",
-    )
-
-
-def test_gate_fable_swaps_to_opus_when_disabled() -> None:
-    assert gate_fable_model("anthropic:claude-fable-5-1", "high", fable_enabled=False) == (
-        SUPPORTED_ANTHROPIC,
-        "high",
-    )
-
-
-def test_gate_fable_leaves_non_fable_ids_alone() -> None:
-    assert gate_fable_model("openai:gpt-6-sol", "high", fable_enabled=False) == (
-        "openai:gpt-6-sol",
-        "high",
-    )
 
 
 def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:

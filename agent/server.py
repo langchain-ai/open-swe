@@ -227,7 +227,8 @@ from agent.tools.admin_gate import (
     is_private_admin_surface,
     participant_is_admin,
 )
-from agent.tools.manage_review_approval_policy import manage_review_approval_policy
+from agent.tools.manage_feature_flags import manage_feature_flags
+from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -1007,7 +1008,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 attribution_route = await self._model_selection.select_route(
                     cast(ModelSelectionState, state)
                 )
-                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+                if attribution_route != "default":
+                    attribution_model_id, attribution_effort = self._routing_defaults[
+                        attribution_route
+                    ]
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
@@ -1464,7 +1468,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((cli_result,) if cli_result_required else ()),
-        *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
+        *(
+            (read_only_sql, manage_feature_flags, manage_review_approval_mode)
+            if private_admin_surface
+            else ()
+        ),
     ]
     if credential_login is None:
         personal_tools = (
@@ -1578,9 +1586,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,
-            routing_models["fast"],
+            main_model,
             route_model_ids={
-                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
+                **{
+                    route: routed_model_id
+                    for route, (routed_model_id, _) in routing_defaults.items()
+                },
+                "default": model_id,
             },
             routing_mode=model_routing_mode,
         )

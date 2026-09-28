@@ -61,6 +61,7 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -74,6 +75,7 @@ describe("WorkspacesSection", () => {
           name: "Preview",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: false,
           default_repo: null,
           has_snapshot: false,
@@ -113,6 +115,7 @@ describe("WorkspacesSection", () => {
           name: "Primary",
           repos: ["acme/oss"],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -122,6 +125,7 @@ describe("WorkspacesSection", () => {
           name: "Preview",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: false,
           default_repo: null,
           has_snapshot: false,
@@ -158,6 +162,7 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -186,6 +191,7 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: false,
@@ -222,6 +228,7 @@ describe("WorkspacesSection", () => {
           name: "Core",
           repos: ["acme/api"],
           slack_channel_ids: ["C0000000001"],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -255,6 +262,7 @@ describe("WorkspacesSection", () => {
       prompt: "",
       repos: ["acme/api"],
       slack_channel_ids: ["C0000000002"],
+      kitchen_channel_ids: [],
     })
 
     renderSection(true)
@@ -272,7 +280,7 @@ describe("WorkspacesSection", () => {
     fireEvent.mouseMove(repositoryHelp)
     expect(
       await screen.findByText(
-        /dashboard, Slack, GitHub issues, or pull requests/
+        /routes its GitHub issues, pull requests, Linear tickets/
       )
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
@@ -301,6 +309,7 @@ describe("WorkspacesSection", () => {
       name: "Preview",
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
+      kitchen_channel_ids: [],
     })
   })
 })

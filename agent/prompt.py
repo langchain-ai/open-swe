@@ -3,7 +3,6 @@ from importlib import resources
 from pathlib import Path
 
 from agent.config import ENV
-from agent.github.comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 from agent.prompts import prompt
 from agent.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -14,10 +13,7 @@ from agent.utils.authorship import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT_PATH = ENV.DEFAULT_PROMPT_PATH.optional()
-EXTERNAL_UNTRUSTED_COMMENTS_SECTION = prompt(
-    "system/external-untrusted-comments",
-    untrusted_comment_open_tag=UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
-)
+EXTERNAL_UNTRUSTED_COMMENTS_SECTION = prompt("system/external-untrusted-comments")
 
 
 def _load_default_prompt() -> str:
@@ -53,7 +49,10 @@ def _render_source_guidance(
         name = source
     else:
         name = "generic"
-    guidance = prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
+    if name in {"slack", "schedule"}:
+        guidance = prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
+    else:
+        guidance = prompt(f"system/source-{name}")
     return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"
 
 

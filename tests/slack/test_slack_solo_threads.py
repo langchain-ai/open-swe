@@ -111,6 +111,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(solo_threads.SlackClient, "bot", state.bot)
     monkeypatch.setattr(solo_threads, "slack_thread_mutation_lock", state.mutation_lock)
     monkeypatch.setattr(routes, "get_langgraph_client", lambda: cast(LangGraphClient, state))
+    monkeypatch.setattr(routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(routes.service, "process_slack_mention", state.process)
     monkeypatch.setattr(common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(common, "is_code_channel", AsyncMock(return_value=False))

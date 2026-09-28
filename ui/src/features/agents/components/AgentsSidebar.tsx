@@ -458,8 +458,8 @@ export function AgentsSidebar({
   const unpinnedGroups = repoGroups.filter(
     (group) => !pinnedRepoKeys.has(group.key)
   )
-  // Every repository sits in exactly one workspace, so the unpinned repo
-  // folders nest cleanly under workspace headers; local-only folders (no
+  // Each repository folder sits under the workspace that prefers it, even
+  // though threads from other workspaces may use it; local-only folders (no
   // server-side repo) fall under the default workspace.
   const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
     key,
