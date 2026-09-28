@@ -545,6 +545,33 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
     assert (await plan_api.get_plan_comments("t", author))["comments"] == []
 
 
+async def test_submit_artifact_comments_dispatches_only_for_comment_author(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+) -> None:
+    from agent.threads import plan_api, plan_store
+
+    fake_store.seed(plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>"})
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    author = {"sub": "alice", "name": "Alice"}
+    await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(plan_api, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(plan_api, "_ensure_dashboard_github_token", AsyncMock())
+    monkeypatch.setattr(plan_api, "_build_dashboard_configurable", AsyncMock(return_value={}))
+    monkeypatch.setattr(plan_api, "langgraph_client", lambda: None)
+
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.submit_plan_comments("t", {"sub": "bob"})
+    assert exc.value.status_code == 422
+    dispatch.assert_not_awaited()
+
+    assert await plan_api.submit_plan_comments("t", author) == {"status": "submitted"}
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+
+
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:

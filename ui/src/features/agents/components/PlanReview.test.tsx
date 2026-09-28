@@ -16,12 +16,14 @@ const mocks = vi.hoisted(() => ({
   addPlanComment: vi.fn(),
   getPlanComments: vi.fn(),
   deletePlanComment: vi.fn(),
+  submitPlanComments: vi.fn(),
 }))
 
 vi.mock("@/lib/plan", () => ({
   addPlanComment: mocks.addPlanComment,
   deletePlanComment: mocks.deletePlanComment,
   getPlanComments: mocks.getPlanComments,
+  submitPlanComments: mocks.submitPlanComments,
 }))
 vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   PlanArtifactFrame: ({
@@ -89,6 +91,7 @@ beforeEach(() => {
   mocks.getPlanComments.mockResolvedValue([])
   mocks.addPlanComment.mockResolvedValue(comment)
   mocks.deletePlanComment.mockResolvedValue({ ok: true })
+  mocks.submitPlanComments.mockResolvedValue({ status: "submitted" })
 })
 
 afterEach(() => {
@@ -154,6 +157,31 @@ describe("PlanReview", () => {
       )
     }
   )
+
+  it("submits comments once and allows another submission after new feedback", async () => {
+    render(<PlanReview plan={plan} />)
+    expect(screen.queryByRole("button", { name: "Submit comments" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Clarify this step" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Submit comments" }))
+    await waitFor(() =>
+      expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
+    )
+    expect(
+      (screen.getByRole("button", { name: "Comments submitted" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+    mocks.addPlanComment.mockResolvedValueOnce({ ...comment, id: "comment-2" })
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "One more thing" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    expect(await screen.findByRole("button", { name: "Submit comments" })).toBeTruthy()
+  })
 
   it("shows historical artifacts without approval or implementation actions", async () => {
     mocks.getPlanComments.mockResolvedValue([comment])

@@ -123,6 +123,12 @@ export function addPlanComment(
   })
 }
 
+export function submitPlanComments(threadId: string): Promise<{ status: string }> {
+  return req(`/plan/${encodeURIComponent(threadId)}/comments/submit`, {
+    method: "POST",
+  })
+}
+
 export function deletePlanComment(
   threadId: string,
   commentId: string
