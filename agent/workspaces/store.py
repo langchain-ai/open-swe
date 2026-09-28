@@ -88,10 +88,6 @@ def _validate_slack_channel_ids(value: list[str] | None) -> list[str]:
     return list(dict.fromkeys(normalize_slack_channel_id(entry) for entry in value))
 
 
-class DefaultWorkspaceDeletionError(ValueError):
-    """The ``default`` workspace was asked to be deleted."""
-
-
 class WorkspaceConflictError(ValueError):
     """Another workspace already holds the slug or binding this write claims.
 
@@ -1128,13 +1124,7 @@ class WorkspaceStore:
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
-        """Delete a workspace and the automations that run in it.
-
-        Raises :class:`DefaultWorkspaceDeletionError` for ``default``: it is
-        where unrouted work lands, so it always exists.
-        """
-        if slug == DEFAULT_WORKSPACE_SLUG:
-            raise DefaultWorkspaceDeletionError("the default workspace cannot be deleted")
+        """Delete a workspace and the automations that run in it."""
         record = await self.get(slug)
         if record is None:
             return False

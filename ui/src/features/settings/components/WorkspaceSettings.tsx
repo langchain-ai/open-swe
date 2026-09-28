@@ -21,12 +21,7 @@ import {
   useWorkspaceOptions,
   workspaceOptionKeys,
 } from "@/features/agents/lib/queries"
-import {
-  api,
-  DEFAULT_WORKSPACE_SLUG,
-  type WorkspaceOption,
-  type WorkspaceRecord,
-} from "@/lib/api"
+import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
@@ -307,7 +302,7 @@ export function WorkspaceSettingsPanel({
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
-      {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
+      {canEdit && (
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
