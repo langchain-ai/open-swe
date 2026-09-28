@@ -1389,6 +1389,7 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
             }
         )
     fetch_comments = AsyncMock(return_value=comments)
+    react = AsyncMock()
     dispatch = AsyncMock()
     monkeypatch.setattr(
         webhook_common,
@@ -1411,7 +1412,7 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
     monkeypatch.setattr(
         webhook_common, "get_or_resolve_thread_github_token", AsyncMock(return_value="token")
     )
-    monkeypatch.setattr(webhook_common, "react_to_github_comment", AsyncMock())
+    monkeypatch.setattr(webhook_common, "react_to_github_comment", react)
     monkeypatch.setattr(webhook_common, "fetch_pr_event_comments", fetch_comments)
     monkeypatch.setattr(webhook_common, "fetch_pr_comments_since_last_tag", fetch_comments)
     monkeypatch.setattr(webhook_common, "trigger_or_queue_run", dispatch)
@@ -1438,9 +1439,11 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
 
     fetch_comments.assert_awaited_once()
     if should_dispatch:
+        react.assert_awaited_once()
         dispatch.assert_awaited_once()
         assert dispatch.call_args.args[0] == thread_id
     else:
+        react.assert_not_awaited()
         dispatch.assert_not_awaited()
 
 
