@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
+import { ApiError } from "../src/api.ts"
+import { CredentialError } from "../src/credentials.ts"
 import {
+  followRun,
   lifecycleRunId,
   parseCliResult,
   RunCollector,
@@ -136,8 +139,137 @@ describe("RunCollector", () => {
       collector.handle({
         event: "error",
         id: null,
-        data: JSON.stringify({ status: 500, detail: "boom" }),
+        data: JSON.stringify({ status: 404, detail: "boom" }),
       })
     ).toEqual({ status: "failed", error: "boom", result: null })
+  })
+
+  test("treats an upstream 5xx error frame as a dropped stream", () => {
+    const collector = new RunCollector(null)
+    expect(
+      collector.handle({
+        event: "error",
+        id: null,
+        data: JSON.stringify({ status: 502, detail: "bad gateway" }),
+      })
+    ).toEqual({ status: "closed", error: "bad gateway", result: null })
+  })
+})
+
+function sse(frames: readonly SseFrame[]): Response {
+  return new Response(
+    frames
+      .map((f) => `${f.event ? `event: ${f.event}\n` : ""}data: ${f.data}\n\n`)
+      .join("")
+  )
+}
+
+describe("followRun", () => {
+  const noSleep = async (): Promise<void> => undefined
+
+  test("reconnects after a drop and reads the run from the replay", async () => {
+    const streams = [
+      [lifecycle("run-1", "running")],
+      [
+        lifecycle("run-1", "running"),
+        resultCall({ stdout: "done", exit_code: 0 }),
+        lifecycle("run-1", "completed"),
+      ],
+    ]
+    let opened = 0
+    const reconnects: number[] = []
+    const outcome = await followRun(
+      async () => sse(streams[opened++] ?? []),
+      "run-1",
+      { sleep: noSleep, onReconnect: (attempt) => reconnects.push(attempt) }
+    )
+    expect(outcome).toEqual({
+      status: "completed",
+      error: null,
+      result: { stdout: "done", exitCode: 0 },
+    })
+    expect(reconnects).toEqual([1])
+  })
+
+  test("reconnects through a backend that is briefly unavailable", async () => {
+    let opened = 0
+    const outcome = await followRun(
+      async () => {
+        opened += 1
+        if (opened === 1) throw new ApiError(503, "restarting")
+        if (opened === 2) throw new TypeError("fetch failed")
+        return sse([
+          lifecycle("run-1", "running"),
+          lifecycle("run-1", "completed"),
+        ])
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome.status).toBe("completed")
+    expect(opened).toBe(3)
+  })
+
+  test("gives up after repeated short-lived drops", async () => {
+    let opened = 0
+    const outcome = await followRun(
+      async () => {
+        opened += 1
+        return sse([])
+      },
+      "run-1",
+      { sleep: noSleep, now: () => 0 }
+    )
+    expect(outcome.status).toBe("closed")
+    expect(opened).toBe(11)
+  })
+
+  test("reconnects on a rate-limited error frame", async () => {
+    const streams = [
+      [
+        {
+          event: "error",
+          id: null,
+          data: JSON.stringify({ status: 429, detail: "slow down" }),
+        },
+      ],
+      [lifecycle("run-1", "running"), lifecycle("run-1", "completed")],
+    ]
+    let opened = 0
+    const outcome = await followRun(
+      async () => sse(streams[opened++] ?? []),
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome.status).toBe("completed")
+    expect(opened).toBe(2)
+  })
+
+  test("does not retry a credential the CLI could not obtain", async () => {
+    let opened = 0
+    const failing = followRun(
+      async () => {
+        opened += 1
+        throw new CredentialError("GitHub Actions refused an OIDC token")
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    await expect(failing).rejects.toBeInstanceOf(CredentialError)
+    expect(opened).toBe(1)
+  })
+
+  test("does not retry a rejected credential", async () => {
+    let opened = 0
+    const failing = followRun(
+      async () => {
+        opened += 1
+        throw new ApiError(401, "unauthorized")
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    await expect(failing).rejects.toBeInstanceOf(ApiError)
+    expect(opened).toBe(1)
   })
 })

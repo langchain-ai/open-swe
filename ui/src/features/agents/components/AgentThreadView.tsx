@@ -163,7 +163,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [login]
   )
 
-  const followUpBehavior = session.data?.follow_up_behavior ?? "queue"
+  const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
       content: string,

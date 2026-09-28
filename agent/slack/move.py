@@ -165,7 +165,7 @@ async def rebind_slack_thread(
 
     try:
         await _carry_run_mapping(client, source, destination)
-        await release_slack_location_status(client, *source_location)
+        await release_slack_location_status(*source_location)
         await sync_slack_background_status(client, thread_id, resume=True)
         await delete_slack_thread_associations(
             client, *source_location, expected_thread_id=thread_id

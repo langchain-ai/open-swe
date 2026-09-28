@@ -11,8 +11,11 @@ import type {
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -30,11 +33,13 @@ import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
   useUpdateAgentSchedule,
+  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
+import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
 interface AutomationEditorProps {
@@ -66,6 +71,7 @@ export function AutomationEditor({
   const canManage = session.data?.is_admin === true
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
+  const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
 
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
@@ -90,6 +96,25 @@ export function AutomationEditor({
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
+  // null = untouched: an existing automation keeps its workspace, and a new
+  // one starts in the instance's default workspace.
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
+    null
+  )
+  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspace =
+    workspaceOverride ??
+    schedule?.workspace ??
+    (mode === "create"
+      ? (workspaceOptionsQuery.data?.default_slug ?? DEFAULT_WORKSPACE_SLUG)
+      : null)
+  // A workspace deleted after the automation was saved: its runs are refused
+  // until someone picks another, so the picker must stay reachable.
+  const savedWorkspaceMissing =
+    workspaceOverride === null &&
+    !!schedule?.workspace &&
+    workspaceOptionsQuery.data !== undefined &&
+    !workspaces.some((option) => option.slug === schedule.workspace)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -110,6 +135,8 @@ export function AutomationEditor({
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
+      (workspaceOverride !== null &&
+        workspaceOverride !== (schedule?.workspace ?? null)) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
       activeSelection?.effort !== initialSelection?.effort)
   const allowNavigation = useUnsavedChangesWarning(isDirty)
@@ -119,6 +146,8 @@ export function AutomationEditor({
   const canSave =
     name.trim().length > 0 &&
     prompt.trim().length > 0 &&
+    workspace !== null &&
+    !savedWorkspaceMissing &&
     (trigger === "github_issue_opened" ? !!repo : !!cron)
 
   const onPickTrigger = (value: string | null) => {
@@ -132,7 +161,7 @@ export function AutomationEditor({
   }
 
   const handleSave = () => {
-    if (!canSave) return
+    if (!canSave || workspace === null) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
     const modelId = modelIsReal ? (activeSelection?.modelId ?? null) : null
     const effort = modelIsReal ? (activeSelection?.effort ?? null) : null
@@ -150,6 +179,7 @@ export function AutomationEditor({
           admin_thread: adminThread,
           model_id: modelId,
           effort,
+          workspace,
         },
         {
           onSuccess: () => {
@@ -176,6 +206,9 @@ export function AutomationEditor({
           model_id: modelId,
           effort,
           enabled,
+          ...(workspaceOverride !== null
+            ? { workspace: workspaceOverride }
+            : {}),
         },
       },
       {
@@ -273,7 +306,22 @@ export function AutomationEditor({
             triggerClassName="text-muted-foreground"
             disabled={!canManage}
           />
+          <span className="text-border">|</span>
+          <WorkspaceSelector
+            workspaces={workspaces}
+            selectedSlug={workspace}
+            onChange={(slug) => setWorkspaceOverride(slug)}
+            disabled={!canManage}
+            placeholder="Choose workspace"
+            showWithOneWorkspace
+          />
         </div>
+        {savedWorkspaceMissing && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            Workspace {schedule?.workspace} no longer exists, so runs are
+            refused. Pick another workspace and save.
+          </p>
+        )}
 
         <SectionLabel>Triggers</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-1.5">
@@ -337,13 +385,13 @@ export function AutomationEditor({
 
         <SectionLabel>Slack destination</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <input
-            value={slackChannelId}
-            onChange={(e) => setSlackChannelId(e.target.value)}
+          <SlackChannelCombobox
+            value={slackChannelId.trim() || null}
+            onValueChange={(id) => setSlackChannelId(id ?? "")}
             disabled={!canManage}
-            placeholder="C0123456789"
-            spellCheck={false}
-            className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+            placeholder="Search channels or paste a channel ID"
+            aria-label="Slack channel"
+            className="w-full"
           />
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <span className="text-xs text-muted-foreground">
@@ -377,9 +425,10 @@ export function AutomationEditor({
 
         <SectionLabel>Agent Instructions</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <textarea
+          <SlackChannelTextarea
+            bare
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onValueChange={setPrompt}
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}

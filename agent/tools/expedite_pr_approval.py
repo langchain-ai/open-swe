@@ -19,7 +19,7 @@ from agent.expedited_review.lifecycle import post_card, remove_superseded_cards,
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
 from agent.slack.channels import SlackChannel
@@ -49,7 +49,8 @@ def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
         else "The approval card is posted in the Slack thread."
     )
     posted += (
-        " Clicks only record votes. Call `merge_expedited_pr` once checks and reviews are "
+        " An approval goes to GitHub as the voter's review when they click. Call "
+        "`merge_expedited_pr` once checks and reviews are "
         "clean; keep a `/baby-sit` watch on the PR so you are woken when they are. You are "
         "also woken when someone approves the card. Do not poll."
     )
@@ -84,8 +85,8 @@ async def _post_root_message(
     channel: SlackChannel, pr_ref: GitHubPrRef, title: str
 ) -> tuple[str | None, str | None]:
     """Open a thread in ``channel`` for the card, joining it when the bot is outside."""
-    text = render_prompt(
-        "slack/expedited-review-requested.md",
+    text = prompt(
+        "slack/expedited-review-requested",
         pr_url=pr_ref.url,
         label=f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}",
         title=escape(title),

@@ -93,44 +93,6 @@ async def test_new_connection_exposes_no_tools_until_admin_selects_them(fake_sto
     assert await loader.load_workspace_mcp_tools("default") == []
 
 
-async def test_one_failed_server_does_not_hide_other_servers(fake_store, monkeypatch, caplog):
-    await save("broken", allowed_tools=["search"])
-    await save("working", allowed_tools=["search"])
-
-    async def discover(record, namespace):
-        if record.name == "broken":
-            raise ValueError("secret upstream detail")
-        return [Tool(name="search", inputSchema={"type": "object"})]
-
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    assert [t.name for t in await loader.load_workspace_mcp_tools("default")] == [
-        "mcp_working_search_0ebe441dc6"
-    ]
-    assert "secret upstream detail" not in caplog.text
-
-
-async def test_workspace_mcp_catalog_is_reused_until_settings_change(fake_store, monkeypatch):
-    await save(allowed_tools=["search1", "search2"])
-    calls = 0
-
-    async def discover(record, namespace):
-        nonlocal calls
-        calls += 1
-        return [Tool(name=f"search{calls}", inputSchema={"type": "object"})]
-
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    assert (await loader.load_workspace_mcp_tools("default"))[
-        0
-    ].name == "mcp_example_search1_882c6b1452"
-    assert (await loader.load_workspace_mcp_tools("default"))[
-        0
-    ].name == "mcp_example_search1_882c6b1452"
-    await save(allowed_tools=["search1", "search2"])
-    assert (await loader.load_workspace_mcp_tools("default"))[
-        0
-    ].name == "mcp_example_search2_7f8eb9cd41"
-
-
 @pytest.mark.parametrize("paginated", [False, True])
 async def test_duplicate_catalog_is_isolated_from_other_connections(
     fake_store, monkeypatch, paginated

@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -60,9 +60,12 @@ class ProfileUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
+    preserve_sandbox_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = None
+    experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
@@ -416,17 +419,9 @@ async def get_my_profile(
     profile, preferences = await asyncio.gather(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
-    return {
-        **(normalize_profile_for_response(profile) if profile else {}),
-        **_preferences(preferences),
-    }
-
-
-def _preferences(preferences: UserPreferences) -> dict[str, bool]:
-    return {
-        "concierge_mode": preferences.concierge_mode,
-        "experimental_act_as_approval": preferences.experimental_act_as_approval,
-    }
+    if not profile:
+        return preferences.model_dump()
+    return {**normalize_profile_for_response(profile), **preferences.model_dump()}
 
 
 @router.put("/profile")
@@ -440,13 +435,18 @@ async def put_my_profile(
         login,
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
+            preserve_sandbox_memory=update.preserve_sandbox_memory,
             experimental_act_as_approval=update.experimental_act_as_approval,
         ),
     )
-    if preferences is None and (update.concierge_mode or update.experimental_act_as_approval):
+    if preferences is None and (
+        update.concierge_mode
+        or update.preserve_sandbox_memory
+        or update.experimental_act_as_approval
+    ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        **_preferences(preferences or UserPreferences()),
+        **(preferences or UserPreferences()).model_dump(),
     }

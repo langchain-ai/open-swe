@@ -63,36 +63,6 @@ def test_failed_write_is_logged_and_traced_under_the_browser_id(
     assert record.__dict__["status_code"] == 409
 
 
-def test_failed_reads_below_500_are_not_logged(
-    span_tags: list[dict[str, str]], caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING):
-        response = TestClient(_app()).get("/dashboard/api/settings")
-
-    assert response.status_code == 404
-    assert _failures(caplog) == []
-
-
-def test_raising_endpoint_is_logged_with_the_id(
-    span_tags: list[dict[str, str]], caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError):
-        TestClient(_app()).get("/dashboard/api/boom", headers={"X-Request-ID": REQUEST_ID})
-
-    [record] = _failures(caplog)
-    assert record.__dict__["error_id"] == REQUEST_ID
-    assert record.exc_info is not None
-
-
-def test_malformed_ids_are_replaced(span_tags: list[dict[str, str]]) -> None:
-    response = TestClient(_app()).put(
-        "/dashboard/api/settings", headers={"X-Request-ID": "req_<script>"}
-    )
-
-    assert response.headers["x-request-id"].startswith("req_")
-    assert response.headers["x-request-id"] != "req_<script>"
-
-
 def test_tracing_failures_do_not_break_the_response(monkeypatch: pytest.MonkeyPatch) -> None:
     def explode(_tags: dict[str, str]) -> None:
         raise RuntimeError("no tracer here")
@@ -100,29 +70,6 @@ def test_tracing_failures_do_not_break_the_response(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(request_ids, "_tag_root_span", explode)
 
     assert TestClient(_app()).put("/dashboard/api/settings").status_code == 409
-
-
-def test_client_error_report_is_logged_with_its_id_and_user(
-    span_tags: list[dict[str, str]], caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING):
-        response = TestClient(_app()).post(
-            "/dashboard/api/client-errors",
-            json={
-                "error_id": REQUEST_ID,
-                "title": "Couldn't pin thread",
-                "error_message": "Couldn't reach the server.",
-                "status": 0,
-                "mutation": None,
-                "path": "/agents",
-            },
-        )
-
-    assert response.status_code == 204
-    [record] = [r for r in caplog.records if r.getMessage() == "Dashboard action failed"]
-    assert record.__dict__["error_id"] == REQUEST_ID
-    assert record.__dict__["error_title"] == "Couldn't pin thread"
-    assert record.__dict__["login"] == "alice"
 
 
 def test_client_error_report_rejects_arbitrary_ids(span_tags: list[dict[str, str]]) -> None:

@@ -215,6 +215,7 @@ from agent.tools import (
     slack_read_thread_messages,
     slack_reply,
     slack_start_new_thread,
+    start_thread,
     submit_thread_feedback,
     trigger_automation,
     update_automation,
@@ -226,7 +227,8 @@ from agent.tools.admin_gate import (
     is_private_admin_surface,
     participant_is_admin,
 )
-from agent.tools.manage_review_approval_policy import manage_review_approval_policy
+from agent.tools.manage_feature_flags import manage_feature_flags
+from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.save_user_settings import personal_settings_run_allowed
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -563,6 +565,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
+        "start_thread",
     }
 
 
@@ -1005,7 +1008,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 attribution_route = await self._model_selection.select_route(
                     cast(ModelSelectionState, state)
                 )
-                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+                if attribution_route != "default":
+                    attribution_model_id, attribution_effort = self._routing_defaults[
+                        attribution_route
+                    ]
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
@@ -1079,6 +1085,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "selected_model_id": attribution_model_id,
+            "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
             **({"model_route": attribution_route} if attribution_route else {}),
             "rendered_system_prompt": construct_system_prompt(
@@ -1095,6 +1103,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
+                slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
@@ -1426,6 +1435,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         list_threads,
         get_thread,
         manage_thread,
+        *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,
@@ -1458,7 +1468,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_review_assessment_feedback,
         *(ADMIN_TOOLS if admin_thread else ()),
         *((cli_result,) if cli_result_required else ()),
-        *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
+        *(
+            (read_only_sql, manage_feature_flags, manage_review_approval_mode)
+            if private_admin_surface
+            else ()
+        ),
     ]
     if credential_login is None:
         personal_tools = (
@@ -1572,9 +1586,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,
-            routing_models["fast"],
+            main_model,
             route_model_ids={
-                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
+                **{
+                    route: routed_model_id
+                    for route, (routed_model_id, _) in routing_defaults.items()
+                },
+                "default": model_id,
             },
             routing_mode=model_routing_mode,
         )

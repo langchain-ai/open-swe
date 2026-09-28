@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from agent.act_as.gate import require_consent
@@ -38,6 +39,7 @@ from agent.threads.plan_store import get_plan_content
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -744,6 +746,11 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            origin = (
+                cfg.slack_thread
+                if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
+                else None
+            )
             try:
                 await PullRequest(
                     owner=owner,
@@ -762,6 +769,18 @@ async def _record_pr_telemetry(
                         opening_head_sha
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
+                    ),
+                    opening_model_id=(
+                        (cfg.resolved_agent_model_id or "") if record_opening else ""
+                    ),
+                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    langsmith_run_id=str(run_id) if record_opening and run_id else "",
+                    slack_team_id=origin.team_id if origin else "",
+                    slack_channel_id=origin.channel_id if origin else "",
+                    slack_thread_ts=origin.thread_ts if origin else "",
+                    # Other sources carry a stale trigger or the bot's own post.
+                    slack_message_ts=(
+                        origin.triggering_event_ts if origin and cfg.source == "slack" else ""
                     ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
@@ -890,12 +909,20 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
-async def _stamp_attribution_footer(body: str) -> str:
+async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    if cfg.thread_id:
+    state = state or {}
+    if selected := state.get("selected_model_id"):
+        model_id, effort = selected, state.get("selected_effort")
+        usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
+        models = usage.models if usage else ()
+        reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in models}
+        if models and reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+            model_id, effort = ", ".join(models), None
+    elif cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -959,6 +986,7 @@ async def _open_pull_request(
     draft: bool,
     resolves_thread: bool = False,
     author: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         token, kind = await _resolve_pr_author_token(author)
@@ -1031,7 +1059,8 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _stamp_attribution_footer(
-            await _maybe_append_references(client, token, owner, repo, body)
+            await _maybe_append_references(client, token, owner, repo, body),
+            state,
         )
         draft = _effective_draft(draft)
         payload = {
@@ -1134,6 +1163,7 @@ async def open_pull_request(
     draft: bool = True,
     resolves_thread: bool = False,
     author: str = "",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1146,6 +1176,7 @@ async def open_pull_request(
         draft=draft,
         resolves_thread=resolves_thread,
         author=author or None,
+        state=state,
     )
 
 

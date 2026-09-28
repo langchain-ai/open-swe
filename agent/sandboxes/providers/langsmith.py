@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from agent.config import ENV
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
+from agent.utils.startup_trace import asubphase
 
 logger = logging.getLogger(__name__)
 
@@ -695,20 +696,30 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # run(wait=False) opens the WS and reads the "started" frame, so
         # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return await self._abase_execute(command, timeout)
+            async with asubphase("sandbox.exec.connect", sandbox_id=self.id):
+                handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError) as exc:
+            return await self._afallback_execute(command, timeout, exc)
         deadline = self._deadline(effective)
         try:
-            result = await asyncio.wait_for(handle.result, timeout=deadline)
+            async with asubphase("sandbox.exec.result", sandbox_id=self.id):
+                result = await asyncio.wait_for(handle.result, timeout=deadline)
         except TimeoutError:
             await self._asafe_kill(handle)
             return self._timeout_response(deadline, server_side=False)
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-            return await self._abase_execute(command, timeout)
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS) as exc:
+            return await self._afallback_execute(command, timeout, exc)
         return self._result_to_response(result)
+
+    async def _afallback_execute(
+        self, command: str, timeout: int | None, cause: BaseException
+    ) -> ExecuteResponse:
+        async with asubphase(
+            "sandbox.exec.http_fallback", sandbox_id=self.id, reason=type(cause).__name__
+        ):
+            return await self._abase_execute(command, timeout)
 
 
 class SandboxProvider(ABC):

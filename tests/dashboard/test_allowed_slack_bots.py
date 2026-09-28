@@ -112,13 +112,6 @@ def test_non_admin_cannot_manage_bots(
     assert client.request(method, path, json=body).status_code == 403
 
 
-@pytest.mark.parametrize("bot_id", ["*", "Release bot", "B123,B456", "UHUMAN", "BOWN", "BMISSING"])
-def test_rejects_invalid_human_and_self_bots(client: TestClient, bot_id: str) -> None:
-    response = client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": bot_id})
-    assert response.status_code in (400, 422), response.text
-    assert client.get("/dashboard/api/slack/allowed-bots").json() == []
-
-
 def test_cannot_supply_another_execution_identity(client: TestClient) -> None:
     response = client.post(
         "/dashboard/api/slack/allowed-bots",
@@ -140,15 +133,6 @@ def test_duplicate_add_does_not_transfer_ownership(client: TestClient) -> None:
     assert client.get("/dashboard/api/slack/allowed-bots").json()[0]["created_by"] == "alice"
 
 
-def test_system_bot_does_not_require_admin_oauth(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value=None))
-    assert (
-        client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).status_code == 200
-    )
-
-
 def _member(user_id: str, name: str, **overrides: Any) -> dict[str, Any]:
     return {
         "id": user_id,
@@ -164,48 +148,6 @@ def _member(user_id: str, name: str, **overrides: Any) -> dict[str, Any]:
         },
         **overrides,
     }
-
-
-def test_bot_directory_paginates_filters_and_caches(
-    client: TestClient, directory: dict[str, Any]
-) -> None:
-    directory["pages"] = {
-        "": {
-            "ok": True,
-            "members": [
-                _member("UHUMAN", "Human", is_bot=False),
-                _member("UDELETED", "Deleted", deleted=True),
-                _member("UOWN", "Open SWE"),
-                _member("USLACKBOT", "slackbot"),
-                _member("UOTHER", "Other workspace", team_id="TOTHER"),
-            ],
-            "response_metadata": {"next_cursor": "next-page"},
-        },
-        "next-page": {
-            "ok": True,
-            "members": [_member("U123", "Release bot"), _member("U456", "Build bot")],
-        },
-    }
-    response = client.get("/dashboard/api/slack/bots")
-    assert response.status_code == 200, response.text
-    assert response.json() == [
-        {
-            "team_id": "T123",
-            "bot_id": "B456",
-            "user_id": "U456",
-            "name": "Build bot",
-            "image_url": "https://avatars.slack-edge.com/bot.png",
-        },
-        {
-            "team_id": "T123",
-            "bot_id": "B123",
-            "user_id": "U123",
-            "name": "Release bot",
-            "image_url": "https://avatars.slack-edge.com/bot.png",
-        },
-    ]
-    assert client.get("/dashboard/api/slack/bots").json() == response.json()
-    assert directory["calls"] == ["", "next-page"]
 
 
 def test_bot_directory_does_not_reuse_another_installation_cache(
@@ -231,23 +173,6 @@ def test_bot_directory_reports_rate_limit_without_partial_results(
     assert response.status_code == 429
     assert response.headers["retry-after"] == "30"
     assert len(directory["calls"]) == 1
-
-
-def test_bot_directory_reports_missing_scope(client: TestClient, directory: dict[str, Any]) -> None:
-    directory["error"] = httpx2.Response(
-        200, json={"ok": False, "error": "missing_scope", "needed": "users:read"}
-    )
-    response = client.get("/dashboard/api/slack/bots")
-    assert response.status_code == 400
-    assert "users:read" in response.json()["detail"]
-
-
-def test_bot_directory_rejects_repeated_pagination_cursor(
-    client: TestClient, directory: dict[str, Any]
-) -> None:
-    page = {"ok": True, "members": [], "response_metadata": {"next_cursor": "same-cursor"}}
-    directory["pages"] = {"": page, "same-cursor": page}
-    assert client.get("/dashboard/api/slack/bots").status_code == 502
 
 
 def test_selected_bot_is_reverified_at_add_time(

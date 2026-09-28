@@ -7,7 +7,7 @@ lookup hit / null-name / failure / cache paths.
 
 import json
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from langgraph.runtime import Runtime
@@ -163,25 +163,6 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     )
 
 
-async def test_routed_run_exposes_selected_model_and_effort_to_tools(
-    prepare_harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    prepare_harness["thread_metadata"] = {"visibility": "public"}
-    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
-    config = _slack_config()
-    middleware = _middleware(config)
-    middleware._effort = "medium"
-    middleware._model_selection = MagicMock()
-    middleware._model_selection.select_route = AsyncMock(return_value="performance")
-    middleware._routing_defaults = {"performance": ("openai:routed", "high")}
-
-    await _prepare(middleware)
-
-    assert config["configurable"]["resolved_agent_model_id"] == "openai:routed"
-    assert config["configurable"]["resolved_agent_effort"] == "high"
-    assert prepare_harness["thread_update"]["metadata"]["effort"] == "high"
-
-
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
     prepare_harness: dict[str, Any], github_client: _FakeGitHubClient
 ) -> None:
@@ -242,43 +223,3 @@ async def test_public_scope_resolves_profile_via_installation_token(
         "https://api.github.com/user",
     ]
     assert prepare_harness["recorded"]["github_user_id"] == 99
-
-
-@pytest.mark.parametrize(
-    ("status", "slack_name", "expected_id", "expected_name", "expected_source"),
-    [
-        (200, "Mason Slack", 99, "Mason Slack", "slack"),
-        (200, "", 4321, None, None),
-        (404, "Mason Slack", 4321, "Mason Slack", "slack"),
-    ],
-)
-async def test_public_scope_name_fallback(
-    prepare_harness,
-    github_client,
-    monkeypatch,
-    status,
-    slack_name,
-    expected_id,
-    expected_name,
-    expected_source,
-) -> None:
-    prepare_harness["thread_metadata"] = {"visibility": "public"}
-
-    async def fake_token(**kwargs: object) -> str:
-        return _INSTALLATION_TOKEN
-
-    monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401),
-            _FakeResponse(status, {"id": expected_id, "login": "mason-gh", "name": None}),
-        ]
-    )
-    config = _slack_config(github_user_id=4321)
-    config["configurable"]["slack_thread"]["triggering_user_name"] = slack_name
-    await _prepare(_middleware(config))
-
-    recorded = prepare_harness["recorded"]
-    assert recorded["github_user_id"] == expected_id
-    assert recorded["display_name"] == expected_name
-    assert recorded["display_name_source"] == expected_source

@@ -12,7 +12,6 @@ import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
   pickComposerWorkspace,
-  reposForWorkspace,
 } from "@/features/agents/lib/composerWorkspace"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
@@ -174,9 +173,9 @@ export function AgentsHome({
   )
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
-  // Workspace first: an explicit pick, else the owner of a repository named
-  // from outside (a link or the profile default), else the user's default,
-  // then the instance default.
+  // Workspace first: an explicit pick, else the workspace preferring a
+  // repository named from outside (a link or the profile default), else the
+  // user's default, then the instance default.
   const namedRepo = (
     repoOverride === undefined ? userDefaultRepo : repoOverride
   )?.toLowerCase()
@@ -191,15 +190,11 @@ export function AgentsHome({
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
   })
-  // Then the repository, limited to what that workspace may work in.
+  // Then the repository: every workspace can work in every accessible one.
   const accessibleRepos = reposQuery.data?.repositories
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
-  const workspaceRepos = useMemo(
-    () =>
-      reposForWorkspace(selectedWorkspace, workspaces, accessibleRepos ?? []),
-    [accessibleRepos, selectedWorkspace, workspaces]
-  )
+  const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   const repo = pickComposerRepo({
     override: repoOverride,
     userDefault: userDefaultRepo,

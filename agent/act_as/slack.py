@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import BackgroundTasks
 
 from agent.act_as.records import ActAsRequest, ThreadActAs
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.blocks import Block, actions, block_payload, button, context, section
 from agent.slack.client import (
     get_active_slack_thread,
@@ -98,8 +98,8 @@ async def handle_button(
     await note_for_concierge(
         user_id,
         channel_id,
-        render_prompt(
-            "slack/concierge-act-as-decided.md",
+        prompt(
+            "slack/concierge-act-as-decided",
             decision=_LABELS[action],
             thread_url=dashboard_thread_url(button.thread_id) or button.thread_id,
         ),

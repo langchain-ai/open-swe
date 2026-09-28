@@ -28,6 +28,7 @@ from agent.review.findings import (
 from agent.review.reviews import classify_finding, get_pr_head_sha, get_review
 from agent.review.session import REVIEW_CHAT_SOURCE
 from agent.thread_ids import review_chat_thread_id, reviewer_thread_id
+from agent.threads.creation import create_thread
 from agent.threads.proxy import (
     langgraph_proxy_headers,
     require_json_content_type,
@@ -243,12 +244,11 @@ async def _create_chat_thread(
         "repo_owner": owner,
         "repo_name": repo,
         "pr_number": pr_number,
-        "title": title,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    await langgraph_client().threads.create(
-        thread_id=thread_id, metadata=metadata, if_exists="do_nothing"
+    await create_thread(
+        langgraph_client(), thread_id, title=title, metadata=metadata, if_exists="do_nothing"
     )
 
 

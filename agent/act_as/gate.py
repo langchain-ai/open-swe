@@ -15,7 +15,7 @@ from typing import Literal, TypedDict
 from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.slack.blocks import block_payload
 from agent.slack.client import open_slack_dm, post_slack_top_level_message_with_ts
 from agent.slack.dm import note_for_concierge
@@ -124,8 +124,8 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     await note_for_concierge(
         slack_user_id,
         dm_channel_id,
-        render_prompt(
-            "slack/concierge-act-as-requested.md",
+        prompt(
+            "slack/concierge-act-as-requested",
             thread_url=thread_url or thread_id,
             title=request.title,
             repo=repo,
