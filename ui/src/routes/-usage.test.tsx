@@ -383,7 +383,9 @@ it.each([
     expect(
       within(row).queryByRole("button", { name: /reasoning efforts/ })
     ).toBeNull()
+    const table = row.closest("table")!
     const cell = (label: string) => metricCell(row, label)
+    expect(cell("Merged").nextElementSibling).toBe(cell("Mature merge rate"))
     expect(cell("PRs opened (base)").textContent).toBe("7 (100%)")
     expect(cell("Merged").textContent).toBe("3 (43%)")
     expect(cell("Open").textContent).toBe("3 (43%)")
@@ -413,7 +415,31 @@ it.each([
     fireEvent.keyDown(openCount, { key: "Escape" })
 
     expect(cell("Mature merge rate").textContent).toBe("60%3/5 eligible")
-    expect(cell("Avg time to merge").textContent).toBe("1d")
+    expect(cell("Time to merge").textContent).toBe("1d")
+    const mergeRate = within(table).getByText("Mature merge rate")
+    act(() => mergeRate.focus())
+    expect(
+      await screen.findByText(/Includes merged and closed PRs/)
+    ).toBeTruthy()
+
+    expect(within(row).queryByRole("button", { name: "1d" })).toBeNull()
+    const avgTime = within(table).getByText("Time to merge")
+    act(() => avgTime.focus())
+    expect(
+      await screen.findByText(/Average time from PR opened to merged/)
+    ).toBeTruthy()
+    act(() => avgTime.blur())
+    fireEvent.keyDown(avgTime, { key: "Escape" })
+
+    const timeToPR = within(table).getByText("Time to PR")
+    act(() => timeToPR.focus())
+    expect(
+      await screen.findByText(
+        /Average time from opening-run start to PR creation/
+      )
+    ).toBeTruthy()
+    act(() => timeToPR.blur())
+    fireEvent.keyDown(timeToPR, { key: "Escape" })
 
     fireEvent.click(screen.getByText("How these numbers work"))
     expect(
@@ -544,8 +570,8 @@ it("keeps reasoning effort subrows under their model when sorting and collapsing
     "2.5%2/2 measuredSmall sample",
   ])
   expect(values("Mean distance")).toEqual(["—", "—", "—"])
-  expect(values("Avg time to PR")).toEqual(["2h", "—", "30m"])
-  expect(values("Avg time to merge")).toEqual(["2d", "—", "1h"])
+  expect(values("Time to PR")).toEqual(["2h", "—", "30m"])
+  expect(values("Time to merge")).toEqual(["2d", "—", "1h"])
   const names = () => modelRows(table).map((row) => row.cells[0]!.textContent)
   const header = within(table).getByRole("columnheader", {
     name: "Opening model",
@@ -613,7 +639,7 @@ it("shows an em dash for avg time to merge when a group has no merges", async ()
   )
   const client = mountReport()
   const row = (await screen.findByText("example-model")).closest("tr")!
-  const cell = metricCell(row, "Avg time to merge")
+  const cell = metricCell(row, "Time to merge")
   expect(cell.textContent).toBe("\u2014")
   expect(cell.textContent).not.toContain("Based on")
   client.clear()
@@ -652,7 +678,7 @@ it.each([
   )
   const client = mountReport()
   const row = (await screen.findByText("example-model")).closest("tr")!
-  const deliveryCell = metricCell(row, "Avg time to PR")
+  const deliveryCell = metricCell(row, "Time to PR")
   expect(deliveryCell.textContent).toBe("\u2014")
   expect(within(deliveryCell).getByTitle(expected)).toBeTruthy()
   client.clear()
@@ -685,7 +711,7 @@ it("renders a zero avg time to PR as a real duration, not an empty marker", asyn
   )
   const client = mountReport()
   const row = (await screen.findByText("example-model")).closest("tr")!
-  const deliveryCell = metricCell(row, "Avg time to PR")
+  const deliveryCell = metricCell(row, "Time to PR")
   expect(deliveryCell.textContent).not.toBe("\u2014")
   expect(deliveryCell.textContent).toContain("0")
   expect(
