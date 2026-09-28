@@ -82,8 +82,9 @@ export function SearchableSelect<T extends SearchableSelectItem>({
         return [...previous, ...page.filter((item) => !seen.has(item.id))]
       })
       setHasMore(page.length === PAGE_SIZE)
-    } catch {
-      if (current === request.current) setHasMore(false)
+    } catch (e) {
+      // hasMore stays true so the next scroll to the end retries.
+      console.error("Failed to load more options", e)
     } finally {
       if (current === request.current) {
         pending.current = false

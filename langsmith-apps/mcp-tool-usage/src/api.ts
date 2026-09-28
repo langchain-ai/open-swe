@@ -130,7 +130,7 @@ function looksLikeError(run: ToolCallRun): boolean {
   )
 }
 
-/** Threads that used the tool: error-free first, then by closeness of call count to the median. */
+/** Error-free threads that used the tool (all threads only if none are), by closeness of call count to the median. */
 export async function fetchThreadCandidates(
   projectId: string,
   runName: string,
@@ -164,14 +164,15 @@ export async function fetchThreadCandidates(
     calls,
     failed: calls.some(looksLikeError),
   }))
-  if (candidates.length === 0) return []
+  const healthy = candidates.filter((c) => !c.failed)
+  const pool = healthy.length > 0 ? healthy : candidates
+  if (pool.length === 0) return []
 
-  const sizes = candidates.map((c) => c.calls.length).sort((a, b) => a - b)
+  const sizes = pool.map((c) => c.calls.length).sort((a, b) => a - b)
   const median = sizes[Math.floor(sizes.length / 2)]
-  return candidates
+  return pool
     .sort(
       (a, b) =>
-        Number(a.failed) - Number(b.failed) ||
         Math.abs(a.calls.length - median) - Math.abs(b.calls.length - median) ||
         b.calls[0].start_time.localeCompare(a.calls[0].start_time)
     )
@@ -208,15 +209,21 @@ export async function fetchThreadUrl(
   run: ToolCallRun
 ): Promise<string> {
   const threadId = run.thread_id ?? ""
-  const response = await call<RunExtraResponse>("POST /api/v2/runs/query", {
-    body: {
-      project_ids: [projectId],
-      ids: [run.id],
-      min_start_time: run.start_time,
-      page_size: 1,
-      selects: ["EXTRA"],
-    },
-  })
+  let response: RunExtraResponse
+  try {
+    response = await call<RunExtraResponse>("POST /api/v2/runs/query", {
+      body: {
+        project_ids: [projectId],
+        ids: [run.id],
+        min_start_time: run.start_time,
+        page_size: 1,
+        selects: ["EXTRA"],
+      },
+    })
+  } catch (e) {
+    console.error("Failed to read openswe_thread_url; using production link", e)
+    return productionThreadUrl(threadId)
+  }
   const recorded = response.items[0]?.extra?.metadata?.openswe_thread_url
   return typeof recorded === "string" && recorded
     ? recorded
