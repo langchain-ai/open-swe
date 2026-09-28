@@ -55,17 +55,19 @@ def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> s
         parts.append(f"+{pr.additions} −{pr.deletions}{files}")
     if pr.head_ref and pr.base_ref:
         parts.append(f"`{escape(pr.head_ref)}` → `{escape(pr.base_ref)}`")
-    if requester is not None:
+    if requester is not None and requester != author:
         parts.append(f"Requested by {requester}")
     return "  ·  ".join(parts)
 
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
+        # Slack opens the URL and still delivers the click, so signing up lands on the PR.
         button(
             "I'll review",
             action_id="open_swe_option_select_review",
             value=_button_value("review", request),
+            url=request.pull_request.url,
             style="primary",
         ),
         button(

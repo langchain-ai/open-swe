@@ -315,9 +315,16 @@ test.describe("Human review in Slack", () => {
     expect(text).toContain(`fakeorg/demo#${seeded.number}`);
     expect(text).toContain("Tidy the greeting");
     expect(text).toContain(TLDR);
+    expect(text).toContain(`Requested by <@${ALICE.slack}>`);
     expect(text).not.toContain("Reviewers");
     expect(text).not.toContain("Merges on its own");
     expect(buttons(card)).toEqual(["I'll review", "Open on GitHub", "Dismiss"]);
+    const review = (card.blocks ?? [])
+      .flatMap((block) => block.elements ?? [])
+      .find((element) => element.action_id === "open_swe_option_select_review");
+    expect(review?.url).toBe(
+      `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
+    );
     await shootCard(page, "open");
 
     // 2. Alice and Bob both sign up; each becomes a requested reviewer on GitHub.
@@ -519,8 +526,9 @@ test.describe("Human review in Slack", () => {
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.thread_id).toBe("");
-    expect(cardText(await reviewCard(request, posted))).toContain(
-      `Requested by <@${ALICE.slack}>`,
+    // Alice wrote the PR and asked for the review, so the card names her once.
+    expect(cardText(await reviewCard(request, posted))).not.toContain(
+      "Requested by",
     );
 
     // 2. Thirty minutes pass with nobody signed up: Alice's thread for the PR
