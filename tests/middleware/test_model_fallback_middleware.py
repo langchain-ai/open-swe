@@ -119,6 +119,18 @@ class TestModelFallbackMiddleware:
         assert calls[1] is override.return_value
 
     @pytest.mark.asyncio
+    async def test_without_fallback_retries_the_requested_model(self) -> None:
+        response = ModelResponse(result=[AIMessage(content="ok")])
+        handler = AsyncMock(side_effect=[TimeoutError(), response])
+        request = _make_request()
+
+        result = await ModelFallbackMiddleware(None).awrap_model_call(request, handler)
+
+        assert result is response
+        assert [call.args[0] for call in handler.await_args_list] == [request, request]
+        cast(MagicMock, request.override).assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_async_propagates_non_transient_error(self) -> None:
         middleware = ModelFallbackMiddleware(MagicMock())
         calls: list[object] = []

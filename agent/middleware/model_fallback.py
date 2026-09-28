@@ -78,6 +78,13 @@ MODEL_OUTAGE_MESSAGE = (
     "the run in a few minutes to continue."
 )
 
+SINGLE_MODEL_OUTAGE_MESSAGE = (
+    "I wasn't able to reach the language model after several retries (it kept "
+    "returning transient errors such as dropped connections or timeouts). This is a "
+    "temporary provider outage, not a problem with your task. My progress so far has "
+    "been saved — please retrigger the run in a few minutes to continue."
+)
+
 
 def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
     return exc.__class__.__module__.partition(".")[0] == "httpx" and any(
@@ -147,7 +154,8 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
     """Retry the model call across primary and fallback providers on transient errors.
 
     Args:
-        fallback_model: Cross-provider model used on odd-numbered attempts.
+        fallback_model: Cross-provider model used on odd-numbered attempts, or
+            ``None`` to retry every attempt on the request's own model.
         backoff_schedule: Seconds slept before each retry. ``len(schedule) + 1``
             is the total number of attempts. Delays get ±25% jitter.
         surface_outage_message: When all attempts fail, return a terminal
@@ -159,7 +167,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
 
     def __init__(
         self,
-        fallback_model: BaseChatModel,
+        fallback_model: BaseChatModel | None,
         *,
         backoff_schedule: Sequence[float] = DEFAULT_BACKOFF_SCHEDULE,
         surface_outage_message: bool = True,
@@ -188,14 +196,18 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
         for attempt in range(total_attempts):
             # Alternate: primary on even attempts, fallback on odd. If one
             # provider recovers first (or only one is down), we find it.
-            use_fallback = attempt % 2 == 1
+            use_fallback = attempt % 2 == 1 and self._fallback_model is not None
             attempt_request = (
                 request.override(model=self._fallback_model) if use_fallback else request
             )
             try:
                 if last_exc is None:
                     return await handler(attempt_request)
-                failed_model = request.model if use_fallback else self._fallback_model
+                failed_model = (
+                    self._fallback_model
+                    if not use_fallback and self._fallback_model is not None
+                    else request.model
+                )
                 metadata: dict[str, str | int | float | None] = {
                     "attempt": attempt + 1,
                     "max_attempts": total_attempts,
@@ -246,7 +258,9 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                 if delay > 0:
                     delay += random.uniform(0, delay * 0.25)
                 failed_on = "fallback" if use_fallback else "primary"
-                retry_with = "primary" if use_fallback else "fallback"
+                retry_with = (
+                    "primary" if use_fallback or self._fallback_model is None else "fallback"
+                )
                 logger.warning(
                     "Model call failed transiently; retrying",
                     extra={
@@ -278,5 +292,10 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
             },
         )
         if self._surface_outage_message:
-            return AIMessage(content=MODEL_OUTAGE_MESSAGE)
+            message = (
+                MODEL_OUTAGE_MESSAGE
+                if self._fallback_model is not None
+                else SINGLE_MODEL_OUTAGE_MESSAGE
+            )
+            return AIMessage(content=message)
         raise last_exc
