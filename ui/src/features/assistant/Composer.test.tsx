@@ -156,6 +156,30 @@ describe("assistant composer model selection", () => {
     expect(await send()).toMatchObject({ model_selection_changed: false })
   })
 
+  it("consumes accepted Auto after unrelated composer settings change", async () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByText("Auto"))
+    await send()
+    act(() => {
+      const current = runtime.thread.composer.getState().runConfig
+      runtime.thread.composer.setRunConfig({
+        ...current,
+        custom: {
+          ...current.custom,
+          repo: "langchain-ai/langgraph",
+          environment: "oss",
+        },
+      })
+    })
+    await respond()
+    expect(await send()).toMatchObject({
+      model_selection: "auto",
+      model_selection_changed: false,
+      repo: "langchain-ai/langgraph",
+      environment: "oss",
+    })
+  })
+
   it("clears a pending Auto action when an explicit model is selected", async () => {
     render(<Harness />)
     fireEvent.click(screen.getByText("Auto"))

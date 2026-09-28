@@ -24,7 +24,12 @@ export function useModelSelectionSubmission(
       const sent = submitted.current
       submitted.current = undefined
       const current = composer.getState().runConfig
-      if (current !== sent || current.custom?.model_selection_changed !== true)
+      const actionId = sent?.custom?.model_selection_action_id
+      if (
+        typeof actionId !== "string" ||
+        current.custom?.model_selection_action_id !== actionId ||
+        current.custom.model_selection_changed !== true
+      )
         return
       composer.setRunConfig({
         ...current,
