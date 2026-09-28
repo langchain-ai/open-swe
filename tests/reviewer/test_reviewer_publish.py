@@ -989,12 +989,17 @@ async def test_publish_review_skips_findings_already_published() -> None:
 
 
 @pytest.mark.asyncio
-async def test_published_review_registry_failure_does_not_complete_and_retry_skips_duplicate() -> (
-    None
-):
+@pytest.mark.parametrize("assessment_mode", [None, "dry_run", "approve"])
+async def test_published_review_registry_failure_does_not_complete_or_invite_duplicate(
+    assessment_mode: str | None,
+) -> None:
     from agent.tools.publish_review import _publish_review_async
 
     with (
+        patch(
+            "agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=assessment_mode)
+        ),
+        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
@@ -1026,30 +1031,46 @@ async def test_published_review_registry_failure_does_not_complete_and_retry_ski
                 owner="o",
                 repo="r",
                 pr_number=7,
-                head_sha="newsha",
+                head_sha="a" * 40,
                 token="t",
                 severity_threshold="medium",
                 cap=15,
                 is_re_review=False,
+                assessment=_assessment("a" * 40) if assessment_mode else None,
+                state={"review_approval_policy": "Docs only"},
             )
 
-        with pytest.raises(RuntimeError, match="Storage unavailable"):
-            await publish()
+        if assessment_mode:
+            result = await publish()
+            assert result["success"] is True
+            assert result["review_id"] == 999
+            assert result["completion_recorded"] is False
+            assert "merge remains blocked" in str(result["warning"])
+            post.assert_awaited_once()
+            assert post.await_args is not None
+            assert post.await_args.kwargs["event"] == (
+                "APPROVE" if assessment_mode == "approve" else "COMMENT"
+            )
+        else:
+            with pytest.raises(RuntimeError, match="Storage unavailable"):
+                await publish()
         completion.assert_awaited_once_with(
             reviewer_thread_id="tid",
             github_review_id=999,
-            head_sha="newsha",
+            head_sha="a" * 40,
             finding_count=0,
         )
-        metadata.assert_not_awaited()
+        assert not any("last_reviewed_sha" in call.kwargs for call in metadata.await_args_list)
         settle.assert_not_awaited()
         notify.assert_not_awaited()
 
+        if assessment_mode:
+            return
         result = await publish()
         assert result["success"] is True
         assert result["skipped_empty_re_review"] is True
         post.assert_awaited_once()
-        metadata.assert_awaited_once_with("tid", last_reviewed_sha="newsha")
+        metadata.assert_awaited_once_with("tid", last_reviewed_sha="a" * 40)
         settle.assert_awaited_once()
 
 

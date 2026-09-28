@@ -627,12 +627,27 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
-    await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-        reviewer_thread_id=thread_id,
-        github_review_id=review_id if isinstance(review_id, int) else None,
-        head_sha=head_sha,
-        finding_count=len(inline_comments),
-    )
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
 
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
