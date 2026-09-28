@@ -322,23 +322,34 @@ async def test_a_definition_edit_never_reverts_refresh_state() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("registry_db")
+@pytest.mark.usefixtures("registry_db", "fake_store")
 async def test_delete_removes_record_and_snapshot() -> None:
     delete_snapshot = AsyncMock()
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Core"), "ramon")
         await WORKSPACES.mark_captured(
-            "default",
+            "core",
             snapshot_id="snap-1",
             snapshot_name="prior",
             source_sandbox_id="sb-prior",
         )
 
-        assert await WORKSPACES.remove("default") is True
-        assert await env_store.load_default_workspace() is None
+        assert await WORKSPACES.remove("core") is True
+        assert await WORKSPACES.get("core") is None
         delete_snapshot.assert_awaited_once_with("snap-1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_default_workspace_cannot_be_deleted() -> None:
+    await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
+
+    with pytest.raises(env_store.DefaultWorkspaceDeletionError):
+        await WORKSPACES.remove("default")
+
+    assert await WORKSPACES.get("default") is not None
 
 
 @pytest.mark.asyncio

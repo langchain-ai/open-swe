@@ -1696,3 +1696,19 @@ async def test_an_automation_can_move_to_another_workspace(fake_client, auth, re
             "sched_1", "alice", ScheduleUpdateBody(workspace="gone")
         )
     assert refused.value.status_code == 422
+
+
+async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    for schedule_id, workspace in (("sched_1", "core"), ("sched_2", "default")):
+        await fake_client.store.put_item(
+            schedules.SCHEDULES_NAMESPACE,
+            schedule_id,
+            _scheduled_record(id=schedule_id, workspace=workspace, cron_id=f"cron_{schedule_id}"),
+        )
+
+    assert await WORKSPACES.remove("core")
+
+    remaining = {item["id"] for item in await schedules.list_agent_schedules()}
+    assert remaining == {"sched_2"}
+    assert fake_client.crons.deleted == ["cron_sched_1"]

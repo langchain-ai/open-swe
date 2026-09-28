@@ -423,7 +423,7 @@ async def test_cron_registration_is_idempotent() -> None:
     client.crons.create.assert_awaited_once()
 
 
-@pytest.mark.usefixtures("registry_db")
+@pytest.mark.usefixtures("registry_db", "fake_store")
 @pytest.mark.asyncio
 async def test_deleting_an_workspace_removes_its_cron() -> None:
     client = MagicMock()

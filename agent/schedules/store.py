@@ -531,6 +531,20 @@ async def delete_agent_schedule(schedule_id: str) -> None:
     await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
 
 
+async def delete_workspace_automations(workspace: str) -> int:
+    """Delete every automation that runs in ``workspace``, crons included; returns how many."""
+    deleted = 0
+    for record in await search_all_values(SCHEDULES_NAMESPACE):
+        schedule_id = record.get("id")
+        if not isinstance(schedule_id, str) or _record_workspace(record) != workspace:
+            continue
+        await _delete_cron(record.get("cron_id"))
+        await delete_value(SCHEDULES_NAMESPACE, schedule_id)
+        await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+        deleted += 1
+    return deleted
+
+
 def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> str:
     repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
