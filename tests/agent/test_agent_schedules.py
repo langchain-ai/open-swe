@@ -57,6 +57,10 @@ class _FakeStore:
         return {"items": [{"value": value} for value in values[offset : offset + limit]]}
 
 
+# Automations name a workspace, and launching or saving one checks that its row
+# exists, so every test runs against a migrated database (which seeds `default`).
+pytestmark = pytest.mark.usefixtures("registry_db")
+
 class _FakeCrons:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []

@@ -263,7 +263,7 @@ async def _existing_workspace(value: str) -> str:
         slug = slugify(value)
     except ValueError as exc:
         raise HTTPException(422, "workspace must be a workspace name or slug") from exc
-    if slug != DEFAULT_WORKSPACE_SLUG and not await WORKSPACES.slug_exists(slug):
+    if not await WORKSPACES.slug_exists(slug):
         raise HTTPException(422, f"no workspace named {slug!r}")
     return slug
 
@@ -724,7 +724,7 @@ async def _launch_agent_schedule_record(
         return {"status": "disabled", "schedule_id": schedule_id}
 
     workspace = _record_workspace(record)
-    if workspace != DEFAULT_WORKSPACE_SLUG and not await WORKSPACES.slug_exists(workspace):
+    if not await WORKSPACES.slug_exists(workspace):
         # Running in another workspace would hand it that workspace's settings
         # and connections, which nobody chose for it.
         error = f"workspace {workspace!r} no longer exists"
