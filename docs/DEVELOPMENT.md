@@ -142,6 +142,12 @@ With only the seeded `default` workspace, Slack and GitHub runs land there by de
 
 Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
 
+## Backend API documentation
+
+[`swagger.json`](../swagger.json) is the generated OpenAPI 3.1 schema for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer. After local setup, `make run` serves interactive documentation at `http://localhost:8000/docs` and the live schema at `/openapi.json`; this server does not include the LangGraph runtime or support creating runs.
+
+Regenerate the checked-in schema with `make swagger` after changing backend routes or models. The checked-in file can lag the running backend; use its live schema when inspecting deployed routes. Some request/response schemas and authentication requirements are not yet documented. LangGraph runtime endpoints such as `/runs`, `/threads`, and `/assistants` are not included.
+
 ## LangGraph state across worktrees
 
 `langgraph dev` persists local threads, checkpoints, and Store data under `.langgraph_api` in its working directory. Preserve existing local data when moving development to a new worktree unless you want a clean start.

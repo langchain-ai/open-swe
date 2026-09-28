@@ -39,7 +39,8 @@ from agent.threads.creation import create_lock_thread, create_thread
 from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
-from agent.webhooks.common import repo_private_from_payload, workspace_for_repo_config
+from agent.webhooks.common import repo_private_from_payload
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ class ScheduleCreateBody(BaseModel):
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
     admin_thread: bool = False
+    # The workspace its runs launch in, always chosen explicitly.
+    workspace: str = Field(min_length=1, max_length=120)
 
     @field_validator("schedule")
     @classmethod
@@ -114,6 +117,7 @@ class ScheduleUpdateBody(BaseModel):
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode | None = None
     admin_thread: bool | None = None
+    workspace: str | None = None
 
     @field_validator("schedule")
     @classmethod
@@ -188,6 +192,7 @@ def _schedule_summary(
         "schedule": record.get("schedule"),
         "trigger": record.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER,
         "scope": "workspace",
+        "workspace": _record_workspace(record),
         "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
@@ -216,6 +221,52 @@ async def _migrate_workspace_record(
     migrated = {**record, "scope": "workspace"}
     await put_value(namespace, key, migrated)
     return migrated
+
+
+def _record_workspace(record: dict[str, Any]) -> str:
+    """The workspace an automation launches in, ``default`` until the startup migration has run."""
+    workspace = record.get("workspace")
+    return workspace if isinstance(workspace, str) and workspace else DEFAULT_WORKSPACE_SLUG
+
+
+async def migrate_automation_workspaces() -> int:
+    """Move every automation saved without a workspace to ``default``; returns how many moved.
+
+    Runs at startup, like the other LangGraph Store migrations, and is a no-op
+    once every record carries a workspace.
+    """
+    moved = 0
+    for record in await search_all_values(SCHEDULES_NAMESPACE):
+        schedule_id = record.get("id")
+        if not isinstance(schedule_id, str) or _has_workspace(record):
+            continue
+        # The search is a snapshot, and during a rolling deploy another replica
+        # may have edited or deleted this automation since: write only the new
+        # field, onto what is stored now.
+        current = await get_value(SCHEDULES_NAMESPACE, schedule_id)
+        if not current or _has_workspace(current):
+            continue
+        await put_value(
+            SCHEDULES_NAMESPACE, schedule_id, {**current, "workspace": DEFAULT_WORKSPACE_SLUG}
+        )
+        moved += 1
+    return moved
+
+
+def _has_workspace(record: dict[str, Any]) -> bool:
+    workspace = record.get("workspace")
+    return isinstance(workspace, str) and bool(workspace)
+
+
+async def _existing_workspace(value: str) -> str:
+    """``value`` as a workspace slug, refusing one that does not exist."""
+    try:
+        slug = slugify(value)
+    except ValueError as exc:
+        raise HTTPException(422, "workspace must be a workspace name or slug") from exc
+    if not await WORKSPACES.slug_exists(slug):
+        raise HTTPException(422, f"no workspace named {slug!r}")
+    return slug
 
 
 async def _put_schedule(record: dict[str, Any]) -> dict[str, Any]:
@@ -349,6 +400,7 @@ async def create_agent_schedule(
         profile = await get_profile(login) or {}
         repo = await repo_config_for_user(login, body.repo)
         run_email = await resolve_run_email(login, profile) or email
+    workspace = await _existing_workspace(body.workspace)
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     schedule_id = str(uuid.uuid4())
     now = now_iso()
@@ -359,6 +411,7 @@ async def create_agent_schedule(
         "schedule": body.schedule,
         "trigger": body.trigger,
         "repo": repo,
+        "workspace": workspace,
         "slack_channel_id": body.slack_channel_id,
         "slack_notification_mode": body.slack_notification_mode,
         "admin_thread": body.admin_thread,
@@ -441,6 +494,8 @@ async def update_agent_schedule(
         )
     if body.admin_thread is not None:
         patch["admin_thread"] = body.admin_thread
+    if body.workspace is not None:
+        patch["workspace"] = await _existing_workspace(body.workspace)
 
     updated = {**existing, **patch}
     trigger = updated.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER
@@ -485,6 +540,24 @@ async def delete_agent_schedule(schedule_id: str) -> None:
     await _delete_cron(existing.get("cron_id"))
     await delete_value(SCHEDULES_NAMESPACE, schedule_id)
     await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+
+
+async def delete_workspace_automations(workspace: str) -> int:
+    """Delete every automation that runs in ``workspace``, crons included; returns how many."""
+    deleted = 0
+    for record in await search_all_values(SCHEDULES_NAMESPACE):
+        schedule_id = record.get("id")
+        if not isinstance(schedule_id, str) or _record_workspace(record) != workspace:
+            continue
+        # One moved to another workspace since the search must survive.
+        current = await get_value(SCHEDULES_NAMESPACE, schedule_id)
+        if not current or _record_workspace(current) != workspace:
+            continue
+        await _delete_cron(current.get("cron_id"))
+        await delete_value(SCHEDULES_NAMESPACE, schedule_id)
+        await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+        deleted += 1
+    return deleted
 
 
 def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> str:
@@ -567,6 +640,7 @@ def _agent_run_metadata(
         "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
         "automation_scope": "workspace",
+        "workspace": _record_workspace(record),
         "owner_type": "system",
         "visibility": "public",
         "schedule_name": record.get("name"),
@@ -610,7 +684,7 @@ async def _agent_run_config(
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     if repo and repo.get("owner") and repo.get("name"):
         configurable["repo"] = repo
-    workspace = await workspace_for_repo_config(repo)
+    workspace = _record_workspace(record)
     configurable["workspace"] = workspace
     configurable["environment"] = workspace
     if slack_thread:
@@ -649,6 +723,14 @@ async def _launch_agent_schedule_record(
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
         return {"status": "disabled", "schedule_id": schedule_id}
+
+    workspace = _record_workspace(record)
+    if not await WORKSPACES.slug_exists(workspace):
+        # Running in another workspace would hand it that workspace's settings
+        # and connections, which nobody chose for it.
+        error = f"workspace {workspace!r} no longer exists"
+        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+        return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
@@ -964,4 +1046,6 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
             status_code if isinstance(status_code, int) else 403,
             result.get("error") or "automation repository unavailable",
         )
+    if status == "unknown_workspace":
+        raise HTTPException(409, result.get("error") or "automation workspace no longer exists")
     raise HTTPException(502, result.get("error") or "failed to start automation test")

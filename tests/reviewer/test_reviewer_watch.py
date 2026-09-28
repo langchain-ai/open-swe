@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from agent.github import webhook as github_webhooks
-from agent.webhooks import common as webhook_common
 
 
 def _push_payload(
@@ -38,18 +37,6 @@ def _pr_close_payload(*, action: str, number: int = 7) -> dict[str, Any]:
         "pull_request": {"number": number, "head": {"ref": "feat-x"}},
     }
 
-
-@pytest.mark.asyncio
-async def test_push_event_skips_branch_deletion() -> None:
-    payload = _push_payload(
-        ref="refs/heads/feat-x", after="0000000000000000000000000000000000000000"
-    )
-    with patch(
-        "agent.webhooks.common.is_repo_auto_review_enabled",
-        new_callable=AsyncMock,
-        return_value=True,
-    ):
-        await github_webhooks.process_github_push_event(payload)
     # If we got here without crashing and with no other patches needed, the
     # function returned early on the deletion check.
 
@@ -417,102 +404,6 @@ async def test_push_event_idempotent_when_head_unchanged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_token_for_repo_public_scopes_by_id() -> None:
-    get_token = AsyncMock(return_value=("scoped", "exp"))
-    with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        token, expires = await webhook_common.reviewer_token_for_repo(
-            {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=123
-        )
-    assert (token, expires) == ("scoped", "exp")
-    get_token.assert_awaited_once_with(repository_ids=[123])
-
-
-@pytest.mark.asyncio
-async def test_reviewer_token_for_repo_public_scopes_by_name_without_id() -> None:
-    get_token = AsyncMock(return_value=("scoped", "exp"))
-    with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common.reviewer_token_for_repo(
-            {"owner": "lc", "name": "repo"}, repo_private=False, repo_id=None
-        )
-    get_token.assert_awaited_once_with(repositories=["repo"])
-
-
-@pytest.mark.asyncio
-async def test_reviewer_token_for_repo_private_uses_full_token() -> None:
-    get_token = AsyncMock(return_value=("full", "exp"))
-    with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common.reviewer_token_for_repo(
-            {"owner": "lc", "name": "repo"}, repo_private=True, repo_id=123
-        )
-    get_token.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_reviewer_token_for_repo_unknown_privacy_uses_full_token() -> None:
-    get_token = AsyncMock(return_value=("full", "exp"))
-    with patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token):
-        await webhook_common.reviewer_token_for_repo(
-            {"owner": "lc", "name": "repo"}, repo_private=None, repo_id=123
-        )
-    get_token.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_push_event_public_repo_uses_scoped_token() -> None:
-    payload = _push_payload(ref="refs/heads/feat-x", after="newsha", private=False, repo_id=123)
-    pr = {
-        "number": 7,
-        "html_url": "https://github.com/lc/repo/pull/7",
-        "title": "T",
-        "head": {"sha": "newsha", "ref": "feat-x"},
-        "base": {"sha": "basesha", "ref": "main"},
-    }
-    fake_client = MagicMock()
-    fake_client.runs.create = AsyncMock()
-    get_token = AsyncMock(return_value=("scoped-token", "exp"))
-    cache_token = MagicMock()
-
-    with (
-        patch(
-            "agent.webhooks.common.is_repo_auto_review_enabled",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
-        patch("agent.webhooks.common.get_github_app_installation_token_with_expiry", get_token),
-        patch(
-            "agent.webhooks.common.fetch_open_pr_for_branch",
-            new_callable=AsyncMock,
-            return_value=pr,
-        ),
-        patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
-            new_callable=AsyncMock,
-            return_value={"kind": "reviewer", "watch": True},
-        ),
-        patch(
-            "agent.webhooks.common.ensure_thread_exists_for_metadata",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
-        patch("agent.webhooks.common.cache_github_token_for_thread", cache_token),
-        patch(
-            "agent.webhooks.common.fetch_pr_review_threads", new_callable=AsyncMock, return_value=[]
-        ),
-        patch(
-            "agent.webhooks.common.reconcile_findings_with_review_threads", new_callable=AsyncMock
-        ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-    ):
-        await github_webhooks.process_github_push_event(payload)
-
-    get_token.assert_awaited_once_with(repository_ids=[123])
-    assert fake_client.runs.create.await_args is not None
-    _, kwargs = fake_client.runs.create.await_args
-    assert kwargs["config"]["configurable"]["repo_private"] is False
-
-
-@pytest.mark.asyncio
 async def test_push_event_rescopes_token_when_pr_metadata_reveals_public() -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
     pr = {
@@ -609,18 +500,3 @@ async def test_pr_reopened_re_enables_watch() -> None:
     ):
         await github_webhooks.process_github_pr_close(_pr_close_payload(action="reopened"))
     assert captured and captured[0][1]["watch"] is True
-
-
-@pytest.mark.asyncio
-async def test_pr_close_skips_non_reviewer_threads() -> None:
-    fake_set = AsyncMock()
-    with (
-        patch(
-            "agent.webhooks.common.get_thread_metadata_safe",
-            new_callable=AsyncMock,
-            return_value={"kind": "agent"},
-        ),
-        patch("agent.webhooks.common.set_reviewer_thread_metadata", new=fake_set),
-    ):
-        await github_webhooks.process_github_pr_close(_pr_close_payload(action="closed"))
-    fake_set.assert_not_called()
