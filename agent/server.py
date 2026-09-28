@@ -1569,6 +1569,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    if not fallback_middleware:
+        # No cross-provider fallback: still retry transient errors on the primary.
+        fallback_middleware.append(ModelFallbackMiddleware(main_model))
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         assert model_routing_mode is not None

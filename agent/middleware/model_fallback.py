@@ -86,7 +86,7 @@ def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
     )
 
 
-def _should_fallback(exc: BaseException) -> bool:
+def should_fallback(exc: BaseException) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
         return True
     if isinstance(exc, ModelError):
@@ -97,7 +97,9 @@ def _should_fallback(exc: BaseException) -> bool:
         if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
             return True
     if type(exc) is openai.APIError:
-        return classify_exception(exc) == "provider_overloaded"
+        return (
+            classify_exception(exc) == "provider_overloaded" or "please retry" in str(exc).lower()
+        )
     return False
 
 
@@ -235,7 +237,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                         extra={**error_tracking_fields(exc), "model_access_error": fields},
                     )
                     return AIMessage(content=access_error_message)
-                if not _should_fallback(exc):
+                if not should_fallback(exc):
                     raise
                 last_exc = exc
                 if attempt + 1 >= total_attempts:

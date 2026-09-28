@@ -1,7 +1,9 @@
 import json
 
+import httpx
 import httpx2
 import pytest
+from langchain_fireworks.chat_models import FireworksConnectionError
 
 from agent.middleware.model_call_timeout import ModelCallTimeoutError
 from agent.middleware.task_retry import task_on_failure, task_retry_on
@@ -36,6 +38,11 @@ def test_task_retry_on_subagent_model_deadline() -> None:
 def test_task_retry_on_httpx_transport_subclasses() -> None:
     assert task_retry_on(httpx2.RemoteProtocolError("stream dropped")) is True
     assert task_retry_on(httpx2.ConnectError("connect failed")) is True
+
+
+def test_task_retry_on_langchain_provider_connection_error() -> None:
+    request = httpx.Request("POST", "https://api.fireworks.ai")
+    assert task_retry_on(FireworksConnectionError(message="Connection error.", request=request))
 
 
 def test_task_on_failure_returns_model_fixable_error() -> None:
