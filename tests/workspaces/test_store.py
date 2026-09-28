@@ -335,6 +335,15 @@ async def test_delete_removes_record_and_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_default_workspace_cannot_be_deleted() -> None:
+    with pytest.raises(env_store.DefaultWorkspaceDeletionError):
+        await WORKSPACES.remove("default")
+
+    assert await WORKSPACES.get("default") is not None
+
+
+@pytest.mark.asyncio
 async def test_load_default_workspace_swallows_database_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
