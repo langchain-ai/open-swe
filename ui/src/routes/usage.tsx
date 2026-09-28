@@ -72,7 +72,6 @@ interface SortableColumn<Key extends string> {
 }
 
 type UsageScope = "invocations" | "threads"
-type MergeRateView = "observed" | "lower_bound"
 type PROutcomesSort =
   | "model"
   | "prs_opened"
@@ -736,12 +735,6 @@ function PRMergeRateSection({
               they have had enough time to merge.
             </p>
             <p>
-              <strong>Confidence-adjusted</strong> shows the 95% Wilson lower
-              bound for the same eligible PRs. It is a conservative comparison
-              score, not the observed merge rate. A small sample lowers the
-              bound even when every eligible PR merged.
-            </p>
-            <p>
               <strong>Time to merge</strong> is the arithmetic mean of time from
               PR opened to merged across merged PRs opened in the selected
               period. Unmerged PRs are excluded, and it shows — when a group has
@@ -885,33 +878,7 @@ function OutcomeCell({
   )
 }
 
-function wilsonLowerBound(merged: number, eligible: number): number | null {
-  if (eligible === 0) return null
-  const z = 1.96
-  const rate = merged / eligible
-  const z2 = z * z
-  return (
-    (rate +
-      z2 / (2 * eligible) -
-      z * Math.sqrt((rate * (1 - rate) + z2 / (4 * eligible)) / eligible)) /
-    (1 + z2 / eligible)
-  )
-}
-
-function mergeRate(
-  group: PRMergeRateCohort | PRMergeRateEffort,
-  view: MergeRateView
-) {
-  return view === "observed"
-    ? group.mature_cohort_merge_share
-    : wilsonLowerBound(group.merged, group.mature_denominator)
-}
-
-function prOutcomeSortValue(
-  cohort: PRMergeRateCohort,
-  sort: PROutcomesSort,
-  view: MergeRateView
-) {
+function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
   switch (sort) {
     case "model":
       return safeModelLabel(cohort.model_id ?? "") || "Unavailable"
@@ -928,7 +895,7 @@ function prOutcomeSortValue(
     case "mean_distance":
       return cohort.mean_distance_basis_points ?? null
     case "merge_rate":
-      return mergeRate(cohort, view)
+      return cohort.mature_cohort_merge_share
     case "avg_delivery_seconds":
       return cohort.avg_delivery_seconds ?? null
     case "avg_merge_seconds":
@@ -937,7 +904,6 @@ function prOutcomeSortValue(
 }
 
 function prOutcomeColumns(
-  view: MergeRateView,
   maturityDays: number
 ): Array<SortableColumn<PROutcomesSort>> {
   return [
@@ -951,12 +917,9 @@ function prOutcomeColumns(
     { key: "merged", label: "Merged", align: "right" },
     {
       key: "merge_rate",
-      label: view === "observed" ? "Mature merge rate" : "95% lower bound",
+      label: "Mature merge rate",
       align: "right",
-      tooltip:
-        view === "observed"
-          ? `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`
-          : "Wilson 95% lower bound on the observed merge rate. This is a conservative comparison score, not the observed rate.",
+      tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
     },
     {
       key: "closed_without_merge",
@@ -998,13 +961,11 @@ function prOutcomeColumns(
 function PROutcomeCells({
   group,
   maturityDays,
-  mergeRateView,
 }: {
   group: PRMergeRateCohort | PRMergeRateEffort
   maturityDays: number
-  mergeRateView: MergeRateView
 }) {
-  const rate = mergeRate(group, mergeRateView)
+  const rate = group.mature_cohort_merge_share
   return (
     <>
       <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
@@ -1100,10 +1061,9 @@ function PRMergeRateTable({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
   const [direction, setDirection] = useState<SortDirection>("desc")
-  const [mergeRateView, setMergeRateView] = useState<MergeRateView>("observed")
   const sortedCohorts = [...cohorts].sort((a, b) => {
-    const aValue = prOutcomeSortValue(a, sort, mergeRateView)
-    const bValue = prOutcomeSortValue(b, sort, mergeRateView)
+    const aValue = prOutcomeSortValue(a, sort)
+    const bValue = prOutcomeSortValue(b, sort)
     if (aValue == null) return bValue == null ? 0 : 1
     if (bValue == null) return -1
     const comparison =
@@ -1126,26 +1086,6 @@ function PRMergeRateTable({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-end gap-3 border-b border-border px-4 py-3 text-xs">
-        <span className="text-muted-foreground">Merge rate view</span>
-        <div
-          role="group"
-          aria-label="Merge rate view"
-          className="flex rounded-md border border-border p-0.5"
-        >
-          {(["observed", "lower_bound"] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              aria-pressed={mergeRateView === view}
-              className={`rounded-sm px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${mergeRateView === view ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"}`}
-              onClick={() => setMergeRateView(view)}
-            >
-              {view === "observed" ? "Observed" : "Confidence-adjusted"}
-            </button>
-          ))}
-        </div>
-      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px] text-xs">
           <caption className="px-4 py-3 text-left text-muted-foreground">
@@ -1154,7 +1094,7 @@ function PRMergeRateTable({
           </caption>
           <thead className="border-b border-border text-muted-foreground">
             <tr>
-              {prOutcomeColumns(mergeRateView, maturityDays).map((column) => (
+              {prOutcomeColumns(maturityDays).map((column) => (
                 <SortableHeader
                   key={column.key}
                   column={column}
@@ -1236,7 +1176,6 @@ function PRMergeRateTable({
                     <PROutcomeCells
                       group={cohort}
                       maturityDays={maturityDays}
-                      mergeRateView={mergeRateView}
                     />
                   </tr>
                   {isExpanded &&
@@ -1251,7 +1190,6 @@ function PRMergeRateTable({
                         <PROutcomeCells
                           group={effort}
                           maturityDays={maturityDays}
-                          mergeRateView={mergeRateView}
                         />
                       </tr>
                     ))}

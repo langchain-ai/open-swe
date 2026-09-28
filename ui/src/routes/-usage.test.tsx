@@ -1793,7 +1793,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
   client.clear()
 })
 
-it("sorts model rows by mean distance and the selected merge-rate view", async () => {
+it("sorts model rows by mean distance and observed merge rate", async () => {
   const makeCohort = (
     model: string,
     merged: number,
@@ -1847,14 +1847,5 @@ it("sorts model rows by mean distance and the selected merge-rate view", async (
     "100%30/30 eligible",
     "—",
   ])
-  fireEvent.click(screen.getByRole("button", { name: "Confidence-adjusted" }))
-  expect(models()[0]).toContain("z-large-model")
-  expect(values("95% lower bound")).toEqual([
-    "89%30/30 eligible",
-    "44%3/3 eligibleSmall sample",
-    "—",
-  ])
-  fireEvent.click(screen.getByRole("button", { name: "Observed" }))
-  expect(models()[0]).toContain("a-small-model")
   client.clear()
 })
