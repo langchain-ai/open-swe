@@ -222,11 +222,20 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         </Button>
                         <Button
                           data-testid="comment-submit"
+                          aria-keyshortcuts="Meta+Enter Control+Enter"
                           size="sm"
                           disabled={posting || !draft.trim()}
                           onClick={() => void submitComment()}
                         >
                           {posting ? "Posting…" : "Comment"}
+                          {!posting && (
+                            <kbd
+                              aria-hidden="true"
+                              className="ml-1 font-sans text-[0.625rem] opacity-80"
+                            >
+                              ⌘ ↵
+                            </kbd>
+                          )}
                         </Button>
                       </div>
                     </div>

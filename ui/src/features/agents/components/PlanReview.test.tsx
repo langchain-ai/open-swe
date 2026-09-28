@@ -113,33 +113,49 @@ describe("PlanReview", () => {
     expect(screen.getByTestId("plan-comments")).toBeTruthy()
   })
 
-  it("adds a comment anchored to selected preview text", async () => {
-    render(<PlanReview plan={plan} />)
+  it.each(["click", "metaKey", "ctrlKey"])(
+    "adds an anchored comment via %s",
+    async (method) => {
+      render(<PlanReview plan={plan} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
-    expect(screen.getByTestId("comment-composer").textContent).toContain("Plan")
-    fireEvent.change(screen.getByTestId("comment-input"), {
-      target: { value: "Clarify this step" },
-    })
-    fireEvent.click(screen.getByTestId("comment-submit"))
-
-    await waitFor(() =>
-      expect(mocks.addPlanComment).toHaveBeenCalledWith(
-        "thread-1",
-        "Clarify this step",
-        {
-          exact: "Plan",
-          prefix: "",
-          suffix: " details",
-          start: 0,
-          end: 4,
-        }
+      fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+      expect(screen.getByTestId("comment-composer").textContent).toContain(
+        "Plan"
       )
-    )
-    expect((await screen.findByTestId("plan-comment")).textContent).toContain(
-      "Clarify this step"
-    )
-  })
+      fireEvent.change(screen.getByTestId("comment-input"), {
+        target: { value: "Clarify this step" },
+      })
+      fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
+      expect(mocks.addPlanComment).not.toHaveBeenCalled()
+      if (method === "click") {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Comment", exact: true })
+        )
+      } else {
+        fireEvent.keyDown(screen.getByTestId("comment-input"), {
+          key: "Enter",
+          [method]: true,
+        })
+      }
+
+      await waitFor(() =>
+        expect(mocks.addPlanComment).toHaveBeenCalledWith(
+          "thread-1",
+          "Clarify this step",
+          {
+            exact: "Plan",
+            prefix: "",
+            suffix: " details",
+            start: 0,
+            end: 4,
+          }
+        )
+      )
+      expect((await screen.findByTestId("plan-comment")).textContent).toContain(
+        "Clarify this step"
+      )
+    }
+  )
 
   it("shows historical artifacts without approval or implementation actions", async () => {
     mocks.getPlanComments.mockResolvedValue([comment])
