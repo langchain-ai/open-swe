@@ -919,12 +919,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         if self._requested_models is not None and self._model_selection is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
+                handoff_config = RunConfig.from_config(self._config)
                 handoff = await initial_thread_handoff(
                     thread_id=self._thread_id,
                     messages=state.get("messages") or [],
                     model=self._title_model,
                     client=client,
                     requested_models=self._requested_models,
+                    slack_event_ts=(
+                        handoff_config.slack_thread.triggering_event_ts
+                        if handoff_config.slack_thread is not None
+                        else None
+                    ),
                 )
                 if handoff is not None:
                     requested_model = handoff.requested_model

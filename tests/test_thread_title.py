@@ -12,6 +12,7 @@ from agent.thread_title import (
     _ThreadTitle,
     generate_and_store_thread_title,
     initial_thread_handoff,
+    original_human_task,
     schedule_thread_title_generation,
 )
 
@@ -19,6 +20,22 @@ from agent.thread_title import (
 # call that sees a non-default value here is running inside the agent run, and
 # would stream its tokens into the thread the user is watching.
 _RUN_STREAM: contextvars.ContextVar[str] = contextvars.ContextVar("run_stream", default="none")
+
+
+@pytest.mark.parametrize("trigger_kind", ["missing", "system"])
+def test_slack_handoff_never_falls_back_to_unrelated_human(trigger_kind: str) -> None:
+    messages = [
+        HumanMessage(
+            content='<input-message sender="slack:U1" kind="human" timestamp="1.0">Use Kimi</input-message>'
+        )
+    ]
+    if trigger_kind == "system":
+        messages.append(
+            HumanMessage(
+                content='<input-message sender="system:bot" kind="system" timestamp="2.0">Use Opus</input-message>'
+            )
+        )
+    assert original_human_task(messages, slack_event_ts="2.0") is None
 
 
 class _StructuredModel:

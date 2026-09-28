@@ -13,6 +13,7 @@ from agent.input_messages import (
     dynamic_context_hash,
     human_input,
     input_message_text,
+    input_message_timestamps,
     message_sender_id,
 )
 from agent.prompts import load_prompt, prompt
@@ -39,9 +40,13 @@ class ThreadHandoff(_ThreadTitle):
     unavailable_model: str | None = None
 
 
-def original_human_task(messages: Sequence[BaseMessage]) -> str | None:
+def original_human_task(
+    messages: Sequence[BaseMessage], *, slack_event_ts: str | None = None
+) -> str | None:
     for message in messages:
         if not isinstance(message, HumanMessage):
+            continue
+        if slack_event_ts and slack_event_ts not in input_message_timestamps(message.content):
             continue
         if message_sender_id(message.content, kind="human") is not None:
             return input_message_text(message.content)
@@ -173,8 +178,9 @@ async def initial_thread_handoff(
     model: BaseChatModel,
     client: object,
     requested_models: Mapping[str, ModelOption],
+    slack_event_ts: str | None = None,
 ) -> ThreadHandoff | None:
-    conversation = original_human_task(messages)
+    conversation = original_human_task(messages, slack_event_ts=slack_event_ts)
     if conversation is None:
         return None
     try:

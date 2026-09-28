@@ -300,6 +300,73 @@ async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
     assert prepare_harness["recorded"] is None
 
 
+@pytest.mark.parametrize("request_text", ["Use Opus to fix this", "Fix this"])
+async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history(
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, request_text: str
+) -> None:
+    from langchain_core.messages import HumanMessage
+
+    from agent.dashboard.options import available_requested_models
+    from agent.slack.webhook import _slack_context_input
+    from agent.thread_title import ThreadHandoff
+    from agent.utils.thread_settings import ThreadSettings
+
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value={}))
+    stored: ThreadSettings = {}
+
+    async def persist(
+        client: object, thread_id: str, value: ThreadSettings, *, strict: bool
+    ) -> None:
+        stored.update(value)
+
+    monkeypatch.setattr(server, "store_thread_settings", persist)
+
+    observed: list[str] = []
+
+    async def infer(messages: list[object], **kwargs: object) -> ThreadHandoff:
+        message = messages[-1]
+        assert isinstance(message, HumanMessage)
+        observed.append(message.text)
+        return ThreadHandoff(
+            title="Fix issue",
+            requested_model="anthropic:claude-opus-5-5" if "Opus" in message.text else None,
+        )
+
+    config = _slack_config()
+    config["configurable"]["slack_thread"]["triggering_event_ts"] = "2.0"
+    middleware = _middleware(config)
+    middleware._title_model.with_structured_output.return_value.ainvoke = AsyncMock(
+        side_effect=infer
+    )
+    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._model_selection = MagicMock()
+    middleware._model_selection.select_route = AsyncMock(return_value="default")
+    run_input = _slack_context_input(
+        [{"ts": "1.0", "user": "U2", "text": "Use Kimi for the earlier task"}],
+        {"U1": "Alice", "U2": "Bob"},
+        {},
+        channel={"id": "slack:C1", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="2.0",
+        trigger_user_id="U1",
+        request_text=request_text,
+        request_blocks=[{"type": "text", "text": request_text}],
+    )
+    state: PrepareRunState = {
+        "messages": [HumanMessage(content=message["content"]) for message in run_input["messages"]]
+    }
+    prepared = await middleware._prepare(state, MagicMock())
+    expected = "anthropic:claude-opus-5-5" if "Opus" in request_text else None
+    assert len(observed) == 1
+    assert request_text in observed[0]
+    assert "Kimi" not in observed[0]
+    assert stored["model_handoff_complete"] is True
+    assert stored["requested_model"] == expected
+    assert prepared["requested_model"] == expected
+
+
 @pytest.mark.parametrize("image_type", ["image", "image_url", None])
 @pytest.mark.parametrize(
     "model", ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"]
