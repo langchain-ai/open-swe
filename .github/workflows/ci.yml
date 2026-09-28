@@ -36,6 +36,23 @@ jobs:
       - name: Run format check
         run: make format-check
 
+  swagger:
+    name: Agent swagger check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Regenerate swagger.json
+        run: make swagger
+      - name: Fail if swagger.json is stale
+        run: |
+          if ! git diff --exit-code --stat swagger.json; then
+            echo "::error file=swagger.json::swagger.json is out of date. Run 'make swagger' and commit the result."
+            exit 1
+          fi
+
   typecheck:
     name: Agent typecheck
     runs-on: ubuntu-latest
