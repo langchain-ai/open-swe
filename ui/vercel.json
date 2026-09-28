@@ -2,6 +2,14 @@
   "framework": null,
   "buildCommand": "pnpm run build",
   "installCommand": "pnpm install --frozen-lockfile --filter open-swe-dashboard...",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "openswe.vercel.app" }],
+      "destination": "https://openswe.langchain.dev/:path*",
+      "permanent": true
+    }
+  ],
   "git": {
     "deploymentEnabled": {
       "**": false,

@@ -247,7 +247,9 @@ def apply() -> None:
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, reviews, merge):
+    from agent.threads import session_upload
+
+    for module in (eligibility, readiness, reviews, merge, session_upload):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox

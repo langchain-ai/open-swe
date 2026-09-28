@@ -12,6 +12,7 @@ import shlex
 from typing import Any, NamedTuple
 
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError
 
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
@@ -192,7 +193,11 @@ async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
 
 async def _reconcile(thread_id: str) -> _Reconciled:
     client = _client()
-    thread = await client.threads.get(thread_id)
+    try:
+        thread = await client.threads.get(thread_id)
+    except NotFoundError:
+        logger.info("Background-task thread is gone", extra={"agent_thread_id": thread_id})
+        return _Reconciled({"status": "missing_thread"}, None, tracked=True)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
