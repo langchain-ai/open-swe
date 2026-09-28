@@ -29,8 +29,9 @@ def _make_request() -> ModelRequest[None]:
 
 class TestModelFallbackMiddleware:
     @pytest.mark.parametrize("default_fallback_enabled", [True, False])
+    @pytest.mark.parametrize("requested_fallback_enabled", [True, False])
     async def test_handoff_fallback_does_not_change_other_model_calls(
-        self, default_fallback_enabled: bool
+        self, default_fallback_enabled: bool, requested_fallback_enabled: bool
     ) -> None:
         requested = FakeListChatModel(responses=["requested"])
         requested_fallback = FakeListChatModel(responses=["requested fallback"])
@@ -39,7 +40,9 @@ class TestModelFallbackMiddleware:
         middleware = ModelFallbackMiddleware(
             default_fallback if default_fallback_enabled else None, backoff_schedule=(0.0,)
         )
-        middleware.register_fallback(requested, requested_fallback)
+        middleware.register_fallback(
+            requested, requested_fallback if requested_fallback_enabled else None
+        )
 
         async def handler(request: ModelRequest[None]) -> ModelResponse[None]:
             if request.model is requested or request.model is other:
@@ -47,10 +50,16 @@ class TestModelFallbackMiddleware:
             message = await request.model.ainvoke(request.messages)
             return ModelResponse(result=[message])
 
-        result = await middleware.awrap_model_call(
-            ModelRequest(model=requested, messages=[]), handler
-        )
-        assert result.result[0].content == "requested fallback"
+        if requested_fallback_enabled:
+            result = await middleware.awrap_model_call(
+                ModelRequest(model=requested, messages=[]), handler
+            )
+            assert result.result[0].content == "requested fallback"
+        else:
+            with pytest.raises(TimeoutError, match="Provider unavailable"):
+                await middleware.awrap_model_call(
+                    ModelRequest(model=requested, messages=[]), handler
+                )
         if default_fallback_enabled:
             result = await middleware.awrap_model_call(
                 ModelRequest(model=other, messages=[]), handler
