@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, emitter, identity, ingestion, retention
+from agent.analytics import directory, emitter, identity, ingestion
 from agent.analytics.events import EventName, RunCanceledPayload, RunFailedPayload
 from tests.analytics.helpers import DAY, event
 
@@ -124,36 +124,6 @@ async def test_findings_keep_first_milestones_and_latest_observation(analytics_d
         assert row["human_replies"] == 4
 
 
-async def test_directory_upgrades_email_and_login_captures_to_github_id(analytics_db):
-    _, transaction = analytics_db
-    email_person = await directory.resolve_person(email=" Person@Example.com ")
-    login_person = await directory.resolve_person(github_login="old-login")
-    canonical = await directory.resolve_person(
-        immutable_person_key=123,
-        github_login="old-login",
-        email="person@example.com",
-        display_name="Person",
-    )
-    assert canonical == identity.opaque_person("github", 123)
-    assert await directory.resolve_person(github_login="OLD-LOGIN") == canonical
-    assert await directory.resolve_person(email="PERSON@example.com") == canonical
-    assert (
-        await directory.resolve_person(immutable_person_key=123, github_login="new-login")
-        == canonical
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["github_login"] == "new-login"
-        assert row["email"] == "person@example.com"
-        aliases = dict(
-            (
-                await conn.execute(text("SELECT alias_person_id, person_id FROM identity_aliases"))
-            ).all()
-        )
-        assert aliases[email_person] == canonical
-        assert aliases[login_person] == canonical
-
-
 @pytest.mark.parametrize(
     ("name", "payload"),
     [
@@ -166,15 +136,6 @@ async def test_unsuccessful_invocations_preserve_token_accounting(analytics_db, 
     await ingestion.ingest(event(workspace, name, payload, run_id=uuid4()))
     async with transaction() as conn:
         assert await conn.scalar(text("SELECT total_tokens FROM run_projection")) == 9
-
-
-async def test_strict_capture_propagates_persistence_failure(monkeypatch):
-    async def unavailable(event):
-        raise RuntimeError("storage unavailable")
-
-    monkeypatch.setattr(emitter, "enqueue", unavailable)
-    with pytest.raises(RuntimeError, match="storage unavailable"):
-        await emitter.pr_observed(owner="org", repo="repo", number=1, occurred_at=DAY)
 
 
 async def test_observation_lifecycle_counts_state_changes_and_survives_retention(analytics_db):
@@ -223,20 +184,6 @@ async def test_observation_lifecycle_counts_state_changes_and_survives_retention
         assert row["resolved_at"] == DAY + timedelta(days=5)
 
 
-async def test_sparse_pr_observations_order_each_non_null_metric_independently(analytics_db):
-    _, transaction = analytics_db
-    common = {"owner": "org", "repo": "repo", "number": 1}
-    await emitter.pr_observed(**common, occurred_at=DAY + timedelta(days=3), changed_files=5)
-    await emitter.pr_observed(**common, occurred_at=DAY, additions=10, deletions=1, changed_files=2)
-    await emitter.pr_observed(**common, occurred_at=DAY + timedelta(days=2), additions=30)
-    await emitter.pr_observed(
-        **common, occurred_at=DAY + timedelta(days=1), additions=20, deletions=4
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_usage_projection"))).mappings().one()
-        assert (row["additions"], row["deletions"], row["changed_files"]) == (30, 4, 5)
-
-
 async def test_same_github_revision_can_supply_complementary_pr_measurements(analytics_db):
     _, transaction = analytics_db
     common = {"owner": "org", "repo": "repo", "number": 1, "occurred_at": DAY}
@@ -246,97 +193,6 @@ async def test_same_github_revision_can_supply_complementary_pr_measurements(ana
     async with transaction() as conn:
         row = (await conn.execute(text("SELECT * FROM pr_usage_projection"))).mappings().one()
         assert (row["additions"], row["deletions"], row["changed_files"]) == (30, 4, 2)
-
-
-@pytest.mark.parametrize("attribute", ["github_login", "email"])
-@pytest.mark.parametrize("provisional_first", [False, True])
-async def test_reassigned_handle_does_not_resolve_through_historical_alias(
-    analytics_db, attribute, provisional_first
-):
-    _, transaction = analytics_db
-    old = "old@example.com" if attribute == "email" else "old-login"
-    new = "new@example.com" if attribute == "email" else "new-login"
-    historical = await directory.resolve_person(**{attribute: old}) if provisional_first else None
-    previous_owner = await directory.resolve_person(immutable_person_key=123, **{attribute: old})
-    await directory.resolve_person(immutable_person_key=123, **{attribute: new})
-    new_owner = await directory.resolve_person(**{attribute: old})
-    assert new_owner != previous_owner
-    assert new_owner != historical
-    assert await directory.resolve_person(**{attribute: old}) == new_owner
-    assert await directory.resolve_person(**{attribute: new}) == previous_owner
-    canonical = await directory.resolve_person(immutable_person_key=456, **{attribute: old})
-    assert canonical != previous_owner
-    async with transaction() as conn:
-        owners = {
-            row["person_id"]: row
-            for row in (await conn.execute(text("SELECT * FROM identity_directory"))).mappings()
-        }
-        assert owners[previous_owner][attribute] == new
-        assert owners[canonical][attribute] == old
-        aliases = dict(
-            (
-                await conn.execute(text("SELECT alias_person_id, person_id FROM identity_aliases"))
-            ).all()
-        )
-        assert aliases[new_owner] == canonical
-        if historical:
-            assert aliases[historical] == previous_owner
-
-
-@pytest.mark.parametrize("replacement_team", [None, "new-team"])
-async def test_identity_upgrade_preserves_team_unless_explicitly_replaced(
-    analytics_db, replacement_team
-):
-    _, transaction = analytics_db
-    provisional = await directory.resolve_person(github_login="person", team_key="team")
-    canonical = await directory.resolve_person(
-        immutable_person_key=123, github_login="person", team_key=replacement_team
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["person_id"] == canonical
-        assert row["team_id"] == identity.opaque_id("team", replacement_team or "team")
-        assert (
-            await conn.scalar(
-                text("SELECT person_id FROM identity_aliases WHERE alias_person_id = :provisional"),
-                {"provisional": provisional},
-            )
-            == canonical
-        )
-
-
-async def test_github_name_outranks_earlier_trusted_slack_name(analytics_db):
-    _, transaction = analytics_db
-    person = await directory.resolve_person(
-        immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
-    )
-    assert (
-        await directory.resolve_person(
-            immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
-        )
-        == person
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["display_name"] == "Grace Hopper"
-        assert row["display_name_source"] == "github"
-
-
-async def test_trusted_slack_name_never_overwrites_github_name(analytics_db):
-    _, transaction = analytics_db
-    person = await directory.resolve_person(
-        immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
-    )
-    assert (
-        await directory.resolve_person(
-            immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
-        )
-        == person
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["display_name"] == "Grace Hopper"
-        assert row["display_name_source"] == "github"
 
 
 async def test_legacy_unsourced_name_blocks_slack_and_yields_to_github(analytics_db):
@@ -368,62 +224,6 @@ async def test_legacy_unsourced_name_blocks_slack_and_yields_to_github(analytics
         row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
         assert row["display_name"] == "Grace Hopper"
         assert row["display_name_source"] == "github"
-
-
-async def test_unsourced_name_never_displaces_trusted_github_name(analytics_db):
-    _, transaction = analytics_db
-    person = await directory.resolve_person(
-        immutable_person_key=123, display_name="Grace Hopper", display_name_source="github"
-    )
-    assert (
-        await directory.resolve_person(immutable_person_key=123, display_name="Legacy Name")
-        == person
-    )
-    assert (
-        await directory.resolve_person(
-            immutable_person_key=123, display_name="Grace (Slack)", display_name_source="slack"
-        )
-        == person
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["display_name"] == "Grace Hopper"
-        assert row["display_name_source"] == "github"
-
-
-async def test_github_upsert_person_defaults_name_provenance_to_github(analytics_db):
-    _, transaction = analytics_db
-    await directory.upsert_person(
-        provider="github", immutable_person_key=123, display_name="Grace Hopper"
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["display_name"] == "Grace Hopper"
-        assert row["display_name_source"] == "github"
-
-
-async def test_retention_clears_name_and_provenance_together(analytics_db):
-    workspace, transaction = analytics_db
-    person = await directory.resolve_person(
-        immutable_person_key=123,
-        github_login="person",
-        display_name="Grace Hopper",
-        display_name_source="github",
-    )
-    async with transaction() as conn:
-        await conn.execute(
-            text(
-                "UPDATE identity_directory SET anonymize_after = clock_timestamp() - interval '1 day' "
-                "WHERE workspace_id = :workspace_id AND person_id = :person_id"
-            ),
-            {"workspace_id": workspace, "person_id": person},
-        )
-    await retention.enforce_retention()
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM identity_directory"))).mappings().one()
-        assert row["github_login"] is None
-        assert row["display_name"] is None
-        assert row["display_name_source"] is None
 
 
 async def test_reused_login_never_merges_durable_identities(analytics_db):

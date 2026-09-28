@@ -8,3 +8,6 @@ cron expression; switching to "schedule" requires a ``schedule``. Switching to
 "slack_channel_message" requires a ``slack_channel_id`` and a
 ``message_pattern``; check a new pattern with ``preview_automation_matches``
 before saving it.
+
+Pass ``workspace`` (a workspace slug) to move the automation: later runs launch
+in that workspace.

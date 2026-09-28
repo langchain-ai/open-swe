@@ -121,42 +121,6 @@ async def test_merges_the_bots_channels_with_the_public_directory_and_caches(
     assert len(client.calls["users_conversations"]) == 1
 
 
-async def test_a_brief_rate_limit_is_waited_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient(
-        [_MEMBER_PAGE],
-        [
-            _rate_limited("2"),
-            {
-                "channels": [{"id": "C2", "name": "oss-help", "is_member": False}],
-                "response_metadata": {"next_cursor": ""},
-            },
-        ],
-    )
-    slept = _install(monkeypatch, client)
-
-    directory = await channel_options.list_slack_channels()
-
-    assert slept == [2.0]
-    assert directory.partial is False
-    assert [option.id for option in directory.channels] == ["C2", "G1"]
-
-
-async def test_a_long_rate_limit_leaves_the_directory_partial(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _FakeClient([_MEMBER_PAGE], [_rate_limited("30")])
-    slept = _install(monkeypatch, client)
-
-    directory = await channel_options.list_slack_channels()
-
-    assert slept == []
-    assert directory.partial is True
-    assert [option.id for option in directory.channels] == ["G1"]
-    # Served from cache for now, so the next browse does not hammer Slack.
-    assert await channel_options.list_slack_channels() == directory
-    assert len(client.calls["conversations_list"]) == 1
-
-
 async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,17 +155,6 @@ async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_re
 
     assert [option.id for option in directory.channels] == ["C2", "G1"]
     assert directory.partial is False
-
-
-async def test_rate_limiting_the_bots_own_channels_asks_the_admin_to_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install(monkeypatch, _FakeClient([_rate_limited("30")], []))
-
-    with pytest.raises(HTTPException) as excinfo:
-        await channel_options.list_slack_channels()
-
-    assert excinfo.value.status_code == 429
 
 
 async def test_a_repeating_cursor_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

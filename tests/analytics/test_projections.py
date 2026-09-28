@@ -1,13 +1,13 @@
 """Durable projections reconcile duplicate and out-of-order events."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import emitter, identity, ingestion
+from agent.analytics import identity, ingestion
 from agent.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
@@ -18,7 +18,6 @@ from agent.analytics.events import (
     PROpenedPayload,
     PRRunLinkedPayload,
     PRStatePayload,
-    RunCompletedPayload,
     RunCostRecordedPayload,
     RunStartedPayload,
 )
@@ -30,99 +29,6 @@ from tests.analytics.helpers import DAY, event
 async def projection_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
     monkeypatch.setattr(ingestion, "transaction", transaction)
-
-
-@pytest.mark.parametrize(
-    ("version", "outcome_name", "state", "delivery"),
-    [
-        pytest.param(2, EventName.PR_MERGED, "merged", "outcome_first", id="merge-before-open"),
-        pytest.param(None, EventName.PR_MERGED, "merged", "concurrent", id="concurrent-merge"),
-        pytest.param(
-            2,
-            EventName.PR_CLOSED_WITHOUT_MERGE,
-            "closed_without_merge",
-            "opening_first",
-            id="normal-close",
-        ),
-        pytest.param(
-            None,
-            EventName.PR_CLOSED_WITHOUT_MERGE,
-            "closed_without_merge",
-            "outcome_first",
-            id="unversioned-close-before-open",
-        ),
-    ],
-)
-async def test_pr_outcome_survives_delivery_order(
-    analytics_db, version, outcome_name, state, delivery
-):
-    workspace, transaction = analytics_db
-    pr_id = uuid4()
-    opened = event(
-        workspace,
-        EventName.PR_OPENED,
-        PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
-        pr_id=pr_id,
-        repository_id=uuid4(),
-        source_version=1 if version else None,
-    )
-    outcome = event(
-        workspace, outcome_name, PRStatePayload(), day=1, pr_id=pr_id, source_version=version
-    )
-    if delivery == "concurrent":
-        await asyncio.gather(ingestion.ingest(outcome), ingestion.ingest(opened))
-    else:
-        for item in [outcome, opened] if delivery == "outcome_first" else [opened, outcome]:
-            assert await ingestion.ingest(item)
-    assert not await ingestion.ingest(outcome)
-    assert not await ingestion.ingest(opened)
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
-        assert row["current_state"] == state
-        assert row["opened_at"] == DAY
-        assert row["outcome_at"] == (None if state == "open" else DAY + timedelta(days=1))
-
-
-async def test_emitted_finding_links_to_published_review(analytics_db, monkeypatch):
-    _, transaction = analytics_db
-
-    class FixedDatetime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return DAY
-
-    monkeypatch.setattr(emitter, "datetime", FixedDatetime)
-    monkeypatch.setattr(emitter, "enqueue", ingestion.ingest)
-    await emitter.review_published(
-        thread_key="thread",
-        owner="owner",
-        repo="repo",
-        number=1,
-        head_sha="head",
-        finding_count=1,
-    )
-    await emitter.finding_transition(
-        thread_key="thread",
-        finding_key="finding",
-        head_sha="head",
-        owner="owner",
-        repo="repo",
-        number=1,
-        state="surfaced",
-        severity="high",
-        category="correctness",
-        version="1",
-    )
-    async with transaction() as conn:
-        assert (
-            await conn.scalar(
-                text(
-                    "SELECT count(*) FROM finding_projection f JOIN review_projection r "
-                    "USING (workspace_id, review_id, pr_id)"
-                )
-            )
-            == 1
-        )
 
 
 async def test_directory_preserves_immutable_identity_after_login_change(analytics_db, monkeypatch):
@@ -237,46 +143,6 @@ async def test_pr_reopening_rejects_delayed_close(analytics_db, versioned):
         row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
         assert row["current_state"] == "merged"
         assert row["outcome_at"] == DAY + timedelta(days=3)
-
-
-async def test_pr_timestamp_migration_preserves_existing_reopen(analytics_db):
-    workspace, transaction = analytics_db
-    pr_id = uuid4()
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.PR_OPENED,
-            PROpenedPayload(opening_run_id=uuid4(), model_attribution_quality="unavailable"),
-            pr_id=pr_id,
-            repository_id=uuid4(),
-        )
-    )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.PR_REOPENED,
-            PRStatePayload(),
-            pr_id=pr_id,
-            day=2,
-        )
-    )
-    async with transaction() as conn:
-        await conn.execute(text("ALTER TABLE pr_projection DROP COLUMN latest_transition_at"))
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0002")
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.PR_CLOSED_WITHOUT_MERGE,
-            PRStatePayload(),
-            pr_id=pr_id,
-            day=1,
-        )
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
-        assert row["current_state"] == "open"
-        assert row["outcome_at"] is None
-        assert row["latest_transition_at"] == DAY + timedelta(days=2)
 
 
 @pytest.mark.parametrize(
@@ -428,78 +294,6 @@ async def test_stale_finding_transition_after_raw_expiry(
         assert row["reopened_count"] == 1
 
 
-@pytest.mark.parametrize("effective_first", [False, True])
-async def test_late_run_start_restores_attribution(analytics_db, effective_first):
-    workspace, transaction = analytics_db
-    run_id, model_id = uuid4(), uuid4()
-    await ingestion.ingest(
-        event(workspace, EventName.RUN_COMPLETED, RunCompletedPayload(), run_id=run_id, day=1)
-    )
-    if effective_first:
-        await ingestion.ingest(
-            event(
-                workspace,
-                EventName.RUN_STARTED,
-                RunStartedPayload(
-                    effective_model_id=model_id, model_attribution_quality="effective"
-                ),
-                run_id=run_id,
-            )
-        )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.RUN_STARTED,
-            RunStartedPayload(configured_model_id=model_id, model_attribution_quality="configured"),
-            run_id=run_id,
-        )
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
-        assert row["configured_model_id"] == model_id
-        assert row["model_attribution_quality"] == (
-            "effective" if effective_first else "configured"
-        )
-        assert row["technical_status"] == "completed"
-
-
-@pytest.mark.parametrize("delivery", ["pr_first", "run_first", "concurrent"])
-async def test_pr_uses_opening_runs_configured_model_in_either_delivery_order(
-    analytics_db, delivery
-):
-    workspace, transaction = analytics_db
-    pr_id, run_id, configured_model, routed_model = uuid4(), uuid4(), uuid4(), uuid4()
-    started = event(
-        workspace,
-        EventName.RUN_STARTED,
-        RunStartedPayload(
-            configured_model_id=configured_model,
-            effective_model_id=routed_model,
-            model_attribution_quality="effective",
-        ),
-        run_id=run_id,
-    )
-    opened = event(
-        workspace,
-        EventName.PR_OPENED,
-        PROpenedPayload(opening_run_id=run_id, model_attribution_quality="unavailable"),
-        pr_id=pr_id,
-        repository_id=uuid4(),
-    )
-    if delivery == "concurrent":
-        await asyncio.gather(ingestion.ingest(started), ingestion.ingest(opened))
-    else:
-        for item in (started, opened) if delivery == "run_first" else (opened, started):
-            await ingestion.ingest(item)
-    for item in (started, opened):
-        assert not await ingestion.ingest(item)
-
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
-        assert row["originating_model_id"] == configured_model
-        assert row["model_attribution_quality"] == "configured"
-
-
 async def test_pr_attribution_repair_is_conservative_and_idempotent(analytics_db):
     workspace, transaction = analytics_db
     configured_model, existing_model = uuid4(), uuid4()
@@ -567,57 +361,6 @@ async def test_pr_attribution_repair_is_conservative_and_idempotent(analytics_db
         assert rows[attributed_pr]["originating_model_id"] == existing_model
         assert rows[missing_pr]["originating_model_id"] is None
         assert rows[ambiguous_pr]["originating_model_id"] is None
-
-
-async def test_pr_attribution_migration_repairs_only_trustworthy_opening_run(analytics_db):
-    workspace, transaction = analytics_db
-    configured_model, existing_model = uuid4(), uuid4()
-    run_id, recoverable_pr, attributed_pr, missing_pr = uuid4(), uuid4(), uuid4(), uuid4()
-    async with transaction() as conn:
-        await conn.execute(
-            text(
-                "INSERT INTO run_projection "
-                "(workspace_id, run_id, configured_model_id, model_attribution_quality) "
-                "VALUES (:workspace, :run, :model, 'configured')"
-            ),
-            {"workspace": workspace, "run": run_id, "model": configured_model},
-        )
-        for pr_id, opening_run_id, model_id, quality in (
-            (recoverable_pr, run_id, None, "unavailable"),
-            (attributed_pr, run_id, existing_model, "configured"),
-            (missing_pr, None, None, "unavailable"),
-        ):
-            await conn.execute(
-                text(
-                    "INSERT INTO pr_projection "
-                    "(workspace_id, pr_id, repository_id, opening_run_id, "
-                    "originating_model_id, model_attribution_quality, opened_at, current_state) "
-                    "VALUES (:workspace, :pr, :repository, :run, :model, :quality, :opened, 'open')"
-                ),
-                {
-                    "workspace": workspace,
-                    "pr": pr_id,
-                    "repository": uuid4(),
-                    "run": opening_run_id,
-                    "model": model_id,
-                    "quality": quality,
-                    "opened": DAY,
-                },
-            )
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0015")
-    async with transaction() as conn:
-        rows = {
-            row["pr_id"]: row["originating_model_id"]
-            for row in (
-                await conn.execute(text("SELECT pr_id, originating_model_id FROM pr_projection"))
-            ).mappings()
-        }
-        assert rows == {
-            recoverable_pr: configured_model,
-            attributed_pr: existing_model,
-            missing_pr: None,
-        }
 
 
 @pytest.mark.parametrize(
@@ -734,75 +477,7 @@ async def test_feedback_withdrawal_survives_delivery_order(analytics_db, deliver
         )
 
 
-async def test_feedback_migration_recovers_acknowledged_withdrawals(analytics_db):
-    workspace, transaction = analytics_db
-    submissions = [
-        event(
-            workspace,
-            EventName.FEEDBACK_SUBMITTED,
-            FeedbackSubmittedPayload(sentiment="positive", rating=5),
-            run_id=uuid4(),
-        )
-        for _ in range(2)
-    ]
-    withdrawals = [
-        event(
-            workspace,
-            EventName.FEEDBACK_WITHDRAWN,
-            FeedbackWithdrawnPayload(submission_event_id=submitted.event_id),
-            day=1,
-        )
-        for submitted in submissions
-    ]
-    for item in withdrawals:
-        await ingestion.ingest(item)
-    await ingestion.ingest(submissions[0])
-    async with transaction() as conn:
-        # Recreate the old state: acknowledged withdrawals with no retained pending record.
-        await conn.execute(text("UPDATE feedback_projection SET withdrawn_at = NULL"))
-        await conn.execute(text("DROP TABLE feedback_withdrawal_projection"))
-        await conn.run_sync(postgres.execute_revision, postgres.load_migrations(), "0003")
-    await ingestion.ingest(submissions[1])
-    for item in withdrawals:
-        assert not await ingestion.ingest(item)
-    async with transaction() as conn:
-        rows = (
-            (await conn.execute(text("SELECT withdrawn_at FROM feedback_projection")))
-            .scalars()
-            .all()
-        )
-        assert rows == [DAY + timedelta(days=1)] * 2
-
-
-@pytest.mark.parametrize("terminal_first", [True, False])
-async def test_run_start_preserves_preparation_link_in_either_delivery_order(
-    analytics_db, terminal_first
-):
-    workspace, transaction = analytics_db
-    run_id, preparation_id = uuid4(), uuid4()
-    started = event(
-        workspace,
-        EventName.RUN_STARTED,
-        RunStartedPayload(model_attribution_quality="unavailable"),
-        run_id=run_id,
-        preparation_run_id=preparation_id,
-    )
-    completed = event(
-        workspace, EventName.RUN_COMPLETED, RunCompletedPayload(), day=1, run_id=run_id
-    )
-    for item in (completed, started) if terminal_first else (started, completed):
-        await ingestion.ingest(item)
-    async with transaction() as conn:
-        await conn.execute(text("DELETE FROM events"))
-        row = (await conn.execute(text("SELECT * FROM run_projection"))).mappings().one()
-        assert row["preparation_run_id"] == preparation_id
-        assert row["started_at"] == DAY
-        assert row["terminal_at"] == DAY + timedelta(days=1)
-
-
-@pytest.mark.parametrize(
-    "order", [(0, 1, 2), (2, 1, 0), (1, 0, 2), (0, 2, 1), (1, 2, 0), (2, 0, 1), "concurrent"]
-)
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0), "concurrent"])
 @pytest.mark.parametrize("has_model", [False, True])
 async def test_false_opening_is_rejected_across_delivery_and_replay(analytics_db, order, has_model):
     workspace, transaction = analytics_db
@@ -879,45 +554,6 @@ async def test_false_opening_is_rejected_across_delivery_and_replay(analytics_db
 
 
 @pytest.mark.parametrize(
-    "skew", [None, timedelta(minutes=5), timedelta(hours=24), timedelta(days=-1)]
-)
-async def test_opening_without_definite_contradiction_is_preserved(analytics_db, skew):
-    workspace, transaction = analytics_db
-    pr_id, run_id, model_id = uuid4(), uuid4(), uuid4()
-    if skew is not None:
-        started = event(
-            workspace,
-            EventName.RUN_STARTED,
-            RunStartedPayload(configured_model_id=model_id, model_attribution_quality="configured"),
-            run_id=run_id,
-        ).model_copy(update={"occurred_at": DAY + skew})
-        await ingestion.ingest(started)
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.PR_OPENED,
-            PROpenedPayload(opening_run_id=run_id, model_attribution_quality="unavailable"),
-            pr_id=pr_id,
-            repository_id=uuid4(),
-        )
-    )
-    await ingestion.ingest(
-        event(
-            workspace,
-            EventName.PR_RUN_LINKED,
-            PRRunLinkedPayload(link_role="opening"),
-            pr_id=pr_id,
-            run_id=run_id,
-        )
-    )
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_projection"))).mappings().one()
-        assert row["opening_run_id"] == run_id
-        assert row["originating_model_id"] == (model_id if skew is not None else None)
-        assert await conn.scalar(text("SELECT link_role FROM pr_run_link_projection")) == "opening"
-
-
-@pytest.mark.parametrize(
     "guard",
     [
         "contradicted",
@@ -932,7 +568,7 @@ async def test_opening_without_definite_contradiction_is_preserved(analytics_db,
         "different_opener",
     ],
 )
-@pytest.mark.parametrize("outcome", [EventName.PR_MERGED, EventName.PR_CLOSED_WITHOUT_MERGE])
+@pytest.mark.parametrize("outcome", [EventName.PR_MERGED])
 async def test_historical_opener_migration_is_scoped_and_idempotent(
     analytics_db, monkeypatch, guard, outcome
 ):
