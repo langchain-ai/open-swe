@@ -1712,3 +1712,51 @@ async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, r
     remaining = {item["id"] for item in await schedules.list_agent_schedules()}
     assert remaining == {"sched_2"}
     assert fake_client.crons.deleted == ["cron_sched_1"]
+
+
+async def test_a_failed_workspace_delete_keeps_its_automations(
+    fake_client, auth, registry_db, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="core")
+    )
+    monkeypatch.setattr(WORKSPACES, "delete", AsyncMock(side_effect=RuntimeError("db down")))
+
+    with pytest.raises(RuntimeError):
+        await WORKSPACES.remove("core")
+
+    assert [item["id"] for item in await schedules.list_agent_schedules()] == ["sched_1"]
+    assert fake_client.crons.deleted == []
+
+
+async def test_workspace_cleanup_spares_an_automation_moved_since_it_looked(
+    fake_client, auth, registry_db, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="oss")
+    )
+    stale = [_scheduled_record(workspace="core")]
+    monkeypatch.setattr(schedules, "search_all_values", AsyncMock(return_value=stale))
+
+    assert await schedules.delete_workspace_automations("core") == 0
+
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert stored["workspace"] == "oss"
+
+
+async def test_the_startup_migration_writes_onto_the_current_record(
+    fake_client, auth, monkeypatch
+) -> None:  # noqa: ANN001, ARG001
+    """Another replica's edit, or delete, since the search is not undone."""
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(prompt="edited since")
+    )
+    stale = [_scheduled_record(), _scheduled_record(id="sched_gone")]
+    monkeypatch.setattr(schedules, "search_all_values", AsyncMock(return_value=stale))
+
+    assert await schedules.migrate_automation_workspaces() == 1
+
+    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
+    assert (stored["prompt"], stored["workspace"]) == ("edited since", "default")
+    assert (tuple(schedules.SCHEDULES_NAMESPACE), "sched_gone") not in fake_client.store.items

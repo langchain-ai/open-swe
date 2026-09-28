@@ -237,14 +237,24 @@ async def migrate_automation_workspaces() -> int:
     moved = 0
     for record in await search_all_values(SCHEDULES_NAMESPACE):
         schedule_id = record.get("id")
-        workspace = record.get("workspace")
-        if not isinstance(schedule_id, str) or (isinstance(workspace, str) and workspace):
+        if not isinstance(schedule_id, str) or _has_workspace(record):
+            continue
+        # The search is a snapshot, and during a rolling deploy another replica
+        # may have edited or deleted this automation since: write only the new
+        # field, onto what is stored now.
+        current = await get_value(SCHEDULES_NAMESPACE, schedule_id)
+        if not current or _has_workspace(current):
             continue
         await put_value(
-            SCHEDULES_NAMESPACE, schedule_id, {**record, "workspace": DEFAULT_WORKSPACE_SLUG}
+            SCHEDULES_NAMESPACE, schedule_id, {**current, "workspace": DEFAULT_WORKSPACE_SLUG}
         )
         moved += 1
     return moved
+
+
+def _has_workspace(record: dict[str, Any]) -> bool:
+    workspace = record.get("workspace")
+    return isinstance(workspace, str) and bool(workspace)
 
 
 async def _existing_workspace(value: str) -> str:
@@ -538,7 +548,11 @@ async def delete_workspace_automations(workspace: str) -> int:
         schedule_id = record.get("id")
         if not isinstance(schedule_id, str) or _record_workspace(record) != workspace:
             continue
-        await _delete_cron(record.get("cron_id"))
+        # One moved to another workspace since the search must survive.
+        current = await get_value(SCHEDULES_NAMESPACE, schedule_id)
+        if not current or _record_workspace(current) != workspace:
+            continue
+        await _delete_cron(current.get("cron_id"))
         await delete_value(SCHEDULES_NAMESPACE, schedule_id)
         await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
         deleted += 1
