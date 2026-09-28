@@ -321,6 +321,7 @@ export async function exchangeDesktopHandoff(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        Origin: backend,
       },
       body: JSON.stringify({ code, verifier }),
     }

@@ -114,6 +114,20 @@ def test_reshaped_records_and_blocks_are_skipped_without_breaking_the_chain() ->
     ]
 
 
+def test_chain_runs_through_records_that_carry_no_message() -> None:
+    session = parse_claude_transcript(
+        _jsonl(
+            _user("u1", None, "first"),
+            _assistant("a1", "u1", "m1", {"type": "text", "text": "one"}),
+            {"type": "system", "subtype": "stop_hook_summary", "uuid": "s1", "parentUuid": "a1"},
+            _user("u2", "s1", "second"),
+            _assistant("a2", "u2", "m2", {"type": "text", "text": "two"}),
+        )
+    )
+
+    assert [message.content for message in session.messages] == ["first", "one", "second", "two"]
+
+
 def test_input_with_no_transcript_records_is_rejected() -> None:
     with pytest.raises(TranscriptError):
         parse_claude_transcript("{not json\nplain text\n")

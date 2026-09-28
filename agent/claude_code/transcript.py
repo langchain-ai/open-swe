@@ -170,9 +170,21 @@ class OtherRecord(_Model):
 
 
 class LinkRecord(_Record):
-    """A conversation record whose shape no longer parses, kept so the parent chain through it holds."""
+    """A record in the parent chain that carries no message, such as a ``system`` stop-hook summary."""
 
     type: str
+
+
+_MESSAGE_RECORD_TYPES = frozenset({"user", "assistant", "attachment", "custom-title"})
+
+
+def _record_tag(value: object) -> str:
+    if not isinstance(value, dict):
+        return "other"
+    kind = value.get("type")
+    if isinstance(kind, str) and kind in _MESSAGE_RECORD_TYPES:
+        return kind
+    return "link" if isinstance(value.get("uuid"), str) else "other"
 
 
 type Record = Annotated[
@@ -180,8 +192,9 @@ type Record = Annotated[
     | Annotated[AssistantRecord, Tag("assistant")]
     | Annotated[AttachmentRecord, Tag("attachment")]
     | Annotated[CustomTitleRecord, Tag("custom-title")]
+    | Annotated[LinkRecord, Tag("link")]
     | Annotated[OtherRecord, Tag("other")],
-    Discriminator(_tag(frozenset({"user", "assistant", "attachment", "custom-title"}))),
+    Discriminator(_record_tag),
 ]
 
 _RECORD: TypeAdapter[Record] = TypeAdapter(Record)
