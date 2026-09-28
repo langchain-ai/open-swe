@@ -161,7 +161,7 @@ async def _reset_durable_pr_state() -> None:
 
     if postgres.configured():
         async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE expedited_approval, pull_request CASCADE"))
+            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -407,9 +407,13 @@ async def control_team_settings(request: Request) -> JSONResponse:
 @app.get("/control/expedited-approvals")
 async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
     """Every expedited approval row for a repository, newest last."""
-    from agent.expedited_review.approvals import ExpeditedApproval
+    from agent.human_review.requests import HumanReviewRequest
 
-    approvals = await ExpeditedApproval.all_for_repo(owner, repo)
+    approvals = [
+        request
+        for request in await HumanReviewRequest.all_for_repo(owner, repo)
+        if request.kind == "expedited"
+    ]
     return JSONResponse(
         [
             {
@@ -427,7 +431,7 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                         "github_review_id": vote.github_review_id,
                         "github_review_sha": vote.github_review_sha,
                     }
-                    for vote in approval.votes
+                    for vote in approval.participants
                 ],
             }
             for approval in approvals

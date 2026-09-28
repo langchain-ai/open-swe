@@ -1205,6 +1205,15 @@ export interface ReviewerEvalStatus {
   updated_at: string
 }
 
+export interface HumanReviewRequestResult {
+  success: boolean
+  error: string
+  request_id: string
+  channel: string
+  permalink: string
+  reused: boolean
+}
+
 async function pullRequestAction(
   pr: OpenPullRequest,
   body: PullRequestActionRequest
@@ -1608,6 +1617,11 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  requestHumanReview: (pr: OpenPullRequest) =>
+    request<HumanReviewRequestResult>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
+      { method: "POST" }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

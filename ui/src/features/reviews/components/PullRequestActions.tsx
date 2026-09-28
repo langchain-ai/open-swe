@@ -10,6 +10,7 @@ import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
 import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { RequestHumanReview } from "./RequestHumanReview"
 import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
 export type PullRequestOutcome = "merged" | "closed"
@@ -57,6 +58,7 @@ export function PullRequestActions({
             {pr.draft === true && (
               <MarkPullRequestReady pr={pr} onReady={onReady} />
             )}
+            {pr.draft === false && <RequestHumanReview pr={pr} />}
             {canUpdateBranch(pr) && (
               <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
             )}

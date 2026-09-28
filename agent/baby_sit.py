@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent.database import postgres
 from agent.dispatch import dispatch_agent_run
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.github.app import get_github_app_installation_token
 from agent.github.ci import (
     FAILING_CONCLUSIONS,
@@ -27,6 +26,7 @@ from agent.github.ci import (
 )
 from agent.github.comments import post_github_comment
 from agent.github.pull_requests import PullRequestPayload
+from agent.human_review.requests import HumanReviewRequest
 from agent.prompts import prompt
 from agent.slack.client import GitHubPrRef, post_slack_thread_reply
 from agent.source_context import SourceContext
@@ -329,7 +329,7 @@ async def _has_expedited_card(watch: BabySitWatch) -> bool:
     if not postgres.configured():
         return False
     try:
-        approval = await ExpeditedApproval.active_for(watch.owner, watch.repo, watch.pr_number)
+        approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:
         logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
         return False

@@ -149,6 +149,16 @@ async def _fetch_reviews(
         return None
 
 
+async def latest_review_states(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
+) -> dict[str, str] | None:
+    """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
+    reviews = await _fetch_reviews(client, owner, repo, number)
+    if reviews is None:
+        return None
+    return _latest_reviews_by_user(reviews, author)
+
+
 def _resolve_mergeability(
     pr: Mapping[str, Any], live: Mergeability | None
 ) -> tuple[bool | None, str]:

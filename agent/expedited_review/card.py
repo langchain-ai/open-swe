@@ -2,8 +2,8 @@
 
 import json
 
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
+from agent.human_review.requests import HumanReviewRequest
 from agent.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
     Block,
@@ -26,18 +26,18 @@ _MAX_PATCH_LINES = 60
 _OVERFLOW_NOTE_RESERVE = 64
 
 
-def _button_value(action: str, approval: ExpeditedApproval) -> str:
+def _button_value(action: str, approval: HumanReviewRequest) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _vote_summary(approval: ExpeditedApproval, author: str) -> str:
+def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
     """``author`` and the approvers are Slack mentions, so none of this is escaped."""
     if not approval.approvals:
         return f"Needs one approval from someone other than {author}."
     return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
-def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]:
+def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
     return [
@@ -92,7 +92,7 @@ def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
-def _vote_buttons(approval: ExpeditedApproval, channel: str | None) -> list[ButtonElement]:
+def _vote_buttons(approval: HumanReviewRequest, channel: str | None) -> list[ButtonElement]:
     buttons = [
         button(
             "Approve",
@@ -112,7 +112,7 @@ def _vote_buttons(approval: ExpeditedApproval, channel: str | None) -> list[Butt
     return [*buttons, _dismiss_button(approval)]
 
 
-def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
+def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Mark ready for review",
         action_id="open_swe_option_select_ready",
@@ -121,7 +121,7 @@ def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
     )
 
 
-def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
+def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Dismiss",
         action_id="open_swe_option_select_dismiss",
@@ -130,7 +130,7 @@ def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
 
 
 def _voting_diff(
-    approval: ExpeditedApproval, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
 ) -> list[Block]:
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
@@ -138,7 +138,7 @@ def _voting_diff(
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
+def _status(approval: HumanReviewRequest, author: str, channel: str | None) -> list[Block]:
     if approval.awaiting_ready:
         return [
             section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
@@ -154,7 +154,7 @@ def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> li
 
 
 def open_card(
-    approval: ExpeditedApproval,
+    approval: HumanReviewRequest,
     *,
     title: str,
     author: str,
@@ -164,7 +164,7 @@ def open_card(
 ) -> tuple[str, list[Block]]:
     """Text fallback and blocks for an open card; diff and buttons go once it is approved.
 
-    ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    ``author`` is the PR author's Slack mention, from :meth:`HumanReviewRequest.author_mention`.
     ``channel`` (``#name``) offers broadcasting the card there; ``None`` offers nothing.
     """
     pr = approval.pull_request
@@ -179,7 +179,7 @@ def open_card(
 
 
 def closed_card(
-    approval: ExpeditedApproval,
+    approval: HumanReviewRequest,
     *,
     title: str,
     author: str,

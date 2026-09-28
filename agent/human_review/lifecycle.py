@@ -1,7 +1,7 @@
-"""Post an expedited review card, keep it in step with its votes, and close it.
+"""Post a human review card, keep it in step with its request, and close it.
 
-Every Slack write here edits or posts the one card, and only because the agent
-or a voter just acted: nothing runs in the background.
+Every Slack write here edits or posts the one card, and only because someone
+just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
 import asyncio
@@ -12,18 +12,19 @@ from uuid import UUID
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
-from agent.expedited_review import card
-from agent.expedited_review.approvals import ApprovalState, ExpeditedApproval
+from agent.expedited_review import card as expedited_card
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
+from agent.expedited_review.readiness import latest_review_states
 from agent.expedited_review.reviews import dismiss_approval
-from agent.github.app import (
-    get_github_app_installation_id_for_repo,
-    get_github_app_installation_token,
-)
 from agent.github.ci import fetch_pr
+from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
+from agent.human_review import card as standard_card
+from agent.human_review.people import Outcome, repo_token
+from agent.human_review.requests import HumanReviewRequest, RequestState
 from agent.slack.blocks import Block, block_payload
+from agent.slack.cards import repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
@@ -39,13 +40,6 @@ logger = logging.getLogger(__name__)
 
 LEGACY_CRON_TASK = "expedited_review"
 _LEGACY_CRON_KIND = "expedited_review_watch"
-
-
-async def repo_token(owner: str, repo: str) -> str | None:
-    installation_id = await get_github_app_installation_id_for_repo(owner, repo)
-    if installation_id is None:
-        return None
-    return await get_github_app_installation_token(installation_id=installation_id)
 
 
 async def delete_legacy_crons(watch_key: str) -> dict[str, int]:
@@ -72,10 +66,10 @@ async def delete_legacy_crons(watch_key: str) -> dict[str, int]:
 
 
 async def transition(
-    approval_id: UUID, *, expected: tuple[ApprovalState, ...], **changes: Any
-) -> ExpeditedApproval | None:
+    request_id: UUID, *, expected: tuple[RequestState, ...], **changes: Any
+) -> HumanReviewRequest | None:
     """Apply ``changes`` if the row is still in one of ``expected``; else ``None``."""
-    async with ExpeditedApproval.locked(approval_id) as (_, row):
+    async with HumanReviewRequest.locked(request_id) as (_, row):
         if row is None or row.state not in expected:
             return None
         for name, value in changes.items():
@@ -83,15 +77,15 @@ async def transition(
         return row
 
 
-async def _files_for(approval: ExpeditedApproval, token: str) -> list[ChangedFile]:
-    pr = approval.pull_request
+async def _files_for(request: HumanReviewRequest, token: str) -> list[ChangedFile]:
+    pr = request.pull_request
     files = await fetch_changed_files(
         owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
     )
     return files or []
 
 
-async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) -> str | None:
+async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile]) -> str | None:
     """A hosted-but-unposted PNG of the diff, which the card renders inline."""
     shown, _ = ChangedFile.split(files)
     if not shown:
@@ -124,9 +118,9 @@ async def _diff_image_id(approval: ExpeditedApproval, files: list[ChangedFile]) 
 
 
 async def post_card(
-    approval: ExpeditedApproval, *, title: str, files: list[ChangedFile]
+    approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
-    """Post the card into the approval's thread: ``(message_ts, slack_error)``.
+    """Post an expedited card into its thread: ``(message_ts, slack_error)``.
 
     Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
     """
@@ -134,7 +128,7 @@ async def post_card(
     if location is None:
         return None, "no Slack thread"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
-    text, blocks = card.open_card(
+    text, blocks = expedited_card.open_card(
         approval,
         title=title,
         author=await approval.author_mention(),
@@ -151,7 +145,26 @@ async def post_card(
     )
 
 
-async def _broadcast_channel(approval: ExpeditedApproval) -> str | None:
+async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, str | None]:
+    """Post a standard card: a thread reply also sent to the channel, or a top-level post."""
+    text, blocks = await render(request, None)
+    location = request.slack_location
+    if location is not None:
+        return await post_slack_thread_reply_with_ts(
+            location[0],
+            location[1],
+            text,
+            blocks=block_payload(blocks),
+            agent_thread_id=request.thread_id or None,
+            reply_broadcast=True,
+        )
+    channel = await SlackChannel.load(request.slack_channel_id)
+    if channel is None:
+        return None, "channel_not_found"
+    return await channel.post(text, blocks=block_payload(blocks))
+
+
+async def _broadcast_channel(approval: HumanReviewRequest) -> str | None:
     """``#name`` of the channel the card could be broadcast to; ``None`` outside a thread."""
     if not approval.slack_thread_ts or is_code_channel_session(approval.slack_thread_ts):
         return None
@@ -159,23 +172,47 @@ async def _broadcast_channel(approval: ExpeditedApproval) -> str | None:
     return f"#{channel.name}" if channel is not None and channel.name else None
 
 
-async def _render(approval: ExpeditedApproval, outcome: str | None) -> tuple[str, list[Block]]:
-    pr = approval.pull_request
+async def _render_standard(
+    request: HumanReviewRequest, outcome: str | None, token: str | None
+) -> tuple[str, list[Block]]:
+    pr = request.pull_request
+    if outcome is not None:
+        return standard_card.closed_card(request, title=pr.title, outcome=outcome)
+    states: dict[str, str] = {}
+    if token is not None:
+        async with github_client(token=token) as client:
+            states = (
+                await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
+            )
+    requester = request.requested_by
+    return standard_card.open_card(
+        request,
+        title=pr.title,
+        author=await request.author_mention(),
+        requester=standard_card.mention(requester) if requester is not None else None,
+        review_states=states,
+    )
+
+
+async def render(request: HumanReviewRequest, outcome: str | None) -> tuple[str, list[Block]]:
+    pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
-    files = await _files_for(approval, token) if token else []
-    diff_image_id = approval.slack_diff_file_id or None
-    author = await approval.author_mention()
+    if request.kind == "standard":
+        return await _render_standard(request, outcome, token)
+    files = await _files_for(request, token) if token else []
+    diff_image_id = request.slack_diff_file_id or None
+    author = await request.author_mention()
     if outcome is None:
-        return card.open_card(
-            approval,
+        return expedited_card.open_card(
+            request,
             title=pr.title,
             author=author,
             files=files,
             diff_image_id=diff_image_id,
-            channel=await _broadcast_channel(approval),
+            channel=await _broadcast_channel(request),
         )
-    return card.closed_card(
-        approval,
+    return expedited_card.closed_card(
+        request,
         title=pr.title,
         author=author,
         files=files,
@@ -184,80 +221,69 @@ async def _render(approval: ExpeditedApproval, outcome: str | None) -> tuple[str
     )
 
 
-async def refresh_card(approval: ExpeditedApproval, *, outcome: str | None = None) -> None:
-    """Re-render the posted card from current state; used after votes and outcomes."""
-    if not approval.slack_channel_id or not approval.slack_message_ts:
+async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
+    """Re-render the posted card from current state; used after clicks and outcomes."""
+    if not request.slack_channel_id or not request.slack_message_ts:
         return
-    text, blocks = await _render(approval, outcome)
+    text, blocks = await render(request, outcome)
     ok, error = await update_slack_message(
-        approval.slack_channel_id, approval.slack_message_ts, text, blocks=block_payload(blocks)
+        request.slack_channel_id, request.slack_message_ts, text, blocks=block_payload(blocks)
     )
     if not ok:
         logger.warning(
-            "Failed to update expedited review card",
-            extra={"approval_id": str(approval.id), "slack_error": error},
+            "Failed to update human review card",
+            extra={"request_id": str(request.id), "kind": request.kind, "slack_error": error},
         )
 
 
 async def _repost(
-    approval: ExpeditedApproval, *, broadcast: bool, outcome: str | None = None
+    request: HumanReviewRequest, *, broadcast: bool, outcome: str | None = None
 ) -> bool:
-    """Replace the posted card with a fresh thread reply, sent to the channel if ``broadcast``.
-
-    The new card is posted before the old one is deleted, so a failure leaves one card up.
-    """
-    location = approval.slack_location
-    if location is None or not approval.slack_message_ts:
+    """Replace a thread card with a fresh reply, sent to the channel if ``broadcast``."""
+    location = request.slack_location
+    if location is None or not request.slack_message_ts:
         return False
-    old_ts = approval.slack_message_ts
-    approval.slack_broadcast = broadcast
-    text, blocks = await _render(approval, outcome)
-    message_ts, error = await post_slack_thread_reply_with_ts(
-        location[0],
-        location[1],
+    old_ts = request.slack_message_ts
+    request.slack_broadcast = broadcast
+    text, blocks = await render(request, outcome)
+
+    async def adopt(message_ts: str) -> bool:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            # An open card that closed meanwhile keeps its closing render; the new copy is the stray.
+            kept = (
+                row is not None
+                and row.slack_message_ts == old_ts
+                and (outcome is not None or row.state == "open")
+            )
+            if kept:
+                row.slack_message_ts = message_ts
+                row.slack_broadcast = broadcast
+            return kept
+
+    return await repost_thread_card(
+        location,
+        old_ts,
         text,
-        blocks=block_payload(blocks),
-        agent_thread_id=approval.thread_id or None,
-        reply_broadcast=broadcast,
+        blocks,
+        broadcast=broadcast,
+        agent_thread_id=request.thread_id or None,
+        adopt=adopt,
     )
-    if not message_ts:
-        logger.warning(
-            "Failed to repost expedited review card",
-            extra={"approval_id": str(approval.id), "slack_error": error, "broadcast": broadcast},
-        )
-        return False
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
-        # An open card that closed meanwhile keeps its closing render; the new copy is the stray.
-        kept = (
-            row is not None
-            and row.slack_message_ts == old_ts
-            and (outcome is not None or row.state == "open")
-        )
-        if kept:
-            row.slack_message_ts = message_ts
-            row.slack_broadcast = broadcast
-    stray = old_ts if kept else message_ts
-    if not await delete_slack_message(location[0], stray):
-        logger.warning(
-            "Left a stray expedited review card in Slack",
-            extra={"approval_id": str(approval.id), "slack_message_ts": stray},
-        )
-    return kept
 
 
-async def broadcast_card(approval: ExpeditedApproval) -> bool:
+async def broadcast_card(approval: HumanReviewRequest) -> bool:
     """Send the open card to the channel as well as its thread."""
     if approval.slack_broadcast or await _broadcast_channel(approval) is None:
         return False
     return await _repost(approval, broadcast=True)
 
 
-async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
-    """Wake the agent thread that posted the card once with ``prompt``; whether it was queued."""
-    if not approval.thread_id:
+async def notify_agent(request: HumanReviewRequest, prompt: str) -> bool:
+    """Wake the agent thread that asked for the review once with ``prompt``; whether it was queued."""
+    if not request.thread_id:
         return False
-    pr = approval.pull_request
-    configurable = dict(approval.run_config)
+    pr = request.pull_request
+    configurable = dict(request.run_config)
     configurable.update(
         {
             "source": configurable.get("source") or "slack",
@@ -267,7 +293,7 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
     )
     try:
         await dispatch_agent_run(
-            approval.thread_id,
+            request.thread_id,
             prompt,
             configurable,
             source=str(configurable["source"]),
@@ -277,8 +303,8 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
         )
     except Exception:
         logger.warning(
-            "Failed to notify agent about expedited review outcome",
-            extra={"approval_id": str(approval.id)},
+            "Failed to notify agent about a human review request",
+            extra={"request_id": str(request.id), "kind": request.kind},
             exc_info=True,
         )
         return False
@@ -286,53 +312,65 @@ async def notify_agent(approval: ExpeditedApproval, prompt: str) -> bool:
 
 
 async def retire(
-    approval: ExpeditedApproval,
-    state: ApprovalState,
+    request: HumanReviewRequest,
+    state: RequestState,
     outcome: str,
-) -> ExpeditedApproval | None:
-    """Close an open approval and mark its card; ``None`` if it was already closed."""
-    updated = await transition(approval.id, expected=("open",), state=state, detail=outcome)
+) -> HumanReviewRequest | None:
+    """Close an open request and mark its card; ``None`` if it was already closed."""
+    updated = await transition(request.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
-    if state != "merged":
+    if state != "merged" and updated.kind == "expedited":
         await withdraw_reviews(updated)
     await refresh_card_in_thread(updated, outcome=outcome)
     return updated
 
 
+async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Outcome:
+    """Anyone who can see the card may take it down; it needs no GitHub link or access."""
+    if await retire(request, "cancelled", f"dismissed by <@{slack_user_id}>") is None:
+        return Outcome("This review request is already closed.")
+    return Outcome("Dismissed.")
+
+
 async def refresh_card_in_thread(
-    approval: ExpeditedApproval, *, outcome: str | None = None
+    request: HumanReviewRequest, *, outcome: str | None = None
 ) -> None:
-    """Re-render a card that no longer needs votes, reposting it out of the channel if broadcast."""
-    if not approval.slack_broadcast or not await _repost(
-        approval, broadcast=False, outcome=outcome
-    ):
-        await refresh_card(approval, outcome=outcome)
+    """Re-render a card, reposting it into the thread only if it was also in the channel.
+
+    The channel keeps no finished cards: its copy is deleted and the thread keeps the card.
+    """
+    if not request.slack_broadcast or not await _repost(request, broadcast=False, outcome=outcome):
+        await refresh_card(request, outcome=outcome)
 
 
-async def remove_superseded_cards(approval: ExpeditedApproval) -> None:
+async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
     """Delete older cards for ``approval``'s PR, so its thread only ever shows one."""
-    for stale in await ExpeditedApproval.superseded_on_slack(approval.pull_request_id):
+    for stale in await HumanReviewRequest.superseded_on_slack(approval.pull_request_id):
         if stale.id == approval.id:
             continue
         if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
             continue
-        async with ExpeditedApproval.locked(stale.id) as (_, row):
+        async with HumanReviewRequest.locked(stale.id) as (_, row):
             if row is not None:
                 row.slack_message_ts = ""
 
 
-async def mark_merged(approval: ExpeditedApproval) -> None:
-    updated = await retire(approval, "merged", "merged")
+async def mark_merged(request: HumanReviewRequest) -> None:
+    updated = await retire(request, "merged", "merged")
     if updated is None:
         return
-    location = updated.slack_location
+    location = updated.slack_location or (
+        (updated.slack_channel_id, updated.slack_message_ts)
+        if updated.slack_channel_id and updated.slack_message_ts
+        else None
+    )
     if location is not None:
         if not await add_slack_reaction(location[0], location[1], "merged"):
             await add_slack_reaction(location[0], location[1], "white_check_mark")
 
 
-async def withdraw_reviews(approval: ExpeditedApproval) -> None:
+async def withdraw_reviews(approval: HumanReviewRequest) -> None:
     """Dismiss the GitHub reviews every closed, unmerged card of this PR still has standing.
 
     Covers earlier cards too, so a dismissal GitHub refused is retried here.
@@ -345,8 +383,8 @@ async def withdraw_reviews(approval: ExpeditedApproval) -> None:
             extra={"approval_id": str(approval.id)},
         )
         return
-    for stale in await ExpeditedApproval.with_standing_reviews(approval.pull_request_id):
-        async with ExpeditedApproval.locked(stale.id) as (_, row):
+    for stale in await HumanReviewRequest.with_standing_reviews(approval.pull_request_id):
+        async with HumanReviewRequest.locked(stale.id) as (_, row):
             if row is None or row.state in {"open", "merged"}:
                 continue
             for vote in row.approvals:
@@ -360,8 +398,8 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
     PR. Only the card and the merged reaction change: nothing new is posted and the
     agent is not woken.
     """
-    approval = await ExpeditedApproval.active_for(owner, repo, number)
-    if approval is None:
+    request = await HumanReviewRequest.active_for(owner, repo, number)
+    if request is None:
         return
     token = await repo_token(owner, repo)
     payload = (
@@ -369,12 +407,12 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
     )
     if payload is None:
         logger.warning(
-            "Could not read a closed pull request to settle its expedited card",
-            extra={"approval_id": str(approval.id)},
+            "Could not read a closed pull request to settle its review card",
+            extra={"request_id": str(request.id), "kind": request.kind},
         )
         return
     current = PullRequestPayload.model_validate(payload)
     if current.merged:
-        await mark_merged(approval)
+        await mark_merged(request)
     elif current.state == "closed":
-        await retire(approval, "cancelled", "the pull request was closed")
+        await retire(request, "cancelled", "the pull request was closed")
