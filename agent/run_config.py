@@ -150,6 +150,7 @@ class RunConfig(BaseModel):
     resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
+    model_selection_changed: bool = False
     model_override_reason: Literal["image_input"] | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None

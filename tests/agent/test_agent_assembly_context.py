@@ -688,3 +688,36 @@ async def test_new_slack_handoff_ignores_routing_toggle_but_respects_explicit_ch
     enabled = source == "slack" and not explicit
     assert bool(prepare._requested_models) is enabled
     assert bool(routers) is enabled
+
+
+@pytest.mark.asyncio
+async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups() -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(
+        source="dashboard", model_selection="auto", model_selection_changed=True
+    )
+    settings = {
+        "model_id": "anthropic:claude-opus-5-5",
+        "effort": "high",
+        "requested_model": "anthropic:claude-opus-5-5",
+        "model_handoff_complete": True,
+        "model_routing_enabled": False,
+    }
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        captured = await _capture_create_deep_agent_kwargs(config, thread_settings=settings)
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["requested_model"] is None
+    assert snapshot["model_routing_enabled"] is True
+    assert snapshot["model_handoff_complete"] is True
+
+    followup = _base_config()
+    followup["configurable"].update(source="dashboard", model_selection="auto")
+    followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
+    for agent in (captured, followup_agent):
+        middleware = cast(list[object], agent["middleware"])
+        assert any(isinstance(item, ModelSelectionMiddleware) for item in middleware)
+        prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+        assert prepare._requested_models is None

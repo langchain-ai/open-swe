@@ -89,10 +89,10 @@ export function useSubmitAgentMessage(threadId: string) {
       // nothing may flip it back afterwards.
       setAgentThreadStatus(queryClient, threadId, "running")
 
-      const configurable: Record<string, unknown> = modelConfigurable({
-        modelId: vars.model_id,
-        effort: vars.effort,
-      })
+      const configurable = modelConfigurable(
+        { modelId: vars.model_id, effort: vars.effort },
+        vars.model_selection_changed
+      )
 
       void source
         .startRun({

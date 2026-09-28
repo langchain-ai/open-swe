@@ -181,12 +181,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         images,
         model_id: activeSelection?.modelId ?? null,
         effort: activeSelection?.effort ?? null,
+        model_selection_changed: autoSelected,
         enqueue: isStreaming && queue,
       })
     },
     [
       activeSelection?.effort,
       activeSelection?.modelId,
+      autoSelected,
       followUpBehavior,
       isStreaming,
       sendMessage,

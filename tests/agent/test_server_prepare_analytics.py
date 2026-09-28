@@ -279,6 +279,35 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     handoff.assert_awaited_once()
 
 
+async def test_explicit_auto_selection_routes_again_after_a_pinned_turn(
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from langchain_core.messages import HumanMessage
+
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    middleware = _middleware(
+        _slack_config(source="dashboard", model_selection="auto", model_selection_changed=True)
+    )
+    middleware._model_selection = ModelSelectionMiddleware(
+        {"fast": MagicMock()}, MagicMock(), routing_mode="fast"
+    )
+    middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
+    prepared = await middleware._prepare(
+        {
+            "messages": [HumanMessage(content="Fix the typo")],
+            "model_route": "default",
+            "requested_model": "anthropic:claude-opus-5-5",
+        },
+        MagicMock(),
+    )
+    assert prepared["requested_model"] is None
+    assert prepared["model_route"] == "fast"
+    assert prepared["selected_model_id"] == "openai:gpt-6-luna"
+
+
 @pytest.mark.parametrize("failure", ["unavailable", "unknown", "persistence"])
 async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
     prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, failure: str

@@ -1065,10 +1065,18 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_effort = self._effort
             attribution_route = None
             if self._model_selection is not None:
+                routing_state = cast(ModelSelectionState, state).copy()
+                if (
+                    cfg.source == "dashboard"
+                    and cfg.model_selection == "auto"
+                    and cfg.model_selection_changed
+                ):
+                    routing_state.pop("model_route", None)
+                    routing_state.pop("requested_model", None)
                 attribution_route = (
                     "default"
                     if requested_model
-                    else await self._model_selection.select_route(cast(ModelSelectionState, state))
+                    else await self._model_selection.select_route(routing_state)
                 )
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[
@@ -1328,6 +1336,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         thread_settings["model_handoff_complete"] = True
         settings_changed = True
     elif cfg.source == "dashboard" and cfg.model_selection == "auto":
+        if cfg.model_selection_changed:
+            thread_settings["requested_model"] = None
+            thread_settings["model_handoff_complete"] = True
+            settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
     # Capability fallbacks can temporarily replace a pinned text-only model.

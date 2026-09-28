@@ -80,6 +80,27 @@ beforeEach(() => {
 })
 
 describe("useSubmitAgentMessage", () => {
+  it.each([false, true])(
+    "sends Auto picker intent separately from inherited Auto (changed=%s)",
+    async (changed) => {
+      const { result } = setup()
+      await result.current.mutateAsync({
+        content: "Fix the typo",
+        model_id: null,
+        effort: null,
+        model_selection_changed: changed,
+      })
+      expect(source.startRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configurable: {
+            model_selection: "auto",
+            ...(changed ? { model_selection_changed: true } : {}),
+          },
+        })
+      )
+    }
+  )
+
   it("offloads without adding a user message", async () => {
     const { client, result } = setup()
     await result.current.mutateAsync({ content: "/offload", images: [] })

@@ -25,15 +25,19 @@ export function promptMessage(
   }
 }
 
-/** Run `configurable` entries for the picked model, or none when unset. */
+/** Run model settings, distinguishing a picker action from an inherited choice. */
 export function modelConfigurable(
   selection:
     | Partial<Record<keyof ModelSelection, string | null>>
     | null
-    | undefined
+    | undefined,
+  selectionChanged = false
 ): Record<string, unknown> {
   if (!selection?.modelId || !selection.effort)
-    return { model_selection: "auto" }
+    return {
+      model_selection: "auto",
+      ...(selectionChanged ? { model_selection_changed: true } : {}),
+    }
   return {
     agent_model_id: selection.modelId,
     agent_effort: selection.effort,
