@@ -11,8 +11,6 @@ from agent.slack.blocks import Block, ButtonElement, actions, button, context, e
 from agent.users import User
 
 BUTTON_TYPE = "human_review"
-UNCLAIMED_AFTER_MINUTES = 30
-AUTO_MERGE_AFTER_HOURS = 2
 
 _STATE_LABELS = {
     "APPROVED": ":white_check_mark: approved",
@@ -44,13 +42,7 @@ def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> 
 def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Block]:
     reviewers = request.reviewers
     if not reviewers:
-        return [
-            section(
-                "*Reviewers*\nNobody yet. If nobody signs up within "
-                f"{UNCLAIMED_AFTER_MINUTES} minutes, Open SWE picks someone from the "
-                "code's owners and review history."
-            )
-        ]
+        return []
     lines = "\n".join(_reviewer_line(reviewer, states) for reviewer in reviewers)
     return [section(f"*Reviewers*\n{lines}")]
 
@@ -108,14 +100,8 @@ def open_card(
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
     blocks.extend(_reviewers(request, review_states))
-    waiting = f"  Waiting on: {escape(request.detail)}." if request.detail else ""
-    blocks.append(
-        context(
-            "Merges on its own once every reviewer approves, or "
-            f"{AUTO_MERGE_AFTER_HOURS} hours after this request with at least one approval, "
-            f"when checks pass and nothing is left unresolved.{waiting}"
-        )
-    )
+    if request.detail:
+        blocks.append(context(f"Waiting on: {escape(request.detail)}."))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
 

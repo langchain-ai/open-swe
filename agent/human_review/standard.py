@@ -27,7 +27,7 @@ from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
-from agent.human_review.card import AUTO_MERGE_AFTER_HOURS, UNCLAIMED_AFTER_MINUTES, mention
+from agent.human_review.card import mention
 from agent.human_review.lifecycle import (
     mark_merged,
     notify_agent,
@@ -52,6 +52,8 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 SCHEDULER_TASK = "human_review"
+UNCLAIMED_AFTER_MINUTES = 30
+AUTO_MERGE_AFTER_HOURS = 2
 DeadlineStep = Literal["unclaimed", "auto_merge"]
 
 

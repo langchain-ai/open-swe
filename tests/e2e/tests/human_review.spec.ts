@@ -315,7 +315,8 @@ test.describe("Human review in Slack", () => {
     expect(text).toContain(`fakeorg/demo#${seeded.number}`);
     expect(text).toContain("Tidy the greeting");
     expect(text).toContain(TLDR);
-    expect(text).toContain("Nobody yet");
+    expect(text).not.toContain("Reviewers");
+    expect(text).not.toContain("Merges on its own");
     expect(buttons(card)).toEqual(["I'll review", "Open on GitHub", "Dismiss"]);
     await shootCard(page, "open");
 
