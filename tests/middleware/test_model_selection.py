@@ -132,7 +132,9 @@ async def test_jev_sees_the_human_request_not_injected_context(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [None, "timeout", "http", "malformed", "confidence", "nan"])
+@pytest.mark.parametrize(
+    "failure", [None, "timeout_once", "timeout", "http", "malformed", "confidence", "nan"]
+)
 @pytest.mark.parametrize("use_gateway", [False, True])
 async def test_jev_routes_or_falls_back(
     monkeypatch: pytest.MonkeyPatch, failure: str | None, use_gateway: bool
@@ -141,7 +143,7 @@ async def test_jev_routes_or_falls_back(
 
     def handle(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        if failure == "timeout":
+        if failure == "timeout" or (failure == "timeout_once" and len(requests) == 1):
             raise httpx2.TimeoutException("timed out")
         if failure == "http":
             return httpx2.Response(503)
@@ -184,8 +186,8 @@ async def test_jev_routes_or_falls_back(
     middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
     route = await middleware.select_route(state)
-    assert route == ("default" if failure else "fast")
-    assert len(requests) == 1
+    assert route == ("fast" if failure in {None, "timeout_once"} else "default")
+    assert len(requests) == (2 if failure in {"timeout_once", "timeout"} else 1)
     assert requests[0].url == (
         "https://gateway.example.com/v1/systemone"
         if use_gateway
@@ -200,4 +202,68 @@ async def test_jev_routes_or_falls_back(
     assert payload["questions"]["route"]["type"] == "choice"
     state["model_route"] = route
     assert await middleware.select_route(state) == route
-    assert len(requests) == 1
+    assert len(requests) == (2 if failure in {"timeout_once", "timeout"} else 1)
+
+
+@pytest.mark.asyncio
+async def test_jev_timeout_uses_configured_env_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeout: list[float] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "fast",
+                        "confidence": 0.9,
+                        "probabilities": {"fast": 0.9, "balanced": 0.05, "performance": 0.05},
+                    }
+                },
+            },
+        )
+
+    client = httpx2.AsyncClient
+    monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-key")
+    monkeypatch.setenv("TYPESAFE_TIMEOUT_SECONDS", "4.25")
+
+    def make_client(**kwargs: Any) -> httpx2.AsyncClient:
+        timeout.append(kwargs["timeout"])
+        return client(**kwargs, transport=httpx2.MockTransport(handle))
+
+    monkeypatch.setattr("agent.middleware.model_selection.httpx2.AsyncClient", make_client)
+
+    middleware, _ = _middleware()
+    state = ModelSelectionState(messages=[HumanMessage(content="classify this")])
+
+    assert await middleware.select_route(state) == "fast"
+    assert timeout == [4.25]
+
+
+@pytest.mark.asyncio
+async def test_jev_error_fallback_is_persisted_and_emitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.TimeoutException("timed out")
+
+    client = httpx2.AsyncClient
+    monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-key")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection.httpx2.AsyncClient",
+        lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
+    )
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
+
+    middleware, _ = _middleware(route_model_ids={"default": "default-model"})
+    state = ModelSelectionState(messages=[HumanMessage(content="classify this")])
+
+    update = await middleware.abefore_model(state, MagicMock())
+
+    assert update == {"model_route": "default", "model_route_fallback": True}
+    assert events == [
+        {"type": "model_routed", "route": "default", "model_id": "default-model", "fallback": True}
+    ]

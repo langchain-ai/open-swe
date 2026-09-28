@@ -178,6 +178,11 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "TYPESAFE_TIMEOUT_SECONDS",
+    "Timeout in seconds for Jev model routing requests.",
+    default="8.0",
+)
+ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
     secret=True,
