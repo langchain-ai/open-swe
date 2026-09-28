@@ -717,6 +717,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
             token=app_token,
         )
     ):
+        await PullRequest(
+            owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
+        ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
         await common.set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         if postgres.configured():
             try:

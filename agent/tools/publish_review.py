@@ -399,6 +399,9 @@ async def _publish_review_async(
             token=token,
             findings=findings,
         )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+        )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
             thread_id=thread_id,
