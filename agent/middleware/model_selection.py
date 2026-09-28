@@ -146,14 +146,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         state: ModelSelectionState,
     ) -> SelectedRoute:
         """Select the model route for a turn."""
-        messages = state.get("messages", [])
-        task = _latest_human_task(messages)[-8_000:]
-        if task.split(maxsplit=1)[0:1] == ["/model:perf"]:
-            return "performance"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
+        messages = state.get("messages", [])
+        task = _latest_human_task(messages)[-8_000:]
         return await _select_jev_route(task)
 
     async def abefore_model(

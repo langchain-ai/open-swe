@@ -103,31 +103,6 @@ async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("existing_route", [None, "fast", "default"])
-async def test_model_perf_directive_overrides_existing_route_without_classifier(
-    monkeypatch: pytest.MonkeyPatch, existing_route: str | None
-) -> None:
-    jev = AsyncMock(return_value="fast")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
-    middleware, models = _middleware()
-    state = {
-        "messages": [
-            HumanMessage(
-                content='<input-message sender="github:alice" surface="web" kind="human">\n'
-                "/model:perf do the task\n</input-message>"
-            )
-        ],
-        **({"model_route": existing_route} if existing_route else {}),
-    }
-
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-
-    assert state["model_route"] == "performance"
-    assert (await _invoke(middleware, state)).model is models["performance"]
-    jev.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_existing_route_is_reused_without_classifier() -> None:
     middleware, models = _middleware()
     state = {
