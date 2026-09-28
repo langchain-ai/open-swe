@@ -16,6 +16,7 @@ from agent.github.thread_token import (
     get_github_token,
     invalidate_cached_github_token,
 )
+from agent.review.approvals import approval_mode_for
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
@@ -64,7 +65,6 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
@@ -293,21 +293,15 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    auto_approve = False
+    dry_run = True
     if assessment is not None:
-        settings = await get_workspace_settings()
-        policy = await get_approval_policy(owner, repo, settings)
-        if not policy:
+        # The policy was read at the base commit when the run started; the mode is
+        # read now so an admin switching a repository off or to dry run wins mid-review.
+        policy = state.get("review_approval_policy") if state else None
+        mode = await approval_mode_for(owner, repo)
+        if not policy or mode == "off":
             assessment = None
-        elif state and state.get("review_approval_policy") != policy:
-            return {
-                "success": False,
-                "error": "Approval policy changed. Start a new review before publishing an assessment.",
-            }
-        else:
-            auto_approve = settings.get("review_auto_approve") is True and bool(
-                state and state.get("review_approval_policy") == policy
-            )
+        dry_run = mode != "approve"
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -405,6 +399,9 @@ async def _publish_review_async(
             token=token,
             findings=findings,
         )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+        )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
             thread_id=thread_id,
@@ -435,7 +432,7 @@ async def _publish_review_async(
         }
 
     approved = (
-        auto_approve
+        not dry_run
         and assessment is not None
         and assessment.decision == "would_approve"
         and await approval_allowed_for_head(
@@ -452,6 +449,7 @@ async def _publish_review_async(
             additional_findings_count=additional_findings_count,
             assessment=assessment,
             approved=approved,
+            dry_run=dry_run,
         )
 
         review_response = await post_pull_request_review(
@@ -567,6 +565,7 @@ async def _publish_review_async(
                     repo=repo,
                     pr_number=pr_number,
                     approved=approved,
+                    dry_run=dry_run,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
@@ -628,6 +627,28 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
+
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -658,22 +679,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,

@@ -18,6 +18,7 @@ from agent.workspaces.refresh import (
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
+    DefaultWorkspaceDeletionError,
     RepositorySettings,
     Workspace,
     WorkspaceConflictError,
@@ -217,7 +218,11 @@ async def api_delete_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
     normalized = _normalized_slug(slug)
-    if not await WORKSPACES.remove(normalized):
+    try:
+        removed = await WORKSPACES.remove(normalized)
+    except DefaultWorkspaceDeletionError as e:
+        raise HTTPException(409, str(e)) from e
+    if not removed:
         raise HTTPException(404, "workspace not found")
     # A later workspace under the same slug must start from the instance record.
     await delete_workspace_settings(normalized)
