@@ -18,13 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 async def notify_slack_review(
-    thread_id: str, *, reviewer: str, review_url: str, edited_body: str | None = None
+    thread_id: str,
+    *,
+    reviewer: str,
+    review_url: str,
+    edited_body: str | None = None,
+    edited_at: str | None = None,
 ) -> None:
     """Attempt each review notice once, even if Slack's response is lost."""
     client = get_client(url=ENV.LANGGRAPH_URL.get())
     namespace = ("github_review_slack_notices", thread_id)
     action = "submitted" if edited_body is None else "edited"
-    key = hashlib.sha256(f"{review_url}:{action}:{edited_body or ''}".encode()).hexdigest()
+    key = hashlib.sha256(
+        f"{review_url}:{action}:{edited_at or edited_body or ''}".encode()
+    ).hexdigest()
     try:
         location = await get_active_slack_thread(client, thread_id)
         while location is not None:

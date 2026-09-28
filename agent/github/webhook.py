@@ -1193,6 +1193,7 @@ async def process_github_pr_comment(
             reviewer=event_comment["author"],
             review_url=f"{pr_url}#pullrequestreview-{comment_id}",
             edited_body=event_body if payload.get("action") == "edited" else None,
+            edited_at=event_comment["event_at"],
         )
 
 

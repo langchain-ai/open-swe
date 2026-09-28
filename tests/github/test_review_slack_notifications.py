@@ -113,6 +113,16 @@ async def test_review_wakeup_posts_one_linked_notice(
     )
     assert dispatch.await_count == 2
 
+    payload["action"] = "edited"
+    for index, edited_body in enumerate(["A", "B", "A"], start=1):
+        payload["review"].update(body=edited_body, updated_at=f"2026-01-01T00:00:0{index}Z")
+        comments[0]["body"] = edited_body
+        await asyncio.gather(deliver(), deliver())
+        assert post.await_count == index + 1
+        assert post.call_args.args[2] == (
+            "@octo <https://github.com/o/r/pull/7#pullrequestreview-42|edited a review>."
+        )
+
 
 @pytest.mark.parametrize("detached", [False, True])
 async def test_reviews_do_not_create_slack_threads(review_notice, detached: bool) -> None:
