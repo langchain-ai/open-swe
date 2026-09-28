@@ -590,6 +590,46 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "pinned_model",
+    ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"],
+)
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+@pytest.mark.parametrize("has_images", [False, True])
+async def test_image_fallback_overrides_only_incompatible_pinned_models(
+    pinned_model: str, source: str, has_images: bool
+) -> None:
+    from agent.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(
+        source=source,
+        model_selection="auto",
+        agent_model_id="openai:gpt-6-sol",
+        agent_effort="medium",
+    )
+    if has_images:
+        config["configurable"]["model_override_reason"] = "image_input"
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        thread_settings={
+            "model_id": pinned_model,
+            "effort": "high",
+            "requested_model": pinned_model,
+            "model_handoff_complete": True,
+            "model_routing_enabled": False,
+        },
+    )
+    middleware = cast(list[object], captured["middleware"])
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    expected = (
+        "openai:gpt-6-sol" if has_images and pinned_model.endswith("kimi-k3") else pinned_model
+    )
+    assert prepare._model_id == expected
+    assert config["configurable"]["resolved_agent_model_id"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "stored", [{}, {"model_id": "openai:gpt-6-sol", "model_routing_enabled": True}]
 )
 async def test_model_handoff_only_initializes_new_routed_threads(stored: dict[str, object]) -> None:

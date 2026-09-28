@@ -859,6 +859,7 @@ async def _enrich_run_start_command(
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
         overrides["agent_effort"] = run_effort
+        overrides["model_override_reason"] = "image_input"
         metadata_update["model"] = run_model
         metadata_update["effort"] = run_effort
         metadata_update["resolved_model"] = run_model

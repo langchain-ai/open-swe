@@ -1054,6 +1054,7 @@ async def _process_slack_mention_impl(
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
+        configurable["model_override_reason"] = "image_input"
 
     if thread_model_choice and not image_model_override:
         configurable["agent_model_id"], configurable["agent_effort"] = thread_model_choice

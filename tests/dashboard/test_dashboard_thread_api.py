@@ -230,10 +230,17 @@ async def test_private_threads_created_by_admins_get_admin_permissions(
     assert (configurable.get("admin_thread") is True) is expected_admin
 
 
+@pytest.mark.parametrize("creating", [False, True])
 async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
+    creating: bool,
 ) -> None:
-    created: dict[str, object] = {}
+    metadata = {
+        "model": _TEXT_ONLY_MODEL,
+        "effort": "high",
+        "model_selection": "auto",
+    }
+    created: dict[str, object] = {} if creating else {"metadata": metadata}
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
@@ -267,8 +274,8 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         "new-tid",
         "octocat",
         command,
-        metadata={},
-        creating=True,
+        metadata={} if creating else metadata,
+        creating=creating,
     )
 
     stamped = created["metadata"]
@@ -280,6 +287,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+    assert configurable["model_override_reason"] == "image_input"
 
 
 async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:

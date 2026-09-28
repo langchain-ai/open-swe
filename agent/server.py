@@ -79,6 +79,7 @@ from agent.dashboard.options import (
     canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
+    model_supports_images,
 )
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -1331,15 +1332,18 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     elif cfg.source == "dashboard" and cfg.model_selection == "auto":
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
-    # An explicit per-run model choice is the one thing allowed to move a thread
-    # off its stored settings; the new choice is then stored in turn.
+    # Capability fallbacks can also replace a pinned text-only model.
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
     if (
-        (not thread_settings.get("requested_model") or cfg.model_selection == "explicit")
+        (
+            not thread_settings.get("requested_model")
+            or cfg.model_selection == "explicit"
+            or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
+        )
         and isinstance(per_thread_model, str)
         and per_thread_model in SUPPORTED_MODEL_IDS
         and isinstance(per_thread_effort, str)
