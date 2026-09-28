@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -63,7 +63,9 @@ class ProfileUpdate(BaseModel):
     preserve_sandbox_memory: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = None
+    experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")

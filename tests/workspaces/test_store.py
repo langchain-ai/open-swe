@@ -9,22 +9,17 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.store import now_iso
 from agent.workspaces import store as env_store
-from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable, workspace_for_repo
 from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 from agent.workspaces.store import (
-    LEGACY_ENVIRONMENTS_NAMESPACE,
     WORKSPACES,
-    WORKSPACES_NAMESPACE,
     RefreshStep,
     Workspace,
     WorkspaceCreate,
     WorkspaceUpdate,
     default_snapshot_name_for,
-    import_store_records,
     log_excerpt,
     slugify,
 )
-from tests.conftest import FakeStore
 
 # --- slug + snapshot naming (sync) ---
 
@@ -186,15 +181,13 @@ def test_workspace_prompt_blank_is_none() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_only_the_workspace_named_default_is_resolved() -> None:
+async def test_a_migration_seeds_the_default_workspace() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
-    assert await env_store.load_default_workspace() is None
 
-    await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
     resolved = await env_store.load_default_workspace()
 
     assert resolved is not None
-    assert resolved.slug == "default"
+    assert (resolved.slug, resolved.name) == ("default", "Default")
 
 
 @pytest.mark.asyncio
@@ -328,17 +321,26 @@ async def test_delete_removes_record_and_snapshot() -> None:
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Core"), "ramon")
         await WORKSPACES.mark_captured(
-            "default",
+            "core",
             snapshot_id="snap-1",
             snapshot_name="prior",
             source_sandbox_id="sb-prior",
         )
 
-        assert await WORKSPACES.remove("default") is True
-        assert await env_store.load_default_workspace() is None
+        assert await WORKSPACES.remove("core") is True
+        assert await WORKSPACES.get("core") is None
         delete_snapshot.assert_awaited_once_with("snap-1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_default_workspace_cannot_be_deleted() -> None:
+    with pytest.raises(env_store.DefaultWorkspaceDeletionError):
+        await WORKSPACES.remove("default")
+
+    assert await WORKSPACES.get("default") is not None
 
 
 @pytest.mark.asyncio
@@ -522,29 +524,11 @@ async def test_update_clearing_create_params_with_null_stays_readable() -> None:
     reread = await WORKSPACES.get("base")
     assert reread is not None
     assert reread.create_params == {}
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["base"]
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["base", "default"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_an_imported_record_with_null_create_params_is_still_readable(
-    fake_store: FakeStore,
-) -> None:
-    """Records written before create_params was modelled can hold a null."""
-    fake_store.seed(
-        WORKSPACES_NAMESPACE,
-        "legacy",
-        {"slug": "legacy", "name": "legacy", "create_params": None},
-    )
-    assert await import_store_records() == 1
-
-    record = await WORKSPACES.get("legacy")
-
-    assert record is not None
-    assert record.create_params == {}
-    assert record.sandbox_create_params() == {}
-
-
 def test_assignment_is_validated() -> None:
     record = Workspace(slug="base")
     with pytest.raises(ValidationError):
@@ -572,7 +556,6 @@ def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_load_workspace_prefers_the_selection() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
     await WORKSPACES.create(WorkspaceCreate(name="staging", repos=["acme/staging"]), "ramon")
 
     selected = await env_store.load_workspace("staging")
@@ -592,13 +575,9 @@ async def test_load_workspace_prefers_the_selection() -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_workspace_options_omit_admin_only_settings() -> None:
-    await WORKSPACES.create(
-        WorkspaceCreate(
-            name="default",
-            prompt="secret-ish prompt",
-            create_params={"_internal_runtime": "v2"},
-        ),
-        "ramon",
+    await WORKSPACES.apply_update(
+        "default",
+        WorkspaceUpdate(prompt="secret-ish prompt", create_params={"_internal_runtime": "v2"}),
     )
     await WORKSPACES.mark_captured(
         "default",
@@ -614,7 +593,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
     assert options == [
         {
             "slug": "default",
-            "name": "default",
+            "name": "Default",
             "repos": [],
             "slack_channel_ids": [],
             "kitchen_channel_ids": [],
@@ -714,118 +693,10 @@ async def test_slack_channel_ids_are_normalized() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_stored_records_are_imported_from_both_namespaces(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    fake_store.seed(
-        LEGACY_ENVIRONMENTS_NAMESPACE,
-        "default",
-        {"slug": "default", "name": "Default", "prompt": "hi", "repos": []},
-    )
-    fake_store.seed(
-        WORKSPACES_NAMESPACE,
-        "oss",
-        {"slug": "oss", "name": "OSS", "repos": ["acme/oss"], "slack_channel_ids": ["C0SS"]},
-    )
-
-    assert await import_store_records() == 2
-
-    assert WORKSPACES.import_completed is True
-    stored = {record.slug: record for record in await WORKSPACES.list_all()}
-    assert sorted(stored) == ["default", "oss"]
-    assert stored["default"].prompt == "hi"
-    assert stored["oss"].repos == ["acme/oss"]
-    assert stored["oss"].slack_channel_ids == ["C0SS"]
-    # Consumed, not merely copied, so neither namespace can write them back.
-    assert fake_store.values(WORKSPACES_NAMESPACE) == {}
-    assert fake_store.values(LEGACY_ENVIRONMENTS_NAMESPACE) == {}
-
-
 @pytest.mark.usefixtures("registry_db")
-async def test_one_unimportable_record_does_not_stop_the_others(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "alice")
-    fake_store.seed(
-        WORKSPACES_NAMESPACE, "taken", {"slug": "taken", "name": "Taken", "repos": ["acme/api"]}
-    )
-    fake_store.seed(
-        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
-    )
-
-    assert await import_store_records() == 1
-
-    assert sorted(record.slug for record in await WORKSPACES.list_all()) == ["core", "oss"]
-    # The one whose repository another workspace owns stays where it is, and the
-    # import is not complete until it is dealt with.
-    assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["taken"]
-    assert WORKSPACES.import_completed is False
-    # Its repository already has an owner, so that owner still wins.
-    assert await workspace_for_repo("acme", "api") == "core"
-    assert await repo_is_routable("acme", "api") is True
-
-
 @pytest.mark.usefixtures("registry_db")
-async def test_repositories_of_an_unreadable_record_fail_closed_until_it_imports(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    monkeypatch.setenv("OPEN_SWE_UNASSIGNED_REPO_WORKSPACE", "default")
-    broken = {"slug": "legacy", "name": "Legacy", "repos": ["acme/legacy"], "snapshot_status": "?"}
-    fake_store.seed(WORKSPACES_NAMESPACE, "legacy", broken)
-    fake_store.seed(
-        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
-    )
-
-    assert await import_store_records() == 1
-
-    assert WORKSPACES.import_completed is False
-    assert sorted(fake_store.values(WORKSPACES_NAMESPACE)) == ["legacy"]
-    # GitHub deliveries for the stranded repository are retried, not routed to
-    # ``default`` or dropped; everything else routes as usual.
-    with pytest.raises(WorkspaceLookupError):
-        await repo_is_routable("acme", "legacy")
-    assert await workspace_for_repo("acme", "legacy") is None
-    assert await repo_is_routable("acme", "oss") is True
-    assert await repo_is_routable("acme", "unrelated") is True
-
-    fake_store.seed(WORKSPACES_NAMESPACE, "legacy", {**broken, "snapshot_status": "none"})
-    assert await import_store_records() == 1
-    assert WORKSPACES.import_completed is True
-    assert await workspace_for_repo("acme", "legacy") == "legacy"
-
-
 @pytest.mark.usefixtures("registry_db")
-async def test_importing_twice_imports_nothing_the_second_time(fake_store: FakeStore) -> None:
-    fake_store.seed(
-        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
-    )
-
-    assert await import_store_records() == 1
-    assert await import_store_records() == 0
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["oss"]
-
-
 @pytest.mark.usefixtures("registry_db")
-async def test_deleting_an_imported_workspace_does_not_resurrect_it(
-    fake_store: FakeStore,
-) -> None:
-    fake_store.seed(
-        LEGACY_ENVIRONMENTS_NAMESPACE,
-        "oss",
-        {"slug": "oss", "name": "OSS", "prompt": "hi", "repos": ["acme/oss"]},
-    )
-    assert await import_store_records() == 1
-
-    assert await WORKSPACES.remove("oss") is True
-
-    assert await import_store_records() == 0
-    assert await WORKSPACES.list_all() == []
-    assert await WORKSPACES.get("oss") is None
-
-
 @pytest.mark.usefixtures("registry_db")
 async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
     """A hand-edited or pre-model row must not take the whole listing down.
@@ -844,7 +715,7 @@ async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
             {"slug": "corrupt"},
         )
 
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["default", "healthy"]
 
 
 @pytest.mark.usefixtures("registry_db")

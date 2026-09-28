@@ -257,3 +257,10 @@ async def test_a_prompt_edit_during_a_refresh_outlives_it(
     stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
     assert stored["prompt"] == "new"
     assert stored["refresh_status"] == "success"
+
+
+async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.AsyncClient) -> None:
+    response = await admin_client.delete("/dashboard/api/workspaces/default")
+
+    assert response.status_code == 409
+    assert (await admin_client.get("/dashboard/api/workspaces/default")).status_code == 200

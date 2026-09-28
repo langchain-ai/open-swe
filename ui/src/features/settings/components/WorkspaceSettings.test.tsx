@@ -114,14 +114,14 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
-function renderPage(canEdit = true, onDeleted = vi.fn()) {
+function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
       <WorkspaceSettingsPanel
-        slug="oss"
+        slug={slug}
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
@@ -130,6 +130,14 @@ function renderPage(canEdit = true, onDeleted = vi.fn()) {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("offers no way to delete the default workspace", async () => {
+    mockApis({ ...RECORD, slug: "default", name: "Default" })
+    renderPage(true, vi.fn(), "default")
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
