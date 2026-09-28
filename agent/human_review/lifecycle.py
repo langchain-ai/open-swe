@@ -326,6 +326,13 @@ async def retire(
     return updated
 
 
+async def reopen(request: HumanReviewRequest) -> None:
+    """Undo superseding a request whose replacement never made it to Slack."""
+    updated = await transition(request.id, expected=("superseded",), state="open", detail="")
+    if updated is not None:
+        await refresh_card(updated)
+
+
 async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Outcome:
     """Anyone who can see the card may take it down; it needs no GitHub link or access."""
     if await retire(request, "cancelled", f"dismissed by <@{slack_user_id}>") is None:

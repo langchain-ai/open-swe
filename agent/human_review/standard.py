@@ -16,6 +16,7 @@ from uuid import UUID
 
 import httpx2
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -118,7 +119,7 @@ async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
 
-async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: timedelta) -> None:
+async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: timedelta) -> bool:
     try:
         await langgraph_client().runs.create(
             None,
@@ -134,6 +135,23 @@ async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: time
             extra={"request_id": str(request.id), "step": step},
             exc_info=True,
         )
+        return False
+    return True
+
+
+async def _existing(active: HumanReviewRequest) -> RequestResult:
+    if active.kind == "expedited":
+        return _failure(
+            "This pull request has an open expedited review card. Dismiss it before "
+            "asking for a standard review."
+        )
+    return RequestResult(
+        success=True,
+        request_id=str(active.id),
+        channel=active.slack_channel_id,
+        permalink=await _permalink(active),
+        reused=True,
+    )
 
 
 async def request_review(
@@ -154,19 +172,8 @@ async def request_review(
         )
 
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None and active.kind == "expedited":
-        return _failure(
-            "This pull request has an open expedited review card. Dismiss it before "
-            "asking for a standard review."
-        )
     if active is not None:
-        return RequestResult(
-            success=True,
-            request_id=str(active.id),
-            channel=active.slack_channel_id,
-            permalink=await _permalink(active),
-            reused=True,
-        )
+        return await _existing(active)
 
     target = await _target_channel(pr_ref, channel, token)
     if isinstance(target, RequestResult):
@@ -192,18 +199,32 @@ async def request_review(
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
     in_thread = origin.slack_channel_id == target.id and bool(origin.slack_thread_ts)
-    request = await HumanReviewRequest(
-        pull_request_id=pull_request.id,
-        head_sha=details.head_sha,
-        kind="standard",
-        thread_id=origin.thread_id,
-        run_config=origin.run_config,
-        requested_by_user_id=origin.requester.id if origin.requester is not None else None,
-        tldr=await pull_request_tldr(details.title, details.body),
-        slack_channel_id=target.id,
-        slack_thread_ts=origin.slack_thread_ts if in_thread else "",
-        slack_broadcast=in_thread,
-    ).save()
+    try:
+        request = await HumanReviewRequest(
+            pull_request_id=pull_request.id,
+            head_sha=details.head_sha,
+            kind="standard",
+            thread_id=origin.thread_id,
+            run_config=origin.run_config,
+            requested_by_user_id=origin.requester.id if origin.requester is not None else None,
+            tldr=await pull_request_tldr(details.title, details.body),
+            slack_channel_id=target.id,
+            slack_thread_ts=origin.slack_thread_ts if in_thread else "",
+            slack_broadcast=in_thread,
+        ).save()
+    except IntegrityError:
+        # A concurrent request opened one first; the partial unique index allows only one.
+        winner = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if winner is None:
+            raise
+        return await _existing(winner)
+    # Without its deadlines a request could wait forever on a reviewer who never approves.
+    scheduled = await _schedule(
+        request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES)
+    ) and await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
+    if not scheduled:
+        await _discard(request.id)
+        return _failure("Open SWE could not schedule the review request's deadlines. Try again.")
     try:
         message_ts, error = await post_standard_card(request)
     except BaseException:
@@ -217,8 +238,6 @@ async def request_review(
         )
     request.slack_message_ts = message_ts
     request = await request.save()
-    await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
-    await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
     return RequestResult(
         success=True,
         request_id=str(request.id),
@@ -426,6 +445,12 @@ async def settle_pull_request(owner: str, repo: str, number: int) -> None:
         await settle(request)
 
 
+async def settle_repository(owner: str, repo: str) -> None:
+    """Re-check every open standard request in a repository, for events that name no PR."""
+    for request in await HumanReviewRequest.open_in_repository(owner, repo, kind="standard"):
+        await settle(request)
+
+
 async def _wake_for_reviewer(request: HumanReviewRequest) -> bool:
     pr = request.pull_request
     text = prompt(
@@ -444,17 +469,21 @@ async def _wake_for_reviewer(request: HumanReviewRequest) -> bool:
             extra={"request_id": str(request.id)},
         )
         return False
-    thread_id = await dispatch_pull_request_prompt(
+
+    async def record_thread(thread_id: str) -> None:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            if row is not None:
+                row.thread_id = thread_id
+
+    await dispatch_pull_request_prompt(
         pr.owner,
         pr.repo,
         pr.number,
         login,
         text,
         title=f"Pick a reviewer for {pr.repo}#{pr.number}",
+        before_dispatch=record_thread,
     )
-    async with HumanReviewRequest.locked(request.id) as (_, row):
-        if row is not None:
-            row.thread_id = thread_id
     return True
 
 

@@ -185,10 +185,17 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
-    async def open_of_kind(cls, kind: RequestKind) -> list[Self]:
+    async def open_in_repository(cls, owner: str, repo: str, *, kind: RequestKind) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
-                cls._loaded(select(cls)).where(cls.kind == kind, cls.state == "open")
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    cls.kind == kind,
+                    cls.state == "open",
+                )
             )
             return list(rows)
 

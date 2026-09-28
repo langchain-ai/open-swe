@@ -16,7 +16,7 @@ from agent.expedited_review.eligibility import (
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
-from agent.human_review.lifecycle import post_card, remove_superseded_cards, retire
+from agent.human_review.lifecycle import post_card, remove_superseded_cards, reopen, retire
 from agent.human_review.requests import HumanReviewRequest
 from agent.prompts import prompt
 from agent.run_config import RunConfig
@@ -157,9 +157,9 @@ async def expedite_pr_approval(
 
     payload = PullRequestPayload.model_validate(pr)
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    standard: HumanReviewRequest | None = None
     if active is not None and active.kind == "standard":
-        await retire(active, "superseded", "replaced by an expedited review")
-        active = None
+        standard, active = active, None
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
     if (
@@ -202,6 +202,12 @@ async def expedite_pr_approval(
         pull_request.author = payload.author
         pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
+    # One open request per PR, so the standard one closes before this row is written;
+    # it is reopened below if the expedited card cannot be posted.
+    if standard is not None and (
+        await retire(standard, "superseded", "replaced by an expedited review") is None
+    ):
+        return _failure("The pull request's review request changed meanwhile. Try again.")
     approval = await HumanReviewRequest(
         pull_request_id=pull_request.id,
         thread_id=thread_id,
@@ -217,9 +223,13 @@ async def expedite_pr_approval(
         message_ts, error = await post_card(approval, title=payload.title, files=files)
     except BaseException:
         await _discard(approval)
+        if standard is not None:
+            await reopen(standard)
         raise
     if not message_ts:
         await _discard(approval)
+        if standard is not None:
+            await reopen(standard)
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()

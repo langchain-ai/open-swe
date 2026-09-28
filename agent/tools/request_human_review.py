@@ -1,20 +1,40 @@
 """Tools that ask people in Slack to review a pull request, and assign one when nobody signs up."""
 
+from collections.abc import Mapping
 from typing import Any
 
+from fastapi import HTTPException
 from langgraph.config import get_config
 
+from agent.dashboard import repo_access
+from agent.github.token import resolve_github_token
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, assign, request_review
 from agent.run_config import RunConfig
 from agent.slack.cards import run_slack_location
-from agent.slack.client import parse_github_pr_url
+from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.tools.manage_baby_sit import dispatch_run_config
 from agent.users import User
 
 
 def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
+
+
+async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None:
+    """Why this run may not act on the pull request's repository, judged by its own GitHub access."""
+    config = get_config()
+    try:
+        token, _ = await resolve_github_token(
+            config if isinstance(config, Mapping) else {}, thread_id
+        )
+    except Exception as exc:
+        return f"GitHub authentication failed: {exc}"
+    try:
+        await repo_access.assert_repo_access(f"{pr_ref.owner}/{pr_ref.repo}", token)
+    except HTTPException as exc:
+        return f"This thread cannot access {pr_ref.owner}/{pr_ref.repo}: {exc.detail}"
+    return None
 
 
 async def request_human_review(pr_url: str, channel: str = "") -> dict[str, Any]:
@@ -26,6 +46,8 @@ async def request_human_review(pr_url: str, channel: str = "") -> dict[str, Any]
     thread_id = cfg.thread_id
     if not thread_id:
         return _failure("No executable agent thread is available")
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
     login = cfg.github_login or ""
     origin = Origin(
@@ -62,8 +84,11 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     if request is None or request.kind != "standard":
         return _failure("This pull request has no open review request to assign a reviewer to.")
     thread_id = RunConfig.from_config(get_config()).thread_id
-    if request.thread_id and request.thread_id != thread_id:
-        return _failure("This review request belongs to another agent thread.")
+    # Only the thread woken to pick a reviewer may pick one.
+    if not thread_id or request.thread_id != thread_id:
+        return _failure("Only the thread this review request woke may assign its reviewer.")
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
     result = await assign(request, github_login.strip().lstrip("@"), reason)
     if not result.success:
         return _failure(result.error)

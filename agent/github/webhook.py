@@ -15,7 +15,7 @@ from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.human_review.lifecycle import close_for_pull_request
-from agent.human_review.standard import settle_pull_request
+from agent.human_review.standard import settle_pull_request, settle_repository
 from agent.input_messages import (
     PersonIdentity,
     RunInput,
@@ -866,7 +866,9 @@ async def process_github_ci_event(
 ) -> None:
     """Evaluate active baby-sit watches and review requests for a signed GitHub CI event."""
     await handle_ci_webhook(payload, event_type, delivery_id=delivery_id)
-    if payload.get("action") == "completed":
+    if event_type == "status":
+        await settle_human_reviews_for_status(payload)
+    elif payload.get("action") == "completed":
         await settle_human_reviews(payload)
 
 
@@ -1575,3 +1577,22 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
         await settle_pull_request(owner, repo, number)
+
+
+class _StatusEvent(BaseModel):
+    repository: _GitHubRepository
+    state: str
+
+
+async def settle_human_reviews_for_status(payload: dict[str, Any]) -> None:
+    """A finished commit status names only a SHA, so re-check the repository's open requests."""
+    if not postgres.configured():
+        return
+    try:
+        event = _StatusEvent.model_validate(payload)
+    except ValidationError:
+        common.logger.info("GitHub status event has an unexpected shape", exc_info=True)
+        return
+    if event.state == "pending":
+        return
+    await settle_repository(event.repository.owner.login, event.repository.name)
