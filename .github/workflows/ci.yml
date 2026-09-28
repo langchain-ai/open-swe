@@ -71,8 +71,15 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install dependencies
         run: uv sync --locked --extra dev
+      # Every DROP DATABASE forces a checkpoint; without fsync, parallel workers stop queueing on them.
+      - name: Tune throwaway PostgreSQL for tests
+        run: >-
+          docker exec ${{ job.services.postgres.id }} psql -U postgres
+          -c "ALTER SYSTEM SET fsync = off"
+          -c "ALTER SYSTEM SET full_page_writes = off"
+          -c "SELECT pg_reload_conf()"
       - name: Run unit tests
-        run: make test
+        run: make test PYTEST_ARGS="-n auto"
 
   js-format:
     name: JS format check
