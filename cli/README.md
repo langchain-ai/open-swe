@@ -63,8 +63,10 @@ oswe login --backend https://dev.open-swe.langchain.dev
 This is the desktop app's sign-in: your browser opens the GitHub login the
 dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
-dashboard's own `osw_session` cookie. The session and backend URL live in
-`~/.open-swe/config.json` (mode 0600), and `oswe logout` deletes the file.
+dashboard's own `osw_session` cookie. The session is stored in
+`~/.open-swe/config.json` (mode 0600) under the backend that minted it, and
+`oswe logout` forgets the current backend's session. `--backend` also makes
+that backend the shared one, so it repoints the desktop app too.
 
 ### Check the credential
 
@@ -96,10 +98,10 @@ steps:
 | `OPEN_SWE_BACKEND_URL` | the backend to call |
 | `OPEN_SWE_DESKTOP_URL` | the same, checked second |
 
-With neither set, the backend comes from `~/.open-swe/config.json`, then
-from the backend the desktop app was last pointed at
-(`desktop-config.json` in its application-support directory), then
-`http://localhost:2024` — the desktop app's own development default.
+With neither set, the backend is `backendUrl` in `~/.open-swe/config.json`,
+the one file the CLI and the desktop app share, then `http://localhost:2024`
+— the desktop app's own development default. Development builds of the
+desktop app keep a separate profile and never change the shared file.
 
 The binary never reads a `.env`. It is compiled with
 `--no-compile-autoload-dotenv`, because it runs inside your repository and a

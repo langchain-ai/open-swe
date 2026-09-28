@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { readBackend, readConfig } from "../src/config.ts"
+import {
+  forgetSession,
+  readBackend,
+  readConfig,
+  storeSession,
+} from "../src/config.ts"
 import {
   ApiKeyCredential,
   GitHubActionsCredential,
@@ -38,28 +43,55 @@ describe("readBackend", () => {
     expect(await readBackend()).toBe("http://localhost:2024")
   })
 
-  test("reads the backend the desktop app was pointed at", async () => {
+  test("reads the backend the desktop app shares", async () => {
     delete process.env["OPEN_SWE_BACKEND_URL"]
     delete process.env["OPEN_SWE_DESKTOP_URL"]
     const home = await mkdtemp(join(tmpdir(), "open-swe-home-"))
-    const support = join(
-      home,
-      "Library",
-      "Application Support",
-      "open-swe-desktop"
-    )
-    await mkdir(support, { recursive: true })
+    await mkdir(join(home, ".open-swe"))
     await writeFile(
-      join(support, "desktop-config.json"),
+      join(home, ".open-swe", "config.json"),
       JSON.stringify({ backendUrl: "https://desktop.example.com/" })
     )
     process.env["HOME"] = home
 
-    expect(await readBackend()).toBe(
-      process.platform === "darwin"
-        ? "https://desktop.example.com/"
-        : "http://localhost:2024"
+    expect(await readBackend()).toBe("https://desktop.example.com/")
+  })
+})
+
+describe("shared sessions", () => {
+  test("uses only the session minted by the backend in use", async () => {
+    for (const name of ["OPEN_SWE_API_KEY", "OPEN_SWE_SESSION"])
+      delete process.env[name]
+    delete process.env["OPEN_SWE_BACKEND_URL"]
+    delete process.env["OPEN_SWE_DESKTOP_URL"]
+    const home = await mkdtemp(join(tmpdir(), "open-swe-home-"))
+    process.env["HOME"] = home
+
+    await storeSession("http://127.0.0.1:2027", "stale", true)
+    await storeSession("https://desktop.example.com", "fresh", false)
+    expect((await readConfig())?.credential.source).toContain("config.json")
+    expect(
+      await (await readConfig())?.credential.headers("http://127.0.0.1:2027")
+    ).toMatchObject({ Cookie: "osw_session=stale" })
+
+    await writeFile(
+      join(home, ".open-swe", "config.json"),
+      JSON.stringify({
+        ...JSON.parse(
+          await readFile(join(home, ".open-swe", "config.json"), "utf8")
+        ),
+        backendUrl: "https://desktop.example.com/",
+      })
     )
+    expect(
+      await (
+        await readConfig()
+      )?.credential.headers("https://desktop.example.com")
+    ).toMatchObject({ Cookie: "osw_session=fresh" })
+
+    expect(await forgetSession("https://desktop.example.com")).toBe(true)
+    expect(await readConfig()).toBeNull()
+    expect(await readBackend()).toBe("https://desktop.example.com/")
   })
 })
 

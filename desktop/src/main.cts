@@ -84,7 +84,12 @@ const {
   staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
-const { DESKTOP_CONFIG_FILE } = require("./user-data.js");
+const {
+  migrateDesktopConfig,
+  readSharedConfig,
+  sharedConfigPath,
+  updateSharedConfig,
+} = require("./shared-config.js");
 
 const appRuntime = resolveAppRuntime({
   argv: process.argv,
@@ -92,9 +97,11 @@ const appRuntime = resolveAppRuntime({
   appDataPath: app.getPath("appData"),
 });
 const isDevelopment = appRuntime.isDevelopment;
-fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
-if (isDevelopment) app.setName(appRuntime.name);
-app.setPath("userData", appRuntime.userDataPath);
+if (appRuntime.userDataPath) {
+  fs.mkdirSync(appRuntime.userDataPath, { recursive: true });
+  app.setName(appRuntime.name);
+  app.setPath("userData", appRuntime.userDataPath);
+}
 app.setAppUserModelId(appRuntime.appUserModelId);
 
 protocol.registerSchemesAsPrivileged([
@@ -880,31 +887,42 @@ function configureDesktopIpc() {
   });
 }
 
+function profileConfigPath() {
+  return path.join(app.getPath("userData"), "desktop-config.json");
+}
+
+/** Development builds keep their own profile, so they never repoint the packaged app or the CLI. */
 function configPath() {
-  return path.join(app.getPath("userData"), DESKTOP_CONFIG_FILE);
+  return isDevelopment
+    ? profileConfigPath()
+    : sharedConfigPath(require("node:os").homedir());
+}
+
+function migrateStoredConfig() {
+  if (isDevelopment) return;
+  try {
+    migrateDesktopConfig(profileConfigPath(), configPath());
+  } catch (error) {
+    console.warn("Could not migrate desktop-config.json", error);
+  }
 }
 
 function readStoredBackendUrl() {
   try {
-    const config = JSON.parse(fs.readFileSync(configPath(), "utf8"));
-    return typeof config.backendUrl === "string"
-      ? validateBackendUrl(config.backendUrl)
-      : undefined;
-  } catch {
+    const { backendUrl } = readSharedConfig(configPath());
+    return backendUrl ? validateBackendUrl(backendUrl) : undefined;
+  } catch (error) {
+    console.warn("Could not read the stored backend URL", error);
     return undefined;
   }
 }
 
 function storeBackendUrl(value) {
   const url = validateBackendUrl(value.trim());
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(
-    configPath(),
-    `${JSON.stringify({ backendUrl: url }, null, 2)}\n`,
-    {
-      mode: 0o600,
-    },
-  );
+  updateSharedConfig(configPath(), (config) => ({
+    ...config,
+    backendUrl: url,
+  }));
   return url;
 }
 
@@ -1597,6 +1615,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),

@@ -49,8 +49,7 @@ test("uses an isolated app profile for development runs", () => {
       isDevelopment: false,
       name: "Open SWE",
       appUserModelId: "com.langchain.openswe",
-      // Electron's default for this package; moving it would orphan installed users' data.
-      userDataPath: path.join(appDataPath, "open-swe-desktop"),
+      userDataPath: null,
     },
   );
 });

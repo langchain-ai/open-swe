@@ -1,13 +1,13 @@
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { homedir, platform } from "node:os"
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join } from "node:path"
 
 import {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
-  DESKTOP_CONFIG_FILE,
-  DEVELOPMENT_USER_DATA_DIRECTORY,
-  PACKAGED_USER_DATA_DIRECTORY,
-} from "../../desktop/src/user-data.ts"
+  readSharedConfig,
+  sharedConfigPath,
+  updateSharedConfig,
+} from "../../desktop/src/shared-config.ts"
 import { normalizeBackend } from "./api.ts"
 import { resolveCredential, type Credential } from "./credentials.ts"
 import { errorCode, isRecord, parseJson, stringAt } from "./json.ts"
@@ -22,7 +22,7 @@ function configDir(): string {
 }
 
 function configFile(): string {
-  return join(configDir(), "config.json")
+  return sharedConfigPath(home())
 }
 
 function bridgesFile(): string {
@@ -31,11 +31,6 @@ function bridgesFile(): string {
 
 const DIR_MODE = 0o700
 const FILE_MODE = 0o600
-
-export interface CliConfig {
-  backend: string
-  session: string
-}
 
 export interface RunConfig {
   backend: string
@@ -69,55 +64,17 @@ async function writePrivate(path: string, value: unknown): Promise<void> {
   await chmod(path, FILE_MODE)
 }
 
-/** Where the desktop app keeps the backend URL it was pointed at. */
-function desktopConfigPaths(): string[] {
-  const base = home()
-  const names = [PACKAGED_USER_DATA_DIRECTORY, DEVELOPMENT_USER_DATA_DIRECTORY]
-  const roots =
-    platform() === "darwin"
-      ? [join(base, "Library", "Application Support")]
-      : platform() === "win32"
-        ? [join(base, "AppData", "Roaming")]
-        : [process.env["XDG_CONFIG_HOME"] || join(base, ".config")]
-  return roots.flatMap((root) =>
-    names.map((name) => join(root, name, DESKTOP_CONFIG_FILE))
-  )
-}
-
-async function desktopBackend(): Promise<string | null> {
-  for (const path of desktopConfigPaths()) {
-    const text = await readFileOrNull(path)
-    if (text === null) continue
-    const parsed = parseJson(text)
-    const url = isRecord(parsed) ? stringAt(parsed, "backendUrl") : null
-    if (url) return url
-  }
-  return null
-}
-
-async function storedConfig(): Promise<Partial<CliConfig>> {
-  const text = await readFileOrNull(configFile())
-  if (text === null) return {}
-  const parsed = parseJson(text)
-  if (!isRecord(parsed)) return {}
-  return {
-    backend: stringAt(parsed, "backend") ?? undefined,
-    session: stringAt(parsed, "session") ?? undefined,
-  }
-}
-
 /**
- * The backend to talk to, resolved the way the desktop app resolves its own:
- * the environment first, under the same variable names, then what was stored,
- * then the development default.
+ * The backend to talk to: the environment first, under the desktop app's own
+ * variable names, then the backend the CLI and the desktop app share, then the
+ * development default.
  */
 export async function readBackend(): Promise<string> {
   const env = process.env
   return (
     env["OPEN_SWE_BACKEND_URL"] ||
     env["OPEN_SWE_DESKTOP_URL"] ||
-    (await storedConfig()).backend ||
-    (await desktopBackend()) ||
+    readSharedConfig(configFile()).backendUrl ||
     DEFAULT_DEVELOPMENT_BACKEND_URL
   )
 }
@@ -125,13 +82,12 @@ export async function readBackend(): Promise<string> {
 /**
  * Where the CLI is pointed and who it is.
  *
- * A session has no desktop fallback: the app keeps it in an encrypted cookie
- * store no other process can read, so it comes from `OPEN_SWE_SESSION` or from
- * `oswe login`.
+ * The desktop app keeps its own session in an encrypted cookie store no other
+ * process can read, so the CLI's comes from `OPEN_SWE_SESSION` or `oswe login`.
  */
 export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())
-  const { session } = await storedConfig()
+  const session = readSharedConfig(configFile()).sessions[backend]
   const credential = resolveCredential(
     backend,
     session ? { session, path: configFile() } : null
@@ -139,19 +95,29 @@ export async function readConfig(): Promise<RunConfig | null> {
   return credential === null ? null : { backend, credential }
 }
 
-export async function writeConfig(config: CliConfig): Promise<string> {
-  await writePrivate(configFile(), config)
+/** Store a session for `backend`, and make it the shared backend when `select` is set. */
+export async function storeSession(
+  backend: string,
+  session: string,
+  select: boolean
+): Promise<string> {
+  updateSharedConfig(configFile(), (config) => ({
+    backendUrl: select ? backend : config.backendUrl,
+    sessions: { ...config.sessions, [backend]: session },
+  }))
   return configFile()
 }
 
-export async function clearConfig(): Promise<boolean> {
-  try {
-    await rm(configFile())
-    return true
-  } catch (cause) {
-    if (errorCode(cause) === "ENOENT") return false
-    throw cause
-  }
+export async function forgetSession(backend: string): Promise<boolean> {
+  const { sessions } = readSharedConfig(configFile())
+  if (!(backend in sessions)) return false
+  updateSharedConfig(configFile(), (config) => ({
+    ...config,
+    sessions: Object.fromEntries(
+      Object.entries(config.sessions).filter(([key]) => key !== backend)
+    ),
+  }))
+  return true
 }
 
 export async function readBridgeMemory(): Promise<BridgeMemory> {
