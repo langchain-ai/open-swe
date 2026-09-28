@@ -128,9 +128,7 @@ describe("PlanReview", () => {
       fireEvent.keyDown(screen.getByTestId("comment-input"), { key: "Enter" })
       expect(mocks.addPlanComment).not.toHaveBeenCalled()
       if (method === "click") {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Comment", exact: true })
-        )
+        fireEvent.click(screen.getByRole("button", { name: "Comment" }))
       } else {
         fireEvent.keyDown(screen.getByTestId("comment-input"), {
           key: "Enter",
