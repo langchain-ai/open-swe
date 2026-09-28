@@ -1053,6 +1053,39 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_empty_re_review_records_the_head_as_reviewed() -> None:
+    """The expedited merge gate only counts heads with a stored review, not a green check."""
+    from agent.github.pull_requests import PullRequest
+    from agent.tools.publish_review import _publish_review_async
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+    ):
+        result = await _publish_review_async(
+            owner="o",
+            repo="r",
+            pr_number=7,
+            head_sha="newsha",
+            token="t",
+            severity_threshold="medium",
+            cap=15,
+            is_re_review=True,
+        )
+
+    stored = await PullRequest.get("o", "r", 7)
+    assert result["skipped_empty_re_review"] is True
+    assert stored is not None
+    assert [(review.head_sha, review.github_review_id) for review in stored.reviews] == [
+        ("newsha", None)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
     """Out-of-diff findings are disabled: a finding anchored outside the diff is
     never surfaced on the PR. On a re-review with nothing else to post, it is

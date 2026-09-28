@@ -80,6 +80,33 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
         logger.debug("Failed to record reviewer usage", exc_info=True)
 
 
+async def _link_review(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    thread_id: str,
+    head_sha: str,
+    github_review_id: int | None,
+    finding_count: int,
+) -> None:
+    """Record ``head_sha`` as reviewed; the expedited merge gate reads this, not the check run."""
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=github_review_id,
+            head_sha=head_sha,
+            finding_count=finding_count,
+        )
+    except Exception:  # noqa: BLE001
+        # A registry write must not turn a finished review into a tool failure the agent retries.
+        logger.warning(
+            "Failed to link review to its pull request",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+            exc_info=True,
+        )
+
+
 async def publish_review(
     ranking: list[str],
     severity_threshold: Severity = "medium",
@@ -409,6 +436,15 @@ async def _publish_review_async(
             findings=await list_findings_async(thread_id),
         )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+        await _link_review(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            thread_id=thread_id,
+            head_sha=head_sha,
+            github_review_id=None,
+            finding_count=0,
+        )
         conclusion, check_title, check_summary = review_check_conclusion(0)
         await settle_review_check_run(
             thread_id=thread_id,
@@ -644,6 +680,15 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+    await _link_review(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        thread_id=thread_id,
+        head_sha=head_sha,
+        github_review_id=review_id if isinstance(review_id, int) else None,
+        finding_count=len(inline_comments),
+    )
     conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
     await settle_review_check_run(
         thread_id=thread_id,
@@ -654,22 +699,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,

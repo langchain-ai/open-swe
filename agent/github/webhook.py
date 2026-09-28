@@ -733,6 +733,16 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
                     exc_info=True,
                     extra={"pr_number": pr_number, "scout_head_sha": head_sha},
                 )
+            try:
+                await PullRequest(
+                    owner=repo_config["owner"], repo=repo_config["name"], number=pr_number
+                ).link_review(reviewer_thread_id=thread_id, head_sha=head_sha)
+            except Exception:
+                common.logger.warning(
+                    "Could not record the unchanged head as reviewed",
+                    exc_info=True,
+                    extra={"pr_number": pr_number, "scout_head_sha": head_sha},
+                )
         # The old head's check disappears once the head moves (GitHub only
         # shows checks on the current head), so even though no re-review runs,
         # surface a settled check on the new head.
