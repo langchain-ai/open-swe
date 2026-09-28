@@ -173,43 +173,6 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     assert blocks[-1]["type"] == "context_actions"
 
 
-async def test_slack_reply_shows_extra_blocks_after_the_message_and_before_buttons(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    post = AsyncMock(return_value=("2.0", None))
-    chart = {"type": "data_visualization", "title": "Errors", "chart": {"type": "pie"}}
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
-    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
-
-    assert await slack_reply_tool.slack_reply(
-        "Answer", "progress", options=["Yes"], blocks=[chart]
-    ) == {"success": True}
-    blocks = post.await_args.kwargs["blocks"]
-    assert [block["type"] for block in blocks] == ["markdown", "data_visualization", "actions"]
-    assert post.await_args.args[2] == "Answer"
-
-
-async def test_slack_reply_refuses_blocks_that_overflow_the_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    post = AsyncMock()
-    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
-    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
-
-    config = _config()
-    config["run_id"] = "run-1"
-    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
-    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
-
-    result = await slack_reply_tool.slack_reply(
-        "Answer", "final", blocks=[{"type": "divider"}] * 48
-    )
-
-    assert result["success"] is False
-    assert result["retry"] is True
-    post.assert_not_awaited()
-
-
 async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

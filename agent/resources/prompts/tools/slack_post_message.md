@@ -7,11 +7,11 @@ This sends a new top-level message without moving the current Open SWE
 conversation or starting a new agent task. For updates and answers in the
 current conversation, use `slack_thread_reply`.
 
-Write `message` in standard Markdown: **bold**, _italic_, [link text](url),
-lists and task lists, quotes, pipe tables, and <@USER_ID> mentions. Use fenced
-code blocks with a language identifier such as ```diff or ```python for syntax
-highlighting. Keep it concise and below 40,000 characters. Share only content
-intended for the destination's audience. The tool returns the channel
+Write `message` in standard Markdown: **bold**, _italic_, [link text](url), and
+<@USER_ID> mentions. Put source code, diffs, and commands in top-level fenced
+code blocks with a language identifier such as ```python or ```diff so Slack
+highlights them. Keep it concise and below 40,000 characters. Share only
+content intended for the destination's audience. The tool returns the channel
 ID and message timestamp on success, or the Slack error on failure.
 
 For `not_in_channel` or `channel_not_found`, ask the user to verify the channel
