@@ -16,6 +16,8 @@ test("workspace admins create and revoke a key without retaining its secret", as
     .click();
   const secret = page.getByLabel("New API key");
   await expect(secret).toHaveValue(/^osk_/);
+  const suffix = (await secret.inputValue()).slice(-6);
+  const keyRow = page.getByRole("listitem").filter({ hasText: `…${suffix}` });
   await page.getByRole("button", { name: "I’ve saved my key" }).click();
   await expect(secret).toHaveCount(0);
   await page.reload();
@@ -34,5 +36,8 @@ test("workspace admins create and revoke a key without retaining its secret", as
   await expect(
     page.getByRole("button", { name: "Revoke Release automation" }),
   ).toHaveCount(0);
-  await expect(page.getByText(/revoked · Expires/)).toBeVisible();
+  await expect(keyRow.getByText(/revoked · Expires/)).toBeVisible();
+  await expect(
+    keyRow.getByText("Created by Alice", { exact: true }),
+  ).toBeVisible();
 });
