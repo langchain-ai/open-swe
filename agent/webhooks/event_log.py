@@ -7,6 +7,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
 from urllib.parse import parse_qs
+from uuid import UUID
 
 from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -52,8 +53,40 @@ _INSERT = text(
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
     LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
+    RETURNING source, event_type, delivery_id, received_at, user_id, pull_request_id
     """
 )
+
+_EVENT_KINDS = text(
+    f"""
+    SELECT source, event_type, COALESCE(payload->>'action', '') AS action,
+           count(*) AS count, max(received_at) AS last_received_at
+    FROM {_TABLE}
+    WHERE received_at >= :since
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3
+    """
+)
+
+
+class LoggedEvent(BaseModel):
+    """A row as written, with the links resolved on insert."""
+
+    source: WebhookSource
+    event_type: str
+    delivery_id: str
+    received_at: datetime
+    user_id: UUID | None
+    pull_request_id: UUID | None
+    payload: JsonValue
+
+
+class EventKind(BaseModel):
+    source: WebhookSource
+    event_type: str
+    action: str
+    count: int
+    last_received_at: datetime
 
 
 class EventRefs(BaseModel):
@@ -76,6 +109,15 @@ class EventRefs(BaseModel):
         number = delivery.pull_request.number if delivery.pull_request else None
         if number is None and delivery.issue and delivery.issue.pull_request:
             number = delivery.issue.number
+        if number is None:
+            number = next(
+                (
+                    check.pull_requests[0].number
+                    for check in (delivery.check_run, delivery.check_suite, delivery.workflow_run)
+                    if check and check.pull_requests
+                ),
+                None,
+            )
         return cls(
             github_repository=delivery.repository.full_name if delivery.repository else "",
             github_user_id=str(delivery.sender.id)
@@ -114,11 +156,18 @@ class _GitHubIssue(BaseModel):
     pull_request: JsonValue = None
 
 
+class _GitHubCheck(BaseModel):
+    pull_requests: list[_GitHubPullRequest] = []
+
+
 class _GitHubDelivery(BaseModel):
     repository: _GitHubRepository | None = None
     sender: _GitHubAccount | None = None
     pull_request: _GitHubPullRequest | None = None
     issue: _GitHubIssue | None = None
+    check_run: _GitHubCheck | None = None
+    check_suite: _GitHubCheck | None = None
+    workflow_run: _GitHubCheck | None = None
 
 
 class _LinearUser(BaseModel):
@@ -145,33 +194,45 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-    ) -> None:
+    ) -> LoggedEvent | None:
         """Never raises: a delivery that cannot be logged is still handled."""
         if not configured():
-            return
+            return None
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
             logger.warning("Rotating event log partitions failed", exc_info=True)
+        payload = cls._decode(request, body)
         try:
             async with transaction() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     _INSERT,
                     {
                         "source": source,
                         "endpoint": request.url.path,
                         "event_type": event_type,
                         "delivery_id": delivery_id,
-                        "payload": json.dumps(cls._decode(request, body)),
+                        "payload": json.dumps(payload),
                         **(refs or EventRefs()).model_dump(),
                     },
                 )
+                row = result.mappings().one()
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Recording a webhook in the event log failed",
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
+            return None
+        return LoggedEvent.model_validate({**row, "payload": payload})
+
+    @classmethod
+    async def kinds(cls, since: datetime) -> list[EventKind]:
+        """Every distinct source, event type, and action received since ``since``."""
+        await cls.ensure_partitions()
+        async with transaction() as conn:
+            rows = await conn.execute(_EVENT_KINDS, {"since": since})
+            return [EventKind.model_validate(dict(row)) for row in rows.mappings()]
 
     @classmethod
     async def ensure_partitions(cls) -> None:

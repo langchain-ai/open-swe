@@ -6,6 +6,7 @@ from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
+from agent.webhooks.event_subscriptions import EventSubscription
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
@@ -35,7 +36,7 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
-    await EventLog.record(
+    logged = await EventLog.record(
         request,
         body,
         "github",
@@ -43,6 +44,8 @@ async def github_webhook(
         delivery_id=delivery_id,
         refs=EventRefs.github(body),
     )
+    if logged is not None:
+        background_tasks.add_task(EventSubscription.deliver, logged)
     common.logger.info(
         "GitHub webhook received",
         extra={
