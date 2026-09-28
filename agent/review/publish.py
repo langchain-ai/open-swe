@@ -332,7 +332,7 @@ def render_review_body(
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
             + (
-                "Approved automatically under the repository's `APPROVALS.md`. No merge is performed."
+                "Approved automatically under the repository's `.open-swe/APPROVALS.md`. No merge is performed."
                 if approved
                 else "Dry run: this assessment does not approve or merge the PR."
                 if dry_run

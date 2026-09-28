@@ -442,7 +442,7 @@ export function ReviewStylesPanel() {
             />
             <Label htmlFor="repo-approval-mode">Approval mode</Label>
             <p className="text-xs text-muted-foreground">
-              Criteria come from <code>APPROVALS.md</code> at the root of the
+              Criteria come from <code>.open-swe/APPROVALS.md</code> in the
               repository, read from each pull request&apos;s base branch. Dry
               run posts the assessment without approving; Approve submits a
               GitHub approval when the assessment passes. Nothing is merged.
@@ -473,12 +473,13 @@ export function ReviewStylesPanel() {
               <p className="text-xs text-muted-foreground">
                 {approvalsFile.data.found ? (
                   <>
-                    <code>APPROVALS.md</code> found on the default branch.
+                    <code>.open-swe/APPROVALS.md</code> found on the default
+                    branch.
                   </>
                 ) : (
                   <>
-                    No <code>APPROVALS.md</code> on the default branch, so
-                    reviews post no approval assessment.
+                    No <code>.open-swe/APPROVALS.md</code> on the default
+                    branch, so reviews post no approval assessment.
                   </>
                 )}
               </p>

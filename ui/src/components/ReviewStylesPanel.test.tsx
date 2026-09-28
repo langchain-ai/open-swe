@@ -210,7 +210,7 @@ it("shows the dry-run default and saves an admin's approval mode", async () => {
   await waitFor(() => expect(mode.textContent).toContain("Approve"))
 })
 
-it("says when the repository has no APPROVALS.md", async () => {
+it("says when the repository has no .open-swe/APPROVALS.md", async () => {
   vi.spyOn(api, "getApprovalsFile").mockResolvedValue({ found: false })
   await renderAndSelect("acme/api")
   expect(
