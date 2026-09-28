@@ -3,7 +3,9 @@
 import logging
 import uuid
 from typing import Any, Literal, Self
+from urllib.parse import quote
 
+import httpx2
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -11,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from agent.claude_code.transcript import TranscriptError, parse_claude_transcript
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.github.http import github_client
+from agent.github.http import GITHUB_API_BASE, github_client
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import SystemIdentity, build_input_messages
 from agent.prompts import prompt
@@ -67,8 +69,13 @@ class SessionUploadBody(BaseModel):
         return self
 
 
+class _PullRequestRepo(BaseModel):
+    full_name: str
+
+
 class _PullRequestHead(BaseModel):
     ref: str
+    repo: _PullRequestRepo | None
 
 
 class _PullRequestPayload(BaseModel):
@@ -87,25 +94,40 @@ class _Target(BaseModel):
         return f"{self.owner}/{self.name}"
 
 
+async def _github_get(login: str, path: str) -> httpx2.Response | None:
+    """The GitHub response, or ``None`` when GitHub reports the resource missing."""
+    async with github_client(token=await _github_token_for_login(login)) as client:
+        response = await client.get(f"{GITHUB_API_BASE}{path}")
+    if response.status_code == 404:
+        return None
+    if response.is_error:
+        logger.warning(
+            "GitHub read for a session upload failed",
+            extra={"github_path": path, "github_status": response.status_code},
+        )
+        raise HTTPException(502, "could not read from GitHub")
+    return response
+
+
 async def _pull_request_target(pr_url: str, login: str) -> _Target:
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         raise HTTPException(422, "pr_url must be a github.com pull request URL")
-    await require_repo_access_for_user(login, f"{ref.owner}/{ref.repo}")
-    async with github_client(token=await _github_token_for_login(login)) as client:
-        response = await client.get(f"/repos/{ref.owner}/{ref.repo}/pulls/{ref.number}")
-    if response.status_code == 404:
+    full_name = f"{ref.owner}/{ref.repo}"
+    await require_repo_access_for_user(login, full_name)
+    response = await _github_get(login, f"/repos/{full_name}/pulls/{ref.number}")
+    if response is None:
         raise HTTPException(404, "pull request not found")
-    if response.is_error:
-        logger.warning(
-            "Could not read the uploaded session's pull request",
-            extra={"pr_url": ref.url, "github_status": response.status_code},
-        )
-        raise HTTPException(502, "could not read the pull request from GitHub")
     try:
         head = _PullRequestPayload.model_validate(response.json()).head
     except ValidationError as exc:
         raise HTTPException(502, "GitHub returned a malformed pull request") from exc
+    if head.repo is None or head.repo.full_name.lower() != full_name.lower():
+        raise HTTPException(
+            422,
+            f"pull requests from forks are not supported; push the work to a branch on "
+            f"{full_name} and pass repo and branch",
+        )
     return _Target(
         owner=ref.owner, name=ref.repo, branch=head.ref, pr_url=ref.url, pr_number=ref.number
     )
@@ -118,8 +140,13 @@ async def _branch_target(repo: str, branch: str, login: str) -> _Target:
     safe_branch = _safe_git_ref(branch.strip())
     if safe_branch is None:
         raise HTTPException(422, "branch is not a valid git branch name")
-    await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
-    await _github_token_for_login(login)
+    full_name = f"{repo_config['owner']}/{repo_config['name']}"
+    await require_repo_access_for_user(login, full_name)
+    if (
+        await _github_get(login, f"/repos/{full_name}/branches/{quote(safe_branch, safe='')}")
+        is None
+    ):
+        raise HTTPException(422, f"branch {safe_branch} is not on {full_name}; push it first")
     return _Target(owner=repo_config["owner"], name=repo_config["name"], branch=safe_branch)
 
 

@@ -83,13 +83,35 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
   let threadId: string | undefined;
   try {
     await loginAs(page, SAME_USER);
-    const upload = await page.request.post("/dashboard/api/threads/uploads", {
+    const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
       headers: SAME_ORIGIN_HEADERS,
       data: {
         type: "claude",
         transcript,
         repo: "fakeorg/demo",
-        branch: "environment-rewrite",
+        branch: "never-pushed",
+      },
+    });
+    expect(unpushed.status()).toBe(422);
+    expect(await unpushed.text()).toContain("push it first");
+
+    const seeded = await api.post("/control/pull-request", {
+      data: {
+        repo: "fakeorg/demo",
+        head: "environment-rewrite",
+        title: "Environment rewrite",
+        files: { "environments.md": "setup and init scripts\n" },
+      },
+    });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+    const { number } = (await seeded.json()) as { number: number };
+
+    const upload = await page.request.post("/dashboard/api/threads/uploads", {
+      headers: SAME_ORIGIN_HEADERS,
+      data: {
+        type: "claude",
+        transcript,
+        pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
         visibility: "private",
       },
     });
@@ -105,6 +127,8 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
       branch: "environment-rewrite",
       visibility: "private",
     });
+    const thread = await (await api.get(`/threads/${threadId}`)).json();
+    expect(thread.metadata.pr_number).toBe(number);
 
     const state = await (await api.get(`/threads/${threadId}/state`)).json();
     const messages = state.values.messages as Array<{
