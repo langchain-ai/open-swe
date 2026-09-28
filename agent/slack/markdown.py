@@ -1,20 +1,22 @@
+import re
 from html import escape
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
 from agent.slack.blocks import (
-    CODE_TEXT_MAX_CHARS,
     MARKDOWN_TEXT_MAX_CHARS,
     MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     Block,
-    code,
+    code_blocks,
     markdown,
     section,
+    split_lines,
 )
 
 _parser = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
+_SLACK_TOKEN = re.compile(r"(<[@#!][A-Za-z0-9^]+(?:\|[^<>]*)?>)")
 
 
 def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
@@ -33,9 +35,7 @@ def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
         begin, end = token.map
         blocks.extend(_prose(lines[start:begin]))
         language = token.info.split()[0] if token.info.strip() else None
-        blocks.extend(
-            code(chunk, language=language) for chunk in _chunks(token.content, CODE_TEXT_MAX_CHARS)
-        )
+        blocks.extend(code_blocks(token.content, language=language))
         start = end
     blocks.extend(_prose(lines[start:]))
     return blocks if len(blocks) <= MESSAGE_MAX_BLOCKS - reserve else None
@@ -44,24 +44,8 @@ def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
 def _prose(lines: list[str]) -> list[Block]:
     return [
         section(chunk)
-        for chunk in _chunks(markdown_to_mrkdwn("".join(lines)), SECTION_TEXT_MAX_CHARS)
+        for chunk in split_lines(markdown_to_mrkdwn("".join(lines)), SECTION_TEXT_MAX_CHARS)
     ]
-
-
-def _chunks(text: str, limit: int) -> list[str]:
-    """``text`` cut on line boundaries into pieces of at most ``limit`` characters."""
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        if current and len(current) + len(line) > limit:
-            chunks.append(current)
-            current = ""
-        while len(line) > limit:
-            chunks.append(line[:limit])
-            line = line[limit:]
-        current += line
-    chunks.append(current)
-    return [chunk.rstrip("\n") for chunk in chunks if chunk.strip()]
 
 
 def markdown_to_mrkdwn(markdown: str) -> str:
@@ -125,7 +109,10 @@ def _render_inline(tokens: list[Token]) -> str:
     }
     for token in tokens:
         if token.type == "text":
-            output.append(escape(token.content, quote=False))
+            output.extend(
+                part if index % 2 else escape(part, quote=False)
+                for index, part in enumerate(_SLACK_TOKEN.split(token.content))
+            )
         elif token.type in markers:
             output.append(markers[token.type])
         elif token.type == "code_inline":

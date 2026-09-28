@@ -164,6 +164,27 @@ def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
 
 
+def split_lines(text: str, limit: int) -> list[str]:
+    """``text`` cut on line boundaries into non-blank pieces of at most ``limit`` characters."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if current and len(current) + len(line) > limit:
+            chunks.append(current)
+            current = ""
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        current += line
+    chunks.append(current)
+    return [chunk.rstrip("\n") for chunk in chunks if chunk.strip()]
+
+
+def code_blocks(body: str, *, language: str | None = None) -> list[RichTextBlock]:
+    """All of ``body``, as many code blocks as it takes."""
+    return [code(chunk, language=language) for chunk in split_lines(body, CODE_TEXT_MAX_CHARS)]
+
+
 def code(body: str, *, language: str | None = None) -> RichTextBlock:
     """A syntax-highlighted code block; unlike mrkdwn, rich text takes ``body`` literally."""
     if len(body) > CODE_TEXT_MAX_CHARS:

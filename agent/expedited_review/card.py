@@ -5,13 +5,11 @@ import json
 from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
 from agent.slack.blocks import (
-    CODE_TEXT_MAX_CHARS,
     SECTION_TEXT_MAX_CHARS,
     Block,
     ButtonElement,
     actions,
     button,
-    code,
     context,
     divider,
     escape,
@@ -45,33 +43,13 @@ def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]
 
 
 def _diff_sections(files: list[ChangedFile]) -> list[Block]:
+    """Every reviewed line; eligibility has already checked that it all fits."""
     shown, tests = ChangedFile.split(files)
     sections: list[Block] = []
-    for file in shown[:_MAX_FILE_SECTIONS]:
+    for file in shown:
         sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
-        sections.append(code(_clip(file.patch or ""), language="diff"))
-    return [*sections, *_overflow_note(shown), *_test_diffstat(tests)]
-
-
-def _clip(patch: str) -> str:
-    """``patch`` cut on a line boundary to fit one code block."""
-    if len(patch) <= CODE_TEXT_MAX_CHARS:
-        return patch
-    lines = patch.splitlines()
-    budget = CODE_TEXT_MAX_CHARS - _OVERFLOW_NOTE_RESERVE
-    kept: list[str] = []
-    for line in lines:
-        budget -= len(line) + 1
-        if budget < 0:
-            break
-        kept.append(line)
-    return "\n".join([*kept, f"… {len(lines) - len(kept)} more lines on GitHub"])
-
-
-def _overflow_note(files: list[ChangedFile]) -> list[Block]:
-    if len(files) <= _MAX_FILE_SECTIONS:
-        return []
-    return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
+        sections.extend(file.patch_blocks)
+    return [*sections, *_test_diffstat(tests)]
 
 
 def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
