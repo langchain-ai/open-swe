@@ -312,7 +312,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       </div>
                     )}
                   </div>
-                  {comments.some((comment) => comment.author_login === plan.user.login) && (
+                  {comments.some(
+                    (comment) => comment.author_login === plan.user.login
+                  ) && (
                     <div className="border-t border-border p-3">
                       <Button
                         className="w-full"

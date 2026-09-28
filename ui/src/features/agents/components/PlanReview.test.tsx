@@ -166,13 +166,18 @@ describe("PlanReview", () => {
       target: { value: "Clarify this step" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Comment" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Submit comments" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Submit comments" })
+    )
     await waitFor(() =>
       expect(mocks.submitPlanComments).toHaveBeenCalledWith("thread-1")
     )
     expect(
-      (screen.getByRole("button", { name: "Comments submitted" }) as HTMLButtonElement)
-        .disabled
+      (
+        screen.getByRole("button", {
+          name: "Comments submitted",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(true)
     mocks.addPlanComment.mockResolvedValueOnce({ ...comment, id: "comment-2" })
     fireEvent.click(screen.getByRole("button", { name: "Select text" }))
@@ -180,7 +185,9 @@ describe("PlanReview", () => {
       target: { value: "One more thing" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Comment" }))
-    expect(await screen.findByRole("button", { name: "Submit comments" })).toBeTruthy()
+    expect(
+      await screen.findByRole("button", { name: "Submit comments" })
+    ).toBeTruthy()
   })
 
   it("shows historical artifacts without approval or implementation actions", async () => {

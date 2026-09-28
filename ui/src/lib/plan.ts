@@ -123,7 +123,9 @@ export function addPlanComment(
   })
 }
 
-export function submitPlanComments(threadId: string): Promise<{ status: string }> {
+export function submitPlanComments(
+  threadId: string
+): Promise<{ status: string }> {
   return req(`/plan/${encodeURIComponent(threadId)}/comments/submit`, {
     method: "POST",
   })
