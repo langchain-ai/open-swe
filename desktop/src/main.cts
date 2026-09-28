@@ -73,6 +73,7 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -1423,8 +1424,8 @@ async function completeExternalLogin(verifier, code) {
     expirationDate: Date.now() / 1000 + Number(payload.expires_in),
   });
 
-  const window =
-    mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+  const existingWindow = mainWindow && !mainWindow.isDestroyed();
+  const window = existingWindow || createWindow();
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
@@ -1640,6 +1641,31 @@ function configurePermissions() {
   );
 }
 
+let pendingDeepLink = null;
+
+function openDesktopLink(url) {
+  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
+  if (!target) return false;
+  const existingWindow = mainWindow && !mainWindow.isDestroyed();
+  const window = existingWindow || createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  if (existingWindow) void window.loadURL(target);
+  else
+    window.webContents.once(
+      "did-finish-load",
+      () => void window.loadURL(target),
+    );
+  return true;
+}
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  if (!backendUrl) pendingDeepLink = url;
+  else openDesktopLink(url);
+});
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -1650,6 +1676,12 @@ if (!hasSingleInstanceLock) {
       app.quit();
       return;
     }
+    if (!backendUrl) {
+      pendingDeepLink = commandLine.find((argument) =>
+        argument.startsWith("open-swe://link/"),
+      );
+    } else if (commandLine.some((argument) => openDesktopLink(argument)))
+      return;
     const window = mainWindow || setupWindow || createWindow();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -1722,11 +1754,14 @@ if (!hasSingleInstanceLock) {
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
     });
+    if (app.isPackaged) app.setAsDefaultProtocolClient("open-swe");
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
     createWindow();
+    if (pendingDeepLink) openDesktopLink(pendingDeepLink);
+    else process.argv.slice(1).some((argument) => openDesktopLink(argument));
     // Otherwise the first local thread opened after launch waits behind the
     // backend's boot, showing a blank page for seconds.
     if (localThreadStore.list().length) {
