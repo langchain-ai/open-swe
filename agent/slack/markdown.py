@@ -3,7 +3,65 @@ from html import escape
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+from agent.slack.blocks import (
+    CODE_TEXT_MAX_CHARS,
+    MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
+    SECTION_TEXT_MAX_CHARS,
+    Block,
+    code,
+    markdown,
+    section,
+)
+
 _parser = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
+
+
+def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
+    """``text`` as blocks that keep code highlighted past Slack's native Markdown limit.
+
+    ``None`` when it needs more blocks than a message holds once ``reserve`` are left free.
+    """
+    if len(text) <= MARKDOWN_TEXT_MAX_CHARS:
+        return [markdown(text)]
+    lines = text.splitlines(keepends=True)
+    blocks: list[Block] = []
+    start = 0
+    for token in _parser.parse(text):
+        if token.level or token.type not in {"fence", "code_block"} or token.map is None:
+            continue
+        begin, end = token.map
+        blocks.extend(_prose(lines[start:begin]))
+        language = token.info.split()[0] if token.info.strip() else None
+        blocks.extend(
+            code(chunk, language=language) for chunk in _chunks(token.content, CODE_TEXT_MAX_CHARS)
+        )
+        start = end
+    blocks.extend(_prose(lines[start:]))
+    return blocks if len(blocks) <= MESSAGE_MAX_BLOCKS - reserve else None
+
+
+def _prose(lines: list[str]) -> list[Block]:
+    return [
+        section(chunk)
+        for chunk in _chunks(markdown_to_mrkdwn("".join(lines)), SECTION_TEXT_MAX_CHARS)
+    ]
+
+
+def _chunks(text: str, limit: int) -> list[str]:
+    """``text`` cut on line boundaries into pieces of at most ``limit`` characters."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if current and len(current) + len(line) > limit:
+            chunks.append(current)
+            current = ""
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        current += line
+    chunks.append(current)
+    return [chunk.rstrip("\n") for chunk in chunks if chunk.strip()]
 
 
 def markdown_to_mrkdwn(markdown: str) -> str:

@@ -173,17 +173,25 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     assert blocks[-1]["type"] == "context_actions"
 
 
-async def test_slack_reply_falls_back_to_mrkdwn_over_native_limit(
+async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     post = AsyncMock(return_value=("2.0", None))
-    message = "# Heading\n\n" + "x" * 12000
+    message = "# Heading\n\n" + "x" * 12000 + "\n\n```diff\n-old\n+new\n```\n\nafter"
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply(message, "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply(message, "progress") == {"success": True}
     assert post.await_args.args[2].startswith("*Heading*\n")
-    assert post.await_args.kwargs["blocks"] is None
+    blocks = post.await_args.kwargs["blocks"]
+    [code] = [block for block in blocks if block["type"] == "rich_text"]
+    assert code["elements"][0] == {
+        "type": "rich_text_preformatted",
+        "elements": [{"type": "text", "text": "-old\n+new"}],
+        "language": "diff",
+    }
+    assert blocks[0]["text"]["text"].startswith("*Heading*\n")
+    assert blocks[-1]["text"]["text"] == "after"
 
 
 async def test_slack_reply_rejects_oversized_message_with_options(

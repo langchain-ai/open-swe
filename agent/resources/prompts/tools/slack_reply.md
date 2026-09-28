@@ -18,10 +18,10 @@ essential. End the run by posting a concise final outcome here.
 
 Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~,
 [link text](url), and Markdown lists. Replies use Slack's native Markdown blocks.
-Use fenced code blocks with a language identifier such as ```python or ```sql
-for syntax highlighting, preserving the code's original whitespace.
-Messages over 12,000 characters fall back to Slack's legacy mrkdwn and may lose
-less-common Markdown formatting. A message with `options` must stay within 12,000
+Use fenced code blocks with a language identifier such as ```python, ```sql, or
+```diff for syntax highlighting, preserving the code's original whitespace.
+Past 12,000 characters, prose falls back to Slack's legacy mrkdwn and may lose
+less-common Markdown formatting; top-level code blocks stay highlighted. A message with `options` must stay within 12,000
 characters so its buttons are not hidden; shorten it or share the body as an artifact.
 If supplying explicit `blocks`, use the formatting required by each block type.
 

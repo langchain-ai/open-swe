@@ -9,7 +9,12 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
-from agent.slack.blocks import SECTION_TEXT_MAX_CHARS, block_payload, section
+from agent.slack.blocks import (
+    MARKDOWN_TEXT_MAX_CHARS,
+    SECTION_TEXT_MAX_CHARS,
+    block_payload,
+    section,
+)
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
@@ -19,7 +24,7 @@ from agent.slack.client import (
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -33,7 +38,7 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_MARKDOWN_MAX_CHARS = 12000
+_NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
 
 
 def _usage_with_effort(
@@ -108,8 +113,9 @@ async def slack_reply(
         if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             if options:
                 return _oversized_options_error(message)
+            long_blocks = markdown_blocks(message, reserve=1)
+            slack_blocks = block_payload(long_blocks) if long_blocks else None
             message = markdown_to_mrkdwn(message)
-            slack_blocks = None
         if response_type == "final" and run_id and _triggering_user_id(cfg):
             if slack_blocks is None:
                 slack_blocks = block_payload(
@@ -178,11 +184,10 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
     if blocks is None:
-        if native_markdown:
-            blocks = _build_option_blocks(message, None)
-        else:
+        long_blocks = markdown_blocks(message)
+        blocks = block_payload(long_blocks) if long_blocks else None
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
     usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""

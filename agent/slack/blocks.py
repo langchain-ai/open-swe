@@ -19,6 +19,9 @@ from typing import Any, Literal, NotRequired, TypedDict, cast
 SECTION_TEXT_MAX_CHARS = 3000
 # Slack documents no rich-text limit; 4.5k characters is the largest block verified to render.
 CODE_TEXT_MAX_CHARS = 4000
+# Cumulative across every markdown block in one message.
+MARKDOWN_TEXT_MAX_CHARS = 12000
+MESSAGE_MAX_BLOCKS = 50
 BUTTON_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
@@ -40,6 +43,11 @@ type TextObject = PlainText | Mrkdwn
 class SectionBlock(TypedDict):
     type: Literal["section"]
     text: TextObject
+
+
+class MarkdownBlock(TypedDict):
+    type: Literal["markdown"]
+    text: str
 
 
 class ContextBlock(TypedDict):
@@ -116,6 +124,7 @@ class InputBlock(TypedDict):
 
 type Block = (
     SectionBlock
+    | MarkdownBlock
     | ContextBlock
     | DividerBlock
     | RichTextBlock
@@ -145,6 +154,10 @@ def mrkdwn(text: str) -> Mrkdwn:
 
 def section(text: str) -> SectionBlock:
     return {"type": "section", "text": mrkdwn(text)}
+
+
+def markdown(text: str) -> MarkdownBlock:
+    return {"type": "markdown", "text": text}
 
 
 def context(*texts: str) -> ContextBlock:
