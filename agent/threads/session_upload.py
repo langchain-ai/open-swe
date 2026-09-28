@@ -72,6 +72,23 @@ class SessionUploadHeader(BaseModel):
         return self
 
 
+UPLOAD_REQUEST_BODY: dict[str, object] = {
+    "requestBody": {
+        "required": True,
+        "description": (
+            "JSONL, optionally with Content-Encoding: gzip. The first line is a "
+            "SessionUploadHeader object; every following line is the session transcript, verbatim."
+        ),
+        "content": {
+            "application/x-ndjson": {
+                "schema": {"type": "string"},
+                "x-first-line-schema": SessionUploadHeader.model_json_schema(),
+            }
+        },
+    }
+}
+
+
 class UploadStream:
     """The request body as JSONL lines, inflated and decoded chunk by chunk, never held whole.
 
@@ -117,6 +134,8 @@ class UploadStream:
             tail = self._inflater.flush()
             if not self._inflater.eof:
                 raise HTTPException(400, "session upload ended partway through the gzip stream")
+            if self._inflater.unused_data:
+                raise HTTPException(400, "session upload has data after the gzip stream")
         return self._decoder.decode(tail, final=True)
 
     def _split(self, text: str) -> Iterator[str]:

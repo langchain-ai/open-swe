@@ -66,7 +66,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
-from agent.threads.session_upload import UploadStream, upload_session
+from agent.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -99,7 +99,7 @@ async def api_list_threads(
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
-@router.post("/threads/uploads")
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
 async def api_upload_session(
     request: Request,
     session: dict[str, Any] = SESSION_DEP,

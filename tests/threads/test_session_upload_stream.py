@@ -35,9 +35,15 @@ async def test_lines_survive_any_chunking(encoding: str | None) -> None:
     assert await _lines(_request(body, chunk=3, encoding=encoding)) == text.split("\n")
 
 
-async def test_truncated_gzip_is_rejected() -> None:
-    body = gzip.compress(b'{"type":"claude"}\n' * 100)[:-12]
-
+@pytest.mark.parametrize(
+    "body",
+    [
+        gzip.compress(b'{"type":"claude"}\n' * 100)[:-8],
+        gzip.compress(b'{"type":"claude"}\n') + b"trailing",
+    ],
+    ids=["missing-trailer", "trailing-bytes"],
+)
+async def test_gzip_that_is_not_exactly_one_stream_is_rejected(body: bytes) -> None:
     with pytest.raises(HTTPException) as raised:
         await _lines(_request(body, chunk=64, encoding="gzip"))
     assert raised.value.status_code == 400
