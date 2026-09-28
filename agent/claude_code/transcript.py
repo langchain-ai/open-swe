@@ -170,9 +170,21 @@ class OtherRecord(_Model):
 
 
 class LinkRecord(_Record):
-    """A conversation record whose shape no longer parses, kept so the parent chain through it holds."""
+    """A record in the parent chain that carries no message, such as a ``system`` stop-hook summary."""
 
     type: str
+
+
+_MESSAGE_RECORD_TYPES = frozenset({"user", "assistant", "attachment", "custom-title"})
+
+
+def _record_tag(value: object) -> str:
+    if not isinstance(value, dict):
+        return "other"
+    kind = value.get("type")
+    if isinstance(kind, str) and kind in _MESSAGE_RECORD_TYPES:
+        return kind
+    return "link" if isinstance(value.get("uuid"), str) else "other"
 
 
 type Record = Annotated[
@@ -180,8 +192,9 @@ type Record = Annotated[
     | Annotated[AssistantRecord, Tag("assistant")]
     | Annotated[AttachmentRecord, Tag("attachment")]
     | Annotated[CustomTitleRecord, Tag("custom-title")]
+    | Annotated[LinkRecord, Tag("link")]
     | Annotated[OtherRecord, Tag("other")],
-    Discriminator(_tag(frozenset({"user", "assistant", "attachment", "custom-title"}))),
+    Discriminator(_record_tag),
 ]
 
 _RECORD: TypeAdapter[Record] = TypeAdapter(Record)
@@ -219,18 +232,6 @@ def _parse_record(number: int, line: str) -> Record | LinkRecord | None:
         return None
 
 
-def _parse_records(transcript: str) -> list[Record | LinkRecord]:
-    lines = [
-        (number, line) for number, line in enumerate(transcript.splitlines(), 1) if line.strip()
-    ]
-    records = [
-        record for number, line in lines if (record := _parse_record(number, line)) is not None
-    ]
-    if lines and not records:
-        raise TranscriptError("no line is a Claude Code transcript record")
-    return records
-
-
 def _hangs_off_branch(record: ConversationRecord) -> bool:
     """Parallel tool results and their attachments parent to their own ``tool_use`` line, off the main path."""
     if isinstance(record, AttachmentRecord | LinkRecord):
@@ -242,14 +243,8 @@ def _hangs_off_branch(record: ConversationRecord) -> bool:
     )
 
 
-def _active_branch(records: Sequence[Record | LinkRecord]) -> list[ConversationRecord]:
+def _active_branch(conversation: Sequence[ConversationRecord]) -> list[ConversationRecord]:
     """The newest message's ancestry plus what hangs off it, in file order, so rewound branches drop out."""
-    conversation = [
-        record
-        for record in records
-        if isinstance(record, UserRecord | AssistantRecord | AttachmentRecord | LinkRecord)
-        and not record.is_sidechain
-    ]
     if not conversation:
         return []
     by_uuid = {record.uuid: record for record in conversation}
@@ -367,9 +362,48 @@ class _Builder:
         self._deferred.clear()
 
 
-def parse_claude_transcript(transcript: str) -> ClaudeSession:
-    """Convert a session's JSONL into messages; raises ``TranscriptError`` on malformed input."""
-    records = _parse_records(transcript)
+class ClaudeTranscript:
+    """A session's JSONL taken one line at a time, keeping only what the conversation needs."""
+
+    def __init__(self) -> None:
+        self._records: list[ConversationRecord] = []
+        self._title: str | None = None
+        self._line = 0
+        self._parsed = 0
+
+    @classmethod
+    def parse(cls, transcript: str) -> ClaudeSession:
+        reader = cls()
+        for line in transcript.splitlines():
+            reader.add(line)
+        return reader.session()
+
+    def add(self, line: str) -> None:
+        self._line += 1
+        if not line.strip():
+            return
+        record = _parse_record(self._line, line)
+        if record is None:
+            return
+        self._parsed += 1
+        if isinstance(record, CustomTitleRecord):
+            self._title = record.custom_title.strip() or self._title
+        elif not isinstance(record, OtherRecord) and not record.is_sidechain:
+            self._records.append(record)
+
+    def session(self) -> ClaudeSession:
+        """Fold the lines into messages; raises ``TranscriptError`` when none was a record."""
+        if self._line and not self._parsed:
+            raise TranscriptError("no line is a Claude Code transcript record")
+        messages = _messages(self._records)
+        first_human = next((m for m in messages if isinstance(m, HumanMessage)), None)
+        title = self._title
+        if title is None and first_human is not None:
+            title = str(first_human.content).strip()[:MAX_TITLE_CHARS] or None
+        return ClaudeSession(title=title, messages=messages)
+
+
+def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
     builder = _Builder()
     for record in _active_branch(records):
         match record:
@@ -393,10 +427,4 @@ def parse_claude_transcript(transcript: str) -> ClaudeSession:
                 builder.human(_content_text(queued.prompt), record.uuid)
             case _:
                 continue
-    messages = builder.finish()
-    titles = [record.custom_title for record in records if isinstance(record, CustomTitleRecord)]
-    first_human = next((m for m in messages if isinstance(m, HumanMessage)), None)
-    title = titles[-1].strip() if titles and titles[-1].strip() else None
-    if title is None and first_human is not None:
-        title = str(first_human.content).strip()[:MAX_TITLE_CHARS] or None
-    return ClaudeSession(title=title, messages=messages)
+    return builder.finish()
