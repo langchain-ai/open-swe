@@ -16,7 +16,7 @@ from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
 from agent.prompts import prompt
-from agent.slack.blocks import block_payload
+from agent.slack.blocks import block_payload, escape
 from agent.slack.client import open_slack_dm, post_slack_top_level_message_with_ts
 from agent.slack.dm import note_for_concierge
 from agent.users import User
@@ -85,9 +85,9 @@ async def require_consent(
         return None
     if person.typed_preferences.act_as_always_allowed:
         return None
-    existing = thread.for_login(login)
-    if existing is not None and existing.status != "pending":
-        return None if existing.status == "approved" else _refusal(login, "denied", token_kind)
+    decision = thread.decision_for(login)
+    if decision is not None:
+        return None if decision == "approved" else _refusal(login, "denied", token_kind)
 
     slack_user_id = person.slack_user_id
     if not slack_user_id:
@@ -103,10 +103,11 @@ async def require_consent(
 async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) -> bool:
     thread_url = dashboard_thread_url(thread_id)
     thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
-    repo = f"{request.owner}/{request.repo}"
+    repo = escape(f"{request.owner}/{request.repo}")
     message = (
         f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
-        f"*{request.title}*\n`{repo}` — `{request.head}` → `{request.base}`\n\n"
+        f"*{escape(request.title)}*\n"
+        f"`{repo}` — `{escape(request.head)}` → `{escape(request.base)}`\n\n"
         "Approve, always allow, or deny."
     )
     dm_channel_id, error = await open_slack_dm(slack_user_id)
@@ -124,14 +125,7 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     await note_for_concierge(
         slack_user_id,
         dm_channel_id,
-        prompt(
-            "slack/concierge-act-as-requested",
-            thread_url=thread_url or thread_id,
-            title=request.title,
-            repo=repo,
-            head=request.head,
-            base=request.base,
-        ),
+        prompt("slack/concierge-act-as-requested", thread_url=thread_url or thread_id),
     )
     return True
 
@@ -139,9 +133,9 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
 async def _wait_for_answer(thread_id: str, login: str, token_kind: str) -> ActAsRefusal | None:
     for _ in range(int(_WAIT_SECONDS / _POLL_SECONDS)):
         await asyncio.sleep(_POLL_SECONDS)
-        request = (await ThreadActAs.load(thread_id)).for_login(login)
-        if request is not None and request.status == "approved":
+        decision = (await ThreadActAs.load(thread_id)).decision_for(login)
+        if decision == "approved":
             return None
-        if request is not None and request.status == "denied":
+        if decision == "denied":
             return _refusal(login, "denied", token_kind)
     return _refusal(login, "pending", token_kind)

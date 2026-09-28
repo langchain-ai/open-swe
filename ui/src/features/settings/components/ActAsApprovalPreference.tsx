@@ -8,13 +8,18 @@ export function ActAsApprovalPreference() {
   const save = usePatchProfile()
   const defaults = options.data
   const disabled = !profile.isSuccess || !defaults
+  const alwaysAllowed = profile.data?.act_as_always_allowed ?? false
 
   return (
     <>
       <SettingsRow
         label="Approve PRs opened as you"
         htmlFor="experimental-act-as-approval"
-        description="In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
+        description={
+          alwaysAllowed
+            ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
+            : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
+        }
         control={
           <Switch
             id="experimental-act-as-approval"

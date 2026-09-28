@@ -228,6 +228,7 @@ export interface Profile {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   experimental_act_as_approval?: boolean
+  act_as_always_allowed?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

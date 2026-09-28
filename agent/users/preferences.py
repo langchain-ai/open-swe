@@ -21,7 +21,6 @@ class UserPreferencesPatch(BaseModel):
     preserve_sandbox_memory: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    experimental_act_as_approval: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
+    # A consent control, so never agent-manageable.
+    experimental_act_as_approval: bool | None = None
     act_as_always_allowed: bool | None = None

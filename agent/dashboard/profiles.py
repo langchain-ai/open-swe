@@ -437,6 +437,10 @@ async def put_my_profile(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
             experimental_act_as_approval=update.experimental_act_as_approval,
+            # Switching approval either way starts over from asking every time.
+            act_as_always_allowed=(
+                False if update.experimental_act_as_approval is not None else None
+            ),
         ),
     )
     if preferences is None and (

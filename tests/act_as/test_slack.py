@@ -99,9 +99,8 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
     )
 
 
-async def _status() -> str | None:
-    request = (await ThreadActAs.load("thread-1")).for_login("alice")
-    return request.status if request is not None else None
+async def _status() -> str:
+    return (await ThreadActAs.load("thread-1")).decision_for("alice") or "pending"
 
 
 @pytest.mark.asyncio
@@ -141,3 +140,15 @@ async def test_unknown_request_is_not_decided(stack):
 
     assert await _status() == "pending"
     stack.ephemeral.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_second_click_cannot_reverse_a_denial(stack):
+    await slack_routes.slack_interactivity(_request("deny", stack.fingerprint), BackgroundTasks())
+    await slack_routes.slack_interactivity(
+        _request("approve", stack.fingerprint), BackgroundTasks()
+    )
+
+    assert await _status() == "denied"
+    stack.ephemeral.assert_awaited_once()
+    stack.preferences.assert_not_awaited()

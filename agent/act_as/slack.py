@@ -93,7 +93,11 @@ async def handle_button(
         return ignored("act-as request answered by someone else")
 
     approved = action != "deny"
-    await thread.decide(request, approved=approved, always_allow=action == "always_allow")
+    if not await thread.decide(request, approved=approved, always_allow=action == "always_allow"):
+        await post_slack_ephemeral_message(
+            channel_id, user_id, "You already answered this request; the first answer stands."
+        )
+        return ignored("act-as request already answered")
     background_tasks.add_task(_close_card, interaction, _LABELS[action])
     await note_for_concierge(
         user_id,

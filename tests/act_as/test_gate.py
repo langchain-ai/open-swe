@@ -75,7 +75,7 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
     assert (value["type"], value["action"], value["thread_id"]) == ("act_as", "approve", "thread-1")
     user_id, channel_id, note = dm.concierge.await_args.args
     assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
-    assert '"t" in o/r' in note
+    assert "thread-1" in note and '"t"' not in note
 
 
 @pytest.mark.asyncio

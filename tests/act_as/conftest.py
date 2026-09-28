@@ -20,4 +20,5 @@ def thread_metadata(monkeypatch: pytest.MonkeyPatch) -> JsonObject:
         threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": stored}), update=update)
     )
     monkeypatch.setattr(records, "get_client", lambda: client)
+    monkeypatch.setattr(records, "claim_slack_event", AsyncMock(return_value=True))
     return stored
