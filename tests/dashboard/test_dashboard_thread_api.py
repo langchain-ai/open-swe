@@ -1409,6 +1409,7 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     patch_thread_module(monkeypatch, "_now_ms", lambda: 123_456)
+    monkeypatch.setattr(thread_proxy, "agent_thread_pr_state_lock", _unlocked)
     monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
     patch_thread_module(
         monkeypatch, "update_slack_trace_reply_for_web_handoff", fake_update_trace_reply
@@ -1445,13 +1446,13 @@ async def test_proxy_run_start_from_slack_thread_updates_trace_reply(monkeypatch
     }
 
 
-async def test_early_follow_up_steers_after_run_start_finishes(monkeypatch) -> None:
+async def test_early_follow_up_interrupts_after_run_start_finishes(monkeypatch) -> None:
     started = asyncio.Event()
     release = asyncio.Event()
     lock = asyncio.Lock()
     metadata: dict[str, object] = {"owner_login": "octocat", "source": "dashboard"}
     forwarded: list[str] = []
-    steered: list[str] = []
+    interrupted: list[str] = []
 
     @asynccontextmanager
     async def serialize(*args, **kwargs):
@@ -1492,14 +1493,14 @@ async def test_early_follow_up_steers_after_run_start_finishes(monkeypatch) -> N
     async def enrich(thread_id, login, command, **kwargs):
         return {**command, "params": {**command["params"], "metadata": {}, "config": {}}}
 
-    async def steer(thread_id, login, command, **kwargs):
-        steered.append("steer")
-        return {"type": "success", "result": {"steered": True}}
+    async def interrupt(thread_id, login, command, **kwargs):
+        interrupted.append("interrupt")
+        return {"type": "success", "result": {"run_id": "run-2"}}
 
     monkeypatch.setattr(thread_proxy, "agent_thread_pr_state_lock", serialize)
     monkeypatch.setattr(thread_proxy, "langgraph_client", lambda: FakeClient())
     monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
-    monkeypatch.setattr(thread_proxy, "steer_running_thread", steer)
+    monkeypatch.setattr(thread_proxy, "interrupt_follow_up_run", interrupt)
     monkeypatch.setattr(thread_proxy, "_observe_dashboard_run_ttft", AsyncMock())
     monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", lambda **kwargs: FakeAsyncClient())
     monkeypatch.setattr(thread_proxy, "langgraph_url", lambda: "https://example.com")
@@ -1516,7 +1517,7 @@ async def test_early_follow_up_steers_after_run_start_finishes(monkeypatch) -> N
     await asyncio.gather(first, second)
 
     assert forwarded == ["run.start"]
-    assert steered == ["steer"]
+    assert interrupted == ["interrupt"]
 
 
 async def test_run_ttft_observer_records_first_assistant_text(
@@ -3362,89 +3363,47 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
-async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
-    store = FakeStore()
-    updates: list[dict[str, object]] = []
-    turn = uuid7()
+async def test_interrupt_follow_up_starts_attributed_run(monkeypatch) -> None:
+    enriched = AsyncMock(
+        return_value={
+            "params": {
+                "input": {"messages": [{"role": "user", "content": "also check tests"}]},
+                "config": {"configurable": {"transcript_turn_id": "turn-2"}},
+                "metadata": {"invocation_id": "invocation-2"},
+            }
+        }
+    )
+    create = AsyncMock(return_value={"run_id": "run-2"})
+    patch_thread_module(monkeypatch, "_enrich_run_start_command", enriched)
+    patch_thread_module(monkeypatch, "create_durable_run", create)
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: "client")
+    patch_thread_module(monkeypatch, "_notify_slack_web_handoff", AsyncMock())
+    command = {"id": 7, "method": "run.start", "params": {"input": {}}}
 
-    class FakeThreads:
-        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
-            assert thread_id == "tid"
-            updates.append(metadata)
-
-        async def get_state(self, thread_id: str) -> dict[str, object]:
-            return {"values": {"messages": []}}
-
-    class FakeRuns:
-        async def get(self, thread_id: str, run_id: str) -> dict[str, str]:
-            return {"run_id": run_id, "status": "running"}
-
-    class FakeClient:
-        threads = FakeThreads()
-        runs = FakeRuns()
-
-    FakeClient.store = store  # type: ignore[attr-defined]
-
-    appended: list[object] = []
-
-    async def fake_append(thread_id: str, commands) -> AppendResult:
-        assert thread_id == "tid"
-        appended.extend(commands)
-        return AppendResult(versions=[1], events=[])
-
-    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
-        assert run_id == "run-1"
-        return turn
-
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
-    patch_thread_module(monkeypatch, "append", fake_append)
-    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
-    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
-
-    result = await thread_runs.steer_running_thread(
+    result = await thread_runs.interrupt_follow_up_run(
         "tid",
         "teammate",
-        {
-            "id": 7,
-            "method": "run.start",
-            "params": {
-                "input": {
-                    "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
-                }
-            },
-        },
-        metadata={
-            "source": "dashboard",
-            "transcript": "v2",
-            "latest_run_id": "run-1",
-            "model": "openai:gpt-5",
-        },
+        command,
+        metadata={"source": "dashboard"},
         email="teammate@example.com",
     )
 
-    assert result == {
-        "id": 7,
-        "type": "success",
-        "result": {
-            "thread_id": "tid",
-            "run_id": "run-1",
-            "message_id": "msg-1",
-            "steered": True,
-        },
-    }
-    # The running agent finds the message before its next model call.
-    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
-    assert queued["content"]["queue_id"] == "msg-1"
-    assert queued["content"]["text"] == "also check the tests"
-    assert queued["content"]["sender"]["github_login"] == "teammate"
-    assert "source" not in queued["content"]
-    # The transcript shows it on the live turn right away, under the id the
-    # middleware will record it with, so the two writes deduplicate.
-    [command] = appended
-    assert command.command_id == "human:msg-1"
-    assert command.turn_id == turn
-    assert command.event.role == "human"
-    assert command.event.sender.login == "teammate"
-    assert "also check the tests" in command.event.text
-    assert updates[-1]["participant_logins"] == {"teammate": True}
+    assert result == {"id": 7, "type": "success", "result": {"thread_id": "tid", "run_id": "run-2"}}
+    enriched.assert_awaited_once_with(
+        "tid",
+        "teammate",
+        command,
+        metadata={"source": "dashboard"},
+        email="teammate@example.com",
+    )
+    create.assert_awaited_once_with(
+        "tid",
+        "agent",
+        input={"messages": [{"role": "user", "content": "also check tests"}]},
+        config={"configurable": {"transcript_turn_id": "turn-2"}},
+        metadata={"invocation_id": "invocation-2"},
+        source="dashboard",
+        thread_title=None,
+        client="client",
+        multitask_strategy="interrupt",
+    )

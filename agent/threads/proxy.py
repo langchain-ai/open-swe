@@ -25,9 +25,9 @@ from agent.threads.runs import (
     _enrich_system_run_start_command,
     _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    interrupt_follow_up_run,
     offload_requested,
     queue_follow_up_run,
-    steer_running_thread,
 )
 from agent.threads.summary import (
     _assert_thread_postable,
@@ -241,17 +241,16 @@ async def _proxy_dashboard_thread_commands(
     if method == "run.start" and thread_busy:
         if offload_requested(start_params):
             raise HTTPException(409, "offloading requires an idle conversation")
-        # Queueing and steering both attribute the message to a person, which a
-        # machine has none of; it retries instead.
+        # Both paths attribute the message to a person, which a machine has
+        # none of; it retries instead.
         if principal.machine:
             raise HTTPException(409, "thread is already running")
-        # A follow-up while a run is live either waits for that run as a queued
-        # run of its own, or joins it. Either reply keeps the protocol's shape
-        # so the client cannot tell them from a plain start.
+        # A follow-up either waits for the live run or interrupts it with a
+        # new run. Both replies keep the command protocol's shape.
         handled = await (
             queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
             if enqueue
-            else steer_running_thread(thread_id, login, parsed, metadata=metadata, email=email)
+            else interrupt_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
         )
         return 200, json.dumps(handled).encode(), "application/json"
 
