@@ -196,8 +196,13 @@ async def test_slack_reply_refuses_blocks_that_overflow_the_message(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
+    config = _config()
+    config["run_id"] = "run-1"
+    config["configurable"]["slack_thread"]["triggering_user_id"] = "U1"
+    monkeypatch.setattr(slack_reply_tool, "get_config", lambda: config)
+
     result = await slack_reply_tool.slack_reply(
-        "x" * 12001, "progress", blocks=[{"type": "divider"}] * 48
+        "Answer", "final", blocks=[{"type": "divider"}] * 48
     )
 
     assert result["success"] is False

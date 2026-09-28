@@ -11,6 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.run_config import RunConfig
 from agent.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     block_payload,
     section,
@@ -39,6 +40,8 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+# The posting helpers append a dashboard-link context block.
+_WEB_LINK_BLOCKS = 1
 
 
 def _usage_with_effort(
@@ -111,12 +114,15 @@ async def slack_reply(
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
         if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
-        slack_blocks = _reply_blocks(message, options, blocks or [], reserve=1)
+        feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        slack_blocks = _reply_blocks(
+            message, options, blocks or [], reserve=_WEB_LINK_BLOCKS + feedback
+        )
         if slack_blocks is None and blocks:
             return _too_many_blocks_error(len(blocks))
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
-        if response_type == "final" and run_id and _triggering_user_id(cfg):
+        if feedback and run_id:
             if slack_blocks is None:
                 slack_blocks = block_payload(
                     [
@@ -185,7 +191,7 @@ async def _ephemeral_reply(
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
     extra = blocks or []
-    blocks = _reply_blocks(message, None, extra, reserve=0)
+    blocks = _reply_blocks(message, None, extra, reserve=_WEB_LINK_BLOCKS)
     if blocks is None and extra:
         return _too_many_blocks_error(len(extra))
     if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
@@ -293,8 +299,8 @@ def _reply_blocks(
 ) -> list[dict[str, Any]] | None:
     """``message``, then ``extra``, then option buttons; ``None`` when they cannot fit."""
     actions = _option_actions(options)
-    body = markdown_blocks(message, reserve=reserve + len(extra) + len(actions))
-    if body is None:
+    body = markdown_blocks(message)
+    if body is None or len(body) + len(extra) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None
     return [*block_payload(body), *extra, *actions]
 

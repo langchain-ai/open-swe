@@ -19,10 +19,10 @@ _parser = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
 _SLACK_TOKEN = re.compile(r"(<[@#!][A-Za-z0-9^]+(?:\|[^<>]*)?>)")
 
 
-def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
+def markdown_blocks(text: str) -> list[Block] | None:
     """``text`` as blocks that keep code highlighted past Slack's native Markdown limit.
 
-    ``None`` when it needs more blocks than a message holds once ``reserve`` are left free.
+    ``None`` when it needs more blocks than a message holds.
     """
     if len(text) <= MARKDOWN_TEXT_MAX_CHARS:
         return [markdown(text)]
@@ -38,7 +38,7 @@ def markdown_blocks(text: str, *, reserve: int = 0) -> list[Block] | None:
         blocks.extend(code_blocks(token.content, language=language))
         start = end
     blocks.extend(_prose(lines[start:]))
-    return blocks if len(blocks) <= MESSAGE_MAX_BLOCKS - reserve else None
+    return blocks if len(blocks) <= MESSAGE_MAX_BLOCKS else None
 
 
 def _prose(lines: list[str]) -> list[Block]:
