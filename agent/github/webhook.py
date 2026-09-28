@@ -13,6 +13,7 @@ from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
 from agent.expedited_review.lifecycle import close_for_pull_request
 from agent.github.comments import GitHubAuthError
+from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.input_messages import (
     PersonIdentity,
@@ -1176,7 +1177,7 @@ async def process_github_pr_comment(
                 },
             )
         )
-    await common.trigger_or_queue_run(
+    dispatched = await common.trigger_or_queue_run(
         thread_id,
         prompt,
         input={"messages": messages},
@@ -1186,6 +1187,13 @@ async def process_github_pr_comment(
         pr_number=pr_number,
         token_repositories=common.event_thread_token_repositories(repo_config, payload),
     )
+    if dispatched and event_type == "pull_request_review":
+        await notify_slack_review(
+            thread_id,
+            reviewer=event_comment["author"],
+            review_url=f"{pr_url}#pullrequestreview-{comment_id}",
+            edited_body=event_body if payload.get("action") == "edited" else None,
+        )
 
 
 async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
