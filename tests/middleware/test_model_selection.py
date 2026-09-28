@@ -20,6 +20,7 @@ def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 def _middleware(
     route_model_ids: dict[str, str] | None = None,
     routing_mode: Literal["auto", "fast"] = "auto",
+    gateway_metadata: dict[str, str] | None = None,
 ) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock]]:
     profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in (*profiles, "default")}
@@ -28,6 +29,7 @@ def _middleware(
         models["default"],
         route_model_ids=route_model_ids,
         routing_mode=routing_mode,
+        gateway_metadata=gateway_metadata,
     )
     return middleware, models
 
@@ -61,7 +63,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
-    jev.assert_awaited_once_with("Update the README")
+    jev.assert_awaited_once_with("Update the README", gateway_metadata={})
 
 
 @pytest.mark.asyncio
@@ -128,7 +130,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
-    jev.assert_awaited_once_with("how's the weather in sf today")
+    jev.assert_awaited_once_with("how's the weather in sf today", gateway_metadata={})
 
 
 @pytest.mark.asyncio
@@ -181,7 +183,9 @@ async def test_jev_routes_or_falls_back(
         "agent.middleware.model_selection.httpx2.AsyncClient",
         lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
     )
-    middleware, _ = _middleware()
+    metadata = {"openswe_user_id": "person-a"}
+    middleware, _ = _middleware(gateway_metadata=metadata)
+    metadata["openswe_user_id"] = "person-b"
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
     route = await middleware.select_route(state)
     assert route == ("default" if failure else "fast")
@@ -194,6 +198,12 @@ async def test_jev_routes_or_falls_back(
     assert requests[0].headers["Authorization"] == (
         "Bearer gateway-key" if use_gateway else "Bearer typesafe-key"
     )
+    if use_gateway:
+        assert json.loads(requests[0].headers["X-Gateway-Metadata"]) == {
+            "openswe_user_id": "person-a"
+        }
+    else:
+        assert "X-Gateway-Metadata" not in requests[0].headers
     payload = json.loads(requests[0].read())
     assert payload["state"] == "x" * 8_000
     assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")

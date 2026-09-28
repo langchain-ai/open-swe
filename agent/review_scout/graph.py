@@ -57,6 +57,7 @@ from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
 from agent.tools.record_human_input import record_human_input
 from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway_attribution import gateway_metadata_for_run
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -238,12 +239,15 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    gateway_metadata = await gateway_metadata_for_run(cfg)
+
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     model = _make_model_or_defer(
         model_id,
         use_gateway=settings.effective_gateway_enabled,
+        gateway_metadata=gateway_metadata,
         **provider_model_kwargs(
             model_id,
             effort,

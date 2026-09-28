@@ -69,6 +69,7 @@ from agent.tools import (
 from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
 from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway_attribution import gateway_metadata_for_run
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,8 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    gateway_metadata = await gateway_metadata_for_run(cfg)
+
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = await _resolve_chat_model(cfg)
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
@@ -181,7 +184,9 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     )
 
     return create_deep_agent(
-        model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
+        model=_make_model_or_defer(
+            model_id, use_gateway=use_gateway, gateway_metadata=gateway_metadata, **model_kwargs
+        ),
         system_prompt="",
         tools=apply_tool_descriptions(
             [

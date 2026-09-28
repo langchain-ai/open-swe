@@ -9,7 +9,9 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 :func:`agent.utils.model.make_model`.
 """
 
+import json
 import logging
+from collections.abc import Mapping
 
 from agent.config import ENV
 
@@ -95,7 +97,9 @@ def _provider_of(model_id: str) -> str:
     return model_id.split(":", 1)[0]
 
 
-def gateway_overrides(model_id: str) -> dict[str, object] | None:
+def gateway_overrides(
+    model_id: str, *, gateway_metadata: Mapping[str, str] | None = None
+) -> dict[str, object] | None:
     """``init_chat_model`` kwargs that route ``model_id`` through the gateway.
 
     Returns ``None`` (so the caller keeps talking to the provider directly) when
@@ -123,6 +127,14 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
         "base_url": f"{gateway_base_url()}{path}",
         "api_key": api_key,
     }
+    if gateway_metadata:
+        headers = {"X-Gateway-Metadata": json.dumps(dict(gateway_metadata))}
+        if provider == "google_genai":
+            overrides["additional_headers"] = headers
+        elif provider == "fireworks":
+            overrides["model_kwargs"] = {"extra_headers": headers}
+        else:
+            overrides["default_headers"] = headers
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.

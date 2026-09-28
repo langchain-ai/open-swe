@@ -53,6 +53,7 @@ from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
 from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway_attribution import gateway_metadata_for_run
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    gateway_metadata = await gateway_metadata_for_run(cfg)
+
     workspace = await _analyzer_workspace(cfg)
 
     async def reconnect_backend(_thread_id: str = thread_id):
@@ -152,7 +155,9 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     )
 
     return create_deep_agent(
-        model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
+        model=_make_model_or_defer(
+            model_id, use_gateway=use_gateway, gateway_metadata=gateway_metadata, **model_kwargs
+        ),
         system_prompt="",
         tools=apply_tool_descriptions([save_review_style_prompt, read_finding_outcomes]),
         backend=backend,

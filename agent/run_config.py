@@ -45,6 +45,10 @@ def _reject_bool(value: Any) -> Any:
 Int = Annotated[int, BeforeValidator(_reject_bool)]
 
 
+def _github_user_id(value: object) -> object:
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+
 class Repo(BaseModel):
     """A GitHub repository as ``configurable["repo"]`` carries it."""
 
@@ -110,7 +114,7 @@ class RunConfig(BaseModel):
 
     # Actor
     github_login: str | None = None
-    github_user_id: str | None = None
+    github_user_id: Annotated[str | None, BeforeValidator(_github_user_id)] = None
     user_email: str | None = None
 
     # Repository

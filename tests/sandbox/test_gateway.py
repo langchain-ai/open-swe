@@ -1,5 +1,7 @@
 """Unit tests for LangSmith LLM Gateway routing (agent/utils/gateway.py + make_model)."""
 
+import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -278,3 +280,171 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
+
+
+@pytest.mark.parametrize(
+    ("model_id", "path"),
+    [
+        ("openai:gpt-5.6-sol", "/openai/v1/responses"),
+        ("anthropic:claude-sonnet-4-6", "/anthropic/v1/messages"),
+        ("baseten:moonshotai/Kimi-K2.5", "/baseten/v1/chat/completions"),
+        ("fireworks:accounts/fireworks/models/glm-5p2", "/fireworks/v1/chat/completions"),
+        ("google_genai:gemini-2.5-flash", "/gemini/v1beta/models/gemini-2.5-flash:generateContent"),
+    ],
+)
+async def test_gateway_metadata_reaches_provider_requests(
+    monkeypatch: pytest.MonkeyPatch, model_id: str, path: str
+) -> None:
+    requests: list[tuple[str, str, str, object]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requests.append(
+            (
+                request.path,
+                request.headers["X-Gateway-Metadata"],
+                request.headers.get("X-Session-Affinity", ""),
+                await request.json(),
+            )
+        )
+        if model_id.startswith("openai:"):
+            return web.json_response(
+                {
+                    "id": "resp_test",
+                    "object": "response",
+                    "created_at": 0,
+                    "status": "completed",
+                    "model": "gpt-5.6-sol",
+                    "output": [
+                        {
+                            "id": "msg_test",
+                            "type": "message",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [{"type": "output_text", "text": "ok", "annotations": []}],
+                        }
+                    ],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                }
+            )
+        if model_id.startswith("anthropic:"):
+            return web.json_response(
+                {
+                    "id": "msg_test",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-6",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            )
+        if model_id.startswith("google_genai:"):
+            return web.json_response(
+                {
+                    "candidates": [
+                        {
+                            "content": {"role": "model", "parts": [{"text": "ok"}]},
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "usageMetadata": {
+                        "promptTokenCount": 1,
+                        "candidatesTokenCount": 1,
+                        "totalTokenCount": 2,
+                    },
+                }
+            )
+        return web.json_response(
+            {
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": model_id.split(":", 1)[1],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        )
+
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-test-key")
+    async with _http_server(handler) as base_url:
+        monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
+        metadata = {"openswe_user_id": "alice", "invocation_id": "invocation-alice"}
+        model_kwargs: dict[str, object] = {}
+        if model_id.startswith("fireworks:"):
+            model_kwargs = {
+                "reasoning_effort": "high",
+                "extra_headers": {"X-Session-Affinity": "thread-session"},
+            }
+        first = model.make_model(
+            model_id,
+            gateway_metadata=metadata,
+            max_retries=0,
+            model_kwargs=model_kwargs,
+        )
+        metadata["openswe_user_id"] = "bob"
+        metadata["invocation_id"] = "invocation-bob"
+        second = model.make_model(
+            model_id,
+            gateway_metadata=metadata,
+            max_retries=0,
+            model_kwargs=model_kwargs,
+        )
+        await asyncio.gather(first.ainvoke("hi"), second.ainvoke("hi"))
+        if model_id.startswith("fireworks:"):
+            await first._async_sdk_client.close()
+            await second._async_sdk_client.close()
+
+    assert len(requests) == 2
+    assert {request[0] for request in requests} == {path}
+    assert {json.loads(request[1])["openswe_user_id"] for request in requests} == {"alice", "bob"}
+    for _, raw_metadata, affinity, body in requests:
+        sent_metadata = json.loads(raw_metadata)
+        assert sent_metadata["invocation_id"] == f"invocation-{sent_metadata['openswe_user_id']}"
+        if model_id.startswith("fireworks:"):
+            assert affinity == "thread-session"
+            assert isinstance(body, dict)
+            assert body["reasoning_effort"] == "high"
+    assert model_kwargs.get("extra_headers", {}) == (
+        {"X-Session-Affinity": "thread-session"} if model_id.startswith("fireworks:") else {}
+    )
+
+
+@pytest.mark.parametrize("use_gateway", [False, True])
+def test_gateway_metadata_is_not_forwarded_to_direct_provider(use_gateway: bool) -> None:
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "openai:gpt-5.6-sol",
+            use_gateway=use_gateway,
+            gateway_metadata={"openswe_user_id": "alice"},
+        )
+    assert "gateway_metadata" not in captured
+    assert "default_headers" not in captured
+
+
+def test_gateway_metadata_does_not_change_openai_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "gateway-test-key")
+    captured, fake = _capture_init_chat_model()
+    with patch.object(model, "init_chat_model", fake):
+        model.make_model(
+            "openai:gpt-5.6-sol",
+            gateway_metadata={"openswe_user_id": "alice"},
+            reasoning={"effort": "high"},
+            timeout=42,
+            max_retries=3,
+        )
+    assert captured["use_responses_api"] is True
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
+    assert captured["timeout"] == 42
+    assert captured["max_retries"] == 3
+    assert captured["reasoning"] == {"effort": "high"}

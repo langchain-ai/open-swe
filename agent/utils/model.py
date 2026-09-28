@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
@@ -98,7 +99,13 @@ def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
         include.append("reasoning.encrypted_content")
 
 
-def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
+def make_model(
+    model_id: str,
+    *,
+    use_gateway: bool | None = None,
+    gateway_metadata: Mapping[str, str] | None = None,
+    **kwargs: Unpack[ModelKwargs],
+):
     """Build a chat model, optionally routed through the LangSmith LLM Gateway.
 
     ``use_gateway`` resolves the deployment default (``LANGSMITH_GATEWAY_ENABLED``)
@@ -123,8 +130,19 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     gateway_applied = False
     oauth_applied = False
     if enabled:
-        overrides = gateway_overrides(model_id)
+        overrides = gateway_overrides(model_id, gateway_metadata=gateway_metadata)
         if overrides is not None:
+            gateway_model_kwargs = overrides.get("model_kwargs")
+            if isinstance(gateway_model_kwargs, dict):
+                merged = dict(kwargs.get("model_kwargs") or {})
+                for key, value in gateway_model_kwargs.items():
+                    previous = merged.get(key)
+                    merged[key] = (
+                        {**previous, **value}
+                        if isinstance(previous, dict) and isinstance(value, dict)
+                        else value
+                    )
+                overrides["model_kwargs"] = merged
             model_kwargs.update(overrides)
             gateway_applied = True
 

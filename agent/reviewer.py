@@ -108,6 +108,7 @@ from agent.utils import ttl_cache
 from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway_attribution import gateway_metadata_for_run
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
@@ -914,6 +915,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
+    gateway_metadata = await gateway_metadata_for_run(cfg)
+
     if cfg.reviewer_model_id:
         model_id = cfg.reviewer_model_id
         reasoning_effort = cfg.reviewer_reasoning_effort
@@ -959,9 +962,14 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     )
 
     use_gateway = settings.effective_gateway_enabled
-    reviewer_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    reviewer_model = _make_model_or_defer(
+        model_id, use_gateway=use_gateway, gateway_metadata=gateway_metadata, **model_kwargs
+    )
     reviewer_subagent_model = _make_model_or_defer(
-        subagent_model_id, use_gateway=use_gateway, **subagent_model_kwargs
+        subagent_model_id,
+        use_gateway=use_gateway,
+        gateway_metadata=gateway_metadata,
+        **subagent_model_kwargs,
     )
 
     async def reconnect_backend(

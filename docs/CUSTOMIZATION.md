@@ -221,6 +221,16 @@ The instance toggle lives under **Admin → LLM Gateway**, and each workspace's 
 
 Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
+#### Per-person gateway cost attribution
+
+Gateway requests from execution graphs carry `X-Gateway-Metadata` with `openswe_user_id` (the canonical Open SWE `users.id` UUID), plus `thread_id` and `invocation_id` when available. This includes main, fallback, routed, subagent, title, reviewer, chat, analyzer, scout, and gateway-backed Jev calls. Direct-provider requests do not receive these headers.
+
+Group costs in the LangSmith `gateway` project by `gateway.openswe_user_id`, for example with `/v2/runs/analytics` using `sum(total_cost)` and a metadata grouping on that path. This is separate from the gateway's native User breakdown, which identifies the LangSmith credential owner, and from Open SWE's existing agent trace-cost totals. Do not add both totals together. Attribution starts with newly tagged requests; historical calls are not backfilled.
+
+Attribution resolves the current invocation's actor to an existing user; it does not infer one from the thread owner or old Slack context. Unknown or conflicting identities and background-command completions use the explicit `unattributed` bucket. Scheduled invocations without an actor also use that bucket; preserving a background initiator requires separate durable attribution. The canonical user UUID is not the analytics directory's person ID. Identity lookup failures are logged and leave model execution available.
+
+Optional [header-based spend policies](https://docs.langchain.com/langsmith/llm-gateway-header-policies) can split limits by `openswe_user_id`; enabling attribution does not create policies or budgets. Keep the gateway key server-side: custom attribution headers are application assertions, not a substitute for gateway authentication.
+
 **Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic, Baseten, and Fireworks are unaffected.
 
 ---

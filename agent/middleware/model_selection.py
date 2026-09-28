@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired
@@ -60,14 +61,21 @@ def _route_criteria() -> dict[str, str]:
     return {route: prompt(f"model-selection/{route}") for route in ROUTES}
 
 
-async def _select_jev_route(task: str) -> SelectedRoute:
+async def _select_jev_route(
+    task: str, *, gateway_metadata: Mapping[str, str] | None = None
+) -> SelectedRoute:
     typesafe_key = ENV.TYPESAFE_API_KEY.optional()
     gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
     if not typesafe_key and not gateway_key:
         logger.warning("Jev routing has no API key; using configured default model")
         return "default"
     try:
-        async with httpx2.AsyncClient(timeout=3.0) as client:
+        headers = (
+            {"X-Gateway-Metadata": json.dumps(dict(gateway_metadata))}
+            if gateway_metadata and not typesafe_key
+            else {}
+        )
+        async with httpx2.AsyncClient(timeout=3.0, headers=headers) as client:
             classifier = TypeSafeClassifier(
                 model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
                 api_key=typesafe_key or gateway_key,
@@ -136,10 +144,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         *,
         route_model_ids: Mapping[str, str] | None = None,
         routing_mode: RoutingMode = "auto",
+        gateway_metadata: Mapping[str, str] | None = None,
     ) -> None:
         self._models = {**models, "default": default_model}
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
+        self._gateway_metadata = dict(gateway_metadata or {})
 
     async def select_route(
         self,
@@ -152,7 +162,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return "fast"
         messages = state.get("messages", [])
         task = _latest_human_task(messages)[-8_000:]
-        return await _select_jev_route(task)
+        return await _select_jev_route(task, gateway_metadata=self._gateway_metadata)
 
     async def abefore_model(
         self,

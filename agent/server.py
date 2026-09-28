@@ -244,6 +244,7 @@ from agent.utils.authorship import (
 from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
+from agent.utils.gateway_attribution import gateway_metadata_for_run
 from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.model import (
     DEFAULT_LLM_REASONING,
@@ -1354,6 +1355,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
+    gateway_metadata = await gateway_metadata_for_run(cfg)
     fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
     fallback_middleware: list[Any] = []
     if fallback_model_id and fallback_model_id != model_id:
@@ -1362,7 +1364,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
         fallback_middleware.append(
             ModelFallbackMiddleware(
-                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+                _make_model_or_defer(
+                    fallback_model_id,
+                    use_gateway=use_gateway,
+                    gateway_metadata=gateway_metadata,
+                    **fallback_kwargs,
+                )
             )
         )
         logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
@@ -1568,7 +1575,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
-    main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    main_model = _make_model_or_defer(
+        model_id, use_gateway=use_gateway, gateway_metadata=gateway_metadata, **model_kwargs
+    )
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         assert model_routing_mode is not None
@@ -1576,6 +1585,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             route: _make_model_or_defer(
                 routed_model_id,
                 use_gateway=use_gateway,
+                gateway_metadata=gateway_metadata,
                 **provider_model_kwargs(
                     routed_model_id,
                     effort,
@@ -1595,15 +1605,18 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 "default": model_id,
             },
             routing_mode=model_routing_mode,
+            gateway_metadata=gateway_metadata,
         )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
+        gateway_metadata=gateway_metadata,
         **subagent_model_kwargs,
     )
     title_model = _make_model_or_defer(
         title_model_id,
         use_gateway=use_gateway,
+        gateway_metadata=gateway_metadata,
         **title_model_kwargs,
     )
     workspace_skills = (
