@@ -1007,7 +1007,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 attribution_route = await self._model_selection.select_route(
                     cast(ModelSelectionState, state)
                 )
-                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+                if attribution_route != "default":
+                    attribution_model_id, attribution_effort = self._routing_defaults[
+                        attribution_route
+                    ]
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
@@ -1578,9 +1581,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,
-            routing_models["fast"],
+            main_model,
             route_model_ids={
-                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
+                **{
+                    route: routed_model_id
+                    for route, (routed_model_id, _) in routing_defaults.items()
+                },
+                "default": model_id,
             },
             routing_mode=model_routing_mode,
         )

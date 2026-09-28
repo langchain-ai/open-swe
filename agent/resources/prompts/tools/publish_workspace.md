@@ -50,8 +50,12 @@ Args:
         under, defaulting to ``<prefix>-environment-<slug>``. It must not
         contain a colon — that separates the name from the tag — and it is
         stable: every refresh re-publishes ``name:latest`` under it.
-    repos: Optional ``owner/repo`` list this workspace covers, for the
-        dashboard. Does not clone anything by itself.
+    repos: Optional ``owner/repo`` list of repositories this workspace
+        prefers: their GitHub and Linear events and automations run here, and
+        the setup and update scripts receive them in ``OPENSWE_WORKSPACE_REPOS``
+        to preload. A repository can be preferred by only one workspace. It
+        does not limit access: runs can reach every repository the GitHub App
+        installation can. Does not clone anything by itself.
     mem_bytes: Optional memory capacity for newly-created sandbox VMs.
     vcpus: Optional virtual CPU count for newly-created sandbox VMs.
     fs_capacity_bytes: Optional filesystem capacity for newly-created sandbox VMs.

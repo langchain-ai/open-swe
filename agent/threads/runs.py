@@ -33,6 +33,7 @@ from agent.dashboard.workspace_settings import (
 )
 from agent.database import postgres
 from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_agent_run
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.input_messages import (
     PersonIdentity,
     RunMessage,
@@ -87,7 +88,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-from agent.workspaces.routing import resolve_workspace, workspace_for_repo
+from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -1363,6 +1364,8 @@ async def _create_system_thread_record(
     if repo_config:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
+    if principal.token_repositories is not None:
+        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(principal.token_repositories)
     client = langgraph_client()
     await create_thread(
         client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
@@ -1373,9 +1376,10 @@ async def _create_system_thread_record(
 async def _system_repo_config(
     configurable: Mapping[str, Any], principal: Principal
 ) -> dict[str, str]:
-    """The repository a machine's thread works in, checked against its workspace.
+    """The repository a machine's thread works in.
 
-    A federated workflow that names none gets its own repository, which is the
+    Any repository the GitHub App can reach will do, not only ones its
+    workspace prefers. A federated workflow that names none gets its own repository, which is the
     only one it could have been talking about.
     """
     requested = configurable.get("repo")
@@ -1386,9 +1390,6 @@ async def _system_repo_config(
     repo_config = _parse_repo(requested)
     if not repo_config:
         raise HTTPException(422, "repo must be owner/name")
-    owner = await workspace_for_repo(repo_config["owner"], repo_config["name"])
-    if owner != principal.workspace:
-        raise HTTPException(403, "repository is not in this workspace")
     await require_repo_access_for_workspace(f"{repo_config['owner']}/{repo_config['name']}")
     return repo_config
 
