@@ -284,8 +284,6 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
-  review_auto_approve?: boolean
-  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
@@ -495,6 +493,10 @@ export interface PRMergeRateEffort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds?: number | null
+  avg_delivery_seconds?: number | null
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRateCohort {
@@ -518,6 +520,7 @@ export interface PRMergeRateCohort {
   avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
+  mean_distance_basis_points?: number | null
   distance_sample_size?: number
 }
 
@@ -556,13 +559,20 @@ export interface ReposPayload {
 
 export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
 
+/** What a positive approval assessment does; `null` is the `dry_run` default. */
+export type ReviewApprovalMode = "off" | "dry_run" | "approve"
+
+export interface ApprovalsFileStatus {
+  found: boolean
+}
+
 export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
-  approval_policy?: string | null
+  approval_mode?: ReviewApprovalMode | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -652,7 +662,7 @@ export interface WorkspaceOption {
   slug: string
   name: string
   repos: Array<string>
-  /** Effective default repository, withheld when another workspace owns it. */
+  /** Effective default repository, from the workspace's settings tiers. */
   default_repo: string | null
   slack_channel_ids: Array<string>
   is_default: boolean
@@ -1033,6 +1043,7 @@ export interface ScoutProgress {
 
 export interface PublishedReviewAssessment {
   approved?: boolean
+  dry_run?: boolean
   review_id: number
   head_sha: string
   risk_score: number
@@ -1240,14 +1251,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
     }),
-  saveReviewApprovalPolicy: (
+  saveReviewApprovalMode: (
     full_name: string,
-    approval_policy: string | null
+    approval_mode: ReviewApprovalMode | null
   ) =>
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "PUT",
-      body: JSON.stringify({ approval_policy }),
+      body: JSON.stringify({ approval_mode }),
     }),
+  getApprovalsFile: (full_name: string) =>
+    request<ApprovalsFileStatus>(
+      `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
+    ),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
       `/review-styles/${encodeURIComponent(full_name)}/analyze`,

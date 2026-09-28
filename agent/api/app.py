@@ -42,7 +42,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
     from agent.utils.model import validate_local_dev_llm_config
-    from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -50,20 +49,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()
-    try:
-        # Workspaces used to live in the LangGraph Store; this empties it into
-        # the tables and is a no-op once it has.
-        imported = await import_store_records()
-    except Exception:  # noqa: BLE001
-        # Startup continues, but repository routing fails closed until an import
-        # succeeds: the tables this failed to fill make every repository read as
-        # unowned, and GitHub retries a 503 while it drops a 200.
-        logger.exception("Importing workspaces from the LangGraph Store failed")
-    else:
-        logger.info(
-            "Imported workspaces from the LangGraph Store",
-            extra={"imported_workspaces": imported},
-        )
     try:
         # People used to be Store records keyed by GitHub login; this moves them
         # into the users table and is a no-op once it has.

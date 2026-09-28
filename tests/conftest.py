@@ -18,8 +18,11 @@ from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES
 from tests.support.postgres import MigratedTemplate, isolated_database
+
+# What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
+os.environ.setdefault("REDIS_URI", "fake")
+os.environ.setdefault("DATABASE_URI", ":memory:")
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
@@ -224,10 +227,19 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
-    ttl_cache.clear()
+    """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
+    from langgraph_api import cache
+    from langgraph_api.feature_flags import IS_POSTGRES_OR_GRPC_BACKEND
+
+    def clear() -> None:
+        ttl_cache.clear()
+        # The postgres edition caches over gRPC and has no in-process store to clear.
+        if not IS_POSTGRES_OR_GRPC_BACKEND:
+            cache._CACHE.clear()
+
+    clear()
     yield
-    ttl_cache.clear()
+    clear()
 
 
 @pytest.fixture(autouse=True)
@@ -239,19 +251,6 @@ def _reset_sandbox_registries() -> Iterator[None]:
     yield
     SANDBOX_BACKENDS.clear()
     SANDBOX_CONNECTIONS.clear()
-
-
-@pytest.fixture(autouse=True)
-def _workspace_store_import_completed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Treat the startup import of LangGraph Store workspaces as done.
-
-    Tests do not run the application lifespan, and until that import succeeds
-    :func:`agent.workspaces.routing.repo_is_routable` fails closed rather than
-    reading an empty table as "nobody owns this repository". A test about that
-    path sets the flag back to ``False`` itself.
-    """
-    monkeypatch.setattr(WORKSPACES, "import_completed", True)
-    monkeypatch.setattr(WORKSPACES, "unimported_repos", frozenset())
 
 
 @pytest.fixture(autouse=True)
