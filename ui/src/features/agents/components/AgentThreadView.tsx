@@ -134,7 +134,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
-  const pendingAutoSelectionRef = useRef<{ pending: boolean } | null>(null)
+  const pendingAutoSelectionRef = useRef<{
+    pending: boolean
+    messageId: string | null
+  } | null>(null)
   const activeSelection = autoSelected
     ? null
     : (selection ??
@@ -144,7 +147,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
-    pendingAutoSelectionRef.current = next === null ? { pending: true } : null
+    pendingAutoSelectionRef.current =
+      next === null ? { pending: true, messageId: null } : null
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -184,15 +188,23 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         pendingAutoSelectionRef.current?.pending
           ? pendingAutoSelectionRef.current
           : null
+      const messageId = crypto.randomUUID()
       const restoreAutoSelection = () => {
         // A later picker action has its own object and is unaffected by rollback.
-        if (pendingAutoSelection) pendingAutoSelection.pending = true
+        if (pendingAutoSelection?.messageId === messageId) {
+          pendingAutoSelection.pending = true
+          pendingAutoSelection.messageId = null
+        }
       }
-      if (pendingAutoSelection) pendingAutoSelection.pending = false
+      if (pendingAutoSelection) {
+        pendingAutoSelection.pending = false
+        pendingAutoSelection.messageId = messageId
+      }
       try {
         await sendMessage.mutateAsync({
           content,
           images,
+          client_message_id: messageId,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: pendingAutoSelection !== null,
@@ -208,6 +220,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [activeSelection, followUpBehavior, isStreaming, sendMessage]
   )
+
+  const restoreQueuedAutoSelection = useCallback((messageId: string) => {
+    const pendingAutoSelection = pendingAutoSelectionRef.current
+    if (pendingAutoSelection?.messageId === messageId) {
+      pendingAutoSelection.pending = true
+      pendingAutoSelection.messageId = null
+    }
+  }, [])
 
   const queuedText = (entry: QueuedTurn) =>
     entry.message.chunks
@@ -252,12 +272,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
       if (source.kind === "stream") {
-        await source.cancelQueued(entry.turnId)
-        return
+        if (!(await source.cancelQueued(entry.turnId))) {
+          throw new Error("The queued message could not be cancelled.")
+        }
+      } else {
+        await agentsApi.cancelRun(thread.id, entry.runId)
       }
-      await agentsApi.cancelRun(thread.id, entry.runId)
+      restoreQueuedAutoSelection(entry.message.id)
     },
-    [source, thread.id]
+    [restoreQueuedAutoSelection, source, thread.id]
   )
   const steerInFlightRef = useRef(false)
   // Send now: the follow-up leaves the queue and goes into the live run.
@@ -325,6 +348,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
     if (!(await source.stop())) return
+    for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
+    for (const message of unacknowledged) restoreQueuedAutoSelection(message.id)
     if (source.kind === "stream" && pending.length > 0) {
       // Same reasoning as withdrawQueued: syncs the adapter's queue store.
       await Promise.allSettled(
@@ -363,6 +388,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     isOwnQueued,
     queryClient,
     queued,
+    restoreQueuedAutoSelection,
     restoreQueuedToComposer,
     source,
     thread.id,
