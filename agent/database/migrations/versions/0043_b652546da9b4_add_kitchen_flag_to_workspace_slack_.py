@@ -7,7 +7,7 @@ It defaults to off, so binding a channel to a workspace never implies it.
 from alembic import op
 
 revision = "b652546da9b4"
-down_revision = "0934e6e14894"
+down_revision = "ef05fbc2c85a"
 branch_labels = None
 depends_on = None
 
