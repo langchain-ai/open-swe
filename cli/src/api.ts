@@ -14,6 +14,7 @@ import {
   type Identity,
   type ThreadsPage,
 } from "./threads.ts"
+import { uploadedThreadSchema, type SessionUpload } from "./upload.ts"
 
 export class ApiError extends Error {
   constructor(
@@ -163,6 +164,16 @@ export class ApiClient {
     if (!parsed.success)
       throw new ProtocolError("/threads/page response is malformed")
     return parsed.data
+  }
+
+  /** Create a thread from a local session's transcript; returns its id. */
+  async uploadSession(upload: SessionUpload): Promise<string> {
+    const parsed = uploadedThreadSchema.safeParse(
+      await this.json("POST", "/threads/uploads", { body: upload })
+    )
+    if (!parsed.success)
+      throw new ProtocolError("/threads/uploads response is malformed")
+    return parsed.data.id
   }
 
   async createBridge(input: CreateBridgeInput): Promise<BridgeSession> {
