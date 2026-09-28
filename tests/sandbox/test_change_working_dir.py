@@ -1,9 +1,9 @@
 import importlib
+import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-from deepagents.backends.protocol import ExecuteResponse, ReadResult
+from deepagents.backends.protocol import ExecuteResponse
 
 from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 
@@ -13,23 +13,24 @@ change_working_dir_module = importlib.import_module("agent.tools.change_working_
 class FakeBackend:
     id = "sandbox-1"
 
-    def __init__(self, instructions: str | None = None) -> None:
+    def __init__(self, instructions: str | None = None, error: str | None = None) -> None:
         self.commands: list[str] = []
         self.instructions = instructions
+        self.error = error
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         self.commands.append(command)
-        if command.startswith("realpath"):
-            return ExecuteResponse(output="/repo\n", exit_code=0)
+        if "python3 -c " in command:
+            if self.error:
+                return ExecuteResponse(output=self.error, exit_code=1)
+            return ExecuteResponse(
+                output=json.dumps({"directory": "/repo", "instructions": self.instructions}),
+                exit_code=0,
+            )
         return ExecuteResponse(output="/repo\n", exit_code=0)
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        if self.instructions is None:
-            return ReadResult(error="File not found")
-        return ReadResult(file_data={"content": self.instructions, "encoding": "utf-8"})
 
 
 @pytest.mark.asyncio
@@ -70,9 +71,9 @@ async def test_invalid_directory_does_not_change_existing_directory(monkeypatch)
         "from_runtime",
         lambda: SimpleNamespace(thread_id="thread"),
     )
-    backend.aread = AsyncMock(return_value=ReadResult(error="Permission denied"))
+    backend.error = "Permission denied"
     try:
-        with pytest.raises(RuntimeError, match="Permission denied"):
+        with pytest.raises(ValueError, match="Permission denied"):
             await change_working_dir_module.change_working_dir("/repo")
         assert proxy.working_directory == "/original"
     finally:
