@@ -68,6 +68,8 @@ async def isolated_database(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncI
     engine and the schema name are swapped, so it does not matter which module a
     consumer imported the database API through.
     """
+    monkeypatch.setenv("POSTGRES_URI", uri)
+    uri = postgres.uri() or uri
     admin = MigratedTemplate.admin_engine(uri)
     try:
         database = await MigratedTemplate.clone(admin, uri)
