@@ -21,6 +21,7 @@ import {
 } from "./threadListAdapter"
 import { toolkit } from "./Message"
 import { useModelSelectionSubmission } from "./useModelSelectionSubmission"
+import { createRunStartTracker } from "./runStartTracker"
 
 export function useThreadMetadata() {
   const id = useAuiState((state) => state.threadListItem.externalId)
@@ -49,6 +50,7 @@ function useOpenSweThreadRuntime() {
     () => createDashboardClient(agentsApi.langGraphApiUrl),
     []
   )
+  const runStarts = useMemo(() => createRunStartTracker(dashboardFetch), [])
   const attachments = useMemo(() => {
     const adapter = new SimpleImageAttachmentAdapter()
     adapter.accept = "image/png,image/jpeg,image/gif,image/webp"
@@ -63,12 +65,12 @@ function useOpenSweThreadRuntime() {
   const runtime = useStreamRuntime({
     client,
     assistantId: "agent",
-    fetch: dashboardFetch,
+    fetch: runStarts.fetch,
     autoCancelPendingToolCalls: false,
     isDisabled: !canPost || (exists && !metadata.data),
     adapters: { attachments },
-    onCreated: () => {
-      acceptModelSelection()
+    onCreated: ({ runId }) => {
+      acceptModelSelection(runId)
       setExists(true)
       const remoteId = aui.threadListItem().getState().externalId
       if (remoteId)
@@ -82,7 +84,7 @@ function useOpenSweThreadRuntime() {
       void aui.threads().reload()
     },
   })
-  const acceptModelSelection = useModelSelectionSubmission(runtime)
+  const acceptModelSelection = useModelSelectionSubmission(runtime, runStarts)
   return runtime
 }
 
