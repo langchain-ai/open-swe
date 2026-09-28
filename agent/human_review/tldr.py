@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.prompts import prompt
-from agent.utils.model import make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +35,9 @@ def _clip(text: str) -> str:
 
 
 async def _summarize(title: str, body: str) -> str:
+    # Provider SDKs stay out of agent.webapp's import closure (tests/agent/test_import_hygiene.py).
+    from agent.utils.model import make_model, provider_model_kwargs
+
     settings = await get_workspace_settings()
     model_id, effort = settings.default_thread_title_model
     model = make_model(

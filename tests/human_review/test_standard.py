@@ -57,7 +57,12 @@ def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
 
 
 def test_a_failing_check_github_does_not_require_does_not_block_the_request() -> None:
-    snapshot = _snapshot(check_state="failure", mergeable_state="unstable", failing_checks=["x"])
+    snapshot = _snapshot(
+        check_state="failure",
+        mergeable_state="unstable",
+        failures_are_required=False,
+        failing_checks=["x"],
+    )
     assert request_blockers(snapshot) == []
 
 
