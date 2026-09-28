@@ -1,6 +1,6 @@
 /** Preserve command results that the SDK's onCreated callback omits. */
 export function createRunStartTracker(fetcher: typeof fetch) {
-  const started = new Set<string>()
+  const acceptedActions = new Map<string, string>()
   const trackedFetch = Object.assign(
     async (...args: Parameters<typeof fetch>) => {
       const [input, init] = args
@@ -19,6 +19,16 @@ export function createRunStartTracker(fetcher: typeof fetch) {
       if (!url.pathname.endsWith("/commands")) return response
       const command: unknown = JSON.parse(init.body)
       if (!isRecord(command) || command.method !== "run.start") return response
+      if (!isRecord(command.params) || !isRecord(command.params.config))
+        return response
+      const configurable = command.params.config.configurable
+      if (
+        !isRecord(configurable) ||
+        configurable.model_selection !== "auto" ||
+        configurable.model_selection_changed !== true ||
+        typeof configurable.model_selection_action_id !== "string"
+      )
+        return response
       const body: unknown = await response.clone().json()
       if (
         isRecord(body) &&
@@ -27,7 +37,10 @@ export function createRunStartTracker(fetcher: typeof fetch) {
         typeof body.result.run_id === "string" &&
         body.result.steered !== true
       ) {
-        started.add(body.result.run_id)
+        acceptedActions.set(
+          body.result.run_id,
+          configurable.model_selection_action_id
+        )
       }
       return response
     },
@@ -35,7 +48,11 @@ export function createRunStartTracker(fetcher: typeof fetch) {
   )
   return {
     fetch: trackedFetch,
-    consumeStarted: (runId: string) => started.delete(runId),
+    consumeModelSelectionAction: (runId: string) => {
+      const actionId = acceptedActions.get(runId)
+      acceptedActions.delete(runId)
+      return actionId
+    },
   }
 }
 

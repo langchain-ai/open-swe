@@ -3,11 +3,13 @@
 import { useEffect } from "react"
 import {
   AssistantRuntimeProvider,
+  SimpleImageAttachmentAdapter,
   useExternalStoreRuntime,
 } from "@assistant-ui/react"
 import type {
   AppendMessage,
   AssistantRuntime,
+  AttachmentAdapter,
   ThreadMessage,
 } from "@assistant-ui/react"
 import { ProtocolSseTransportAdapter } from "@langchain/langgraph-sdk"
@@ -60,10 +62,11 @@ vi.mock("@/features/agents/components/ModelPicker", () => ({
   ),
 }))
 
-function Harness() {
+function Harness({ attachments }: { attachments?: AttachmentAdapter }) {
   const currentRuntime = useExternalStoreRuntime<ThreadMessage>({
     messages: [],
     onNew,
+    adapters: { attachments },
   })
   const accept = useModelSelectionSubmission(currentRuntime, runStarts)
   useEffect(() => {
@@ -115,7 +118,10 @@ beforeEach(() => {
   fetcher.mockReset()
   runStarts = createRunStartTracker(fetcher)
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe("assistant composer model selection", () => {
   it("consumes Auto once after acceptance while retaining Auto and other settings", async () => {
@@ -206,4 +212,46 @@ describe("assistant composer model selection", () => {
       model_selection_changed: false,
     })
   })
+
+  it.each(["explicit", "auto"])(
+    "preserves Auto chosen while a %s submission uploads attachments",
+    async (initialSelection) => {
+      let finishUpload!: () => void
+      const upload = new Promise<void>((resolve) => {
+        finishUpload = resolve
+      })
+      const attachments = new SimpleImageAttachmentAdapter()
+      vi.spyOn(attachments, "send").mockImplementation(async (attachment) => {
+        await upload
+        return { ...attachment, status: { type: "complete" }, content: [] }
+      })
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:upload")
+      vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+      render(<Harness attachments={attachments} />)
+      if (initialSelection === "auto") fireEvent.click(screen.getByText("Auto"))
+      await act(async () => {
+        await runtime.thread.composer.addAttachment(
+          new File(["image"], "image.png", { type: "image/png" })
+        )
+      })
+      act(() => {
+        runtime.thread.composer.setText("Continue")
+        runtime.thread.composer.send()
+      })
+      expect(onNew).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByText("Explicit"))
+      fireEvent.click(screen.getByText("Auto"))
+      await act(async () => finishUpload())
+      expect(onNew.mock.calls.at(-1)![0].runConfig?.custom).toMatchObject({
+        model_selection: initialSelection,
+      })
+      await respond()
+      expect(await send()).toMatchObject({
+        model_selection: "auto",
+        model_selection_changed: true,
+      })
+      await respond()
+      expect(await send()).toMatchObject({ model_selection_changed: false })
+    }
+  )
 })
