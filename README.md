@@ -59,6 +59,7 @@ Each cloud coding thread is bound to its own persistent sandbox, so the agent ca
 - Learns repository-specific review preferences from historical feedback
 - Supports read-only PR chat for investigating a change without modifying it
 - Keeps findings grounded in the diff and publishes them back to GitHub
+- Assesses each pull request against the repository's `.open-swe/APPROVALS.md`, posting a dry-run verdict by default or approving once an admin turns approvals on
 
 ### Operate
 
