@@ -1181,19 +1181,27 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
     assert opening["workspace"] == "core"
 
 
-async def test_an_automation_without_a_workspace_moves_to_default(
+async def test_the_startup_migration_moves_automations_without_a_workspace_to_default(
     fake_client, auth, registry_db
 ) -> None:  # noqa: ANN001, ARG001
     """Automations saved before they carried a workspace run in `default`, not their repo's."""
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record())
+    await fake_client.store.put_item(
+        schedules.SCHEDULES_NAMESPACE, "sched_2", _scheduled_record(id="sched_2", workspace="oss")
+    )
 
+    assert await schedules.migrate_automation_workspaces() == 1
+    assert await schedules.migrate_automation_workspaces() == 0
+
+    stored = {
+        schedule_id: fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), schedule_id)]
+        for schedule_id in ("sched_1", "sched_2")
+    }
+    assert stored["sched_1"]["workspace"] == "default"
+    assert stored["sched_2"]["workspace"] == "oss"
     assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
-
     assert fake_client.runs.created[0]["config"]["configurable"]["workspace"] == "default"
-    stored = fake_client.store.items[(tuple(schedules.SCHEDULES_NAMESPACE), "sched_1")]
-    assert stored["workspace"] == "default"
-    assert (await schedules.list_agent_schedules())[0]["workspace"] == "default"
 
 
 async def test_an_automation_whose_workspace_was_deleted_does_not_run(

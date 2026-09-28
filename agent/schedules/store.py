@@ -225,19 +225,28 @@ async def _migrate_workspace_record(
 
 
 def _record_workspace(record: dict[str, Any]) -> str:
-    """The workspace an automation launches in; one saved without it runs in ``default``."""
+    """The workspace an automation launches in, ``default`` until the startup migration has run."""
     workspace = record.get("workspace")
     return workspace if isinstance(workspace, str) and workspace else DEFAULT_WORKSPACE_SLUG
 
 
-async def _migrate_schedule_record(schedule_id: str, record: dict[str, Any]) -> dict[str, Any]:
-    """Bring a stored automation up to date, including moving one without a workspace to ``default``."""
-    record = await _migrate_workspace_record(SCHEDULES_NAMESPACE, schedule_id, record)
-    if isinstance(record.get("workspace"), str) and record["workspace"]:
-        return record
-    migrated = {**record, "workspace": DEFAULT_WORKSPACE_SLUG}
-    await put_value(SCHEDULES_NAMESPACE, schedule_id, migrated)
-    return migrated
+async def migrate_automation_workspaces() -> int:
+    """Move every automation saved without a workspace to ``default``; returns how many moved.
+
+    Runs at startup, like the other LangGraph Store migrations, and is a no-op
+    once every record carries a workspace.
+    """
+    moved = 0
+    for record in await search_all_values(SCHEDULES_NAMESPACE):
+        schedule_id = record.get("id")
+        workspace = record.get("workspace")
+        if not isinstance(schedule_id, str) or (isinstance(workspace, str) and workspace):
+            continue
+        await put_value(
+            SCHEDULES_NAMESPACE, schedule_id, {**record, "workspace": DEFAULT_WORKSPACE_SLUG}
+        )
+        moved += 1
+    return moved
 
 
 async def _existing_workspace(value: str) -> str:
@@ -287,7 +296,7 @@ async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
     record = await get_value(SCHEDULES_NAMESPACE, schedule_id)
     if not record:
         return None
-    return await _migrate_schedule_record(schedule_id, record)
+    return await _migrate_workspace_record(SCHEDULES_NAMESPACE, schedule_id, record)
 
 
 def _assert_schedule_exists(record: dict[str, Any] | None) -> None:
@@ -300,7 +309,9 @@ async def list_agent_schedules() -> list[dict[str, Any]]:
     for record in await search_all_values(SCHEDULES_NAMESPACE):
         schedule_id = record.get("id")
         if isinstance(schedule_id, str):
-            records.append(await _migrate_schedule_record(schedule_id, record))
+            records.append(
+                await _migrate_workspace_record(SCHEDULES_NAMESPACE, schedule_id, record)
+            )
     run_states: dict[str, dict[str, Any]] = {}
     for state in await search_all_values(SCHEDULE_RUN_STATE_NAMESPACE):
         schedule_id = state.get("schedule_id")
