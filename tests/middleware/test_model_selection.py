@@ -178,7 +178,7 @@ async def test_jev_routes_or_falls_back(
     if not use_gateway:
         monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-key")
     monkeypatch.setattr(
-        "agent.middleware.model_selection.httpx2.AsyncClient",
+        "httpx2.AsyncClient",
         lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
     )
     middleware, _ = _middleware()
