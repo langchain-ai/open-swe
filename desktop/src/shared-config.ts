@@ -1,10 +1,4 @@
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** The one config file the packaged desktop app and the `oswe` CLI share. */
@@ -84,15 +78,43 @@ export function updateSharedConfig(
   return next;
 }
 
-/** Move a desktop-only `desktop-config.json` into the shared file; a backend already shared wins. */
-export function migrateDesktopConfig(legacyPath: string, path: string): void {
+export interface MigrationHost {
+  home: string;
+  platform: NodeJS.Platform;
+  env: Record<string, string | undefined>;
+}
+
+/** Electron's default userData folder for the packaged app, named after `desktop/package.json`. */
+export function legacyDesktopConfigPath({
+  home,
+  platform,
+  env,
+}: MigrationHost): string {
+  const appData =
+    platform === "darwin"
+      ? join(home, "Library", "Application Support")
+      : platform === "win32"
+        ? env["APPDATA"] || join(home, "AppData", "Roaming")
+        : env["XDG_CONFIG_HOME"] || join(home, ".config");
+  return join(appData, "open-swe-desktop", "desktop-config.json");
+}
+
+/**
+ * Copy the backend a packaged desktop build kept in `desktop-config.json` into
+ * the shared file, unless the shared file already names one. Whichever of the
+ * desktop app and the CLI runs first does it. The old file stays, because a
+ * desktop build from before the shared file only reads that one.
+ */
+export function migrateDesktopConfig(host: MigrationHost): void {
+  const path = sharedConfigPath(host.home);
+  if (readSharedConfig(path).backendUrl !== null) return;
+  const legacyPath = legacyDesktopConfigPath(host);
   const text = readText(legacyPath);
   if (text === null) return;
   const legacyUrl = parseObject(legacyPath, text)["backendUrl"];
+  if (typeof legacyUrl !== "string") return;
   updateSharedConfig(path, (config) => ({
     ...config,
-    backendUrl:
-      config.backendUrl ?? (typeof legacyUrl === "string" ? legacyUrl : null),
+    backendUrl: config.backendUrl ?? legacyUrl,
   }));
-  rmSync(legacyPath);
 }

@@ -1,12 +1,14 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
+import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
 import {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
+  migrateDesktopConfig,
   readSharedConfig,
   sharedConfigPath,
   updateSharedConfig,
+  type SharedConfig,
 } from "../../desktop/src/shared-config.ts"
 import { normalizeBackend } from "./api.ts"
 import { resolveCredential, type Credential } from "./credentials.ts"
@@ -23,6 +25,11 @@ function configDir(): string {
 
 function configFile(): string {
   return sharedConfigPath(home())
+}
+
+function sharedConfig(): SharedConfig {
+  migrateDesktopConfig({ home: home(), platform: platform(), env: process.env })
+  return readSharedConfig(configFile())
 }
 
 function bridgesFile(): string {
@@ -74,7 +81,7 @@ export async function readBackend(): Promise<string> {
   return (
     env["OPEN_SWE_BACKEND_URL"] ||
     env["OPEN_SWE_DESKTOP_URL"] ||
-    readSharedConfig(configFile()).backendUrl ||
+    sharedConfig().backendUrl ||
     DEFAULT_DEVELOPMENT_BACKEND_URL
   )
 }
@@ -87,7 +94,7 @@ export async function readBackend(): Promise<string> {
  */
 export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())
-  const session = readSharedConfig(configFile()).sessions[backend]
+  const session = sharedConfig().sessions[backend]
   const credential = resolveCredential(
     backend,
     session ? { session, path: configFile() } : null

@@ -10,59 +10,74 @@ const {
   updateSharedConfig,
 } = require("../build/shared-config.js");
 
-function tempHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-home-"));
+function macHost() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-home-"));
+  return { home, platform: "darwin", env: {} };
 }
 
+/** Where a packaged build before the shared file kept its backend. */
 function writeLegacy(home, value) {
-  const legacy = path.join(home, "profile", "desktop-config.json");
+  const legacy = path.join(
+    home,
+    "Library",
+    "Application Support",
+    "open-swe-desktop",
+    "desktop-config.json",
+  );
   fs.mkdirSync(path.dirname(legacy), { recursive: true });
   fs.writeFileSync(legacy, JSON.stringify(value));
   return legacy;
 }
 
-test("moves the desktop backend into the shared config, keeping CLI sessions", () => {
-  const home = tempHome();
-  const shared = sharedConfigPath(home);
+test("copies the desktop backend into the shared config, keeping CLI sessions", () => {
+  const host = macHost();
+  const shared = sharedConfigPath(host.home);
   updateSharedConfig(shared, (config) => ({
     ...config,
     sessions: { "https://openswe.example.com": "cli-session" },
   }));
-  const legacy = writeLegacy(home, {
+  const legacy = writeLegacy(host.home, {
     backendUrl: "https://openswe.example.com/",
   });
 
-  migrateDesktopConfig(legacy, shared);
+  migrateDesktopConfig(host);
 
   assert.deepEqual(readSharedConfig(shared), {
     backendUrl: "https://openswe.example.com/",
     sessions: { "https://openswe.example.com": "cli-session" },
   });
-  assert.equal(fs.existsSync(legacy), false);
   assert.equal(fs.statSync(shared).mode & 0o777, 0o600);
+  assert.equal(fs.existsSync(legacy), true);
 });
 
 test("keeps a backend the shared config already names", () => {
-  const home = tempHome();
-  const shared = sharedConfigPath(home);
+  const host = macHost();
+  const shared = sharedConfigPath(host.home);
   updateSharedConfig(shared, (config) => ({
     ...config,
     backendUrl: "https://chosen.example.com/",
   }));
-  const legacy = writeLegacy(home, { backendUrl: "https://old.example.com/" });
+  writeLegacy(host.home, { backendUrl: "https://old.example.com/" });
 
-  migrateDesktopConfig(legacy, shared);
+  migrateDesktopConfig(host);
 
   assert.equal(
     readSharedConfig(shared).backendUrl,
     "https://chosen.example.com/",
   );
-  assert.equal(fs.existsSync(legacy), false);
+});
+
+test("writes nothing when there is nothing to migrate", () => {
+  const host = macHost();
+
+  migrateDesktopConfig(host);
+
+  assert.equal(fs.existsSync(sharedConfigPath(host.home)), false);
 });
 
 test("drops keys an older CLI stored", () => {
-  const home = tempHome();
-  const shared = sharedConfigPath(home);
+  const host = macHost();
+  const shared = sharedConfigPath(host.home);
   fs.mkdirSync(path.dirname(shared), { recursive: true });
   fs.writeFileSync(
     shared,

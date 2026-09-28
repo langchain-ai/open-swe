@@ -901,7 +901,11 @@ function configPath() {
 function migrateStoredConfig() {
   if (isDevelopment) return;
   try {
-    migrateDesktopConfig(profileConfigPath(), configPath());
+    migrateDesktopConfig({
+      home: require("node:os").homedir(),
+      platform: process.platform,
+      env: process.env,
+    });
   } catch (error) {
     console.warn("Could not migrate desktop-config.json", error);
   }
