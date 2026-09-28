@@ -304,7 +304,7 @@ async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
 async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history(
     prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, request_text: str
 ) -> None:
-    from langchain_core.messages import HumanMessage
+    from langchain_core.messages import HumanMessage, convert_to_messages
 
     from agent.dashboard.options import available_requested_models
     from agent.slack.webhook import _slack_context_input
@@ -355,7 +355,7 @@ async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history
         request_blocks=[{"type": "text", "text": request_text}],
     )
     state: PrepareRunState = {
-        "messages": [HumanMessage(content=message["content"]) for message in run_input["messages"]]
+        "messages": convert_to_messages([dict(message) for message in run_input["messages"]])
     }
     prepared = await middleware._prepare(state, MagicMock())
     expected = "anthropic:claude-opus-5-5" if "Opus" in request_text else None

@@ -1,12 +1,15 @@
 import asyncio
 import contextvars
+from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
+import agent.thread_title as thread_title
+from agent.dashboard.options import available_requested_models
 from agent.thread_title import (
     ThreadHandoff,
     _ThreadTitle,
@@ -254,3 +257,91 @@ async def test_handoff_timeout_falls_back_without_retry(monkeypatch: pytest.Monk
     )
     assert result is None
     call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["read", "update", "mirror", "rename"])
+async def test_handoff_survives_title_persistence_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure: str
+) -> None:
+    metadata = {
+        "source": "slack",
+        "title": "Use Opus to fix this",
+        "title_seed": "Use Opus to fix this",
+        "source_context": {"slack_thread": {"channel_id": "C-code", "thread_ts": "0"}},
+    }
+    threads = _Threads(metadata)
+    error = RuntimeError("Title service unavailable")
+    if failure == "read":
+        monkeypatch.setattr(threads, "get", AsyncMock(side_effect=[{"metadata": metadata}, error]))
+    elif failure == "update":
+        monkeypatch.setattr(threads, "update", AsyncMock(side_effect=error))
+    monkeypatch.setattr(
+        thread_title,
+        "mirror_thread_metadata",
+        AsyncMock(side_effect=error if failure == "mirror" else None),
+    )
+    monkeypatch.setattr(thread_title, "is_code_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        thread_title,
+        "rename_session",
+        AsyncMock(side_effect=error if failure == "rename" else None),
+    )
+    expected = ThreadHandoff(title="Fix the issue", requested_model="anthropic:claude-opus-5-5")
+    model = MagicMock()
+    model.with_structured_output.return_value.ainvoke = AsyncMock(return_value=expected)
+
+    result = await initial_thread_handoff(
+        thread_id="thread-123",
+        messages=[HumanMessage(content="Use Opus to fix this")],
+        model=model,
+        client=SimpleNamespace(threads=threads),
+        requested_models=available_requested_models(fable_enabled=False),
+    )
+    await asyncio.gather(*thread_title._background_tasks)
+
+    assert result == expected
+    assert "Thread title persistence failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handoff_returns_before_slack_title_sync_times_out(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def rename(channel_id: str, title: str) -> None:
+        started.set()
+        await release.wait()
+        raise TimeoutError("Slack title sync timed out")
+
+    monkeypatch.setattr(thread_title, "mirror_thread_metadata", AsyncMock())
+    monkeypatch.setattr(thread_title, "is_code_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(thread_title, "rename_session", rename)
+    threads = _PromotingThreads(
+        {"source": "dashboard", "title": "Use Opus", "title_seed": "Use Opus"}
+    )
+    expected = ThreadHandoff(title="Fix the issue", requested_model="anthropic:claude-opus-5-5")
+    model = MagicMock()
+    model.with_structured_output.return_value.ainvoke = AsyncMock(return_value=expected)
+
+    try:
+        result = await asyncio.wait_for(
+            initial_thread_handoff(
+                thread_id="thread-123",
+                messages=[HumanMessage(content="Use Opus")],
+                model=model,
+                client=SimpleNamespace(threads=threads),
+                requested_models=available_requested_models(fable_enabled=False),
+            ),
+            timeout=1,
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert result == expected
+        assert not release.is_set()
+        assert threads.metadata["title"] == "Fix the issue"
+    finally:
+        release.set()
+        await asyncio.gather(*thread_title._background_tasks)
+    assert "Thread title persistence failed" in caplog.text
