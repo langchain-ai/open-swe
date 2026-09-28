@@ -8,11 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentThreadView } from "./AgentThreadView"
 import type { AgentPromptBarProps } from "./AgentPromptBar"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
+import type { SubmitAgentMessageVariables } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 
 let composer: AgentPromptBarProps
 const sendMessage = {
-  mutateAsync: vi.fn<(variables: SendAgentMessageVariables) => Promise<void>>(),
+  mutateAsync:
+    vi.fn<(variables: SubmitAgentMessageVariables) => Promise<void>>(),
   isPending: false,
 }
 const source = {
@@ -125,6 +126,7 @@ describe("AgentThreadView model selection", () => {
         effort: null,
         model_selection_changed: true,
         enqueue: running,
+        onStartError: expect.any(Function),
       })
 
       await submit()
@@ -182,6 +184,56 @@ describe("AgentThreadView model selection", () => {
     await submit()
     expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
       expect.objectContaining({ model_selection_changed: true })
+    )
+  })
+
+  it("preserves Auto through steering until a queued run can apply it", async () => {
+    source.isRunning = true
+    setup()
+    act(() => composer.onSelectionChange?.(null))
+    await act(async () => {
+      await composer.onSubmit?.("steer", [], { alternate: true })
+    })
+    expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        model_selection_changed: false,
+        enqueue: false,
+      })
+    )
+    await submit()
+    expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model_selection_changed: true, enqueue: true })
+    )
+    await submit()
+    expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model_selection_changed: false })
+    )
+  })
+
+  it("restores Auto when the start fails after the optimistic send resolves", async () => {
+    setup()
+    act(() => composer.onSelectionChange?.(null))
+    await submit()
+    const submission = sendMessage.mutateAsync.mock.calls[0]![0]
+    submission.onStartError?.()
+    await submit()
+    expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model_selection_changed: true })
+    )
+  })
+
+  it("does not restore an old Auto action over a newer consumed selection", async () => {
+    setup()
+    act(() => composer.onSelectionChange?.(null))
+    await submit()
+    const submission = sendMessage.mutateAsync.mock.calls[0]![0]
+    act(() => composer.onSelectionChange?.(selection))
+    act(() => composer.onSelectionChange?.(null))
+    await submit()
+    submission.onStartError?.()
+    await submit()
+    expect(sendMessage.mutateAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model_selection_changed: false })
     )
   })
 

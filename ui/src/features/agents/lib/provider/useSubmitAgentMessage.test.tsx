@@ -9,6 +9,7 @@ import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
@@ -22,6 +23,7 @@ const source = {
 vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   useThreadSource: () => source,
 }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const THREAD_ID = "thread-1"
 const SIDEBAR_PARAMS = {
@@ -77,6 +79,7 @@ beforeEach(() => {
   source.isRunning = false
   source.startRun.mockReset()
   source.startRun.mockResolvedValue(undefined)
+  vi.mocked(reportError).mockClear()
 })
 
 describe("useSubmitAgentMessage", () => {
@@ -183,5 +186,27 @@ describe("useSubmitAgentMessage", () => {
         }),
       ])
     )
+  })
+
+  it("rolls back submission intent and reports a late start failure", async () => {
+    let rejectStart!: (error: Error) => void
+    source.startRun.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectStart = reject
+      })
+    )
+    const { client, result } = setup()
+    const onStartError = vi.fn()
+    await result.current.mutateAsync({ content: "retry Auto", onStartError })
+    expect(onStartError).not.toHaveBeenCalled()
+
+    const error = new Error("Network unavailable")
+    rejectStart(error)
+    await waitFor(() => expect(onStartError).toHaveBeenCalledOnce())
+    expect(pendingMessages(client)?.[0]?.status).toBe("failed")
+    expect(reportError).toHaveBeenCalledWith({
+      title: "Couldn't send message",
+      error,
+    })
   })
 })

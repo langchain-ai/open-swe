@@ -134,7 +134,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
-  const pendingAutoSelectionRef = useRef<symbol | null>(null)
+  const pendingAutoSelectionRef = useRef<{ pending: boolean } | null>(null)
   const activeSelection = autoSelected
     ? null
     : (selection ??
@@ -144,7 +144,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
-    pendingAutoSelectionRef.current = next === null ? Symbol() : null
+    pendingAutoSelectionRef.current = next === null ? { pending: true } : null
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -179,27 +179,34 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
       const pendingAutoSelection =
-        content.trim() === "/offload" ? null : pendingAutoSelectionRef.current
-      await sendMessage.mutateAsync({
-        content,
-        images,
-        model_id: activeSelection?.modelId ?? null,
-        effort: activeSelection?.effort ?? null,
-        model_selection_changed: pendingAutoSelection !== null,
-        enqueue: isStreaming && queue,
-      })
-      // A picker action made during submission still belongs to the next message.
-      if (pendingAutoSelectionRef.current === pendingAutoSelection) {
-        pendingAutoSelectionRef.current = null
+        content.trim() !== "/offload" &&
+        (!isStreaming || queue) &&
+        pendingAutoSelectionRef.current?.pending
+          ? pendingAutoSelectionRef.current
+          : null
+      const restoreAutoSelection = () => {
+        // A later picker action has its own object and is unaffected by rollback.
+        if (pendingAutoSelection) pendingAutoSelection.pending = true
+      }
+      if (pendingAutoSelection) pendingAutoSelection.pending = false
+      try {
+        await sendMessage.mutateAsync({
+          content,
+          images,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+          model_selection_changed: pendingAutoSelection !== null,
+          enqueue: isStreaming && queue,
+          ...(pendingAutoSelection
+            ? { onStartError: restoreAutoSelection }
+            : {}),
+        })
+      } catch (error) {
+        restoreAutoSelection()
+        throw error
       }
     },
-    [
-      activeSelection?.effort,
-      activeSelection?.modelId,
-      followUpBehavior,
-      isStreaming,
-      sendMessage,
-    ]
+    [activeSelection, followUpBehavior, isStreaming, sendMessage]
   )
 
   const queuedText = (entry: QueuedTurn) =>
