@@ -61,6 +61,7 @@ class _FakeStore:
 # exists, so every test runs against a migrated database (which seeds `default`).
 pytestmark = pytest.mark.usefixtures("registry_db")
 
+
 class _FakeCrons:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
