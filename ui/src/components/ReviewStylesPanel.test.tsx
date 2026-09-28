@@ -30,7 +30,7 @@ const style = (full_name: string, fields: Partial<ReviewStyle> = {}) =>
     full_name,
     status: "completed",
     custom_prompt: `${full_name} prompt`,
-    approval_policy: null,
+    approval_mode: null,
     analysis_summary: null,
     top_reviewers: [],
     prs_sampled: 0,
@@ -69,6 +69,7 @@ beforeEach(() => {
   vi.spyOn(api, "getReviewStyle").mockImplementation(async (name) =>
     style(name)
   )
+  vi.spyOn(api, "getApprovalsFile").mockResolvedValue({ found: true })
 })
 
 afterEach(() => {
@@ -186,4 +187,33 @@ it("keeps the saved prompt in the editor once the save settles", async () => {
   )
   await waitFor(() => expect(client.isFetching() + client.isMutating()).toBe(0))
   expect(screen.getByDisplayValue("sharper prompt")).toBeTruthy()
+})
+
+it("shows the dry-run default and saves an admin's approval mode", async () => {
+  const save = vi
+    .spyOn(api, "saveReviewApprovalMode")
+    .mockImplementation(async (name, approval_mode) =>
+      style(name, { approval_mode })
+    )
+  await renderAndSelect("acme/api")
+  expect(await screen.findByText(/found on the default branch/)).toBeTruthy()
+
+  const mode = screen.getByRole("combobox", { name: "Approval mode" })
+  await waitFor(() => expect(mode.hasAttribute("disabled")).toBe(false))
+  expect(mode.textContent).toContain("Dry run")
+  fireEvent.click(mode)
+  const approve = await screen.findByRole("option", { name: "Approve" })
+  fireEvent.pointerDown(approve)
+  fireEvent.click(approve)
+
+  await waitFor(() => expect(save).toHaveBeenCalledWith("acme/api", "approve"))
+  await waitFor(() => expect(mode.textContent).toContain("Approve"))
+})
+
+it("says when the repository has no APPROVALS.md", async () => {
+  vi.spyOn(api, "getApprovalsFile").mockResolvedValue({ found: false })
+  await renderAndSelect("acme/api")
+  expect(
+    await screen.findByText(/reviews post no approval assessment/)
+  ).toBeTruthy()
 })

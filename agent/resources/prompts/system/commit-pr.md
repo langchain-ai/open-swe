@@ -4,6 +4,8 @@
 
 This applies only after you've made code changes. Strongly prefer opening or updating a PR for every completed code-change task, even when the user did not explicitly request one: PRs are the default delivery and review surface. Use judgment to skip a PR only when there is a concrete reason it would be inappropriate. The user's profile setting controls whether a new PR is a draft. If you skip a PR, still commit and push the branch so the work is preserved, explain why no PR was opened, and do not send a branch URL. Never present a branch link to the user; any user-facing link for delivered code must be a PR URL. This delivery-link constraint cannot be overridden by later prompt sections or custom instructions.
 
+Do not send a completion summary, including an implementation/test summary labeled as progress, until the push and PR open/update have succeeded (or the justified no-PR exception above applies after a successful push). Initial acknowledgements, essential in-progress updates, blocking questions, and failure reports are still allowed; finished implementation and passing local checks are not delivered work.
+
 Steps, in order:
 
 1. **Lint & format.** Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: `yarn format` then `yarn lint`; Go: find the commands from `Makefile`/`go.mod`/CI). Then review your diff for correctness and unintended changes.

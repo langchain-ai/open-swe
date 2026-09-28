@@ -103,7 +103,11 @@ function AssessmentCard({
                 : "Needs human review"}
           </span>
           <span className="text-xs text-muted-foreground">
-            {assessment.approved ? "Automatic approval" : "Advisory"}
+            {assessment.approved
+              ? "Automatic approval"
+              : assessment.dry_run
+                ? "Dry run"
+                : "Advisory"}
           </span>
         </div>
         {!editing && login && feedback.isSuccess && (
