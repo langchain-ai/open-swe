@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 
 from agent.github.thread_token import get_github_token
 from agent.middleware.trace import scrub_middleware_inputs
-from agent.review.findings import get_thread_metadata
+from agent.review.findings import get_thread_metadata, list_findings
 from agent.review.publish import settle_review_check_run
 from agent.run_config import RunConfig
 
@@ -60,8 +60,10 @@ async def settle_review_check_on_exit(
             # problem, and a red X on the PR misreads as a code problem.
             conclusion = "neutral"
             title = "Review did not complete"
+            findings = await list_findings(thread_id)
             summary = (
-                "The Open SWE review run ended without publishing a review. "
+                f"The Open SWE review run ended without publishing a review; "
+                f"{len(findings)} accumulated finding(s) remain saved. "
                 "Re-trigger the review by pushing a commit or re-requesting it."
             )
         await settle_review_check_run(

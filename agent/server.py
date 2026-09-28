@@ -100,7 +100,6 @@ from agent.middleware import (
     IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
-    ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
@@ -116,6 +115,7 @@ from agent.middleware import (
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
+    make_fallback_middleware,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -246,9 +246,6 @@ from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    ModelKwargs,
-    fallback_model_id_for,
     make_model,
     provider_model_kwargs,
 )
@@ -1354,18 +1351,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
-    fallback_middleware: list[Any] = []
-    if fallback_model_id and fallback_model_id != model_id:
-        fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-        if fallback_model_id.startswith("openai:"):
-            fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
-        fallback_middleware.append(
-            ModelFallbackMiddleware(
-                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
-            )
-        )
-        logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+    fallback_middleware = make_fallback_middleware(
+        model_id,
+        use_gateway=use_gateway,
+        model_factory=_make_model_or_defer,
+    )
 
     source = cfg.source or "dashboard"
     configurable["source"] = source

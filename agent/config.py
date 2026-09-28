@@ -378,6 +378,10 @@ ENV.var(
     "Reasoning effort for the default model (low, medium, high, max) when no workspace or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
+ENV.var(
+    "LANGCHAIN_OPENAI_STREAM_CHUNK_TIMEOUT_S",
+    "Maximum seconds to wait for the next OpenAI streaming chunk.",
+)
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"

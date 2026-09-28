@@ -40,8 +40,16 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langsmith import trace
 
+from agent.config import ENV
 from agent.middleware.trace import OpenSWEMiddleware
+from agent.runtime import DEFAULT_LLM_MAX_TOKENS
 from agent.utils.errors import classify_exception, error_tracking_fields, exception_fields
+from agent.utils.model import (
+    DEFAULT_LLM_REASONING,
+    ModelKwargs,
+    fallback_model_id_for,
+    make_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,3 +286,25 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
         if self._surface_outage_message:
             return AIMessage(content=MODEL_OUTAGE_MESSAGE)
         raise last_exc
+
+
+def make_fallback_middleware(
+    model_id: str,
+    *,
+    use_gateway: bool,
+    model_factory: Callable[..., BaseChatModel] = make_model,
+) -> list[ModelFallbackMiddleware]:
+    """Build fallback middleware for a resolved primary model."""
+    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
+    if not fallback_model_id or fallback_model_id == model_id:
+        return []
+    fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
+    if fallback_model_id.startswith("openai:"):
+        fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
+    fallback_model = model_factory(
+        fallback_model_id,
+        use_gateway=use_gateway,
+        **fallback_kwargs,
+    )
+    logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+    return [ModelFallbackMiddleware(fallback_model)]

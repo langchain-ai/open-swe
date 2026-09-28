@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
@@ -30,6 +31,9 @@ _TIMEOUT_PROVIDER_PREFIXES = (
     "google_genai:",
     "fireworks:",
 )
+DEFAULT_OPENAI_STREAM_CHUNK_TIMEOUT_SECONDS = 45.0
+
+logger = logging.getLogger(__name__)
 
 
 OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
@@ -67,6 +71,7 @@ class ModelKwargs(TypedDict, total=False):
     temperature: float | None
     max_retries: int | None
     timeout: float | None
+    stream_chunk_timeout: float | None
     store: bool | None
     include: list[str] | None
     output_version: Literal["responses/v1"] | None
@@ -98,6 +103,18 @@ def _configure_openai_responses_kwargs(model_kwargs: dict[str, object]) -> None:
         include.append("reasoning.encrypted_content")
 
 
+def _configured_openai_stream_chunk_timeout() -> float:
+    raw = ENV.LANGCHAIN_OPENAI_STREAM_CHUNK_TIMEOUT_S.optional()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = DEFAULT_OPENAI_STREAM_CHUNK_TIMEOUT_SECONDS
+        if value > 0:
+            return value
+    return DEFAULT_OPENAI_STREAM_CHUNK_TIMEOUT_SECONDS
+
+
 def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpack[ModelKwargs]):
     """Build a chat model, optionally routed through the LangSmith LLM Gateway.
 
@@ -118,6 +135,11 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             or OPENAI_RESPONSES_WS_BASE_URL
         )
         model_kwargs["use_responses_api"] = True
+        model_kwargs.setdefault("stream_chunk_timeout", _configured_openai_stream_chunk_timeout())
+        logger.info(
+            "Configured OpenAI streaming chunk timeout",
+            extra={"stream_chunk_timeout_seconds": model_kwargs["stream_chunk_timeout"]},
+        )
 
     enabled = gateway_env_default() if use_gateway is None else use_gateway
     gateway_applied = False

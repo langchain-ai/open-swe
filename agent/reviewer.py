@@ -56,6 +56,7 @@ from agent.middleware import (
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    make_fallback_middleware,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
@@ -113,7 +114,12 @@ from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
 
 
-def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
+def _reviewer_subagent(
+    model: BaseChatModel,
+    *,
+    model_id: str,
+    use_gateway: bool,
+) -> SubAgent:
     return {
         "name": "reviewer",
         "description": load_prompt("reviewer/subagent-description.md"),
@@ -125,6 +131,11 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 SanitizeOpenAIResponsesMiddleware(),
+                *make_fallback_middleware(
+                    model_id,
+                    use_gateway=use_gateway,
+                    model_factory=_make_model_or_defer,
+                ),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
@@ -984,7 +995,13 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 http_request,
             ]
         ),
-        subagents=[_reviewer_subagent(reviewer_subagent_model)],
+        subagents=[
+            _reviewer_subagent(
+                reviewer_subagent_model,
+                model_id=subagent_model_id,
+                use_gateway=use_gateway,
+            )
+        ],
         backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -1005,6 +1022,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                *make_fallback_middleware(
+                    model_id,
+                    use_gateway=use_gateway,
+                    model_factory=_make_model_or_defer,
+                ),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,

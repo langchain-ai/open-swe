@@ -10,6 +10,7 @@ _MIDDLEWARE_MODULES = {
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
+    "make_fallback_middleware": ".model_fallback",
     "ModelSelectionMiddleware": ".model_selection",
     "notify_step_limit_reached": ".notify_step_limit",
     "PrepareRunState": ".prepare_run",
@@ -42,6 +43,7 @@ __all__ = [
     "ModelCallTimeoutMiddleware",
     "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
+    "make_fallback_middleware",
     "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PrepareRunState",
@@ -74,7 +76,7 @@ if TYPE_CHECKING:
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from agent.middleware.model_errors import ModelErrorMiddleware
-    from agent.middleware.model_fallback import ModelFallbackMiddleware
+    from agent.middleware.model_fallback import ModelFallbackMiddleware, make_fallback_middleware
     from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
     from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware

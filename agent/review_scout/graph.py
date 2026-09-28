@@ -36,6 +36,7 @@ from agent.middleware import (
     StableToolResultOrderMiddleware,
     TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
+    make_fallback_middleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
@@ -272,6 +273,11 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                *make_fallback_middleware(
+                    model_id,
+                    use_gateway=settings.effective_gateway_enabled,
+                    model_factory=_make_model_or_defer,
+                ),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 StoreWalkthroughMiddleware(thread_id=thread_id, config=config),

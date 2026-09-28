@@ -49,6 +49,7 @@ from agent.middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
+    make_fallback_middleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.prompts import apply_tool_descriptions, prompt
@@ -81,7 +82,7 @@ CHAT_MODEL_CALL_LIMIT = 100
 _EXCLUDED_TOOLS = frozenset({"execute", "write_file", "edit_file", "delete"})
 
 
-def _chat_general_purpose_subagent() -> SubAgent:
+def _chat_general_purpose_subagent(*, model_id: str, use_gateway: bool) -> SubAgent:
     # Deep Agents auto-adds a general-purpose subagent whose default
     # FilesystemMiddleware would expose write_file/edit_file/delete/execute.
     # Declaring the spec here suppresses that default and swaps in an
@@ -95,6 +96,11 @@ def _chat_general_purpose_subagent() -> SubAgent:
             [
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
                 SanitizeOpenAIResponsesMiddleware(),
+                *make_fallback_middleware(
+                    model_id,
+                    use_gateway=use_gateway,
+                    model_factory=_make_model_or_defer,
+                ),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
@@ -194,7 +200,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 propose_pr_review,
             ]
         ),
-        subagents=[_chat_general_purpose_subagent()],
+        subagents=[_chat_general_purpose_subagent(model_id=model_id, use_gateway=use_gateway)],
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
@@ -206,6 +212,11 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
+                *make_fallback_middleware(
+                    model_id,
+                    use_gateway=use_gateway,
+                    model_factory=_make_model_or_defer,
+                ),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
