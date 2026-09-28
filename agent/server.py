@@ -1661,7 +1661,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    model_selection: ModelSelectionMiddleware | None = None
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
@@ -1705,33 +1704,30 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             image_fallback.add_text_only_model(model)
         return model
 
-    if adaptive_model_routing or requested_models is not None:
-        routing_models = {
-            route: _make_model_or_defer(
+    # Keep checkpointed routing tasks resumable after a handoff disables routing.
+    routing_models = {
+        route: _make_model_or_defer(
+            routed_model_id,
+            use_gateway=use_gateway,
+            **provider_model_kwargs(
                 routed_model_id,
-                use_gateway=use_gateway,
-                **provider_model_kwargs(
-                    routed_model_id,
-                    effort,
-                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
-                ),
-            )
-            for route, (routed_model_id, effort) in routing_defaults.items()
-            if adaptive_model_routing
-        }
-        model_selection = ModelSelectionMiddleware(
-            routing_models,
-            main_model,
-            route_model_ids={
-                **{
-                    route: routed_model_id
-                    for route, (routed_model_id, _) in routing_defaults.items()
-                },
-                "default": model_id,
-            },
-            routing_mode=model_routing_mode,
-            requested_model_factory=requested_model_factory if requested_models else None,
+                effort,
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
+            ),
         )
+        for route, (routed_model_id, effort) in routing_defaults.items()
+        if adaptive_model_routing
+    }
+    model_selection = ModelSelectionMiddleware(
+        routing_models,
+        main_model,
+        route_model_ids={
+            **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
+            "default": model_id,
+        },
+        routing_mode=model_routing_mode,
+        requested_model_factory=requested_model_factory if requested_models else None,
+    )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1765,7 +1761,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     guard_middleware=_subagent_guard_middleware(local_run),
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
-                        *((model_selection.name,) if model_selection else ()),
+                        model_selection.name,
                     ),
                 ),
             ],
@@ -1847,7 +1843,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     notify_step_limit_reached,
                     record_run_usage,
-                    *([model_selection] if model_selection else []),
+                    model_selection,
                     *fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
