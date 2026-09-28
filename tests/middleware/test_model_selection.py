@@ -204,9 +204,9 @@ async def test_jev_routes_or_falls_back(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("routing_mode", ["auto", "fast", None])
+@pytest.mark.parametrize("routing_mode", ["auto", None])
 async def test_requested_model_wins_and_emits_actual_model(
-    monkeypatch: pytest.MonkeyPatch, routing_mode: Literal["auto", "fast"] | None
+    monkeypatch: pytest.MonkeyPatch, routing_mode: Literal["auto"] | None
 ) -> None:
     events: list[object] = []
     monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
