@@ -181,15 +181,13 @@ def test_workspace_prompt_blank_is_none() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
-async def test_only_the_workspace_named_default_is_resolved() -> None:
+async def test_a_migration_seeds_the_default_workspace() -> None:
     await WORKSPACES.create(WorkspaceCreate(name="Draft", repos=["acme/draft"]), "ramon")
-    assert await env_store.load_default_workspace() is None
 
-    await WORKSPACES.create(WorkspaceCreate(name="Default"), "ramon")
     resolved = await env_store.load_default_workspace()
 
     assert resolved is not None
-    assert resolved.slug == "default"
+    assert (resolved.slug, resolved.name) == ("default", "Default")
 
 
 @pytest.mark.asyncio
@@ -323,16 +321,16 @@ async def test_delete_removes_record_and_snapshot() -> None:
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
     ):
-        await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
+        await WORKSPACES.create(WorkspaceCreate(name="Core"), "ramon")
         await WORKSPACES.mark_captured(
-            "default",
+            "core",
             snapshot_id="snap-1",
             snapshot_name="prior",
             source_sandbox_id="sb-prior",
         )
 
-        assert await WORKSPACES.remove("default") is True
-        assert await env_store.load_default_workspace() is None
+        assert await WORKSPACES.remove("core") is True
+        assert await WORKSPACES.get("core") is None
         delete_snapshot.assert_awaited_once_with("snap-1")
 
 
@@ -517,7 +515,7 @@ async def test_update_clearing_create_params_with_null_stays_readable() -> None:
     reread = await WORKSPACES.get("base")
     assert reread is not None
     assert reread.create_params == {}
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["base"]
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["base", "default"]
 
 
 @pytest.mark.asyncio
@@ -549,7 +547,6 @@ def test_parse_workspace_tag(text: str, expected_slug: str | None, expected_text
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_load_workspace_prefers_the_selection() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="default"), "ramon")
     await WORKSPACES.create(WorkspaceCreate(name="staging", repos=["acme/staging"]), "ramon")
 
     selected = await env_store.load_workspace("staging")
@@ -569,13 +566,9 @@ async def test_load_workspace_prefers_the_selection() -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("registry_db")
 async def test_workspace_options_omit_admin_only_settings() -> None:
-    await WORKSPACES.create(
-        WorkspaceCreate(
-            name="default",
-            prompt="secret-ish prompt",
-            create_params={"_internal_runtime": "v2"},
-        ),
-        "ramon",
+    await WORKSPACES.apply_update(
+        "default",
+        WorkspaceUpdate(prompt="secret-ish prompt", create_params={"_internal_runtime": "v2"}),
     )
     await WORKSPACES.mark_captured(
         "default",
@@ -591,7 +584,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
     assert options == [
         {
             "slug": "default",
-            "name": "default",
+            "name": "Default",
             "repos": [],
             "slack_channel_ids": [],
             "is_default": True,
@@ -712,7 +705,7 @@ async def test_list_all_skips_a_row_that_fails_to_validate() -> None:
             {"slug": "corrupt"},
         )
 
-    assert [record.slug for record in await WORKSPACES.list_all()] == ["healthy"]
+    assert [record.slug for record in await WORKSPACES.list_all()] == ["default", "healthy"]
 
 
 @pytest.mark.usefixtures("registry_db")

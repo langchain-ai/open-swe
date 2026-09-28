@@ -24,7 +24,6 @@ async def test_default_workspace_preference_round_trips(fake_store: FakeStore) -
 
 
 async def _seed() -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="Default"), "alice")
     await WORKSPACES.create(
         WorkspaceCreate(name="OSS", repos=["acme/oss"], slack_channel_ids=["C0SS"]), "alice"
     )
