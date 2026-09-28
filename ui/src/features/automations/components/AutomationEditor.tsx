@@ -115,6 +115,13 @@ export function AutomationEditor({
       instanceDefault: workspaceOptionsQuery.data?.default_slug ?? null,
       workspaces,
     })
+  // A workspace deleted after the automation was saved: its runs are refused
+  // until someone picks another, so the picker must stay reachable.
+  const savedWorkspaceMissing =
+    workspaceOverride === null &&
+    !!schedule?.workspace &&
+    workspaceOptionsQuery.data !== undefined &&
+    !workspaces.some((option) => option.slug === schedule.workspace)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -177,7 +184,12 @@ export function AutomationEditor({
           admin_thread: adminThread,
           model_id: modelId,
           effort,
-          workspace,
+          // Only an explicit pick: the preview above may be computed before
+          // the user's preferences load, and the server resolves the same
+          // default from what it knows.
+          ...(workspaceOverride !== null
+            ? { workspace: workspaceOverride }
+            : {}),
         },
         {
           onSuccess: () => {
@@ -304,14 +316,23 @@ export function AutomationEditor({
             triggerClassName="text-muted-foreground"
             disabled={!canManage}
           />
-          {workspaces.length > 1 && <span className="text-border">|</span>}
+          {(workspaces.length > 1 || savedWorkspaceMissing) && (
+            <span className="text-border">|</span>
+          )}
           <WorkspaceSelector
             workspaces={workspaces}
             selectedSlug={workspace}
             onChange={(slug) => setWorkspaceOverride(slug)}
             disabled={!canManage}
+            showWithOneWorkspace={savedWorkspaceMissing}
           />
         </div>
+        {savedWorkspaceMissing && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            Workspace {schedule?.workspace} no longer exists, so runs are
+            refused. Pick another workspace and save.
+          </p>
+        )}
 
         <SectionLabel>Triggers</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-1.5">
