@@ -932,6 +932,9 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    overrides["model_selection_changed"] = (
+        client_configurable.get("model_selection_changed") is True
+    )
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
         login,

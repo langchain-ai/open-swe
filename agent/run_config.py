@@ -150,6 +150,7 @@ class RunConfig(BaseModel):
     resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
+    model_selection_changed: bool = False
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
