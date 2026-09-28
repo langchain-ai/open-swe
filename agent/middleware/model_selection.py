@@ -1,21 +1,17 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, NotRequired
+from typing import Literal, NotRequired
 
-import httpx2
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langchain_typesafe import Choice, TypeSafeClassifier
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
 
-from agent.config import ENV
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
-from agent.utils.gateway import gateway_base_url
+from agent.utils.jev import select_jev_choice
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +21,7 @@ PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
-def _latest_human_task(messages: Sequence[Any]) -> str:
+def _latest_human_task(messages: Sequence[object]) -> str:
     """The user's own request, skipping injected context envelopes.
 
     Context blocks (sender metadata, dynamic context) are appended as
@@ -49,54 +45,23 @@ def _latest_human_task(messages: Sequence[Any]) -> str:
     return plain
 
 
-class RouteDecision(BaseModel):
-    model_route: Route
-
-
 ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
 
 
-def _route_criteria() -> dict[str, str]:
+def _route_criteria() -> dict[Route, str]:
     return {route: prompt(f"model-selection/{route}") for route in ROUTES}
 
 
 async def _select_jev_route(task: str) -> SelectedRoute:
-    typesafe_key = ENV.TYPESAFE_API_KEY.optional()
-    gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
-    if not typesafe_key and not gateway_key:
-        logger.warning("Jev routing has no API key; using configured default model")
-        return "default"
-    try:
-        async with httpx2.AsyncClient(timeout=3.0) as client:
-            classifier = TypeSafeClassifier(
-                model="jev-1.13.0" if typesafe_key else "typesafe/jev-1.13.0",
-                api_key=typesafe_key or gateway_key,
-                **({} if typesafe_key else {"base_url": gateway_base_url()}),
-                async_client=client,
-            )
-            response = await classifier.ainvoke(
-                {
-                    "state": task,
-                    "questions": {
-                        "route": Choice(
-                            instructions=prompt("model-selection/instructions"),
-                            criteria=_route_criteria(),
-                        )
-                    },
-                },
-                config={"tags": ["nostream"]},
-            )
-            answer = response.choices["route"]
-        if answer.confidence < 0.6:
-            logger.info(
-                "Jev routing confidence below threshold; using configured default model",
-                extra={"confidence": answer.confidence},
-            )
-            return "default"
-        return RouteDecision.model_validate({"model_route": answer.choice}).model_route
-    except Exception:
-        logger.exception("Jev routing failed; using configured default model")
-        return "default"
+    return (
+        await select_jev_choice(
+            task,
+            question="route",
+            instructions=prompt("model-selection/instructions"),
+            criteria=_route_criteria(),
+        )
+        or "default"
+    )
 
 
 class ModelSelectionState(AgentState):

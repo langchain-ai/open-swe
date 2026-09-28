@@ -136,6 +136,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
+from agent.model_request import infer_requested_model
 from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
@@ -166,7 +167,6 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import (
     TITLE_GENERATION_MAX_TOKENS,
-    initial_thread_handoff,
     schedule_thread_title_generation,
 )
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
@@ -916,16 +916,19 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        schedule_thread_title_generation(
+            thread_id=self._thread_id,
+            messages=state.get("messages") or [],
+            model=self._title_model,
+            client=client,
+        )
         requested_model: str | None = None
         if self._requested_models is not None and self._model_selection is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
                 handoff_config = RunConfig.from_config(self._config)
-                handoff = await initial_thread_handoff(
-                    thread_id=self._thread_id,
+                handoff = await infer_requested_model(
                     messages=state.get("messages") or [],
-                    model=self._title_model,
-                    client=client,
                     requested_models=self._requested_models,
                     slack_event_ts=(
                         handoff_config.slack_thread.triggering_event_ts
@@ -968,13 +971,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 self._model_selection.use_requested_model(requested_model)
                 self._model_id = requested_model
                 self._effort = option["default_effort"]
-        else:
-            schedule_thread_title_generation(
-                thread_id=self._thread_id,
-                messages=state.get("messages") or [],
-                model=self._title_model,
-                client=client,
-            )
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)

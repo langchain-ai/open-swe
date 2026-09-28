@@ -8,15 +8,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from agent.dashboard.options import ModelOption
 from agent.input_messages import (
     dynamic_context_hash,
     human_input,
     input_message_text,
-    input_message_timestamps,
-    message_sender_id,
 )
-from agent.prompts import load_prompt, prompt
+from agent.prompts import prompt
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from agent.source_context import SourceContext
 from agent.transcript.mirror import mirror_thread_metadata
@@ -35,28 +32,7 @@ class _ThreadTitle(BaseModel):
     title: str = Field(description="Concise, outcome-focused thread title, 3-8 words")
 
 
-class ThreadHandoff(_ThreadTitle):
-    requested_model: str | None = None
-    unavailable_model: str | None = None
-
-
-def original_human_task(
-    messages: Sequence[BaseMessage], *, slack_event_ts: str | None = None
-) -> str | None:
-    for message in messages:
-        if not isinstance(message, HumanMessage):
-            continue
-        if slack_event_ts and slack_event_ts not in input_message_timestamps(message.content):
-            continue
-        if message_sender_id(message.content, kind="human") is not None:
-            return input_message_text(message.content)
-        text = message.text
-        if "<dynamic-context" not in text and "<input-message" not in text and text.strip():
-            return text
-    return None
-
-
-_TITLE_SYSTEM_PROMPT = load_prompt("thread-title.md")
+_TITLE_SYSTEM_PROMPT = prompt("thread-title")
 
 
 def _thread_metadata(thread: Any) -> dict[str, Any]:
@@ -93,8 +69,7 @@ async def generate_and_store_thread_title(
     conversation: str,
     model: BaseChatModel,
     client: Any,
-    requested_models: Mapping[str, ModelOption] | None = None,
-) -> ThreadHandoff | None:
+) -> None:
     thread = await client.threads.get(thread_id=thread_id)
     metadata = _thread_metadata(thread)
     expected_title = metadata.get("title")
@@ -104,20 +79,10 @@ async def generate_and_store_thread_title(
         and isinstance(title_seed, str)
         and expected_title == title_seed
     )
-    if not replace_title and requested_models is None:
-        return None
+    if not replace_title:
+        return
 
-    structured = model.with_structured_output(
-        ThreadHandoff if requested_models is not None else _ThreadTitle
-    )
-    system_prompt = _TITLE_SYSTEM_PROMPT
-    if requested_models is not None:
-        system_prompt += "\n\n" + prompt(
-            "thread-model-handoff",
-            available_models="\n".join(
-                f"- {option['label']}: {model_id}" for model_id, option in requested_models.items()
-            ),
-        )
+    structured = model.with_structured_output(_ThreadTitle)
     title_input = human_input(
         conversation,
         {
@@ -131,7 +96,7 @@ async def generate_and_store_thread_title(
     async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
         result = await structured.ainvoke(
             [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=_TITLE_SYSTEM_PROMPT),
                 HumanMessage(content=title_input),
             ],
             # Empty callbacks, so this call cannot inherit the run's handlers and
@@ -140,78 +105,38 @@ async def generate_and_store_thread_title(
         )
     if not isinstance(result, _ThreadTitle):
         return
-    handoff = result if isinstance(result, ThreadHandoff) else None
     title = _normalize_title(result.title)
-    if not title or not replace_title:
-        return handoff
+    if not title:
+        return
 
-    async def store_title() -> None:
-        try:
-            async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-                latest = await client.threads.get(thread_id=thread_id)
-                latest_metadata = _thread_metadata(latest)
-                if (
-                    latest_metadata.get("title") != expected_title
-                    or latest_metadata.get("title_seed") != title_seed
-                ):
-                    return
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"title": title, "title_seed": None},
-                )
-                await mirror_thread_metadata(thread_id, {"title": title})
-                # A promotion to a code channel can race the title update.
-                latest = await client.threads.get(thread_id=thread_id)
-                context = SourceContext.from_metadata(_thread_metadata(latest))
-                # DMs share the session timestamp but have no session name to set.
-                if (
-                    context.slack_location
-                    and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
-                    and await is_code_channel(context.slack_location[0])
-                ):
-                    await rename_session(context.slack_location[0], title)
-        except Exception:
-            logger.warning(
-                "Thread title persistence failed", extra={"thread_id": thread_id}, exc_info=True
-            )
-
-    if handoff is not None:
-        # Title I/O must not consume the handoff timeout after inference succeeds.
-        task = asyncio.create_task(store_title(), context=contextvars.Context())
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-    else:
-        await store_title()
-    return handoff
-
-
-async def initial_thread_handoff(
-    *,
-    thread_id: str,
-    messages: Sequence[BaseMessage],
-    model: BaseChatModel,
-    client: object,
-    requested_models: Mapping[str, ModelOption],
-    slack_event_ts: str | None = None,
-) -> ThreadHandoff | None:
-    conversation = original_human_task(messages, slack_event_ts=slack_event_ts)
-    if conversation is None:
-        return None
     try:
         async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-            return await asyncio.create_task(
-                generate_and_store_thread_title(
-                    thread_id=thread_id,
-                    conversation=conversation[:MAX_TITLE_INPUT_CHARS],
-                    model=model,
-                    client=client,
-                    requested_models=requested_models,
-                ),
-                context=contextvars.Context(),
+            latest = await client.threads.get(thread_id=thread_id)
+            latest_metadata = _thread_metadata(latest)
+            if (
+                latest_metadata.get("title") != expected_title
+                or latest_metadata.get("title_seed") != title_seed
+            ):
+                return
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"title": title, "title_seed": None},
             )
+            await mirror_thread_metadata(thread_id, {"title": title})
+            # A promotion to a code channel can race the title update.
+            latest = await client.threads.get(thread_id=thread_id)
+            context = SourceContext.from_metadata(_thread_metadata(latest))
+            # DMs share the session timestamp but have no session name to set.
+            if (
+                context.slack_location
+                and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
+                and await is_code_channel(context.slack_location[0])
+            ):
+                await rename_session(context.slack_location[0], title)
     except Exception:
-        logger.warning("Initial title and model handoff failed", exc_info=True)
-        return None
+        logger.warning(
+            "Thread title persistence failed", extra={"thread_id": thread_id}, exc_info=True
+        )
 
 
 def schedule_thread_title_generation(
@@ -234,8 +159,10 @@ def schedule_thread_title_generation(
                 model=model,
                 client=client,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Thread title generation failed for %s: %s", thread_id, exc)
+        except Exception:
+            logger.warning(
+                "Thread title generation failed", extra={"thread_id": thread_id}, exc_info=True
+            )
         finally:
             _inflight_thread_ids.discard(thread_id)
 

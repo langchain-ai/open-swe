@@ -5,6 +5,7 @@ across public and private thread scopes, including the public GitHub profile
 lookup hit / null-name / failure / cache paths.
 """
 
+import asyncio
 import json
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -225,13 +226,13 @@ async def test_public_scope_resolves_profile_via_installation_token(
     assert prepare_harness["recorded"]["github_user_id"] == 99
 
 
-@pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", None])
+@pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", None, "inference_failure"])
 async def test_initial_handoff_persists_before_work_and_attributes_selected_model(
     prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, requested: str | None
 ) -> None:
     from agent.dashboard.options import available_requested_models
     from agent.middleware.model_selection import ModelSelectionMiddleware
-    from agent.thread_title import ThreadHandoff
+    from agent.model_request import ModelRequestIntent
     from agent.utils.thread_settings import ThreadSettings
 
     prepare_harness["thread_metadata"] = {"visibility": "public"}
@@ -246,8 +247,12 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
 
     store = AsyncMock(side_effect=persist)
     monkeypatch.setattr(server, "store_thread_settings", store)
-    handoff = AsyncMock(return_value=ThreadHandoff(title="A title", requested_model=requested))
-    monkeypatch.setattr(server, "initial_thread_handoff", handoff)
+    intent = (
+        None if requested == "inference_failure" else ModelRequestIntent(requested_model=requested)
+    )
+    requested = intent.requested_model if intent else None
+    handoff = AsyncMock(return_value=intent)
+    monkeypatch.setattr(server, "infer_requested_model", handoff)
     middleware = _middleware(_slack_config())
     chosen = MagicMock()
     router = ModelSelectionMiddleware(
@@ -274,20 +279,24 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     handoff.assert_awaited_once()
 
 
-@pytest.mark.parametrize("failure", ["unavailable", "persistence"])
+@pytest.mark.parametrize("failure", ["unavailable", "unknown", "persistence"])
 async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
     prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     from agent.dashboard.options import available_requested_models
-    from agent.thread_title import ThreadHandoff
+    from agent.model_request import ModelRequestIntent
 
     prepare_harness["thread_metadata"] = {"visibility": "public"}
     monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value={}))
-    model = "anthropic:claude-fable-5-1" if failure == "unavailable" else "openai:gpt-6-sol"
+    model = "anthropic:claude-fable-5-1" if failure == "unknown" else "openai:gpt-6-sol"
     monkeypatch.setattr(
         server,
-        "initial_thread_handoff",
-        AsyncMock(return_value=ThreadHandoff(title="A title", requested_model=model)),
+        "infer_requested_model",
+        AsyncMock(
+            return_value=ModelRequestIntent(
+                requested_model=model, unavailable_model=failure == "unavailable"
+            )
+        ),
     )
     store = AsyncMock(side_effect=RuntimeError("write failed"))
     monkeypatch.setattr(server, "store_thread_settings", store)
@@ -304,11 +313,10 @@ async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
 async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history(
     prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, request_text: str
 ) -> None:
-    from langchain_core.messages import HumanMessage, convert_to_messages
+    from langchain_core.messages import convert_to_messages
 
     from agent.dashboard.options import available_requested_models
     from agent.slack.webhook import _slack_context_input
-    from agent.thread_title import ThreadHandoff
     from agent.utils.thread_settings import ThreadSettings
 
     prepare_harness["thread_metadata"] = {"visibility": "public"}
@@ -325,21 +333,14 @@ async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history
 
     observed: list[str] = []
 
-    async def infer(messages: list[object], **kwargs: object) -> ThreadHandoff:
-        message = messages[-1]
-        assert isinstance(message, HumanMessage)
-        observed.append(message.text)
-        return ThreadHandoff(
-            title="Fix issue",
-            requested_model="anthropic:claude-opus-5-5" if "Opus" in message.text else None,
-        )
+    async def infer(task: str, **kwargs: object) -> str:
+        observed.append(task)
+        return "anthropic:claude-opus-5-5" if "Opus" in task else "no_request"
 
+    monkeypatch.setattr("agent.model_request.select_jev_choice", infer)
     config = _slack_config()
     config["configurable"]["slack_thread"]["triggering_event_ts"] = "2.0"
     middleware = _middleware(config)
-    middleware._title_model.with_structured_output.return_value.ainvoke = AsyncMock(
-        side_effect=infer
-    )
     middleware._requested_models = available_requested_models(fable_enabled=False)
     middleware._model_selection = MagicMock()
     middleware._model_selection.select_route = AsyncMock(return_value="default")
@@ -380,7 +381,7 @@ async def test_requested_model_checks_image_support_before_persisting(
     from langchain_core.messages import HumanMessage
 
     from agent.dashboard.options import available_requested_models
-    from agent.thread_title import ThreadHandoff
+    from agent.model_request import ModelRequestIntent
     from agent.utils.thread_settings import ThreadSettings
 
     prepare_harness["thread_metadata"] = {"visibility": "public"}
@@ -391,8 +392,8 @@ async def test_requested_model_checks_image_support_before_persisting(
     monkeypatch.setattr(server, "store_thread_settings", store)
     monkeypatch.setattr(
         server,
-        "initial_thread_handoff",
-        AsyncMock(return_value=ThreadHandoff(title="Inspect screenshot", requested_model=model)),
+        "infer_requested_model",
+        AsyncMock(return_value=ModelRequestIntent(requested_model=model)),
     )
     content: list[str | dict[str, object]] = [{"type": "text", "text": "Use this model to inspect"}]
     if image_type == "image":
@@ -417,3 +418,62 @@ async def test_requested_model_checks_image_support_before_persisting(
         assert prepared["selected_model_id"] == model
         store.assert_awaited_once()
         middleware._model_selection.use_requested_model.assert_called_once_with(model)
+
+
+@pytest.mark.parametrize("title_fails", [False, True])
+async def test_requested_model_is_persisted_and_work_starts_independently_of_title(
+    prepare_harness: dict[str, object], monkeypatch: pytest.MonkeyPatch, title_fails: bool
+) -> None:
+    from langchain_core.messages import HumanMessage
+
+    import agent.thread_title as thread_title
+    from agent.dashboard.options import available_requested_models
+    from agent.model_request import ModelRequestIntent
+    from agent.utils.thread_settings import ThreadSettings
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def generate_title(**kwargs: object) -> None:
+        started.set()
+        await release.wait()
+        if title_fails:
+            raise RuntimeError("Title service unavailable")
+
+    monkeypatch.setattr(thread_title, "generate_and_store_thread_title", generate_title)
+    monkeypatch.setattr(
+        server, "schedule_thread_title_generation", thread_title.schedule_thread_title_generation
+    )
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value={}))
+    stored: ThreadSettings = {}
+
+    async def persist(
+        client: object, thread_id: str, settings: ThreadSettings, *, strict: bool
+    ) -> None:
+        stored.update(settings)
+
+    monkeypatch.setattr(server, "store_thread_settings", persist)
+    requested = "anthropic:claude-opus-5-5"
+    monkeypatch.setattr(
+        server,
+        "infer_requested_model",
+        AsyncMock(return_value=ModelRequestIntent(requested_model=requested)),
+    )
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    middleware = _middleware(_slack_config())
+    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._model_selection = MagicMock()
+    middleware._model_selection.select_route = AsyncMock(return_value="default")
+    state: PrepareRunState = {"messages": [HumanMessage(content="Use Opus to fix this")]}
+    try:
+        prepared = await asyncio.wait_for(middleware._prepare(state, MagicMock()), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert stored["requested_model"] == requested
+        assert prepared["selected_model_id"] == requested
+        assert prepare_harness["recorded"] is not None
+        assert not release.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(*thread_title._background_tasks)
+    assert stored["requested_model"] == requested
