@@ -1483,7 +1483,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             read_user_settings,
         )
         static_tools = [tool for tool in static_tools if tool not in personal_tools]
-    if not private_thread:
+    if not private_thread and incident_session is None:
         static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]

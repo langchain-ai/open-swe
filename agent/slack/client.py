@@ -11,7 +11,7 @@ import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx2
@@ -57,6 +57,21 @@ SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS = 8000
 _SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES = 1
 _SLACK_THREAD_MUTATION_LOCK_RETRY_SECONDS = 0.05
 _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS = 10
+
+SlackThreadFetchError = Literal["access", "not_found", "transport"]
+
+
+class SlackThreadMessages(list[dict[str, Any]]):
+    """Messages returned from Slack with an optional fetch failure reason."""
+
+    def __init__(
+        self,
+        messages: Iterable[dict[str, Any]] = (),
+        *,
+        error: SlackThreadFetchError | None = None,
+    ) -> None:
+        super().__init__(messages)
+        self.error = error
 
 
 @dataclass(frozen=True)
@@ -1362,10 +1377,10 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
+async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> SlackThreadMessages:
     """Fetch messages for a Slack thread, keeping the most recent window."""
     if not SLACK_BOT_TOKEN:
-        return []
+        return SlackThreadMessages(error="access")
 
     from agent.slack.code_channels import is_code_channel_session
 
@@ -1375,6 +1390,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     messages: list[dict[str, Any]] = []
     cursor: str | None = None
     truncated = False
+    fetch_error: SlackThreadFetchError | None = None
 
     async with SlackClient.bot() as client:
         while True:
@@ -1387,7 +1403,15 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                     )
                 )
             except SLACK_REQUEST_ERRORS as exc:
-                logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                error = slack_error(exc)
+                fetch_error = (
+                    "not_found"
+                    if error in {"thread_not_found", "message_not_found"}
+                    else "access"
+                    if error in {"channel_not_found", "not_in_channel", "is_archived"}
+                    else "transport"
+                )
+                logger.warning("Slack thread fetch failed", extra={"slack_error": error})
                 break
 
             batch = payload.get("messages", [])
@@ -1414,7 +1438,7 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
     messages.sort(key=lambda item: parse_slack_ts(item.get("ts")))
     if truncated:
         messages = messages[-SLACK_THREAD_MAX_MESSAGES:]
-    return messages
+    return SlackThreadMessages(messages, error=fetch_error)
 
 
 @asynccontextmanager

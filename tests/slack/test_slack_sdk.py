@@ -47,18 +47,93 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
         {"ok": True, "messages": [{"ts": "2.0", "user": "U1", "text": "Second message"}]}
     )
     slack_api.respond({"ok": True, "user": {"profile": {"display_name": "Alice"}}})
-    result = await slack_read_thread_messages("C1", "1.0")
+    result = await slack_read_thread_messages("C1", "1700000000.000100")
     assert result["success"] is True
     assert result["count"] == 2
     assert "Alice" in result["formatted"]
     assert result["formatted"].index("First message") < result["formatted"].index("Second message")
     assert slack_api.calls == [
-        ("conversations.replies", {"channel": "C1", "ts": "1.0", "limit": "200"}),
         (
             "conversations.replies",
-            {"channel": "C1", "ts": "1.0", "limit": "200", "cursor": "page2"},
+            {"channel": "C1", "ts": "1700000000.000100", "limit": "200"},
+        ),
+        (
+            "conversations.replies",
+            {
+                "channel": "C1",
+                "ts": "1700000000.000100",
+                "limit": "200",
+                "cursor": "page2",
+            },
         ),
         ("users.info", {"user": "U1"}),
+    ]
+
+
+async def test_read_thread_tool_rejects_wall_clock_timestamp_without_slack_call(monkeypatch):
+    from agent.slack.tools import read_thread_messages
+
+    monkeypatch.setattr(read_thread_messages, "fetch_slack_thread_messages", pytest.fail)
+
+    result = await read_thread_messages.slack_read_thread_messages(
+        "C0C5SF4KT88", "1790591079.000000"
+    )
+
+    assert result == {
+        "success": False,
+        "error": read_thread_messages._INVALID_MESSAGE_TS_ERROR,
+    }
+
+
+async def test_read_thread_tool_passes_well_formed_timestamp_to_fetch(monkeypatch):
+    from agent.slack.tools import read_thread_messages
+
+    captured: dict[str, str] = {}
+
+    async def fake_fetch(channel_id: str, message_ts: str) -> list[dict[str, str]]:
+        captured.update(channel_id=channel_id, message_ts=message_ts)
+        return [{"ts": message_ts, "text": "hello", "user": "U1"}]
+
+    async def fake_names(_user_ids: list[str]) -> dict[str, str]:
+        return {"U1": "Alice"}
+
+    monkeypatch.setattr(read_thread_messages, "fetch_slack_thread_messages", fake_fetch)
+    monkeypatch.setattr(read_thread_messages, "get_slack_user_names", fake_names)
+
+    result = await read_thread_messages.slack_read_thread_messages(
+        " C0C5SF4KT88 ", " 1790591577.851239 "
+    )
+
+    assert result["success"] is True
+    assert captured == {"channel_id": "C0C5SF4KT88", "message_ts": "1790591577.851239"}
+
+
+@pytest.mark.parametrize(
+    "slack_error,expected",
+    [
+        (
+            "not_in_channel",
+            "The bot cannot access or is not a member of that Slack channel.",
+        ),
+        (
+            "thread_not_found",
+            "The Slack channel is readable, but the requested thread does not exist.",
+        ),
+    ],
+)
+async def test_read_thread_tool_preserves_distinct_fetch_failures(slack_api, slack_error, expected):
+    from agent.slack.tools.read_thread_messages import slack_read_thread_messages
+
+    slack_api.respond({"ok": False, "error": slack_error})
+
+    result = await slack_read_thread_messages("C0C5SF4KT88", "1790591577.851239")
+
+    assert result == {"success": False, "error": expected}
+    assert slack_api.calls == [
+        (
+            "conversations.replies",
+            {"channel": "C0C5SF4KT88", "ts": "1790591577.851239", "limit": "200"},
+        )
     ]
 
 

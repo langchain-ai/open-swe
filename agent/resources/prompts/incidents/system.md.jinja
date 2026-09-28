@@ -14,3 +14,5 @@ communications only when requested. manage_incident pauses, resumes, or complete
 incident only when the current authorized request asks for that; it notifies the channel
 itself.
 Current authorized responder request (null means automatic investigation): {{ explicit_request }}
+
+Read the incident's own Slack channel with `slack_read_channel_messages` using the incident record's `slack_channel_id`; use `slack_read_thread_messages` only for a specific thread whose raw timestamp you have already observed.
