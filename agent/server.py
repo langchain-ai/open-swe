@@ -1627,7 +1627,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     model_selection: ModelSelectionMiddleware | None = None
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
-        if adaptive_model_routing
+        if (adaptive_model_routing or source == "slack")
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
         and not local_run
@@ -1648,8 +1648,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ),
         )
 
-    if adaptive_model_routing:
-        assert model_routing_mode is not None
+    if adaptive_model_routing or requested_models is not None:
         routing_models = {
             route: _make_model_or_defer(
                 routed_model_id,
@@ -1661,6 +1660,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 ),
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
+            if adaptive_model_routing
         }
         model_selection = ModelSelectionMiddleware(
             routing_models,

@@ -136,7 +136,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         default_model: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
-        routing_mode: RoutingMode = "auto",
+        routing_mode: RoutingMode | None = "auto",
         requested_model_factory: Callable[[str], BaseChatModel] | None = None,
     ) -> None:
         self._models = {**models, "default": default_model}
@@ -162,6 +162,8 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             if self._requested_model_factory is not None:
                 self.use_requested_model(requested_model)
                 return "default"
+        if self._routing_mode is None:
+            return "default"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":

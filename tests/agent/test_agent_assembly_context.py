@@ -1116,3 +1116,34 @@ async def test_model_handoff_only_initializes_new_routed_threads(stored: dict[st
     middleware = cast(list[object], captured["middleware"])
     prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
     assert bool(prepare._requested_models) is (not bool(stored))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["slack", "dashboard"])
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_new_slack_handoff_ignores_routing_toggle_but_respects_explicit_choice(
+    source: str, explicit: bool
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+    from agent.server import PrepareAgentRunMiddleware
+
+    config = _base_config()
+    config["configurable"].update(source=source)
+    if explicit:
+        config["configurable"].update(
+            model_selection="explicit", agent_model_id="openai:gpt-6-sol", agent_effort="low"
+        )
+    captured = await _capture_create_deep_agent_kwargs(
+        config, profile={"model_routing_enabled": False}
+    )
+    middleware = cast(list[object], captured["middleware"])
+    prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+    routers = [item for item in middleware if isinstance(item, ModelSelectionMiddleware)]
+    enabled = source == "slack" and not explicit
+    assert bool(prepare._requested_models) is enabled
+    assert bool(routers) is enabled
+    if enabled:
+        state: ModelSelectionState = {"messages": []}
+        assert await routers[0].select_route(state) == "default"
+        state["requested_model"] = "anthropic:claude-opus-5-5"
+        assert await routers[0].select_route(state) == "default"
