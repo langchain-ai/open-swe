@@ -39,7 +39,6 @@ from agent.threads.creation import create_lock_thread, create_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import repo_private_from_payload
-from agent.workspaces.routing import resolve_workspace
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
@@ -81,9 +80,8 @@ class ScheduleCreateBody(BaseModel):
     slack_channel_id: str | None = None
     slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
     admin_thread: bool = False
-    # The workspace its runs launch in; left out, the repository's preferred
-    # workspace or the creator's default decides, once, at creation.
-    workspace: str | None = None
+    # The workspace its runs launch in, always chosen explicitly.
+    workspace: str = Field(min_length=1, max_length=120)
 
     @field_validator("schedule")
     @classmethod
@@ -391,14 +389,7 @@ async def create_agent_schedule(
         profile = await get_profile(login) or {}
         repo = await repo_config_for_user(login, body.repo)
         run_email = await resolve_run_email(login, profile) or email
-    if body.workspace is not None:
-        workspace = await _existing_workspace(body.workspace)
-    else:
-        workspace = (
-            await resolve_workspace(
-                repo=(repo["owner"], repo["name"]) if repo else None, login=login
-            )
-        ).slug
+    workspace = await _existing_workspace(body.workspace)
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     schedule_id = str(uuid.uuid4())
     now = now_iso()

@@ -9,8 +9,10 @@ interface WorkspaceSelectorProps {
   selectedSlug: string | null
   onChange: (slug: string | null) => void
   disabled?: boolean
-  /** Render even with a single workspace, e.g. when the saved one no longer exists. */
+  /** Render even with a single workspace, where a choice must still be made. */
   showWithOneWorkspace?: boolean
+  /** Shown while nothing is selected. */
+  placeholder?: string
 }
 
 /**
@@ -26,6 +28,7 @@ export function WorkspaceSelector({
   onChange,
   disabled = false,
   showWithOneWorkspace = false,
+  placeholder = "No workspace",
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -58,7 +61,7 @@ export function WorkspaceSelector({
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selected?.name ?? "No workspace"}
+          {selected?.name ?? placeholder}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>

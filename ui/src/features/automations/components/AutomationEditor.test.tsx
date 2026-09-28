@@ -48,7 +48,6 @@ vi.mock("@/features/automations/lib/useUnsavedChangesWarning", () => ({
 }))
 vi.mock("@/lib/profile", () => ({
   useRepos: () => ({ data: { repositories: [] } }),
-  useMyPreferences: () => ({ data: { default_workspace: "oss" } }),
 }))
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
@@ -127,16 +126,6 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).not.toContain("Save changes")
   })
 
-  it("preselects the creator's default workspace for a new automation", () => {
-    vi.mocked(useSession).mockReturnValue({
-      data: { is_admin: true },
-    } as unknown as ReturnType<typeof useSession>)
-
-    const markup = renderToStaticMarkup(<AutomationEditor mode="create" />)
-
-    expect(markup).toContain(">OSS<")
-  })
-
   it("shows the workspace an existing automation runs in", () => {
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: true },
@@ -166,16 +155,18 @@ describe("AutomationEditor", () => {
     expect(markup).not.toContain(">OSS<")
   })
 
-  it("leaves an untouched workspace for the server to choose", () => {
+  it("starts a new automation in the default workspace", () => {
     signInAsAdmin()
     render(<AutomationEditor mode="create" template={TEMPLATE} />)
 
+    expect(
+      screen.getByRole("button", { name: "Workspace" }).textContent
+    ).toContain("Default")
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
-    expect(mocks.createMutate).toHaveBeenCalledTimes(1)
-    expect(mocks.createMutate.mock.calls[0]?.[0]).not.toHaveProperty(
-      "workspace"
-    )
+    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
+      workspace: "default",
+    })
   })
 
   it("sends a workspace the user picked", () => {

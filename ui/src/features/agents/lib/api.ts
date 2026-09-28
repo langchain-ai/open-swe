@@ -40,8 +40,8 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
-  /** Omitted, the repository's preferred workspace or the creator's default. */
-  workspace?: string | null
+  /** Slug of the workspace every run launches in. */
+  workspace: string
 }
 
 export interface ScheduleUpdateRequest {

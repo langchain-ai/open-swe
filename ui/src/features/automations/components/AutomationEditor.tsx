@@ -12,7 +12,6 @@ import type { AutomationTemplate } from "@/features/automations/lib/automation-t
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
-import { pickComposerWorkspace } from "@/features/agents/lib/composerWorkspace"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
@@ -37,7 +36,8 @@ import {
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
-import { useMyPreferences, useRepos } from "@/lib/profile"
+import { useRepos } from "@/lib/profile"
+import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
 interface AutomationEditorProps {
@@ -70,7 +70,6 @@ export function AutomationEditor({
   const reposQuery = useRepos()
   const { models, defaultSelection } = useModelOptions()
   const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
-  const preferences = useMyPreferences()
 
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
@@ -95,8 +94,8 @@ export function AutomationEditor({
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
-  // null = untouched: an existing automation keeps its workspace, and a new one
-  // follows its repository's preferred workspace, as the server would.
+  // null = untouched: an existing automation keeps its workspace, and a new
+  // one starts in the instance's default workspace.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
     null
   )
@@ -104,17 +103,9 @@ export function AutomationEditor({
   const workspace =
     workspaceOverride ??
     schedule?.workspace ??
-    pickComposerWorkspace({
-      override: null,
-      repoWorkspace: repo
-        ? (workspaces.find((option) =>
-            option.repos.some((r) => r.toLowerCase() === repo.toLowerCase())
-          )?.slug ?? null)
-        : null,
-      userDefault: preferences.data?.default_workspace,
-      instanceDefault: workspaceOptionsQuery.data?.default_slug ?? null,
-      workspaces,
-    })
+    (mode === "create"
+      ? (workspaceOptionsQuery.data?.default_slug ?? DEFAULT_WORKSPACE_SLUG)
+      : null)
   // A workspace deleted after the automation was saved: its runs are refused
   // until someone picks another, so the picker must stay reachable.
   const savedWorkspaceMissing =
@@ -153,6 +144,8 @@ export function AutomationEditor({
   const canSave =
     name.trim().length > 0 &&
     prompt.trim().length > 0 &&
+    workspace !== null &&
+    !savedWorkspaceMissing &&
     (trigger === "github_issue_opened" ? !!repo : !!cron)
 
   const onPickTrigger = (value: string | null) => {
@@ -166,7 +159,7 @@ export function AutomationEditor({
   }
 
   const handleSave = () => {
-    if (!canSave) return
+    if (!canSave || workspace === null) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
     const modelId = modelIsReal ? (activeSelection?.modelId ?? null) : null
     const effort = modelIsReal ? (activeSelection?.effort ?? null) : null
@@ -184,12 +177,7 @@ export function AutomationEditor({
           admin_thread: adminThread,
           model_id: modelId,
           effort,
-          // Only an explicit pick: the preview above may be computed before
-          // the user's preferences load, and the server resolves the same
-          // default from what it knows.
-          ...(workspaceOverride !== null
-            ? { workspace: workspaceOverride }
-            : {}),
+          workspace,
         },
         {
           onSuccess: () => {
@@ -316,15 +304,14 @@ export function AutomationEditor({
             triggerClassName="text-muted-foreground"
             disabled={!canManage}
           />
-          {(workspaces.length > 1 || savedWorkspaceMissing) && (
-            <span className="text-border">|</span>
-          )}
+          <span className="text-border">|</span>
           <WorkspaceSelector
             workspaces={workspaces}
             selectedSlug={workspace}
             onChange={(slug) => setWorkspaceOverride(slug)}
             disabled={!canManage}
-            showWithOneWorkspace={savedWorkspaceMissing}
+            placeholder="Choose workspace"
+            showWithOneWorkspace
           />
         </div>
         {savedWorkspaceMissing && (

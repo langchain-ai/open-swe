@@ -40,6 +40,7 @@ async def list_automations() -> dict[str, Any]:
 
 async def create_automation(
     prompt: str,
+    workspace: str,
     schedule: str | None = None,
     trigger: schedules.AutomationTrigger = "schedule",
     name: str | None = None,
@@ -49,7 +50,6 @@ async def create_automation(
     slack_channel_id: str | None = None,
     slack_notification_mode: schedules.SlackNotificationMode = "always",
     admin_thread: bool = False,
-    workspace: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
     if error := await require_admin("manage workspace automations"):

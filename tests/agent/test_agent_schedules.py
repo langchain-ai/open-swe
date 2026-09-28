@@ -156,29 +156,34 @@ def auth(monkeypatch) -> None:  # noqa: ANN001
 
 def test_cron_validation_rejects_non_five_field_expression() -> None:
     with pytest.raises(ValidationError):
-        ScheduleCreateBody(prompt="hello", schedule="0 9 * *")
+        ScheduleCreateBody(workspace="default", prompt="hello", schedule="0 9 * *")
 
 
 def test_cron_validation_accepts_steps_ranges_and_lists() -> None:
-    body = ScheduleCreateBody(prompt="hello", schedule="*/15 9-17 * * 1,3,5")
+    body = ScheduleCreateBody(workspace="default", prompt="hello", schedule="*/15 9-17 * * 1,3,5")
 
     assert body.schedule == "*/15 9-17 * * 1,3,5"
 
 
 def test_slack_channel_validation_normalizes_ids() -> None:
     body = ScheduleCreateBody(
-        prompt="hello", schedule="0 9 * * *", slack_channel_id=" c0123456789 "
+        workspace="default", prompt="hello", schedule="0 9 * * *", slack_channel_id=" c0123456789 "
     )
 
     assert body.slack_channel_id == "C0123456789"
     with pytest.raises(ValidationError):
-        ScheduleCreateBody(prompt="hello", schedule="0 9 * * *", slack_channel_id="#general")
+        ScheduleCreateBody(
+            workspace="default", prompt="hello", schedule="0 9 * * *", slack_channel_id="#general"
+        )
 
 
 def test_slack_notification_mode_defaults_and_validates() -> None:
-    default_body = ScheduleCreateBody(prompt="hello", schedule="0 9 * * *")
+    default_body = ScheduleCreateBody(workspace="default", prompt="hello", schedule="0 9 * * *")
     conditional_body = ScheduleCreateBody(
-        prompt="hello", schedule="0 9 * * *", slack_notification_mode="on_action"
+        workspace="default",
+        prompt="hello",
+        schedule="0 9 * * *",
+        slack_notification_mode="on_action",
     )
 
     assert default_body.slack_notification_mode == "always"
@@ -195,6 +200,7 @@ def test_slack_notification_mode_defaults_and_validates() -> None:
 
 async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Daily report",
         prompt="Summarize merged PRs",
         schedule="0 9 * * 1-5",
@@ -219,6 +225,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
 
 async def test_create_github_issue_automation_without_cron(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Issue responder",
         prompt="Triage this issue",
         trigger="github_issue_opened",
@@ -235,6 +242,7 @@ async def test_create_github_issue_automation_without_cron(fake_client, auth) ->
 
 async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Admin cleanup",
         prompt="Clean up workspace environments",
         schedule="0 9 * * *",
@@ -250,6 +258,7 @@ async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -
 
 async def test_create_admin_schedule_persists_admin_intent(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
+        workspace="default",
         name="Admin cleanup",
         prompt="Clean up workspace environments",
         schedule="0 9 * * *",
@@ -276,7 +285,7 @@ async def test_create_agent_schedule_requires_dashboard_token(fake_client, monke
 
     with pytest.raises(HTTPException) as exc:
         await schedules.create_agent_schedule(
-            "alice", ScheduleCreateBody(prompt="hello", schedule="0 9 * * 1")
+            "alice", ScheduleCreateBody(workspace="default", prompt="hello", schedule="0 9 * * 1")
         )
 
     assert exc.value.status_code == 401
@@ -293,6 +302,7 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
         await schedules.create_agent_schedule(
             "alice",
             ScheduleCreateBody(
+                workspace="default",
                 prompt="hello",
                 schedule="0 9 * * 1",
                 repo="victim/private",
@@ -560,7 +570,10 @@ async def test_issue_trigger_rejects_stale_cron_and_preserves_failed_cleanup(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            prompt="Triage issues", schedule="0 9 * * *", repo="langchain-ai/open-swe"
+            workspace="default",
+            prompt="Triage issues",
+            schedule="0 9 * * *",
+            repo="langchain-ai/open-swe",
         ),
     )
     cron_delete = AsyncMock(side_effect=RuntimeError("cron service unavailable"))
@@ -800,6 +813,7 @@ async def test_issue_delivery_stays_claimed_after_dispatched_run_bookkeeping_fai
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
+            workspace="default",
             prompt="Triage issues",
             trigger="github_issue_opened",
             repo="langchain-ai/open-swe",
@@ -838,7 +852,10 @@ async def test_issue_delivery_can_retry_failed_dispatch(
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            prompt="Triage issues", trigger="github_issue_opened", repo="langchain-ai/open-swe"
+            workspace="default",
+            prompt="Triage issues",
+            trigger="github_issue_opened",
+            repo="langchain-ai/open-swe",
         ),
     )
     payload = {
@@ -965,7 +982,10 @@ async def test_switching_to_issue_trigger_clears_the_cron_expression(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            prompt="Nightly sweep", schedule="0 9 * * *", repo="langchain-ai/open-swe"
+            workspace="default",
+            prompt="Nightly sweep",
+            schedule="0 9 * * *",
+            repo="langchain-ai/open-swe",
         ),
         email="alice@example.com",
     )
@@ -990,6 +1010,7 @@ async def test_create_issue_automation_ignores_a_supplied_cron(
     result = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
+            workspace="default",
             prompt="Triage issues",
             trigger="github_issue_opened",
             repo="langchain-ai/open-swe",
@@ -1342,7 +1363,11 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         monkeypatch.setattr(schedules, name, no_personal_access)
     child = await automations.create_automation(
-        "Check workspace repos", "0 9 * * *", repo="langchain-ai/open-swe", admin_thread=True
+        "Check workspace repos",
+        workspace="default",
+        schedule="0 9 * * *",
+        repo="langchain-ai/open-swe",
+        admin_thread=True,
     )
     assert child["ok"] is True
     child_id = child["automation"]["id"]
@@ -1613,17 +1638,11 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
     assert opening.get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope
 
 
-async def test_a_new_automation_defaults_to_its_repositorys_preferred_workspace(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    body = ScheduleCreateBody(
-        prompt="Triage this issue", trigger="github_issue_opened", repo="langchain-ai/open-swe"
-    )
-
-    result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
-
-    assert result["workspace"] == "oss"
+def test_a_new_automation_must_name_its_workspace() -> None:
+    with pytest.raises(ValidationError):
+        ScheduleCreateBody.model_validate(
+            {"prompt": "Triage this issue", "trigger": "github_issue_opened", "repo": "a/b"}
+        )
 
 
 async def test_a_new_automation_keeps_the_workspace_it_names(

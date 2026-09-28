@@ -84,16 +84,6 @@ export const REPOS_STALE_TIME_MS = 10 * 60 * 1000
  * Accessible repos, seeded from localStorage so the picker populates instantly
  * instead of waiting on the multi-second GitHub installation fan-out.
  */
-/** The signed-in user's preferences, such as their default workspace. */
-export function useMyPreferences() {
-  const session = useSession()
-  return useQuery({
-    queryKey: ["myPreferences"],
-    queryFn: api.getMyPreferences,
-    enabled: Boolean(session.data),
-  })
-}
-
 export function useRepos() {
   const session = useSession()
   const login = session.data?.login ?? null
