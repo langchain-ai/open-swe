@@ -938,6 +938,16 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 settings["requested_model"] = requested_model
                 if requested_model:
                     option = self._requested_models[requested_model]
+                    if not option["supports_images"] and any(
+                        block.get("type") == "image"
+                        for message in state.get("messages", [])
+                        if isinstance(message, HumanMessage)
+                        for block in message.content_blocks
+                    ):
+                        raise ValueError(
+                            "The requested runtime model does not support image input; "
+                            "select an image-capable model."
+                        )
                     settings.update(
                         model_id=requested_model,
                         effort=option["default_effort"],

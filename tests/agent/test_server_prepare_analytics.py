@@ -380,3 +380,55 @@ async def test_handoff_does_not_proceed_with_unavailable_or_unpersisted_choice(
         await _prepare(middleware)
     middleware._model_selection.use_requested_model.assert_not_called()
     assert prepare_harness["recorded"] is None
+
+
+@pytest.mark.parametrize("image_type", ["image", "image_url", None])
+@pytest.mark.parametrize(
+    "model", ["fireworks:accounts/fireworks/models/kimi-k3", "anthropic:claude-opus-5-5"]
+)
+async def test_requested_model_checks_image_support_before_persisting(
+    prepare_harness: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    image_type: str | None,
+    model: str,
+) -> None:
+    from langchain_core.messages import HumanMessage
+
+    from agent.dashboard.options import available_requested_models
+    from agent.thread_title import ThreadHandoff
+    from agent.utils.thread_settings import ThreadSettings
+
+    prepare_harness["thread_metadata"] = {"visibility": "public"}
+    monkeypatch.setattr(server, "resolve_triggering_user_identity", _async_none)
+    settings: ThreadSettings = {"model_id": "openai:gpt-6-sol"}
+    monkeypatch.setattr(server, "load_thread_settings", AsyncMock(return_value=settings))
+    store = AsyncMock()
+    monkeypatch.setattr(server, "store_thread_settings", store)
+    monkeypatch.setattr(
+        server,
+        "initial_thread_handoff",
+        AsyncMock(return_value=ThreadHandoff(title="Inspect screenshot", requested_model=model)),
+    )
+    content: list[str | dict[str, object]] = [{"type": "text", "text": "Use this model to inspect"}]
+    if image_type == "image":
+        content.append({"type": "image", "base64": "aGVsbG8=", "mime_type": "image/png"})
+    elif image_type == "image_url":
+        content.append(
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}}
+        )
+    state: PrepareRunState = {"messages": [HumanMessage(content=content)]}
+    middleware = _middleware(_slack_config())
+    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._model_selection = MagicMock()
+    if image_type and model.endswith("kimi-k3"):
+        with pytest.raises(ValueError, match="does not support image input"):
+            await middleware._prepare(state, MagicMock())
+        store.assert_not_awaited()
+        middleware._model_selection.use_requested_model.assert_not_called()
+        assert settings == {"model_id": "openai:gpt-6-sol"}
+        assert prepare_harness["recorded"] is None
+    else:
+        prepared = await middleware._prepare(state, MagicMock())
+        assert prepared["selected_model_id"] == model
+        store.assert_awaited_once()
+        middleware._model_selection.use_requested_model.assert_called_once_with(model)
