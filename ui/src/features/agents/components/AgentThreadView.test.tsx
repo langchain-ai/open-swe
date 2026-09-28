@@ -188,14 +188,17 @@ describe("AgentThreadView model selection", () => {
   it("preserves a newer picker action while a submission is pending", async () => {
     setup()
     act(() => composer.onSelectionChange?.(null))
-    const pending = Promise.withResolvers<void>()
-    sendMessage.mutateAsync.mockReturnValueOnce(pending.promise)
+    let resolveSubmission!: () => void
+    const pending = new Promise<void>((resolve) => {
+      resolveSubmission = resolve
+    })
+    sendMessage.mutateAsync.mockReturnValueOnce(pending)
 
     const submission = composer.onSubmit?.("continue", [])
     act(() => composer.onSelectionChange?.(selection))
     act(() => composer.onSelectionChange?.(null))
     await act(async () => {
-      pending.resolve()
+      resolveSubmission()
       await submission
     })
 
