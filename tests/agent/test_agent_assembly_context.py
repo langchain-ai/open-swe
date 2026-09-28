@@ -324,6 +324,28 @@ async def test_model_routing_is_applied_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_router_failure_uses_same_model_as_routing_off() -> None:
+    config = _base_config()
+    config["configurable"]["thread_id"] = "thread-1"
+    profile = {
+        "default_model": "anthropic:claude-opus-5-5",
+        "reasoning_effort": "high",
+        "model_routing_enabled": True,
+    }
+    agent = await _capture_create_deep_agent_kwargs(config, profile=profile)
+    model_selection = next(
+        item
+        for item in cast(list[object], agent["middleware"])
+        if type(item).__name__ == "ModelSelectionMiddleware"
+    )
+    route = await model_selection.select_route({"messages": []})
+
+    assert route == "default"
+    assert model_selection._models[route] is agent["model"]
+    assert agent["make_model_calls"][0][0] == "anthropic:claude-opus-5-5"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_thread", [False, True])
 async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) -> None:
     initial_settings = (
@@ -658,11 +680,13 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
 ) -> None:
     from agent.server import ADMIN_TOOLS
     from agent.tools import read_only_sql
+    from agent.tools.manage_feature_flags import manage_feature_flags
 
     captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
+    assert manage_feature_flags not in tools
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "octocat")
     config = _base_config()
@@ -673,10 +697,12 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql in tools
+    assert manage_feature_flags in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
     general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
     assert read_only_sql in general_purpose["tools"]
+    assert manage_feature_flags in general_purpose["tools"]
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -689,6 +715,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql in tools
+    assert manage_feature_flags in tools
 
     assert all(tool in tools for tool in ADMIN_TOOLS)
 
@@ -697,6 +724,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
+    assert manage_feature_flags not in tools
     assert all(tool not in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "octocat"
@@ -705,6 +733,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert read_only_sql not in tools
+    assert manage_feature_flags not in tools
 
 
 @pytest.mark.asyncio
@@ -832,6 +861,39 @@ async def test_slack_source_context_includes_slack_tools(source: str) -> None:
         "slack_start_new_thread",
         "slack_reply",
     } <= tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("channel_context", "thread_ts", "expected"),
+    [
+        ({"is_im": True}, "0", True),
+        ({"is_im": True}, "1700000000.000100", False),
+        (None, "1700000000.000100", False),
+    ],
+)
+async def test_start_thread_is_offered_only_in_concierge_dms(
+    channel_context: dict[str, bool] | None, thread_ts: str, expected: bool
+) -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update(
+        {
+            "source": "slack",
+            "slack_thread": {
+                "channel_id": "D123",
+                "thread_ts": thread_ts,
+                "channel_context": channel_context,
+            },
+        }
+    )
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    assert ("start_thread" in {_registered_tool_name(tool) for tool in tools}) is expected
 
 
 @pytest.mark.asyncio

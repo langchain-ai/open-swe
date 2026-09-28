@@ -18,6 +18,7 @@ from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
+from agent.prompts import prompt
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
@@ -32,7 +33,7 @@ from agent.threads.handlers import (
 from agent.threads.listing import list_dashboard_threads_page
 from agent.threads.plan_store import get_plan_content, list_plan_comments
 from agent.threads.proxy import proxy_dashboard_thread_commands
-from agent.threads.runs import ThreadMessageBody
+from agent.threads.runs import ThreadMessageBody, start_dashboard_thread
 from agent.threads.summary import thread_is_owner
 from agent.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -73,6 +74,7 @@ ThreadAction = Literal[
 ]
 PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
+_MAX_TITLE_CHARS = 80
 _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
 _MAX_TRANSCRIPT_MESSAGES = 100
@@ -1088,3 +1090,46 @@ async def manage_thread(
     except Exception:
         logger.exception("Thread action %s failed for %s", action, thread_id)
         return _failure("Thread action failed")
+
+
+async def start_thread(
+    title: str,
+    instructions: str,
+    repos: list[str] | None = None,
+    visibility: Literal["workspace", "private"] = "workspace",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+) -> dict[str, Any]:
+    """Implement the `start_thread` tool."""
+    actor = await _actor(state)
+    if actor is None:
+        return _failure("No verified triggering user is available")
+    title = title.strip()
+    instructions = instructions.strip()
+    if not title:
+        return _failure("title is required")
+    if not instructions:
+        return _failure("instructions is required")
+    if len(instructions) > _MAX_MESSAGE_CHARS:
+        return _failure(f"instructions must be at most {_MAX_MESSAGE_CHARS} characters")
+    clean_repos = list(dict.fromkeys(repo.strip() for repo in repos or () if repo.strip()))
+    try:
+        thread_id = await start_dashboard_thread(
+            actor.login,
+            actor.email,
+            title=title[:_MAX_TITLE_CHARS],
+            prompt=prompt(
+                "runs/started-thread", instructions=instructions, other_repos=clean_repos[1:]
+            ),
+            repos=clean_repos,
+            visibility="private" if visibility == "private" else "public",
+        )
+    except HTTPException as exc:
+        return _http_failure(exc)
+    except Exception:
+        logger.exception("Starting a thread failed", extra={"repos": clean_repos})
+        return _failure("Thread start failed")
+    return {
+        "success": True,
+        "thread_id": thread_id,
+        "dashboard_url": dashboard_thread_url(thread_id),
+    }

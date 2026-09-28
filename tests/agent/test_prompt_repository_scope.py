@@ -53,3 +53,16 @@ def test_prompt_omits_repository_scope_for_filtered_webhook_sources(
     prompt = construct_system_prompt(working_dir="/workspace", source=source)
 
     assert "### Repository Modification Scope" not in prompt
+
+
+def test_slack_breakout_prompt_skips_the_opening_restatement() -> None:
+    normal = construct_system_prompt(working_dir="/workspace", source="slack", slack_context=True)
+    breakout = construct_system_prompt(
+        working_dir="/workspace", source="slack", slack_context=True, slack_breakout=True
+    )
+
+    assert "rephrases your understanding of the request" in normal
+    assert "broken out from another Slack thread" not in normal
+    assert "rephrases your understanding of the request" not in breakout
+    assert "broken out from another Slack thread" in breakout
+    assert "{%" not in normal and "{%" not in breakout

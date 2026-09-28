@@ -10,7 +10,6 @@ from agent.slack.blocks import (
     ButtonElement,
     actions,
     button,
-    checkbox,
     code_block,
     context,
     divider,
@@ -20,9 +19,6 @@ from agent.slack.blocks import (
 )
 
 BUTTON_TYPE = "expedited_review"
-# Outside the option-button namespace, so ticking it is acknowledged and otherwise ignored.
-BROADCAST_CHECKBOX_ACTION_ID = "expedited_review_broadcast"
-BROADCAST_OPTION = "broadcast"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
@@ -144,20 +140,10 @@ def _voting_diff(
 
 def _status(approval: ExpeditedApproval, author: str, channel: str | None) -> list[Block]:
     if approval.awaiting_ready:
-        blocks: list[Block] = [
-            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it.")
+        return [
+            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
+            actions(_ready_button(approval), _dismiss_button(approval)),
         ]
-        if channel and not approval.slack_broadcast:
-            blocks.append(
-                actions(
-                    checkbox(
-                        f"Also send to {channel}",
-                        action_id=BROADCAST_CHECKBOX_ACTION_ID,
-                        value=BROADCAST_OPTION,
-                    )
-                )
-            )
-        return [*blocks, actions(_ready_button(approval), _dismiss_button(approval))]
     if approval.approved:
         return [
             section(

@@ -1028,6 +1028,72 @@ async def test_enrich_run_start_command_adds_web_handoff_for_slack_thread(monkey
     assert enriched["params"]["config"]["configurable"]["source"] == "dashboard"
 
 
+@pytest.mark.parametrize("history", [[], [{"id": "earlier"}]])
+async def test_enrich_run_start_command_names_linked_pr_on_first_message(
+    monkeypatch, history: list[dict[str, str]]
+) -> None:
+    pr_url = "https://github.com/acme/widgets/pull/7"
+    metadata: dict[str, object] = {"source": "dashboard", "pr_url": pr_url, "pr_number": 7}
+
+    class FakeThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": metadata}
+
+        async def get_state(self, thread_id: str) -> dict[str, object]:
+            return {"values": {"messages": history}}
+
+        async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:
+            pass
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    async def fake_get_profile(login: str) -> dict[str, object]:
+        return {}
+
+    async def fake_ensure_token(login: str) -> None:
+        pass
+
+    async def fake_resolve_email(login: str, profile: dict[str, object]) -> str:
+        return f"{login}@example.com"
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+    patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
+    patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
+    patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
+    patch_thread_module(monkeypatch, "agent_thread_pr_state_lock", _unlocked)
+
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "deploy to preview"}]}},
+    }
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "tid",
+        "octocat",
+        command,
+        metadata=metadata,
+        email="octocat@example.com",
+    )
+
+    messages = enriched["params"]["input"]["messages"]
+    user_message = ElementTree.fromstring(messages[-1]["content"])
+    assert (user_message.text or "").strip() == "deploy to preview"
+    pr_notices = [
+        message
+        for message in messages[:-1]
+        if ElementTree.fromstring(message["content"]).attrib.get("sender")
+        == "system:pull-request-thread"
+    ]
+    if history:
+        assert pr_notices == []
+    else:
+        assert len(pr_notices) == 1
+        text = ElementTree.fromstring(pr_notices[0]["content"]).text or ""
+        assert pr_url in text
+        assert f"gh pr checkout {pr_url}" in text
+
+
 async def test_enrich_run_start_command_adds_web_handoff_before_image_blocks(monkeypatch) -> None:
     class FakeThreads:
         async def update(self, *, thread_id: str, metadata: dict[str, object]) -> None:

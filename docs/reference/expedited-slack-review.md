@@ -6,10 +6,9 @@ This document records the design and operating constraints of expedited Slack re
 
 The agent posts a tiny PR's full diff in the Slack thread. For a draft, the PR's
 author first marks it ready from the card. Then one person other than the author
-approves. The approval is only recorded in PostgreSQL; nothing reaches GitHub. Once
-checks and reviews are clean, the agent calls a merge tool that submits the approval
-as that person's GitHub review and merges. The approval survives a later commit only
-if it leaves the diff shown on the card unchanged.
+approves, and the click submits that person's GitHub review at once. Once checks and
+reviews are clean, the agent calls a merge tool that merges. The approval survives a
+later commit only if it leaves the diff shown on the card unchanged.
 
 ## Motivation
 
@@ -64,10 +63,8 @@ the card says who approved. Once merged or cancelled, the whole card becomes one
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
 the PR link. Reactions are never votes.
 
-The card is posted in the thread only. A draft's card has an **Also send to #channel**
-checkbox, off by default, that broadcasts the card when the author marks it ready; an
-open card awaiting approval has **Broadcast in #channel**, which anyone in the thread
-may click. Broadcasting reposts the card as a thread reply also sent to the channel.
+The card is posted in the thread only. Once it is open for approval it has
+**Broadcast in #channel**, which anyone in the thread may click. Broadcasting reposts the card as a thread reply also sent to the channel.
 When the card closes for any reason, the broadcast copy is deleted and the closed card
 is posted in the thread only, so the channel keeps no finished cards.
 
@@ -77,18 +74,24 @@ is posted in the thread only, so the channel keeps no finished cards.
   GitHub identity has write or higher on the repo. Votes are keyed by user id, so one
   person cannot vote twice through two handles.
 - The author cannot approve their own PR. One approval from anyone else is enough.
-- A click is recorded and the card re-rendered; nothing is sent to GitHub. A voter
-  without a stored GitHub token is refused at click time, since their review could not
-  be submitted later.
+- A click is recorded, the card re-rendered, and a GitHub `APPROVE` review submitted
+  with the voter's own token on the current head, provided the diff the card drew is
+  unchanged there. The review body links the Slack thread. A voter without a stored
+  GitHub token is refused. If GitHub is unavailable or refuses, the vote stays
+  recorded and the merge submits it.
 - When the approval lands, the agent is woken once so it can try the merge. The
   clicker gets an ephemeral confirmation; nothing else is posted.
 
 ### Dismissal
 
 Anyone in Slack may dismiss an open card, with no GitHub link or write access needed.
-The card is cancelled and its votes no longer count. Nothing is sent to the agent or to
-GitHub: anyone who wants changes tags the agent in the thread like any other request,
-and it can post a fresh card afterwards.
+The card is cancelled and its votes no longer count. Nothing is sent to the agent, and
+the GitHub reviews the votes submitted are dismissed: anyone who wants changes tags the
+agent in the thread like any other request, and it can post a fresh card afterwards.
+Every card that closes without a merge, superseded ones and a closed PR's included,
+dismisses its reviews the same way, so a reopened PR does not inherit them. A review
+counts as dismissed only once GitHub confirms; one GitHub refused is retried whenever
+another card of the PR closes.
 
 ### Merge
 
@@ -107,9 +110,9 @@ card. The tool:
    standing request for changes, and, where Open SWE auto-review is enabled, an Open
    SWE review for this exact head SHA. Anything missing is returned to the agent and
    nothing is written.
-4. Submits a GitHub `APPROVE` review at the current head for the approver with that
-   person's own token, recording the review id and SHA so a retry does not resubmit
-   it, and comments the card's Slack link on the PR.
+4. Submits a GitHub `APPROVE` review at the current head for any approver whose
+   review from the click is not a standing approval: it never landed, or GitHub
+   dismissed it as stale after a later commit.
 5. Merges with a GitHub App token scoped to contents and pull requests on that
    repository, conditional on the current head SHA, using a merge method the
    repository allows. GitHub refusing leaves the card open and the reason goes back
@@ -117,6 +120,12 @@ card. The tool:
 
 On a confirmed merge: card → merged, merged reaction on the Slack root. The thread
 resolves through the existing merged-PR handling.
+
+When someone merges or closes the PR on GitHub themselves, the `pull_request` closed
+webhook settles an open card the same way, from the PR's current state rather than the
+event, so a late delivery cannot close the card of a reopened PR: merged → card merged
+and the merged reaction; closed → card closed and its reviews dismissed. Nothing new is
+posted in Slack and the agent is not woken.
 
 ### Storage
 

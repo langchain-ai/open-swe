@@ -18,7 +18,7 @@ import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
 import {
-  collectRun,
+  followRun,
   RESULT_TOOL,
   type CliResult,
   type RunOutcome,
@@ -239,13 +239,22 @@ async function runCommand(options: RunOptions): Promise<number> {
   try {
     activeRun = true
     const runId = await api.startRun(threadId, configurable, prompt)
-    const response = await api.openEventStream(threadId, {
-      channels: EVENT_CHANNELS,
-      namespaces: [[]],
-      depth: EVENT_DEPTH,
-      since: 0,
-    })
-    outcome = await collectRun(response, runId)
+    outcome = await followRun(
+      () =>
+        api.openEventStream(threadId, {
+          channels: EVENT_CHANNELS,
+          namespaces: [[]],
+          depth: EVENT_DEPTH,
+          since: 0,
+        }),
+      runId,
+      {
+        onReconnect: (attempt, reason) =>
+          note(
+            `Event stream dropped (${reason}); reconnecting, attempt ${attempt}`
+          ),
+      }
+    )
   } catch (cause) {
     fail(
       cause instanceof ApiError && cause.status === 401

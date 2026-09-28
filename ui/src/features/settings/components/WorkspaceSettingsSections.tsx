@@ -163,7 +163,7 @@ export function DefaultRepoSection({
   repositories,
 }: {
   scope: SettingsScope
-  /** On a workspace, its own repositories; on the instance, every repository the installation can see. */
+  /** Every repository the installation can see: any workspace may default to any of them. */
   repositories: Array<string>
 }) {
   const settings = useScopedSettings(scope)
@@ -173,7 +173,7 @@ export function DefaultRepoSection({
       title="Default repository"
       description={
         scoped
-          ? "Where a run in this workspace lands when nothing names a repository. An inherited instance default only applies if this workspace owns it."
+          ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >

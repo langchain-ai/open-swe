@@ -6,6 +6,7 @@ import type {
 import type {
   AgentSource,
   AgentStatus,
+  AgentSubagentSummary,
   AgentThread,
   ReviewPageRef,
 } from "./types"
@@ -32,6 +33,8 @@ interface SidebarThreadItemBase {
   /** `owner/repo` + number of `pr`, when the thread carries a full PR record. */
   prRef?: { repoFullName: string; number: number }
   reviewPage?: ReviewPageRef
+  /** Subagents the thread spawned, listed as sub-threads under its row. */
+  subagents?: Array<AgentSubagentSummary>
 }
 
 export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
@@ -116,6 +119,7 @@ export function cloudSidebarThread(
     pr: thread.pr,
     prRef: pullRequestRef(thread),
     reviewPage: thread.reviewPage,
+    subagents: thread.subagents,
     thread,
   }
 }
@@ -245,8 +249,9 @@ export function groupSidebarThreadsByRepo(
  * Buckets already-built repo groups by the workspace that owns them, using
  * each entry's `workspace` field from `repos` — falling back to
  * {@link DEFAULT_SIDEBAR_WORKSPACE_SLUG} for a repo with no workspace
- * (every repository belongs to exactly one workspace, so this only fires for
- * a repo the caller didn't annotate). A workspace absent from `workspaces`
+ * (a repository is preferred by at most one workspace, and one no workspace
+ * prefers is annotated `default`, so this only fires for a repo the caller
+ * didn't annotate). A workspace absent from `workspaces`
  * displays its slug as its own name.
  *
  * Generic over the repo-group shape so callers with richer, hydrated

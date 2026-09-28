@@ -11,6 +11,7 @@ import re
 import shutil
 import signal
 import sys
+import tempfile
 from asyncio.subprocess import DEVNULL, PIPE
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -40,6 +41,8 @@ AGENT_ENV = frozenset(
 RERERE_NOTE = "conflicts resolved from the rerere cache"
 AGENT_NOTE = "conflicts resolved by oswe"
 RESET_REF_PREFIX = "refs/preview-reset/"
+RERERE_REF = "refs/preview-rerere/cache"
+RERERE_DIR = Path(".git/rr-cache")
 
 
 class PreviewError(Exception):
@@ -150,8 +153,10 @@ def warn(message: str) -> None:
     print(f"warning: {message}", file=sys.stderr, flush=True)
 
 
-async def run(*args: str, check: bool = True) -> Completed:
-    proc = await asyncio.create_subprocess_exec(*args, stdin=DEVNULL, stdout=PIPE, stderr=PIPE)
+async def run(*args: str, check: bool = True, env: dict[str, str] | None = None) -> Completed:
+    proc = await asyncio.create_subprocess_exec(
+        *args, stdin=DEVNULL, stdout=PIPE, stderr=PIPE, env=env
+    )
     stdout, stderr = await proc.communicate()
     result = Completed(await proc.wait(), stdout.decode(), stderr.decode())
     if check and result.code != 0:
@@ -159,8 +164,8 @@ async def run(*args: str, check: bool = True) -> Completed:
     return result
 
 
-async def git(*args: str, check: bool = True) -> Completed:
-    return await run("git", *args, check=check)
+async def git(*args: str, check: bool = True, env: dict[str, str] | None = None) -> Completed:
+    return await run("git", *args, check=check, env=env)
 
 
 async def gh_api(path: str, *args: str, check: bool = True) -> Completed:
@@ -208,6 +213,41 @@ async def restore_head(commit: str) -> None:
     await git("rerere", "clear")
     await git("reset", "-q", "--hard", commit)
     await git("clean", "-fdq")
+
+
+@dataclass
+class RerereCache:
+    """``.git/rr-cache`` kept as a tree in a ref: Actions caches are read-only on PR events."""
+
+    restored_tree: str | None = None
+
+    @staticmethod
+    def _index_env(index: Path) -> dict[str, str]:
+        return {**os.environ, "GIT_INDEX_FILE": str(index)}
+
+    async def restore(self) -> None:
+        if not await remote_refs(RERERE_REF):
+            return
+        await git("fetch", "--no-tags", "--force", "origin", f"{RERERE_REF}:{RERERE_REF}")
+        self.restored_tree = await rev_parse(f"{RERERE_REF}^{{tree}}")
+        with tempfile.TemporaryDirectory() as scratch:
+            env = self._index_env(Path(scratch) / "index")
+            await git("read-tree", RERERE_REF, env=env)
+            await git("checkout-index", "-a", "-f", f"--prefix={RERERE_DIR}/", env=env)
+
+    async def save(self) -> None:
+        if not RERERE_DIR.is_dir():
+            return
+        with tempfile.TemporaryDirectory() as scratch:
+            env = self._index_env(Path(scratch) / "index")
+            await git("--work-tree", str(RERERE_DIR), "add", "-A", ".", env=env)
+            tree = (await git("write-tree", env=env)).stdout.strip()
+        if tree == self.restored_tree:
+            return
+        commit = (await git("commit-tree", tree, "-m", "preview: rerere cache")).stdout.strip()
+        pushed = await git("push", "--force", "origin", f"{commit}:{RERERE_REF}", check=False)
+        if pushed.code != 0:
+            warn(f"could not save the rerere cache: {pushed.first_line}")
 
 
 @dataclass(frozen=True)
@@ -353,7 +393,6 @@ class Preview:
     included: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     conflicted: bool = False
-    agent_resolved: bool = False
 
     def manual_instructions(self, number: str = "<pr>") -> str:
         s = self.settings
@@ -526,7 +565,6 @@ The preview resets to plain `main` every {s.reset_days} days, in the
             number = item.pull.number
             if report is not None and number in report.merged:
                 self.included.append(f"{item.pull.link} — `{item.sha[:7]}` — {AGENT_NOTE}")
-                self.agent_resolved = True
             else:
                 note = report.reasons.get(number) if report is not None else None
                 await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
@@ -586,11 +624,13 @@ The preview resets to plain `main` every {s.reset_days} days, in the
         await git("checkout", "-B", self.settings.branch, "origin/main")
         base_sha = await rev_parse("HEAD")
         prompt = PROMPT_PATH.read_text() if shutil.which("oswe") else None
+        rerere = RerereCache()
+        await rerere.restore()
         await self.merge_manual_branch()
         pending = await self.merge_pulls(defer_conflicts=prompt is not None)
         if prompt is not None and pending:
             await self.merge_pending(prompt, pending)
-        set_output("agent_resolved", "true" if self.agent_resolved else "false")
+        await rerere.save()
         self.write_summary(base_sha)
         await self.publish()
 
