@@ -550,7 +550,7 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(
-      within(card).getByText("Required, never reported: Lint Final Results")
+      within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
     expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
     expect(

@@ -812,15 +812,7 @@ async def load_open_pull_request(
     )
     base = pull.get("base")
     base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-    # Only a blocked PR nothing else explains is worth the extra rules reads.
-    if (
-        base_ref is not None
-        and result.merge_state == "blocked"
-        and not failures
-        and not pending
-        and not result.review_required
-        and not result.unresolved_threads
-    ):
+    if base_ref is not None and result.merge_state == "blocked":
         required = await read_required_checks(client, owner=owner, repo=name, branch=base_ref)
         if required is not None:
             result.missing_checks = unreported_required_checks(required, runs, statuses)
