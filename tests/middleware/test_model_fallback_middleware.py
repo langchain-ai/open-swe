@@ -7,6 +7,7 @@ import httpx2
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
 from agent.middleware.model_fallback import (
@@ -27,6 +28,38 @@ def _make_request() -> ModelRequest[None]:
 
 
 class TestModelFallbackMiddleware:
+    @pytest.mark.parametrize("default_fallback_enabled", [True, False])
+    async def test_handoff_fallback_does_not_change_other_model_calls(
+        self, default_fallback_enabled: bool
+    ) -> None:
+        requested = FakeListChatModel(responses=["requested"])
+        requested_fallback = FakeListChatModel(responses=["requested fallback"])
+        other = FakeListChatModel(responses=["other"])
+        default_fallback = FakeListChatModel(responses=["default fallback"])
+        middleware = ModelFallbackMiddleware(
+            default_fallback if default_fallback_enabled else None, backoff_schedule=(0.0,)
+        )
+        middleware.register_fallback(requested, requested_fallback)
+
+        async def handler(request: ModelRequest[None]) -> ModelResponse[None]:
+            if request.model is requested or request.model is other:
+                raise TimeoutError("Provider unavailable")
+            message = await request.model.ainvoke(request.messages)
+            return ModelResponse(result=[message])
+
+        result = await middleware.awrap_model_call(
+            ModelRequest(model=requested, messages=[]), handler
+        )
+        assert result.result[0].content == "requested fallback"
+        if default_fallback_enabled:
+            result = await middleware.awrap_model_call(
+                ModelRequest(model=other, messages=[]), handler
+            )
+            assert result.result[0].content == "default fallback"
+        else:
+            with pytest.raises(TimeoutError, match="Provider unavailable"):
+                await middleware.awrap_model_call(ModelRequest(model=other, messages=[]), handler)
+
     @pytest.mark.asyncio
     async def test_retry_spans_cover_backoff_and_attempt_without_error_body(self) -> None:
         primary = MagicMock(model_name="primary")

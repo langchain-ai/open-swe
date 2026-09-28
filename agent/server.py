@@ -1456,18 +1456,22 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
-    fallback_middleware: list[Any] = []
-    if fallback_model_id and fallback_model_id != model_id:
+    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
+            primary_model_id
+        )
+        if not fallback_model_id or fallback_model_id == primary_model_id:
+            return None
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
         if fallback_model_id.startswith("openai:"):
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
-        fallback_middleware.append(
-            ModelFallbackMiddleware(
-                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
-            )
+        logger.info(
+            "Configured model fallback",
+            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback_model_id},
         )
-        logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+        return _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+
+    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
 
     source = cfg.source or "dashboard"
     configurable["source"] = source
@@ -1712,6 +1716,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
         if image_fallback is not None and not option["supports_images"]:
             image_fallback.add_text_only_model(model)
+        fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
         return model
 
     # Keep checkpointed routing tasks resumable after a handoff disables routing.
@@ -1854,7 +1859,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     notify_step_limit_reached,
                     record_run_usage,
                     model_selection,
-                    *fallback_middleware,
+                    fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
