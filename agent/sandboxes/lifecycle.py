@@ -500,11 +500,11 @@ async def ensure_sandbox_for_thread(
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
     if created:
-        sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
+        bind_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
         if created_proxy_config is not None:
-            sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
+            bind_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
         async with aphase(thread_id, "sandbox.bind_thread"):
-            await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+            await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
 
     # Publishing last is what makes a failure above visible. Callers reach the
     # proxy's cached backend without awaiting the startup task that produced it,

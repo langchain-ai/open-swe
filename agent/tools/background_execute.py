@@ -389,9 +389,15 @@ async def _uses_completion_callback() -> bool:
     return bool(profile and _CallbackFlag.model_validate(profile).experimental_background_callbacks)
 
 
-async def _track(thread_id: str, task_id: str) -> None:
+async def _track(thread_id: str, task_id: str, *, running: bool = True) -> None:
+    ids = [task_id]
     try:
-        await update_background_task_state(langgraph_client(), thread_id, running=[task_id])
+        await update_background_task_state(
+            langgraph_client(),
+            thread_id,
+            running=ids if running else (),
+            finished=() if running else ids,
+        )
     except Exception:
         logger.warning(
             "Could not track background command", extra={"task_id": task_id}, exc_info=True
@@ -402,8 +408,13 @@ async def _launch_with_callback(
     thread_id: str, backend: Any, command: str, timeout: int
 ) -> dict[str, Any]:
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+    # Tracked first: a fast command's completion callback can reconcile before launch returns.
     await _track(thread_id, task_id)
+    try:
+        state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+    except Exception:
+        await _track(thread_id, task_id, running=False)
+        raise
     return {"success": True, **state}
 
 

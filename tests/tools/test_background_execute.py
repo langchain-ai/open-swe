@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -546,3 +547,83 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
 
     assert await monitor_background_tasks("thread-1") == {"status": "missing_thread"}
     delete_crons.assert_awaited_once_with("thread-1")
+
+
+@pytest.mark.parametrize("launch_fails", [False, True])
+async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
+    launch_fails: bool,
+) -> None:
+    tracked: set[str] = set()
+
+    async def update(
+        client: object,
+        thread_id: str,
+        *,
+        running: Sequence[str] = (),
+        finished: Sequence[str] = (),
+    ) -> None:
+        tracked.update(running)
+        tracked.difference_update(finished)
+
+    async def launch(backend: object, command: str) -> dict[str, str]:
+        assert len(tracked) == 1, "the runner starts inside this call"
+        if launch_fails:
+            raise RuntimeError("active task limit reached")
+        return {"task_id": next(iter(tracked)), "status": "running"}
+
+    with (
+        patch(
+            "agent.tools.background_execute._uses_completion_callback",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "agent.tools.background_execute._current_backend", return_value=("thread-1", object())
+        ),
+        patch("agent.tools.background_execute.execute", side_effect=launch),
+        patch("agent.tools.background_execute.update_background_task_state", side_effect=update),
+        patch("agent.tools.background_execute.langgraph_client"),
+    ):
+        result = await background_execute("true")
+
+    assert result["success"] is not launch_fails
+    assert bool(tracked) is not launch_fails
+
+
+@pytest.mark.parametrize("replaced", [False, True])
+async def test_reattach_reconciles_tracked_tasks_even_on_a_replacement_sandbox(
+    replaced: bool,
+) -> None:
+    import asyncio
+
+    from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+    from agent.sandboxes.providers.registry import SandboxGoneError
+
+    SANDBOX_BACKENDS.clear()
+    sandbox = MagicMock()
+    sandbox.id = "sandbox-replacement" if replaced else "sandbox-old"
+    reconcile = AsyncMock()
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            AsyncMock(
+                return_value={"sandbox_id": "sandbox-old", "running_background_tasks": ["cmd-1"]}
+            ),
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._connect_existing_sandbox",
+            AsyncMock(
+                side_effect=SandboxGoneError("gone") if replaced else None, return_value=sandbox
+            ),
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", AsyncMock(return_value=sandbox)
+        ),
+        patch("agent.sandboxes.lifecycle.client.threads.update", AsyncMock()),
+        patch("agent.sandboxes.lifecycle.thread_token_repositories", AsyncMock(return_value=None)),
+        patch.object(background_tasks, "reconcile_background_tasks", reconcile),
+    ):
+        await ensure_sandbox_for_thread("thread-1")
+        await asyncio.sleep(0)
+
+    reconcile.assert_awaited_once_with("thread-1")
+    SANDBOX_BACKENDS.clear()
