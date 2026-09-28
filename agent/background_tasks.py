@@ -9,7 +9,7 @@ keep a completion from being delivered twice.
 
 import logging
 import shlex
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
@@ -288,12 +288,16 @@ async def _reconcile(thread_id: str) -> _Reconciled:
     return _Reconciled(result, backend, tracked_successfully)
 
 
-async def keep_sandbox_alive(sandbox_id: str) -> None:
-    """Count as sandbox activity so the provider's idle stop spares a running command."""
+HeartbeatOutcome = Literal["running", "finished", "unknown"]
+
+
+async def keep_sandbox_alive(sandbox_id: str, task_id: str) -> HeartbeatOutcome:
+    """Heartbeat for one command; the listing exec is the activity that holds off idle stop."""
     backend = await create_sandbox(sandbox_id)
-    response = await backend.aexecute("true", timeout=10)
-    if response.exit_code != 0:
-        raise RuntimeError(f"sandbox keepalive exited {response.exit_code}")
+    for task in await _list_tasks(backend):
+        if task.get("task_id") == task_id:
+            return "running" if task.get("status") == "running" else "finished"
+    return "unknown"
 
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:

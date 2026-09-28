@@ -87,7 +87,11 @@ async def background_task_complete(task_id: TaskId, access: Access) -> None:
 async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
     from agent.background_tasks import keep_sandbox_alive
 
-    await keep_sandbox_alive(access.sandbox_id)
+    outcome = await keep_sandbox_alive(access.sandbox_id, task_id)
+    if outcome == "unknown":
+        raise HTTPException(404, "No such background task")
+    if outcome == "finished":
+        raise HTTPException(409, "Background task is no longer running")
 
 
 @router.post("/invoke/{tool_name}", response_model=ToolResult)

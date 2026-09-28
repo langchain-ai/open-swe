@@ -197,11 +197,20 @@ async def test_completion_callback_asks_runner_to_retry_until_delivered(
     reconcile.assert_awaited_once_with("thread-a")
 
 
-async def test_heartbeat_callback_touches_the_callers_sandbox(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("tasks", "status_code"),
+    [
+        ([{"task_id": "cmd-1", "status": "running"}], 204),
+        ([{"task_id": "cmd-1", "status": "completed"}], 409),
+        ([{"task_id": "cmd-other", "status": "running"}], 404),
+    ],
+)
+async def test_heartbeat_keeps_the_sandbox_alive_only_for_a_running_task(
+    monkeypatch: pytest.MonkeyPatch, tasks: list[dict[str, str]], status_code: int
 ) -> None:
-    keep_alive = AsyncMock()
-    monkeypatch.setattr(background_tasks, "keep_sandbox_alive", keep_alive)
+    create_sandbox = AsyncMock(return_value=object())
+    monkeypatch.setattr(background_tasks, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     http, token = await _callback_client(monkeypatch)
     async with http:
         unauthenticated = await http.post(
@@ -212,8 +221,8 @@ async def test_heartbeat_callback_touches_the_callers_sandbox(
             headers={tool_access.TOOLS_HEADER: token},
         )
     assert unauthenticated.status_code == 401
-    assert response.status_code == 204
-    keep_alive.assert_awaited_once_with("sandbox-a")
+    assert response.status_code == status_code
+    create_sandbox.assert_awaited_once_with("sandbox-a")
 
 
 @pytest.mark.parametrize(
