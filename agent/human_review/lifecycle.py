@@ -370,21 +370,24 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
                 row.slack_message_ts = ""
 
 
-async def _react(request: HumanReviewRequest, emoji: str, fallback: str) -> None:
+async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None = None) -> None:
     """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
     location = request.slack_location or (
         (request.slack_channel_id, request.slack_message_ts)
         if request.slack_channel_id and request.slack_message_ts
         else None
     )
-    if location is not None and not await add_slack_reaction(location[0], location[1], emoji):
+    if location is None or await add_slack_reaction(location[0], location[1], emoji):
+        return
+    if fallback is not None:
         await add_slack_reaction(location[0], location[1], fallback)
 
 
 async def mark_merged(request: HumanReviewRequest) -> None:
     updated = await retire(request, "merged", "merged")
     if updated is not None:
-        await _react(updated, "merged", "white_check_mark")
+        # ✅ means approved, so a workspace without :merged: gets 🔀 instead.
+        await _react(updated, "merged", "twisted_rightwards_arrows")
 
 
 async def mark_approved(request: HumanReviewRequest) -> None:
@@ -393,7 +396,7 @@ async def mark_approved(request: HumanReviewRequest) -> None:
         if row is None or row.state != "open" or row.approved_at is not None:
             return
         row.approved_at = datetime.now(UTC)
-    await _react(request, "approved", "+1")
+    await _react(request, "white_check_mark")
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:
