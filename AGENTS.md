@@ -39,7 +39,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Make user-initiated UI mutations optimistic by default: update the visible state immediately, roll it back on failure, and show an error toast. Use a non-optimistic flow when an immediate update would be unsafe or misleading.
 - Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
-- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists. Do not add a tool when the agent can already do the same thing through a CLI in its sandbox, such as the authenticated `gh`.
+- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Destructive or sensitive UI actions may remain human-only. Prefer reversible operations and existing sandbox CLIs, such as the authenticated `gh`, over adding tools.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
 ## Testing
