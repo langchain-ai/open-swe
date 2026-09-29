@@ -1191,6 +1191,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 repo_custom_instructions=self._repo_instructions,
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
+                workspace_repos=workspace.repos if workspace else None,
                 admin_workspaces=self._admin_workspaces,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
