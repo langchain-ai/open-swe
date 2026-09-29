@@ -79,6 +79,7 @@ _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
 _MAX_TRANSCRIPT_MESSAGES = 100
 _MAX_TRANSCRIPT_CHARS = 50_000
+_TRANSCRIPT_ROLES = {"human", "user", "ai", "assistant"}
 _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
 _MAX_PLAN_COMMENTS = 100
@@ -356,9 +357,13 @@ def _plain_message_text(content: Any) -> str | None:
     for value in values:
         if isinstance(value, Mapping):
             block_type = value.get("type")
-            if block_type not in {None, "text"}:
-                continue
             text = value.get("text")
+            if not isinstance(text, str) and block_type in {"reasoning", "thinking"}:
+                text = value.get("reasoning") or value.get("thinking")
+            if not isinstance(text, str) and block_type == "non_standard":
+                nested = value.get("value")
+                if isinstance(nested, Mapping):
+                    text = nested.get("thinking") or nested.get("text")
         else:
             text = value
         if not isinstance(text, str):
@@ -373,6 +378,50 @@ def _plain_message_text(content: Any) -> str | None:
     return combined or None
 
 
+def _tool_call_placeholder(message: Any) -> str | None:
+    calls = _value(message, "tool_calls")
+    if not isinstance(calls, list):
+        additional_kwargs = _value(message, "additional_kwargs")
+        calls = (
+            additional_kwargs.get("tool_calls") if isinstance(additional_kwargs, Mapping) else None
+        )
+    content = _message_content(message)
+    if isinstance(content, list):
+        content_calls = [
+            value
+            for value in content
+            if isinstance(value, Mapping)
+            and value.get("type") in {"tool_call", "tool_use", "function_call"}
+        ]
+        calls = calls or content_calls
+    if not isinstance(calls, list) or not calls:
+        return None
+    rendered: list[str] = []
+    for call in calls:
+        if not isinstance(call, Mapping):
+            continue
+        function = call.get("function")
+        function = function if isinstance(function, Mapping) else {}
+        name = call.get("name") or function.get("name") or "unknown"
+        arguments = call.get("args") or call.get("input") or function.get("arguments")
+        if isinstance(arguments, str):
+            argument_text = arguments
+        else:
+            try:
+                argument_text = json.dumps(
+                    arguments or {}, ensure_ascii=False, separators=(",", ":"), default=str
+                )
+            except TypeError, ValueError:
+                argument_text = str(arguments)
+        rendered.append(f"{name}({argument_text})")
+    return f"[tool calls: {', '.join(rendered)}]" if rendered else None
+
+
+def _message_text(message: Any) -> str | None:
+    content = _message_content(message)
+    return _plain_message_text(content) or _tool_call_placeholder(message)
+
+
 def _state_messages(state: Any) -> list[Any]:
     values = _value(state, "values")
     messages = values.get("messages") if isinstance(values, Mapping) else None
@@ -385,7 +434,7 @@ def _last_user_message(state: Any) -> dict[str, Any] | None:
         if not isinstance(message, (Mapping, BaseMessage)) or kind not in {"human", "user"}:
             continue
         content = _message_content(message)
-        text = _plain_message_text(content)
+        text = _message_text(message)
         if not text:
             continue
         truncated = len(text) > _MAX_DETAIL_MESSAGE_CHARS
@@ -403,26 +452,35 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
-def _transcript(state: Any) -> dict[str, Any]:
+def _transcript(state: Any, offset: int = 0) -> dict[str, Any]:
     messages = _state_messages(state)
+    conversational = [
+        message for message in messages if _message_kind(message) in _TRANSCRIPT_ROLES
+    ]
+    offset = max(offset, 0)
+    page = conversational[offset : offset + _MAX_TRANSCRIPT_MESSAGES]
     visible: list[dict[str, Any]] = []
-    omitted = 0
+    unreadable_count = 0
+    per_message_clipped_count = 0
+    aggregate_clipped_count = 0
     used_chars = 0
-    for message in messages:
+    processed_count = 0
+    for message in page:
+        processed_count += 1
         kind = _message_kind(message)
-        if kind not in {"human", "user", "ai", "assistant"}:
-            omitted += 1
-            continue
         content = _message_content(message)
-        text = _plain_message_text(content)
+        text = _message_text(message)
         if not text:
-            omitted += 1
-            continue
-        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
-            omitted += 1
+            unreadable_count += 1
             continue
         remaining = _MAX_TRANSCRIPT_CHARS - used_chars
         returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        per_message_clipped = (
+            len(returned_text) < len(text) and len(text) > _MAX_DETAIL_MESSAGE_CHARS
+        )
+        aggregate_clipped = len(returned_text) < len(text) and not per_message_clipped
+        per_message_clipped_count += per_message_clipped
+        aggregate_clipped_count += aggregate_clipped
         visible.append(
             {
                 "id": _message_id(message),
@@ -434,12 +492,23 @@ def _transcript(state: Any) -> dict[str, Any]:
             }
         )
         used_chars += len(returned_text)
+        if used_chars >= _MAX_TRANSCRIPT_CHARS:
+            break
+    next_offset = offset + processed_count
+    has_more = next_offset < len(conversational)
     return {
         "messages": visible,
         "message_count": len(messages),
+        "conversational_count": len(conversational),
         "returned_count": len(visible),
-        "omitted_count": omitted,
-        "truncated": omitted > 0 or any(item["truncated"] for item in visible),
+        "non_conversational_count": len(messages) - len(conversational),
+        "unreadable_count": unreadable_count,
+        "per_message_clipped_count": per_message_clipped_count,
+        "aggregate_clipped_count": aggregate_clipped_count,
+        "offset": offset,
+        "next_offset": next_offset if has_more else None,
+        "has_more": has_more,
+        "truncated": has_more,
     }
 
 
@@ -724,6 +793,7 @@ def _available_actions(
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    transcript_offset: int = 0,
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
     actor = await _actor(state)
@@ -797,7 +867,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
-        "transcript": _transcript(thread_state),
+        "transcript": _transcript(thread_state, transcript_offset),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
         "cost": cost,

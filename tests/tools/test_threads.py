@@ -236,7 +236,7 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     get_dashboard_thread.assert_not_awaited()
 
 
-def test_transcript_filters_private_and_tool_content() -> None:
+def test_transcript_preserves_structured_assistant_and_separates_omissions() -> None:
     state = {
         "values": {
             "messages": [
@@ -246,10 +246,15 @@ def test_transcript_filters_private_and_tool_content() -> None:
                 {
                     "type": "ai",
                     "content": [
-                        {"type": "reasoning", "text": "hidden reasoning"},
-                        {"type": "text", "text": "Visible answer"},
+                        {"type": "reasoning", "reasoning": "Visible reasoning"},
                     ],
                     "id": "assistant-1",
+                },
+                {
+                    "type": "ai",
+                    "content": [],
+                    "tool_calls": [{"name": "read_file", "args": {"path": "/tmp/a"}}],
+                    "id": "assistant-2",
                 },
                 {"type": "tool", "content": "sensitive tool result"},
             ]
@@ -260,10 +265,62 @@ def test_transcript_filters_private_and_tool_content() -> None:
 
     assert [message["text"] for message in transcript["messages"]] == [
         "Visible request",
-        "Visible answer",
+        "Visible reasoning",
+        '[tool calls: read_file({"path":"/tmp/a"})]',
     ]
-    assert transcript["message_count"] == 5
-    assert transcript["omitted_count"] == 3
+    assert transcript["message_count"] == 6
+    assert transcript["conversational_count"] == 4
+    assert transcript["non_conversational_count"] == 2
+    assert transcript["unreadable_count"] == 1
+    assert transcript["truncated"] is False
+
+
+def test_transcript_paginates_conversational_messages() -> None:
+    state = {
+        "values": {
+            "messages": [{"type": "human", "content": f"message-{index}"} for index in range(101)]
+        }
+    }
+
+    first_page = threads_tool._transcript(state)
+    second_page = threads_tool._transcript(state, first_page["next_offset"])
+
+    assert first_page["returned_count"] == 100
+    assert first_page["messages"][0]["text"] == "message-0"
+    assert first_page["truncated"] is True
+    assert first_page["next_offset"] == 100
+    assert second_page["messages"] == [
+        {
+            "id": None,
+            "role": "user",
+            "text": "message-100",
+            "truncated": False,
+            "sender_id": None,
+            "timestamp": None,
+        }
+    ]
+    assert second_page["truncated"] is False
+
+
+def test_transcript_distinguishes_message_and_aggregate_clipping(monkeypatch) -> None:
+    monkeypatch.setattr(threads_tool, "_MAX_DETAIL_MESSAGE_CHARS", 5)
+    monkeypatch.setattr(threads_tool, "_MAX_TRANSCRIPT_CHARS", 8)
+    state = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "123456"},
+                {"type": "human", "content": "7890"},
+                {"type": "human", "content": "next page"},
+            ]
+        }
+    }
+
+    transcript = threads_tool._transcript(state)
+
+    assert [message["text"] for message in transcript["messages"]] == ["12345", "789"]
+    assert transcript["per_message_clipped_count"] == 1
+    assert transcript["aggregate_clipped_count"] == 1
+    assert transcript["next_offset"] == 2
     assert transcript["truncated"] is True
 
 
