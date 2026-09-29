@@ -227,6 +227,7 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -247,6 +248,7 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

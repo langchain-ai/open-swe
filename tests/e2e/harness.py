@@ -496,16 +496,19 @@ async def control_human_review_deadline(request: Request) -> JSONResponse:
     return JSONResponse(await run_deadline(request_id, step))
 
 
-@app.post("/control/concierge-mode")
-async def control_concierge_mode(request: Request) -> JSONResponse:
-    """Turn a person's concierge mode on or off, as their settings page does."""
+@app.post("/control/user-preferences")
+async def control_user_preferences(request: Request) -> JSONResponse:
+    """Change a person's preferences, as their settings pages do."""
     from agent.users import User, UserPreferencesPatch
 
+    await _seed_test_user_mappings()
     body = await request.json()
     login = str(body.get("login") or "")
-    enabled = bool(body.get("enabled", True))
-    await User.update_preferences(login, UserPreferencesPatch(concierge_mode=enabled))
-    return JSONResponse({"ok": True, "login": login, "concierge_mode": enabled})
+    patch = UserPreferencesPatch.model_validate(body.get("preferences") or {})
+    preferences = await User.update_preferences(login, patch)
+    if preferences is None:
+        raise HTTPException(404, f"no user with login {login!r}")
+    return JSONResponse({"ok": True, "login": login, **preferences.model_dump()})
 
 
 @app.post("/control/repo-file")
