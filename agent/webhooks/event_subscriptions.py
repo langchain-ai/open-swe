@@ -51,9 +51,14 @@ class _GitHubRepository(BaseModel):
 
 
 class _GitHubText(BaseModel):
+    number: int | None = None
     body: str | None = None
     html_url: str = ""
     state: str = ""
+
+
+class _GitHubPullRequestRef(BaseModel):
+    number: int | None = None
 
 
 class _GitHubCheck(BaseModel):
@@ -61,6 +66,7 @@ class _GitHubCheck(BaseModel):
     status: str = ""
     conclusion: str | None = None
     html_url: str | None = None
+    pull_requests: list[_GitHubPullRequestRef] = []
 
 
 class _GitHubDelivery(BaseModel):
@@ -134,6 +140,24 @@ class EventSummary(BaseModel):
     from_open_swe: bool = False
     slack_channel_id: str = ""
     slack_public: bool = False
+    pull_request_numbers: list[int] = []
+
+    @property
+    def details(self) -> str:
+        """Every field the sender controls, for fencing as one block."""
+        lines = [
+            f"{label}: {value}"
+            for label, value in (
+                ("On", self.target),
+                ("From", self.sender),
+                ("Status", self.status),
+                ("Link", self.link),
+            )
+            if value
+        ]
+        if self.body:
+            lines.extend(("", self.body[:_MAX_BODY_CHARS]))
+        return "\n".join(lines)
 
     @classmethod
     def of(cls, event: LoggedEvent) -> Self:
@@ -171,6 +195,17 @@ class EventSummary(BaseModel):
             body=body or "",
             trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
             from_open_swe=sender in _OWN_GITHUB_LOGINS and event.event_type not in _CI_EVENT_TYPES,
+            pull_request_numbers=sorted(
+                {
+                    number
+                    for number in (
+                        delivery.pull_request.number if delivery.pull_request else None,
+                        delivery.issue.number if delivery.issue else None,
+                        *(ref.number for ref in (check.pull_requests if check else [])),
+                    )
+                    if number is not None
+                }
+            ),
         )
 
     @classmethod
@@ -287,7 +322,7 @@ class EventSubscription(Base):
         if summary.from_open_swe:
             return
         try:
-            subscriptions = await cls._matching(event)
+            subscriptions = await cls._matching(event, summary)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Loading event subscriptions failed",
@@ -348,7 +383,11 @@ class EventSubscription(Base):
             )
 
     @classmethod
-    async def _matching(cls, event: LoggedEvent) -> list[Self]:
+    async def _matching(cls, event: LoggedEvent, summary: EventSummary) -> list[Self]:
+        listed_pull_requests = select(PullRequest.id).where(
+            PullRequest.repository_id == event.repository_id,
+            PullRequest.number.in_(summary.pull_request_numbers),
+        )
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls).where(
@@ -359,6 +398,7 @@ class EventSubscription(Base):
                     or_(
                         cls.pull_request_id.is_(None),
                         cls.pull_request_id == event.pull_request_id,
+                        cls.pull_request_id.in_(listed_pull_requests),
                     ),
                     or_(
                         func.cardinality(cls.event_types) == 0,
@@ -382,11 +422,13 @@ class EventSubscription(Base):
         """Record ``event`` as owed to this thread; ``False`` when nothing new is owed."""
         if not await self._claim():
             return False
-        body = summary.body[:_MAX_BODY_CHARS]
+        details = summary.details
         content = prompt(
             "runs/event-subscription",
             summary=summary,
-            body=fence_github_comment_body(body, registered=summary.trusted) if body else "",
+            details=fence_github_comment_body(details, registered=summary.trusted)
+            if details
+            else "",
             instructions=self.instructions,
             subscription_id=str(self.id),
             one_shot=self.one_shot,
@@ -403,10 +445,13 @@ class EventSubscription(Base):
         except Exception:
             await self._unclaim()
             raise
+        if not recorded:
+            await self._unclaim()
+            return False
         pull_request_closed = event.event_type == "pull_request" and summary.action == "closed"
         if self.one_shot or (self.pull_request_id is not None and pull_request_closed):
             await self.delete()
-        return recorded
+        return True
 
     async def delete(self) -> None:
         async with postgres.session() as session:

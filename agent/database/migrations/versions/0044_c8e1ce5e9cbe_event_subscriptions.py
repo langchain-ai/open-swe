@@ -44,6 +44,7 @@ def upgrade() -> None:
             delivery_id text NOT NULL,
             content text NOT NULL,
             run_config jsonb NOT NULL,
+            delivery_attempts integer NOT NULL DEFAULT 0,
             matched_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """
@@ -61,6 +62,8 @@ def upgrade() -> None:
         "COMMENT ON COLUMN event_match.subscription_id IS 'The event_subscription that matched; "
         "no foreign key, since a one-shot is deleted as it matches.'",
         "COMMENT ON COLUMN event_match.content IS 'The wake message, rendered at match time.'",
+        "COMMENT ON COLUMN event_match.delivery_attempts IS 'Runs started to deliver it. After "
+        "three, only a run started for another reason delivers it.'",
         "COMMENT ON COLUMN event_subscription.workspace_id IS 'Matches event_log rows with this "
         "workspace_id: the subscribing thread''s workspace.'",
         "COMMENT ON COLUMN event_subscription.sources IS 'event_log.source values to match; "

@@ -14,7 +14,7 @@ from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, JsonValue
-from sqlalchemy import Text, delete, func, select, text
+from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,7 @@ _SYSTEM: SystemIdentity = {
 }
 _RETAINED = timedelta(days=RETAINED_DAYS)
 _KIND = "event_match"
+_MAX_ATTEMPTS = 3
 
 
 class _ThreadValues(BaseModel):
@@ -64,6 +65,7 @@ class EventMatch(Base):
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
     async def record(self) -> bool:
@@ -126,7 +128,9 @@ class EventMatch(Base):
         """Start a run carrying everything the thread is owed; ``False`` when none was needed.
 
         ``enqueue`` leaves a busy thread alone: its next model call takes what is
-        owed, and the completion webhook calls this again once it finishes.
+        owed, and the completion webhook calls this again once it finishes. A match
+        that ``_MAX_ATTEMPTS`` runs failed to deliver no longer starts one, so a
+        thread whose runs keep failing is not retried forever.
         Raises ``NotFoundError`` when the thread is gone.
         """
         client = dispatch_client()
@@ -141,15 +145,25 @@ class EventMatch(Base):
                     return False
             state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
             owed = await cls.owed(thread_id, state.values.messages if state.values else [])
-            if not owed:
+            if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
                 return False
+            owed_ids = [match.id for match in owed]
+            async with postgres.session() as session:
+                await session.execute(
+                    update(cls)
+                    .where(cls.id.in_(owed_ids))
+                    .values(delivery_attempts=cls.delivery_attempts + 1)
+                )
             latest = owed[-1]
             await create_durable_run(
                 thread_id,
                 "agent",
                 input={"messages": cls.messages(owed)},
                 config={"configurable": latest.run_config},
-                metadata={"kind": _KIND, "event_match_ids": [str(match.id) for match in owed]},
+                metadata={
+                    "kind": _KIND,
+                    "event_match_ids": [str(match_id) for match_id in owed_ids],
+                },
                 source=latest.source,
                 thread_title=None,
                 client=client,

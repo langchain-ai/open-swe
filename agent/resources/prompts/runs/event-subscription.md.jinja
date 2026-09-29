@@ -1,13 +1,7 @@
-A {{ summary.source }} `{{ summary.event_type }}{% if summary.action %}.{{ summary.action }}{% endif %}` event arrived{% if summary.target %} on {{ summary.target }}{% endif %}{% if summary.sender %} from {{ summary.sender }}{% endif %}.
-{% if summary.status %}
-Status: {{ summary.status }}
-{% endif %}
-{% if summary.link %}
-Link: {{ summary.link }}
-{% endif %}
-{% if body %}
+A {{ summary.source }} `{{ summary.event_type }}{% if summary.action %}.{{ summary.action }}{% endif %}` event arrived.
+{% if details %}
 
-{{ body }}
+{{ details }}
 {% endif %}
 {% if instructions %}
 
