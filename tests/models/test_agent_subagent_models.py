@@ -9,9 +9,9 @@ from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.server import get_agent
 
 _MODEL_DEFAULTS = {
-    "default_agent_model": "openai:gpt-6-sol",
+    "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
-    "default_agent_subagent_model": "openai:gpt-6-sol",
+    "default_agent_subagent_model": "openai:gpt-6.1-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
 

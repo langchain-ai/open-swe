@@ -5,8 +5,8 @@ import logging
 import httpx2
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.slack.client import get_slack_permalink
 from agent.slack.code_channels import is_code_channel_session
 from agent.utils.dashboard_links import dashboard_base_url
@@ -33,7 +33,7 @@ def github_error(response: httpx2.Response) -> str:
     return f"{response.status_code} {text}".strip()
 
 
-async def _review_body(approval: ExpeditedApproval) -> str:
+async def _review_body(approval: HumanReviewRequest) -> str:
     # The card is reposted when it is broadcast or closed; the thread root is the stable link.
     anchor = (
         approval.slack_message_ts
@@ -47,7 +47,7 @@ async def _review_body(approval: ExpeditedApproval) -> str:
 
 
 async def submit_approval(
-    approval: ExpeditedApproval, vote: ApprovalVote, head_sha: str
+    approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
 ) -> str | None:
     """POST ``vote`` as its voter's ``APPROVE`` review on ``head_sha``; why it failed, or ``None``.
 
@@ -78,7 +78,7 @@ async def submit_approval(
 
 
 async def dismiss_approval(
-    approval: ExpeditedApproval, vote: ApprovalVote, token: str, reason: str
+    approval: HumanReviewRequest, vote: HumanReviewParticipant, token: str, reason: str
 ) -> None:
     """Withdraw the GitHub review ``vote`` submitted; clears its id once GitHub confirms.
 

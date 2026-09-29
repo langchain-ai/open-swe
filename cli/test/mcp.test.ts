@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { gunzipSync } from "node:zlib"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 
@@ -12,16 +16,27 @@ afterEach(async () => {
   await Promise.all(stops.splice(0).map((stop) => stop()))
 })
 
-async function connect(
-  respond: (url: URL) => Response
-): Promise<{ client: Client; queries: URLSearchParams[] }> {
+async function connect(respond: (url: URL) => Response): Promise<{
+  client: Client
+  queries: URLSearchParams[]
+  bodies: string[]
+  encodings: (string | null)[]
+}> {
   const queries: URLSearchParams[] = []
+  const bodies: string[] = []
+  const encodings: (string | null)[] = []
   const backend = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url)
       queries.push(url.searchParams)
+      const encoding = request.headers.get("content-encoding")
+      encodings.push(encoding)
+      const raw = Buffer.from(await request.arrayBuffer())
+      bodies.push(
+        (encoding === "gzip" ? gunzipSync(raw) : raw).toString("utf8")
+      )
       return respond(url)
     },
   })
@@ -38,7 +53,7 @@ async function connect(
     await server.close()
     await backend.stop(true)
   })
-  return { client, queries }
+  return { client, queries, bodies, encodings }
 }
 
 describe("list_threads", () => {
@@ -144,5 +159,62 @@ describe("list_threads", () => {
 
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain("oswe login")
+  })
+})
+
+describe("upload_session", () => {
+  test("streams a header line and the transcript verbatim as gzipped JSONL", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oswe-upload-"))
+    stops.push(() => rm(dir, { recursive: true, force: true }))
+    const transcript =
+      '{"type":"user","uuid":"u1","message":{"content":"hi"}}\n'
+    const path = join(dir, "session.jsonl")
+    await writeFile(path, transcript)
+    const { client, bodies, encodings } = await connect(() =>
+      Response.json({ id: "t-9", title: "hi" })
+    )
+
+    const result = await client.callTool({
+      name: "upload_session",
+      arguments: {
+        type: "claude",
+        transcript_path: path,
+        repo: "acme/web",
+        branch: "fix-login",
+      },
+    })
+
+    expect(result.isError).toBeFalsy()
+    expect(encodings[0]).toBe("gzip")
+    const body = bodies[0] ?? ""
+    const newline = body.indexOf("\n")
+    expect(JSON.parse(body.slice(0, newline))).toEqual({
+      type: "claude",
+      repo: "acme/web",
+      branch: "fix-login",
+      visibility: "workspace",
+    })
+    expect(body.slice(newline + 1)).toBe(transcript)
+    expect(result.structuredContent).toMatchObject({
+      thread_id: "t-9",
+      url: expect.stringMatching(/\/agents\/t-9$/),
+    })
+  })
+
+  test("refuses a PR link alongside a branch without calling the server", async () => {
+    const { client, bodies } = await connect(() => Response.json({}))
+
+    const result = await client.callTool({
+      name: "upload_session",
+      arguments: {
+        type: "claude",
+        transcript_path: "/nonexistent/session.jsonl",
+        pr_url: "https://github.com/acme/web/pull/7",
+        branch: "fix-login",
+      },
+    })
+
+    expect(result.isError).toBe(true)
+    expect(bodies).toEqual([])
   })
 })

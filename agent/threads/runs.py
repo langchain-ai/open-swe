@@ -859,6 +859,7 @@ async def _enrich_run_start_command(
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
         overrides["agent_effort"] = run_effort
+        overrides["model_override_reason"] = "image_input"
         metadata_update["model"] = run_model
         metadata_update["effort"] = run_effort
         metadata_update["resolved_model"] = run_model
@@ -932,6 +933,9 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    overrides["model_selection_changed"] = (
+        client_configurable.get("model_selection_changed") is True
+    )
     merged_configurable = await _build_dashboard_configurable(
         thread_id,
         login,

@@ -104,29 +104,35 @@ async def generate_and_store_thread_title(
     if not title:
         return
 
-    latest = await client.threads.get(thread_id=thread_id)
-    latest_metadata = _thread_metadata(latest)
-    if (
-        latest_metadata.get("title") != expected_title
-        or latest_metadata.get("title_seed") != title_seed
-    ):
-        return
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"title": title, "title_seed": None},
-    )
-    await mirror_thread_metadata(thread_id, {"title": title})
-    # Re-read after the update: the pre-update snapshot can be stale if the
-    # thread was promoted to a code channel between the check and the update.
-    latest = await client.threads.get(thread_id=thread_id)
-    context = SourceContext.from_metadata(_thread_metadata(latest))
-    # DMs share the session timestamp but have no session name to set.
-    if (
-        context.slack_location
-        and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
-        and await is_code_channel(context.slack_location[0])
-    ):
-        await rename_session(context.slack_location[0], title)
+    try:
+        async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
+            latest = await client.threads.get(thread_id=thread_id)
+            latest_metadata = _thread_metadata(latest)
+            if (
+                latest_metadata.get("title") != expected_title
+                or latest_metadata.get("title_seed") != title_seed
+            ):
+                return
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"title": title, "title_seed": None},
+            )
+            await mirror_thread_metadata(thread_id, {"title": title})
+            # Re-read after the update: the pre-update snapshot can be stale if the
+            # thread was promoted to a code channel between the check and the update.
+            latest = await client.threads.get(thread_id=thread_id)
+            context = SourceContext.from_metadata(_thread_metadata(latest))
+            # DMs share the session timestamp but have no session name to set.
+            if (
+                context.slack_location
+                and context.slack_location[1] == CODE_CHANNEL_SESSION_TS
+                and await is_code_channel(context.slack_location[0])
+            ):
+                await rename_session(context.slack_location[0], title)
+    except Exception:
+        logger.warning(
+            "Thread title persistence failed", extra={"thread_id": thread_id}, exc_info=True
+        )
 
 
 def schedule_thread_title_generation(
@@ -149,8 +155,10 @@ def schedule_thread_title_generation(
                 model=model,
                 client=client,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Thread title generation failed for %s: %s", thread_id, exc)
+        except Exception:
+            logger.warning(
+                "Thread title generation failed", extra={"thread_id": thread_id}, exc_info=True
+            )
         finally:
             _inflight_thread_ids.discard(thread_id)
 

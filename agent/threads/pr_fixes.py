@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Literal
 
 from fastapi import HTTPException
@@ -305,3 +306,41 @@ async def start_pull_request_thread(
             multitask_strategy="enqueue",
         )
         return PullRequestThreadRun(thread_id=thread_id)
+
+
+async def dispatch_pull_request_prompt(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    prompt: str,
+    *,
+    title: str,
+    before_dispatch: Callable[[str], Awaitable[None]],
+) -> str:
+    """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
+
+    ``before_dispatch`` receives the thread id before the run is queued, so the caller
+    can record which thread it woke before that thread can act.
+    """
+    url = f"https://github.com/{owner}/{repo}/pull/{number}"
+    client = langgraph_client()
+    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+        thread_id = await _find_or_create_pr_thread(
+            owner, repo, number, login, None, prompt=prompt, title=title
+        )
+        await before_dispatch(thread_id)
+        current = await client.threads.get(thread_id)
+        configurable = await _build_dashboard_configurable(
+            thread_id, login, thread_metadata(current)
+        )
+        await dispatch_agent_run(
+            thread_id,
+            prompt,
+            configurable,
+            source="dashboard",
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    return thread_id

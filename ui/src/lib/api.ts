@@ -227,6 +227,7 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -247,6 +248,7 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -909,6 +911,9 @@ export interface OpenPullRequest {
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
   failingChecks: string[]
   pendingChecks: string[]
+  // Required by the base branch but never reported on the head, so GitHub
+  // refuses the merge.
+  missingChecks: string[]
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
@@ -1203,6 +1208,15 @@ export interface ReviewerEvalStatus {
   github_run_url?: string | null
   trigger?: string | null
   updated_at: string
+}
+
+export interface HumanReviewRequestResult {
+  success: boolean
+  error: string
+  request_id: string
+  channel: string
+  permalink: string
+  reused: boolean
 }
 
 async function pullRequestAction(
@@ -1608,6 +1622,11 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  requestHumanReview: (pr: OpenPullRequest) =>
+    request<HumanReviewRequestResult>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
+      { method: "POST" }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

@@ -92,7 +92,7 @@ Open SWE needs a PostgreSQL database for its own tables, and `langgraph dev` doe
 
 With a database, every thread created from then on is also recorded into the append-only transcript event log and its LangGraph metadata is stamped `transcript: v2`. The dashboard reads recorded threads from this log by default for everyone. Threads with agent turns from before recording started are never recorded and always read LangGraph state.
 
-`TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables create a throwaway schema per test, migrate it, and drop it afterwards, so point it at a separate database (`postgresql+asyncpg://<user>@localhost:5432/open_swe_test`) rather than the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
+`TEST_ANALYTICS_POSTGRES_URI` is the same thing for the test suite, and only for it: the tests that exercise those tables migrate one template database per test process, clone a throwaway database from it for each test, and drop both afterwards. The role therefore needs `CREATEDB`; the `postgres` superuser of a throwaway container is simplest (`docker run -d -p 5439:5432 -e POSTGRES_PASSWORD=postgres postgres:16`, then `postgresql+asyncpg://postgres:postgres@localhost:5439/postgres`), or grant it with `ALTER ROLE <user> CREATEDB`. Use a separate server from the one `make dev` uses. Unset, every such test skips rather than fails, so a run without it proves less than it appears to; CI sets it, so a regression in that code is caught there either way.
 
 ## 6. Run
 
@@ -215,6 +215,8 @@ The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d08
 5. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
 When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache. PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
+
+The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 
 To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
 
