@@ -1751,6 +1751,13 @@
             ],
             "title": "Mergeable"
           },
+          "missingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missingchecks",
+            "type": "array"
+          },
           "number": {
             "title": "Number",
             "type": "integer"
