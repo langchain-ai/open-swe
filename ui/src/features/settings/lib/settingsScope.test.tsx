@@ -20,7 +20,6 @@ const BASE: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: false,
   review_trace_links: false,
-  fable_enabled: false,
 }
 const SCOPE = { kind: "workspace", slug: "oss" } as const
 
@@ -75,28 +74,28 @@ it("sends a second section's save after the first and keeps both patches", async
   const { result } = renderTwoSections(client)
   await waitFor(() => expect(result.current.a.data).toBeDefined())
 
-  act(() => result.current.a.save({ fable_enabled: true }))
+  act(() => result.current.a.save({ review_draft_prs: true }))
   act(() => result.current.b.save({ pr_summaries: true }))
 
   await waitFor(() => expect(requests).toHaveLength(1))
   expect(result.current.a.data).toMatchObject({
-    fable_enabled: true,
+    review_draft_prs: true,
     pr_summaries: true,
   })
-  expect(result.current.b.inherits("fable_enabled")).toBe(false)
+  expect(result.current.b.inherits("review_draft_prs")).toBe(false)
 
   act(() => requests[0]!.resolve())
   await waitFor(() => expect(requests).toHaveLength(2))
   expect(requests[1]!.overrides).toEqual({
-    fable_enabled: true,
+    review_draft_prs: true,
     pr_summaries: true,
   })
 
   act(() => requests[1]!.resolve())
   await waitFor(() =>
     expect(client.getQueryData(["workspaceSettings", "oss"])).toEqual({
-      effective: { ...BASE, fable_enabled: true, pr_summaries: true },
-      overrides: { fable_enabled: true, pr_summaries: true },
+      effective: { ...BASE, review_draft_prs: true, pr_summaries: true },
+      overrides: { review_draft_prs: true, pr_summaries: true },
     })
   )
 })
@@ -107,7 +106,7 @@ it("drops only the failed patch and reports the failure", async () => {
   const { result } = renderTwoSections(client)
   await waitFor(() => expect(result.current.a.data).toBeDefined())
 
-  act(() => result.current.a.save({ fable_enabled: true }))
+  act(() => result.current.a.save({ review_draft_prs: true }))
   act(() => result.current.b.save({ pr_summaries: true }))
   await waitFor(() => expect(requests).toHaveLength(1))
 
@@ -120,7 +119,7 @@ it("drops only the failed patch and reports the failure", async () => {
       error: expect.objectContaining({ message: "forbidden" }),
     })
   )
-  expect(result.current.a.data?.fable_enabled).toBe(false)
+  expect(result.current.a.data?.review_draft_prs).toBe(false)
   expect(result.current.a.data?.pr_summaries).toBe(true)
 
   act(() => requests[1]!.resolve())
@@ -147,7 +146,7 @@ it("refreshes workspace settings after an instance save", async () => {
   })
   await waitFor(() => expect(result.current.data).toBeDefined())
 
-  act(() => result.current.save({ fable_enabled: true }))
+  act(() => result.current.save({ review_draft_prs: true }))
 
   await waitFor(() =>
     expect(
@@ -156,6 +155,6 @@ it("refreshes workspace settings after an instance save", async () => {
   )
   expect(api.saveInstanceSettings).toHaveBeenCalledWith({
     ...BASE,
-    fable_enabled: true,
+    review_draft_prs: true,
   })
 })

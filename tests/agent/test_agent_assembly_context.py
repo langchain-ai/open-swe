@@ -230,7 +230,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
                 "default_agent_routing_performance_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_performance_reasoning_effort": "high",
                 "gateway_enabled": False,
-                "fable_enabled": True,
             }
         )
 

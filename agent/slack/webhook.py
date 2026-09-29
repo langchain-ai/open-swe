@@ -893,8 +893,8 @@ async def _process_slack_mention_impl(
     # Later mentions carry no tag, so the thread's workspace comes back from
     # metadata — a follow-up must not be told about `default` while its sandbox
     # was built from the workspace the opening message resolved to. It is
-    # resolved here, before the model is, because the model default and the
-    # Fable flag are the resolved workspace's.
+    # resolved here, before the model is, because model defaults belong to the
+    # resolved workspace.
     if is_first_mention:
         # A DM is one person's own space rather than a routed channel, so it opens
         # in the instance default unless they named a workspace; an environment

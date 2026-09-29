@@ -11,8 +11,6 @@ from pydantic import ValidationError
 
 from agent import store as agent_store
 from agent.dashboard import repo_access
-from agent.dashboard.options import fable_disabled_fallback
-from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
@@ -558,31 +556,6 @@ async def test_an_automation_whose_workspace_was_deleted_does_not_run(
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert "gone" in stored["last_error"]
-
-
-async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    """Fable is a per-workspace kill switch, so the run's own workspace decides.
-
-    `default` leaves it on here and the automation's workspace does not, so a
-    flag read from `default` would let the Fable model through.
-    """
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
-    await fake_client.store.put_item(
-        schedules.SCHEDULES_NAMESPACE,
-        "sched_1",
-        _scheduled_record(workspace="oss", model="anthropic:claude-fable-5-1", effort="high"),
-    )
-
-    assert (await schedules.launch_scheduled_agent_run("sched_1"))["status"] == "started"
-
-    configurable = fake_client.runs.created[0]["config"]["configurable"]
-    assert configurable["workspace"] == "oss"
-    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
-        fable_disabled_fallback("high")
-    )
 
 
 @pytest.mark.parametrize("creator", [None, "alice"])

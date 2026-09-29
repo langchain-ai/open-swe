@@ -100,7 +100,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         recent_thread_context_enabled=False,
         admin_workspaces=False,
     )
-    middleware._requested_models = available_requested_models(fable_enabled=False)
+    middleware._requested_models = available_requested_models()
     middleware._model_selection = ModelSelectionMiddleware(
         {"fast": MagicMock()},
         MagicMock(),
@@ -176,7 +176,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
         ("fireworks:accounts/fireworks/models/glm-5p3", "image_url", "image"),
         ("fireworks:accounts/fireworks/models/glm-5p3", None, None),
         ("anthropic:claude-opus-5-5", "image", None),
-        ("anthropic:claude-fable-5-1", None, "unavailable"),
+        ("unknown:model", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "persistence"),
     ],

@@ -5,8 +5,6 @@ import pytest
 from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
-    FABLE_MODEL_IDS,
-    fable_disabled_fallback,
     provider_fallback_pair,
 )
 from agent.dashboard.profiles import normalize_profile_for_response
@@ -22,7 +20,6 @@ SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
 DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
 DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
-FABLE = "anthropic:claude-fable-5-1"
 
 
 def test_provider_fallback_preserves_provider_and_effort() -> None:
@@ -84,10 +81,3 @@ def test_global_default_matches_available_credentials(
     defaults = runpy.run_path(options.__file__)
     assert defaults["default_model_pair"]() == (expected, "medium")
     assert defaults["default_vision_model_pair"]() == (expected, "medium")
-
-
-def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
-    model, effort = fable_disabled_fallback("high")
-    assert model == SUPPORTED_ANTHROPIC
-    assert model not in FABLE_MODEL_IDS
-    assert effort == "high"

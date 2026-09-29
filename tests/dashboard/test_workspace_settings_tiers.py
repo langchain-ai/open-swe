@@ -17,14 +17,14 @@ from tests.conftest import FakeStore
 
 async def test_an_override_applies_to_its_workspace_only(fake_store: FakeStore) -> None:
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
+        WorkspaceSettingsUpdate(org_guidelines="internal only", pr_summaries=True)
     )
     view = await upsert_workspace_overrides(
-        "oss", WorkspaceSettingsUpdate(org_guidelines="be public", fable_enabled=False)
+        "oss", WorkspaceSettingsUpdate(org_guidelines="be public", pr_summaries=False)
     )
     assert view["effective"]["org_guidelines"] == "be public"
-    assert view["effective"]["fable_enabled"] is False
-    assert view["overrides"] == {"org_guidelines": "be public", "fable_enabled": False}
+    assert view["effective"]["pr_summaries"] is False
+    assert view["overrides"] == {"org_guidelines": "be public", "pr_summaries": False}
     assert (await get_workspace_settings("core"))["org_guidelines"] == "internal only"
     assert (await get_instance_settings())["org_guidelines"] == "internal only"
 
@@ -53,18 +53,18 @@ async def test_clearing_an_override_restores_inheritance(fake_store: FakeStore) 
 async def test_cached_reads_do_not_leak_across_workspaces(fake_store: FakeStore) -> None:
     """The TTL cache is process-global, so its keys must carry the workspace."""
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(org_guidelines="internal only", fable_enabled=True)
+        WorkspaceSettingsUpdate(org_guidelines="internal only", pr_summaries=True)
     )
     await upsert_workspace_overrides(
-        "oss", WorkspaceSettingsUpdate(org_guidelines="be public", fable_enabled=False)
+        "oss", WorkspaceSettingsUpdate(org_guidelines="be public", pr_summaries=False)
     )
 
     default_settings = await workspace_settings_cache.cached_workspace_settings("default")
     oss_settings = await workspace_settings_cache.cached_workspace_settings("oss")
     assert default_settings.org_review_guidelines == "internal only"
     assert oss_settings.org_review_guidelines == "be public"
-    assert default_settings.fable_enabled is True
-    assert oss_settings.fable_enabled is False
+    assert default_settings["pr_summaries"] is True
+    assert oss_settings["pr_summaries"] is False
     assert (await workspace_settings_cache.cached_workspace_settings("oss"))[
         "org_guidelines"
     ] == "be public"

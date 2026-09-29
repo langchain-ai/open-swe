@@ -20,7 +20,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -240,7 +239,6 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     model = _make_model_or_defer(
         model_id,
         use_gateway=settings.effective_gateway_enabled,

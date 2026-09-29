@@ -18,7 +18,6 @@ from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
-    gate_fable_model,
     model_supports_images,
     normalize_model_choice,
 )
@@ -165,11 +164,6 @@ async def _resolve_agent_model_choice(
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
         if chosen_model and chosen_effort:
             resolved_model, resolved_effort = chosen_model, chosen_effort
-    resolved_model, resolved_effort = gate_fable_model(
-        resolved_model,
-        resolved_effort,
-        fable_enabled=settings.fable_enabled,
-    )
     if not isinstance(resolved_effort, str):
         raise ValueError("workspace default model must include a reasoning effort")
     return resolved_model, resolved_effort

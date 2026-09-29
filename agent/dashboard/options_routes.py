@@ -7,10 +7,8 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Request
 
 from agent.dashboard.options import (
-    FABLE_MODEL_IDS,
     SUPPORTED_MODELS,
     ModelOption,
-    gate_fable_model,
     models_with_profile_context_windows,
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
@@ -24,7 +22,7 @@ router = APIRouter(tags=["options"])
 async def options(request: Request, workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
     """The models and defaults a composer may offer for ``workspace``.
 
-    Model defaults and the Fable flag resolve per workspace (the instance record
+    Model defaults resolve per workspace (the instance record
     plus the workspace's overrides), so a picker that asked without one would
     advertise the default workspace's values wherever the run will not land there.
     """
@@ -36,21 +34,7 @@ async def options(request: Request, workspace: str = DEFAULT_WORKSPACE_SLUG) -> 
     settings = await get_workspace_settings(workspace)
     agent_model, agent_effort = settings.default_model("agent")
     subagent_model, subagent_effort = settings.default_subagent_model("agent")
-    fable_enabled = settings.fable_enabled
-    # Never advertise a default that isn't in the selectable list: when Fable is
-    # off, gate a stale Fable default down to its non-Fable fallback so the Cloud
-    # Agents page (and the PUT /profile it drives) don't choke on it.
-    agent_model, agent_effort = gate_fable_model(
-        agent_model, agent_effort, fable_enabled=fable_enabled
-    )
-    subagent_model, subagent_effort = gate_fable_model(
-        subagent_model, subagent_effort, fable_enabled=fable_enabled
-    )
-    models: list[ModelOption] = (
-        SUPPORTED_MODELS
-        if fable_enabled
-        else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
-    )
+    models: list[ModelOption] = SUPPORTED_MODELS
     if (
         request.headers.get("origin") == "open-swe://app"
         and request.headers.get("x-open-swe-model-catalog") != "1"

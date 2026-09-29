@@ -42,7 +42,6 @@ import {
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
@@ -185,8 +184,6 @@ export function WorkspaceSettingsPanel({
   })
   const options = useWorkspaceOptions(true)
   const repositories = useRepos()
-  // Model options follow the workspace: the Fable flag that gates some of
-  // them is one of its settings.
   const modelOptions = useOptions(slug)
   const scope: SettingsScope = { kind: "workspace", slug }
   const channelDirectory = useSlackChannelDirectory(canEdit)
@@ -304,7 +301,6 @@ export function WorkspaceSettingsPanel({
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
-      <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />

@@ -5265,18 +5265,6 @@
             ],
             "title": "Expedited Review Enabled"
           },
-          "fable_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fable Enabled"
-          },
           "gateway_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -8450,7 +8438,7 @@
     },
     "/dashboard/api/options": {
       "get": {
-        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag resolve per workspace (the instance record\nplus the workspace's overrides), so a picker that asked without one would\nadvertise the default workspace's values wherever the run will not land there.",
+        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults resolve per workspace (the instance record\nplus the workspace's overrides), so a picker that asked without one would\nadvertise the default workspace's values wherever the run will not land there.",
         "operationId": "options_dashboard_api_options_get",
         "parameters": [
           {

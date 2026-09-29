@@ -39,7 +39,6 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
 from agent.github.thread_token import cache_github_token_for_thread
@@ -938,13 +937,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
     settings = await cached_workspace_settings(cfg.workspace_slug)
-    fable_enabled = settings.fable_enabled
-    model_id, reasoning_effort = gate_fable_model(
-        model_id, reasoning_effort, fable_enabled=fable_enabled
-    )
-    subagent_model_id, subagent_effort = gate_fable_model(
-        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
     model_kwargs = provider_model_kwargs(
         model_id,
         reasoning_effort,

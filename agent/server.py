@@ -78,7 +78,6 @@ from agent.dashboard.options import (
     available_requested_models,
     canonical_model_pair,
     default_vision_model_pair,
-    gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
@@ -1288,7 +1287,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         title_defaults = model_defaults[0]
         use_gateway = gateway_env_default()
         profile = None
-        fable_enabled = False
     else:
         async with aphase(thread_id, "factory.settings_defaults"):
             settings, profile = await asyncio.gather(
@@ -1303,7 +1301,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             routing_defaults = dict(settings.agent_routing_models)
             title_defaults = settings.default_thread_title_model
             use_gateway = settings.effective_gateway_enabled
-            fable_enabled = settings.fable_enabled
 
     slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1413,8 +1410,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             repo_instructions = await _resolve_repo_custom_instructions(
                 await _resolve_prompt_default_repo(cfg)
             )
-    # Stored before the Fable gate so a deployment-wide toggle still applies on
-    # every run rather than being frozen into the thread.
     resolved_settings: ThreadSettings = {
         "model_id": model_id,
         "effort": profile_effort,
@@ -1449,15 +1444,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
     }
-    model_id, profile_effort = gate_fable_model(
-        model_id, profile_effort, fable_enabled=fable_enabled
-    )
-    subagent_model_id, subagent_effort = gate_fable_model(
-        subagent_model_id, subagent_effort, fable_enabled=fable_enabled
-    )
-    title_model_id, title_effort = gate_fable_model(
-        title_model_id, title_effort, fable_enabled=fable_enabled
-    )
 
     model_kwargs = provider_model_kwargs(
         model_id,
@@ -1705,7 +1691,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
-        available_requested_models(fable_enabled=fable_enabled)
+        available_requested_models()
         if (adaptive_model_routing or source == "slack")
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
@@ -1744,7 +1730,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     configurable["image_model_fallback_enabled"] = image_fallback is not None
 
     def requested_model_factory(requested_model: str) -> BaseChatModel:
-        option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
+        option = available_requested_models()[requested_model]
         model = _make_model_or_defer(
             requested_model,
             use_gateway=use_gateway,

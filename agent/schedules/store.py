@@ -12,14 +12,13 @@ from langgraph_sdk.schema import Config
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import gate_fable_model, normalize_model_choice
+from agent.dashboard.options import normalize_model_choice
 from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.repo_access import (
     repo_config_for_user,
     repo_config_for_workspace,
     require_repo_access_for_workspace,
 )
-from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.dispatch import create_durable_run
 from agent.github.comments import fence_github_comment_body
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
@@ -705,9 +704,6 @@ async def _agent_run_config(
         }
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
-        model, effort = gate_fable_model(
-            model, effort, fable_enabled=(await get_workspace_settings(workspace)).fable_enabled
-        )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
     return {"configurable": configurable, "metadata": agent_version_metadata()}

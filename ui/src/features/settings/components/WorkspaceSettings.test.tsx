@@ -17,7 +17,6 @@ import {
   ApiError,
   type WorkspaceSettings,
   type WorkspaceRecord,
-  type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
@@ -472,40 +471,5 @@ describe("WorkspaceSettingsPanel", () => {
     const option = await screen.findByRole("button", { name: "acme/api" })
     expect(option.closest("section")).toBeNull()
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-  })
-
-  it("turns an inherited setting into an override and resets it back", async () => {
-    mockApis()
-    let stored: WorkspaceSettingsView = { effective: SETTINGS, overrides: {} }
-    vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => stored)
-    const save = vi
-      .spyOn(api, "saveWorkspaceSettings")
-      .mockImplementation(async (_slug, overrides) => {
-        stored = { effective: { ...SETTINGS, ...overrides }, overrides }
-        return stored
-      })
-    renderPage()
-
-    const fable = (
-      await screen.findByRole("heading", { name: "Fable" })
-    ).closest("section")
-    if (!fable) throw new Error("no Fable section")
-    const toggle = within(fable).getByRole("switch")
-    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
-    expect(within(fable).getByText("Inherited")).toBeTruthy()
-
-    fireEvent.click(toggle)
-    await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
-    )
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
-
-    fireEvent.click(
-      within(fable).getByRole("button", {
-        name: "Reset Allow Fable models to the instance value",
-      })
-    )
-    await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
   })
 })

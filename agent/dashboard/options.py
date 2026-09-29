@@ -19,7 +19,6 @@ class ModelOption(TypedDict):
 
 SUPPORTED_MODELS: list[ModelOption] = []
 SUPPORTED_MODEL_IDS: set[str] = set()
-FABLE_MODEL_IDS: set[str] = set()
 NON_DEFAULT_MODEL_IDS: set[str] = set()
 DEPRECATED_MODEL_IDS: set[str] = set()
 
@@ -38,16 +37,10 @@ def update_catalog_options() -> None:
             "supports_images": "image" in model.modalities.input,
             "context_window": model.limit.input or model.limit.context,
         }
-        if model_id.startswith("anthropic:claude-fable"):
-            option["can_be_default"] = False
         models.append(option)
     SUPPORTED_MODELS[:] = models
     for target, values in (
         (SUPPORTED_MODEL_IDS, {m["id"] for m in models}),
-        (
-            FABLE_MODEL_IDS,
-            {m["id"] for m in models if m["id"].startswith("anthropic:claude-fable")},
-        ),
         (NON_DEFAULT_MODEL_IDS, {m["id"] for m in models if not m.get("can_be_default", True)}),
         (
             DEPRECATED_MODEL_IDS,
@@ -61,12 +54,8 @@ def update_catalog_options() -> None:
 update_catalog_options()
 
 
-def available_requested_models(*, fable_enabled: bool) -> dict[str, ModelOption]:
-    return {
-        model["id"]: model
-        for model in SUPPORTED_MODELS
-        if fable_enabled or model["id"] not in FABLE_MODEL_IDS
-    }
+def available_requested_models() -> dict[str, ModelOption]:
+    return {model["id"]: model for model in SUPPORTED_MODELS}
 
 
 def model_profile_with_context_override(model_id: str) -> dict[str, object] | None:
@@ -88,36 +77,6 @@ def model_profile_context_window(model_id: str) -> int | None:
 
 def models_with_profile_context_windows(models: Sequence[ModelOption]) -> list[ModelOption]:
     return list(models)
-
-
-def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
-    """Newest supported non-Fable Anthropic model (keeps the Claude family),
-    else the global default. Substitutes a Fable selection when Fable is
-    disabled workspace-wide, preserving ``effort`` when the fallback supports it."""
-    candidates = [
-        m
-        for m in SUPPORTED_MODELS
-        if m["id"].startswith("anthropic:") and m["id"] not in FABLE_MODEL_IDS
-    ]
-    model = next(
-        (m for m in candidates if m["id"].startswith("anthropic:claude-opus")),
-        next(iter(candidates), None),
-    )
-    if model is not None:
-        return model["id"], _fallback_effort_for(model, effort) or model["default_effort"]
-    return default_model_pair()
-
-
-def gate_fable_model(
-    model_id: str, effort: str | None, *, fable_enabled: bool
-) -> tuple[str, str | None]:
-    """ZDR guard: if Fable is disabled but a Fable id was resolved, swap in a
-    safe non-Fable model. Non-Fable selections pass through unchanged. Applied
-    at every model-construction entrypoint so a disabled Fable model can never
-    reach ``make_model``, no matter which layer selected it."""
-    if not fable_enabled and isinstance(model_id, str) and model_id in FABLE_MODEL_IDS:
-        return fable_disabled_fallback(effort)
-    return model_id, effort
 
 
 DEFAULT_MODEL_ID: str = (

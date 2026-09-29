@@ -1,5 +1,5 @@
-"""Workspace settings: model defaults, review toggles and guidelines, the gateway
-and Fable toggles, and the default repository, stored in the LangGraph Store.
+"""Workspace settings: model defaults, review toggles and guidelines, gateway
+toggles, and the default repository, stored in the LangGraph Store.
 
 They resolve by tier. The instance record (the pre-workspaces "team settings"
 record, still under its original key) applies to every workspace; a
@@ -19,12 +19,10 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
-    FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
     default_model_pair,
-    gate_fable_model,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -78,7 +76,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     gateway_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     expedited_review_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -196,51 +193,6 @@ class WorkspaceSettingsUpdate(BaseModel):
         )
         return self
 
-    def apply_fable_policy(self, *, fable_enabled: bool) -> None:
-        """Enforce the Fable rules against the toggle this record resolves to.
-
-        Applied at write time rather than in validation: a workspace record may
-        inherit the toggle from the instance, so the payload alone cannot say
-        whether Fable is on.
-        """
-        if fable_enabled:
-            for model_field, _ in _MODEL_PAIR_FIELDS:
-                model = getattr(self, model_field)
-                if model in NON_DEFAULT_MODEL_IDS:
-                    raise ValueError(f"{model!r} cannot be a default model")
-        else:
-            # Disabling Fable is the ZDR kill switch and must always succeed: rather
-            # than reject a payload that still carries a Fable default, swap each
-            # Fable default to its safe non-Fable fallback (mirrors the runtime
-            # gate_fable_model guard) so the stored record can't advertise Fable.
-            for model_field, effort_field in (
-                ("default_agent_model", "default_agent_reasoning_effort"),
-                ("default_agent_subagent_model", "default_agent_subagent_reasoning_effort"),
-                (
-                    "default_agent_routing_fast_model",
-                    "default_agent_routing_fast_reasoning_effort",
-                ),
-                (
-                    "default_agent_routing_balanced_model",
-                    "default_agent_routing_balanced_reasoning_effort",
-                ),
-                (
-                    "default_agent_routing_performance_model",
-                    "default_agent_routing_performance_reasoning_effort",
-                ),
-                ("default_reviewer_model", "default_reviewer_reasoning_effort"),
-                ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_chat_model", "default_chat_reasoning_effort"),
-                ("default_thread_title_model", "default_thread_title_reasoning_effort"),
-            ):
-                model = getattr(self, model_field)
-                if model in FABLE_MODEL_IDS:
-                    new_model, new_effort = gate_fable_model(
-                        model, getattr(self, effort_field), fable_enabled=False
-                    )
-                    setattr(self, model_field, new_model)
-                    setattr(self, effort_field, new_effort)
-
 
 def _validate_model_effort_pair(model: str | None, effort: str | None, role: str) -> None:
     if model is None and effort is None:
@@ -319,7 +271,6 @@ def _default_settings() -> dict[str, Any]:
         "review_trace_links": True,
         "model_routing_enabled": None,
         "gateway_enabled": None,
-        "fable_enabled": False,
         "expedited_review_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -471,8 +422,7 @@ def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
 
 
 async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
-    """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
-    update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
+    """Replace the instance record."""
     value = _record_values(update)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
     return value
@@ -481,15 +431,7 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
 async def upsert_workspace_overrides(
     slug: str, update: WorkspaceSettingsUpdate
 ) -> WorkspaceSettingsView:
-    """Replace the workspace's overrides; a field left None inherits the instance value.
-
-    Raises ``ValueError`` for a Fable model saved as a default while Fable is on,
-    whether the workspace sets that toggle itself or inherits it.
-    """
-    fable_enabled = update.fable_enabled
-    if fable_enabled is None:
-        fable_enabled = (await get_instance_settings()).fable_enabled
-    update.apply_fable_policy(fable_enabled=fable_enabled)
+    """Replace overrides; a field left None inherits the instance value."""
     value = {k: v for k, v in _record_values(update).items() if v is not None}
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
     if slug != DEFAULT_WORKSPACE_SLUG:
@@ -675,11 +617,6 @@ class WorkspaceSettings(Mapping[str, Any]):
     def effective_gateway_enabled(self) -> bool:
         """Whether LLM Gateway routing is on: the stored toggle, else the env default."""
         return resolve_gateway_enabled(self.gateway_enabled)
-
-    @property
-    def fable_enabled(self) -> bool:
-        value = self.get("fable_enabled")
-        return bool(value) if isinstance(value, bool) else False
 
     @property
     def expedited_review_enabled(self) -> bool:

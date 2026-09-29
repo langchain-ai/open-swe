@@ -27,7 +27,6 @@ from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/glm-5p3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
-_FABLE = "anthropic:claude-fable-5-1"
 _PAIR = ("openai:gpt-6.1-sol", "medium")
 
 

@@ -27,7 +27,7 @@ async def test_slack_request_never_falls_back_to_unrelated_human(
     monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
     intent = await infer_requested_model(
         messages=messages,
-        requested_models=available_requested_models(fable_enabled=False),
+        requested_models=available_requested_models(),
         slack_event_ts="2.0",
     )
     assert intent == ModelRequestIntent()
@@ -60,7 +60,7 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
                 AIMessage(content="Use another model"),
                 HumanMessage(content="Follow-up model instruction"),
             ],
-            requested_models=available_requested_models(fable_enabled=False),
+            requested_models=available_requested_models(),
         )
     finally:
         stream.reset(token)

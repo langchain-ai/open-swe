@@ -64,7 +64,7 @@ export function useProfile() {
 
 /**
  * Selectable models and defaults for the workspace a run will land in; model
- * defaults and the Fable flag are per workspace, so the key carries the slug.
+ * defaults are per workspace, so the key carries the slug.
  */
 export function useOptions(workspace?: string | null) {
   const slug = workspace ?? DEFAULT_WORKSPACE_SLUG

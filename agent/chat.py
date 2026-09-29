@@ -35,7 +35,6 @@ from langchain_core.language_models import BaseChatModel
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
-    gate_fable_model,
     model_supports_effort,
 )
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -171,7 +170,6 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
 
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = await _resolve_chat_model(cfg)
-    model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     use_gateway = settings.effective_gateway_enabled
     model_kwargs = provider_model_kwargs(
         model_id,
