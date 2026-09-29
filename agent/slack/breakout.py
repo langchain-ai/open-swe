@@ -16,6 +16,7 @@ from agent.slack.client import (
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
 from agent.utils.json_types import thread_metadata
+from agent.utils.product_analytics import log_product_event
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks import common
 
@@ -135,6 +136,7 @@ async def _move(request: SlackRequest, target: str) -> None:
         )
         return
     await _mark_done(request, target, new_ts)
+    log_product_event("slack_breakout", user_id=request.user_id, source="slack", mode="move")
 
 
 async def _start(
@@ -167,6 +169,7 @@ async def _start(
             slack_user_id=request.user_id or None,
             thread_id=request.thread_id or thread_id,
         )
+    log_product_event("slack_breakout", user_id=request.user_id, source="slack", mode="start")
     await service.process_slack_mention(
         request.model_copy(
             update={

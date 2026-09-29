@@ -24,6 +24,7 @@ from agent.threads.creation import create_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.product_analytics import log_product_event
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from agent.webhooks.common import is_repo_allowed
@@ -410,4 +411,5 @@ async def slack_start_new_thread(
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."
         )
+    log_product_event("slack_breakout", user_id=requester, source="slack", mode="agent_start")
     return result
