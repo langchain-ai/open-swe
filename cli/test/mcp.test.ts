@@ -30,6 +30,16 @@ async function connect(respond: (url: URL) => Response): Promise<{
     port: 0,
     async fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname.endsWith("/cli/mcp/tools")) {
+        const response = respond(url)
+        if (
+          response.headers.get("content-type")?.includes("application/json")
+        ) {
+          const value = await response.clone().json()
+          if (Array.isArray(value)) return response
+        }
+        return Response.json([])
+      }
       queries.push(url.searchParams)
       const encoding = request.headers.get("content-encoding")
       encodings.push(encoding)
@@ -44,7 +54,7 @@ async function connect(respond: (url: URL) => Response): Promise<{
     `http://127.0.0.1:${backend.port}`,
     new SessionCredential("jwt", "session (test)")
   )
-  const server = createMcpServer("0.0.0-test", async () => api)
+  const server = await createMcpServer("0.0.0-test", async () => api)
   const client = new Client({ name: "test", version: "0" })
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
   await Promise.all([server.connect(serverSide), client.connect(clientSide)])
@@ -162,82 +172,47 @@ describe("list_threads", () => {
   })
 })
 
-describe("exposed dashboard tools", () => {
-  test("reads a thread without marking it viewed", async () => {
-    const { client, queries } = await connect(() =>
-      Response.json({ id: "t-1" })
-    )
-    const result = await client.callTool({
-      name: "get_thread",
-      arguments: { thread_id: "t/1" },
-    })
-    expect(result.isError).toBeFalsy()
-    expect(result.content).toEqual([
-      { type: "text", text: '{\n  "id": "t-1"\n}' },
-    ])
-    expect(queries[0]?.get("mark_viewed")).toBe("false")
-  })
+describe("exposed Python tools", () => {
+  const schema = {
+    name: "manage_feature_flags",
+    description: "Manage feature flags from Python",
+    access: "admin",
+    parameters: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["read", "set"] } },
+      required: ["action"],
+    },
+  }
 
-  test("denies admin tools to non-admin sessions before requesting workspace data", async () => {
-    const { client, bodies } = await connect((url) =>
-      url.pathname.endsWith("/me")
-        ? Response.json({ login: "user", is_admin: false })
-        : Response.json({ workspaces: [] })
-    )
-    const result = await client.callTool({
-      name: "list_workspaces",
-      arguments: {},
-    })
-    expect(result.isError).toBe(true)
-    expect(JSON.stringify(result.content)).toContain("Only workspace admins")
-    expect(bodies).toHaveLength(1)
-  })
-
-  test("exposes independent tools and keeps admin mutations behind identity checks", async () => {
-    const { client, queries, bodies } = await connect((url) =>
-      url.pathname.endsWith("/me")
-        ? Response.json({ login: "admin", is_admin: true })
-        : Response.json({ ok: true })
+  test("uses backend schemas and calls the backend with validated arguments", async () => {
+    const { client, bodies, queries } = await connect((url) =>
+      url.pathname.endsWith("/cli/mcp/tools")
+        ? Response.json([schema])
+        : Response.json({ status: "success", content: { scope: "instance" } })
     )
     const catalog = await client.listTools()
-    expect(catalog.tools.map((tool) => tool.name)).toContain(
-      "create_automation"
-    )
-    expect(catalog.tools.map((tool) => tool.name)).toContain(
-      "set_my_instructions"
-    )
+    expect(
+      catalog.tools.find((tool) => tool.name === schema.name)?.inputSchema
+    ).toMatchObject(schema.parameters)
     expect(catalog.tools.map((tool) => tool.name)).not.toContain("execute")
+    const invalid = await client.callTool({
+      name: schema.name,
+      arguments: { action: "explode" },
+    })
+    expect(invalid.isError).toBe(true)
+    expect(queries).toHaveLength(0)
     const result = await client.callTool({
-      name: "create_skill",
-      arguments: { name: "review", description: "Review code" },
+      name: schema.name,
+      arguments: { action: "read" },
     })
     expect(result.isError).toBeFalsy()
-    expect(JSON.parse(bodies[0] ?? "null")).toEqual({
-      name: "review",
-      description: "Review code",
-      instructions: "",
-    })
-    const adminResult = await client.callTool({
-      name: "refresh_workspace",
-      arguments: { slug: "default" },
-    })
-    expect(adminResult.isError).toBeFalsy()
-    expect(queries).toHaveLength(3)
+    expect(JSON.parse(bodies[0] ?? "null")).toEqual({ action: "read" })
   })
 
-  test("allows admins to read workspace data", async () => {
-    const { client, bodies } = await connect((url) =>
-      url.pathname.endsWith("/me")
-        ? Response.json({ login: "admin", is_admin: true })
-        : Response.json({ workspaces: [{ slug: "default" }] })
-    )
-    const result = await client.callTool({
-      name: "list_workspaces",
-      arguments: {},
-    })
-    expect(result.isError).toBeFalsy()
-    expect(JSON.stringify(result.content)).toContain("default")
-    expect(bodies).toHaveLength(2)
+  test("does not expose tools missing from the signed-in user's catalog", async () => {
+    const { client } = await connect(() => Response.json([]))
+    const catalog = await client.listTools()
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain(schema.name)
   })
 })
 

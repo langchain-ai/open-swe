@@ -6,10 +6,12 @@ from fastapi import HTTPException
 
 from agent.skill_store import store
 from agent.tools.admin_gate import require_admin
+from agent.tools.mcp_exposure import expose_mcp
 
 _ACTION = "manage organization skills"
 
 
+@expose_mcp(access="admin")
 async def save_organization_skill(
     name: str, description: str, instructions: str = ""
 ) -> dict[str, Any]:
@@ -34,6 +36,7 @@ async def save_organization_skill(
     return {"ok": True, "skill": skill, "created": created}
 
 
+@expose_mcp(access="admin")
 async def delete_organization_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_organization_skill` tool."""
     if error := await require_admin(_ACTION):

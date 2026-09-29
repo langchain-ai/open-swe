@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.schedules import store as schedules
 from agent.tools.admin_gate import configurable, require_admin
+from agent.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ def _error(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": str(exc)}
 
 
+@expose_mcp(access="admin")
 async def list_automations() -> dict[str, Any]:
     """Implement the `list_automations` tool."""
     if error := await require_admin("manage workspace automations"):
@@ -38,6 +40,7 @@ async def list_automations() -> dict[str, Any]:
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
 
+@expose_mcp(access="admin")
 async def create_automation(
     prompt: str,
     workspace: str,
@@ -83,6 +86,7 @@ async def create_automation(
     return {"ok": True, "automation": record}
 
 
+@expose_mcp(access="admin")
 async def update_automation(
     automation_id: str,
     prompt: str | None = None,
@@ -144,6 +148,7 @@ async def update_automation(
     return {"ok": True, "automation": record}
 
 
+@expose_mcp(access="admin")
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `trigger_automation` tool."""
     if error := await require_admin("manage workspace automations"):
@@ -155,6 +160,7 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
     return {"ok": True, **result}
 
 
+@expose_mcp(access="admin")
 async def delete_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `delete_automation` tool."""
     if error := await require_admin("manage workspace automations"):

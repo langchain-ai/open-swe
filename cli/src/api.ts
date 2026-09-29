@@ -15,6 +15,8 @@ import {
   type ThreadsPage,
 } from "./threads.ts"
 import { uploadedThreadSchema } from "./upload.ts"
+import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
+import * as z from "zod"
 
 export class ApiError extends Error {
   constructor(
@@ -182,19 +184,22 @@ export class ApiClient {
     return parsed.data
   }
 
-  async getThread(threadId: string): Promise<unknown> {
-    return this.json(
-      "GET",
-      `/threads/${encodeURIComponent(threadId)}?mark_viewed=false`
-    )
+  async mcpTools(): Promise<CliTool[]> {
+    const result = z
+      .array(cliToolSchema)
+      .safeParse(await this.json("GET", "/cli/mcp/tools"))
+    if (!result.success)
+      throw new ProtocolError("/cli/mcp/tools response is malformed")
+    return result.data
   }
 
-  async mcpRequest(
-    method: string,
-    path: string,
-    body?: unknown
+  async mcpInvoke(
+    name: string,
+    args: Record<string, unknown>
   ): Promise<unknown> {
-    return this.json(method, path, { body })
+    return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
+      body: args,
+    })
   }
 
   /** Create a thread from a gzipped JSONL session upload; returns its id. */

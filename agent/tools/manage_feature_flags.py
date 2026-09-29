@@ -15,11 +15,13 @@ from agent.dashboard.workspace_settings import (
 )
 from agent.store import get_value
 from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.mcp_exposure import expose_mcp
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
 
 
+@expose_mcp(access="admin")
 async def manage_feature_flags(
     action: Literal["read", "set"],
     flags: dict[str, bool | None] | None = None,
