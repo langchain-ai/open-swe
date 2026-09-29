@@ -17,6 +17,7 @@ from agent.expedited_review.eligibility import (
 )
 from agent.expedited_review.lifecycle import post_card, remove_superseded_cards, retire
 from agent.github.ci import fetch_pr
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
 from agent.prompts import prompt
@@ -179,6 +180,11 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
+    if payload.draft and payload.author.lower() == "open-swe[bot]":
+        await act_on_pull_request(
+            pr_ref.owner, pr_ref.repo, pr_ref.number, MarkReadyAction(action="mark-ready"), token
+        )
+        payload.draft = False
     active = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
