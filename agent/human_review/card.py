@@ -47,6 +47,17 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
     return [section(f"*Reviewers*\n{lines}")]
 
 
+def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
+    link = f"<{request.pull_request.url}|{_label(request)}>"
+    if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
+        return f":mag: *Review requested*  {link}"
+    approvers = [
+        r.slack_mention for r in request.reviewers if states.get(r.github_login) == "APPROVED"
+    ]
+    by = f" by {', '.join(approvers)}" if approvers else ""
+    return f":white_check_mark: *Approved{by}*  {link}"
+
+
 def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
     pr = request.pull_request
     parts = [f"By {author}"]
@@ -94,10 +105,7 @@ def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    pr = request.pull_request
-    blocks: list[Block] = [
-        section(f":mag: *Review requested*  <{pr.url}|{_label(request)}>\n*{escape(title)}*"),
-    ]
+    blocks: list[Block] = [section(f"{_heading(request, review_states)}\n*{escape(title)}*")]
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
