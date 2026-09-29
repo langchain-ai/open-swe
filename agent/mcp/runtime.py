@@ -26,6 +26,7 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import mcp_http_client
+from agent.prompts import prompt
 from agent.utils.startup_trace import asubphase
 from mcp.types import PaginatedRequestParams, Tool
 
@@ -36,6 +37,10 @@ type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
+_TRUNCATION = re.compile(
+    r"<is_truncated>\s*true\s*</is_truncated>.*?<truncation_message>(.*?)</truncation_message>",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,18 @@ def _connection(record: MCPConnection, namespace: tuple[str, ...]) -> Connection
     if auth := connection_auth(record, namespace):
         connection["auth"] = auth
     return connection
+
+
+def _flag_partial_result(
+    result: tuple[list[dict[str, object]], object],
+) -> tuple[list[dict[str, object]], object]:
+    """Prepend a paging notice when an MCP result reports itself truncated."""
+    content, artifact = result
+    match = _TRUNCATION.search("".join(str(block.get("text", "")) for block in content))
+    if match is None:
+        return result
+    notice = prompt("tools/mcp-partial-result", truncation_message=match.group(1).strip())
+    return [{"type": "text", "text": notice}, *content], artifact
 
 
 async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
@@ -179,7 +196,9 @@ def _wrap_tool(
             )
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
-            return await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
+            return _flag_partial_result(
+                await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
+            )
         except ToolException:
             raise
         except Exception:
