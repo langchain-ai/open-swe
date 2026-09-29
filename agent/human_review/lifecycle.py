@@ -23,7 +23,7 @@ from agent.github.pull_requests import PullRequestPayload
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
 from agent.human_review.requests import HumanReviewRequest, RequestState
-from agent.slack.blocks import Block, block_payload
+from agent.slack.blocks import Block, block_payload, escape
 from agent.slack.cards import repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -335,9 +335,15 @@ async def reopen(request: HumanReviewRequest) -> None:
 
 async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Outcome:
     """Anyone who can see the card may take it down; it needs no GitHub link or access."""
-    if await retire(request, "cancelled", f"dismissed by <@{slack_user_id}>") is None:
+    if not await dismiss_by(request, f"<@{slack_user_id}>", ""):
         return Outcome("This review request is already closed.")
     return Outcome("Dismissed.")
+
+
+async def dismiss_by(request: HumanReviewRequest, by: str, reason: str) -> bool:
+    """Take the card down for ``by``, as a Dismiss click would; ``False`` if already closed."""
+    detail = f": {escape(reason.strip())}" if reason.strip() else ""
+    return await retire(request, "cancelled", f"dismissed by {by}{detail}") is not None
 
 
 async def refresh_card_in_thread(
