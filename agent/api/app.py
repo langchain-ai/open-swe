@@ -125,15 +125,14 @@ def create_app() -> FastAPI:
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
-    if allowed_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[*allowed_origins, "open-swe://app"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
     add_trace_resource_names(app)
     add_request_ids(app)
     app.include_router(dashboard_router)

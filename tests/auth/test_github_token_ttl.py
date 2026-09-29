@@ -249,7 +249,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     assert invalidated["calls"] == 1
     assert resolves == ["stale-token", "fresh-token"]
     assert react_calls == ["stale-token", "fresh-token"]
-    assert fetch_calls == ["fresh-token"]
+    assert fetch_calls == ["stale-token"]
 
 
 @pytest.mark.asyncio

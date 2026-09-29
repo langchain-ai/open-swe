@@ -21,6 +21,9 @@ async def api_request_human_review(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     login = str(session["sub"])
+    requester = await User.for_login("github", login)
+    if requester is None or not requester.typed_preferences.human_review_requests:
+        raise HTTPException(403, "Human review requests are not enabled for you")
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     pr_ref = GitHubPrRef(
         owner=owner,
@@ -28,7 +31,7 @@ async def api_request_human_review(
         number=number,
         url=f"https://github.com/{owner}/{repo}/pull/{number}",
     )
-    result = await request_review(pr_ref, Origin(requester=await User.for_login("github", login)))
+    result = await request_review(pr_ref, Origin(requester=requester))
     if not result.success:
         raise HTTPException(409, result.error)
     return result

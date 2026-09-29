@@ -12,6 +12,7 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
+from agent.slack.thinking import sync_slack_background_status
 from agent.store import get_value, put_value
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ async def notify_slack_review(
     *,
     reviewer: str,
     review_url: str,
+    pr_label: str,
+    review_state: str = "",
     edited_body: str | None = None,
     edited_at: str | None = None,
 ) -> None:
@@ -29,6 +32,13 @@ async def notify_slack_review(
     client = get_client(url=ENV.LANGGRAPH_URL.get())
     namespace = ("github_review_slack_notices", thread_id)
     action = "submitted" if edited_body is None else "edited"
+    outcome = {
+        "approved": "Approved",
+        "changes_requested": "Changes requested",
+        "commented": "Comments left",
+    }.get(review_state.lower())
+    notice = f"{action} a review on {escape(pr_label, quote=False)}"
+    suffix = f": *{outcome}*." if outcome else "."
     key = hashlib.sha256(
         f"{review_url}:{action}:{edited_at or edited_body or ''}".encode()
     ).hexdigest()
@@ -47,7 +57,7 @@ async def notify_slack_review(
                 message_ts, error = await post_slack_thread_reply_with_ts(
                     location["channel_id"],
                     location["thread_ts"],
-                    f"@{escape(reviewer, quote=False)} <{review_url}|{action} a review>.",
+                    f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
                     agent_thread_id=thread_id,
                     unfurl_links=False,
                     unfurl_media=False,
@@ -57,6 +67,8 @@ async def notify_slack_review(
                         "Failed to post GitHub review notice to Slack",
                         extra={"agent_thread_id": thread_id, "slack_error": error},
                     )
+                else:
+                    await sync_slack_background_status(client, thread_id, resume=True)
                 return
     except Exception:
         logger.warning(

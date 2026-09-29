@@ -27,6 +27,11 @@ the repository sets none.
 
 ## Requesting
 
+- Asking is a per-person feature flag, **Request human reviews in Slack** on the
+  Feature Flags page (`human_review_requests`), off by default. Without it the
+  dashboard hides its button and refuses the request, and the agent does not get
+  `request_human_review` in runs that person starts. Signing up, dismissing, and the
+  agent's pick of a reviewer work for everyone.
 - The agent calls `request_human_review`; people use **Request review in Slack** on
   the dashboard's pull request views.
 - Refused while the pull request is closed, a draft, conflicted, or failing a required

@@ -20,7 +20,7 @@ def _authorized(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _update(concierge_mode: bool | None) -> ProfileUpdate:
     return ProfileUpdate(
-        default_model="openai:gpt-6-sol", reasoning_effort="high", concierge_mode=concierge_mode
+        default_model="openai:gpt-6.1-sol", reasoning_effort="high", concierge_mode=concierge_mode
     )
 
 
