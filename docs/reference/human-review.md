@@ -14,15 +14,16 @@ for a standard review while an expedited card is open is refused.
 
 ## Configuration
 
-`.open-swe/settings.json` on the repository's default branch:
+`.open-swe/settings.json` in the repository:
 
 ```json
 { "reviewChannel": "#eng-reviews" }
 ```
 
-The value is a channel name or id. It is read from the default branch, so a pull
-request cannot redirect its own review. The `request_human_review` tool accepts a
-`channel` that overrides it or stands in when the repository sets none.
+The value is a channel name or id. It is read from the pull request's head commit,
+falling back to the default branch when the head has no settings file. The
+`request_human_review` tool accepts a `channel` that overrides it or stands in when
+the repository sets none.
 
 ## Requesting
 

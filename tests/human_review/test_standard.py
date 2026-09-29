@@ -112,14 +112,27 @@ def _github(status: int, text: str = "") -> AsyncMock:
     return AsyncMock(return_value=httpx2.Response(status, text=text))
 
 
-async def test_repo_settings_read_the_review_channel_from_the_default_branch() -> None:
+async def test_repo_settings_prefer_the_pull_request_head() -> None:
     request = _github(200, '{"reviewChannel": "#eng-reviews", "other": 1}')
     with patch("agent.github.repo_files.github_request", request):
-        settings = await RepoSettings.fetch("o", "r", token="t")
+        settings = await RepoSettings.fetch("o", "r", token="t", ref="abc123")
     assert settings.review_channel == "#eng-reviews"
     _client, _method, url = request.await_args.args
     assert url.endswith("/repos/o/r/contents/.open-swe/settings.json")
-    assert request.await_args.kwargs["params"] is None
+    assert request.await_args.kwargs["params"] == {"ref": "abc123"}
+
+
+async def test_repo_settings_fall_back_to_the_default_branch() -> None:
+    request = AsyncMock(
+        side_effect=[
+            httpx2.Response(404),
+            httpx2.Response(200, text='{"reviewChannel": "#eng-reviews"}'),
+        ]
+    )
+    with patch("agent.github.repo_files.github_request", request):
+        settings = await RepoSettings.fetch("o", "r", token="t", ref="abc123")
+    assert settings.review_channel == "#eng-reviews"
+    assert [call.kwargs["params"] for call in request.await_args_list] == [{"ref": "abc123"}, None]
 
 
 @pytest.mark.parametrize(("status", "text"), [(404, ""), (200, "not json"), (200, "[]")])

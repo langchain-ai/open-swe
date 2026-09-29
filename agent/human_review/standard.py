@@ -109,17 +109,17 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 
 
 async def _target_channel(
-    pr_ref: GitHubPrRef, override: str, token: str
+    pr_ref: GitHubPrRef, override: str, token: str, head_sha: str
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
         configured = (
-            await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token)
+            await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
         ).review_channel
     if not configured.strip():
         return _failure(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
-            "`.open-swe/settings.json` on the default branch, or name a Slack channel."
+            "`.open-swe/settings.json`, or name a Slack channel."
         )
     channel = await SlackChannel.resolve(configured)
     if channel is None:
@@ -190,7 +190,7 @@ async def request_review(
     if active is not None:
         return await _existing(active)
 
-    target = await _target_channel(pr_ref, channel, token)
+    target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
     if isinstance(target, RequestResult):
         return target
     payload = await fetch_pr(

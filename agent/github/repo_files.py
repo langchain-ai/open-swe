@@ -60,11 +60,19 @@ class RepoSettings(BaseModel):
     review_channel: str = Field("", alias="reviewChannel")
 
     @classmethod
-    async def fetch(cls, owner: str, repo: str, *, token: str | None) -> RepoSettings:
-        """The default branch's settings, so a pull request cannot redirect its own review."""
-        content = await fetch_repo_file(
-            owner, repo, SETTINGS_PATH, None, token=token, max_chars=SETTINGS_MAX_CHARS
-        )
+    async def fetch(
+        cls, owner: str, repo: str, *, token: str | None, ref: str | None = None
+    ) -> RepoSettings:
+        """The settings at ``ref``, or the default branch's when ``ref`` has none."""
+        content = None
+        if ref:
+            content = await fetch_repo_file(
+                owner, repo, SETTINGS_PATH, ref, token=token, max_chars=SETTINGS_MAX_CHARS
+            )
+        if content is None:
+            content = await fetch_repo_file(
+                owner, repo, SETTINGS_PATH, None, token=token, max_chars=SETTINGS_MAX_CHARS
+            )
         if content is None:
             return cls()
         try:
