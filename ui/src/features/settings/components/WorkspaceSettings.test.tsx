@@ -218,7 +218,15 @@ describe("WorkspaceSettingsPanel", () => {
     // Bound channels read by name once the directory is in.
     expect((await screen.findAllByText("#oss-help")).length).toBeGreaterThan(0)
 
+    const general = name.closest("section")!
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.change(name, { target: { value: "Discard this" } })
+    fireEvent.click(within(general).getByRole("button", { name: "Cancel" }))
+    expect((name as HTMLInputElement).value).toBe("OSS")
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+
     fireEvent.change(name, { target: { value: " OSS support " } })
+    expect(within(general).getByRole("button", { name: "Cancel" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
@@ -289,6 +297,9 @@ describe("WorkspaceSettingsPanel", () => {
           .getByRole("button", { name: "Save" })
           .closest("section")
         if (!general) throw new Error("no General section")
+        expect(
+          within(general).queryByRole("button", { name: "Cancel" })
+        ).toBeNull()
         expect(within(general).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"

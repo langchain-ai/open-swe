@@ -113,14 +113,16 @@ function GeneralSection({
           </p>
         )}
         <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(draftFromWorkspace(record))}
-          >
-            Cancel
-          </Button>
+          {dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setDraft(draftFromWorkspace(record))}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={!dirty || saving || !draft.name.trim()}
