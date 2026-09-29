@@ -84,6 +84,10 @@ export function RepositoryPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search repositories"
+      filters={[
+        { label: "Public", matches: (item) => item.meta === "public" },
+        { label: "Internal", matches: (item) => item.meta === "private" },
+      ]}
       manual={{
         label: "Add a repository by name",
         placeholder: "owner/repo",
