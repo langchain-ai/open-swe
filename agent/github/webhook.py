@@ -15,6 +15,7 @@ from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.human_review.lifecycle import close_for_pull_request
+from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import settle_pull_request, settle_repository
 from agent.input_messages import (
     PersonIdentity,
@@ -1071,6 +1072,15 @@ async def process_github_pr_comment(
         "line": event.get("line") or event.get("original_line"),
     }
     if not event_comment["created_at"] or not comment_id:
+        return
+    # The card's own vote already woke the agent and shows the approval.
+    if (
+        event_type == "pull_request_review"
+        and str(event.get("state") or "").lower() == "approved"
+        and await HumanReviewRequest.is_expedited_approver(
+            repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
+        )
+    ):
         return
     if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
         thread_metadata, event_comment["author"]

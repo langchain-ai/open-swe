@@ -51,11 +51,11 @@ def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
     link = f"<{request.pull_request.url}|{_label(request)}>"
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
+    mentions = {r.github_login: r.slack_mention for r in request.reviewers}
     approvers = [
-        r.slack_mention for r in request.reviewers if states.get(r.github_login) == "APPROVED"
+        mentions.get(login, f"@{login}") for login, state in states.items() if state == "APPROVED"
     ]
-    by = f" by {', '.join(approvers)}" if approvers else ""
-    return f":white_check_mark: *Approved{by}*  {link}"
+    return f":white_check_mark: *Approved by {', '.join(approvers)}*  {link}"
 
 
 def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
