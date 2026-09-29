@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,7 +10,11 @@ from langchain_core.runnables import RunnableConfig
 import agent.server as server
 import agent.thread_title as thread_title
 from agent.dashboard.options import available_requested_models
-from agent.middleware.model_selection import ModelSelectionMiddleware
+from agent.middleware.model_selection import (
+    ModelSelectionMiddleware,
+    ModelSelectionState,
+    SelectedRoute,
+)
 from agent.middleware.prepare_run import PrepareRunState
 from agent.model_request import ModelRequestIntent
 from agent.slack.webhook import _slack_context_input
@@ -134,21 +139,37 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     infer.assert_awaited_once()
 
 
-async def test_explicit_auto_selection_routes_again_after_a_pinned_turn(handoff: Handoff) -> None:
+@pytest.mark.parametrize("previous_route", ["fast", "default"])
+@pytest.mark.parametrize("fresh_route", ["fast", "default"])
+async def test_explicit_auto_selection_replaces_checkpoint_route(
+    handoff: Handoff,
+    monkeypatch: pytest.MonkeyPatch,
+    previous_route: SelectedRoute,
+    fresh_route: SelectedRoute,
+) -> None:
     handoff.middleware._config["configurable"].update(
         source="dashboard", model_selection="auto", model_selection_changed=True
     )
     handoff.middleware._requested_models = None
-    prepared = await handoff.prepare(
-        {
-            "messages": [HumanMessage(content="Fix the typo")],
-            "model_route": "default",
-            "requested_model": "anthropic:claude-opus-5-5",
-        }
+    selection = handoff.middleware._model_selection
+    assert selection is not None
+    selection._routing_mode = "auto"
+    classify = AsyncMock(return_value=fresh_route)
+    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", classify)
+    state: ModelSelectionState = {
+        "messages": [HumanMessage(content="Fix the typo")],
+        "model_route": previous_route,
+        "requested_model": "anthropic:claude-opus-5-5",
+    }
+    prepared = await handoff.prepare(cast(PrepareRunState, state))
+    state.update(cast(ModelSelectionState, prepared))
+    assert state["requested_model"] is None
+    assert state["model_route"] == fresh_route
+    assert prepared["selected_model_id"] == (
+        "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6-sol"
     )
-    assert prepared["requested_model"] is None
-    assert prepared["model_route"] == "fast"
-    assert prepared["selected_model_id"] == "openai:gpt-6-luna"
+    assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
+    classify.assert_awaited_once_with("Fix the typo")
 
 
 @pytest.mark.parametrize("request_text", ["Use Opus to fix this", "Fix this"])

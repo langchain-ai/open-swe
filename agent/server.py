@@ -1132,7 +1132,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "model": attribution_model_id,
                         "effort": attribution_effort,
                         "source": self._source,
-                        **({"model_route": attribution_route} if attribution_route else {}),
+                        **(
+                            {"model_route": attribution_route}
+                            if attribution_route is not None
+                            else {}
+                        ),
                     },
                 )
                 if cfg.invocation_id:
@@ -1174,7 +1178,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
-            **({"model_route": attribution_route} if attribution_route else {}),
+            **({"model_route": attribution_route} if attribution_route is not None else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
@@ -1713,8 +1717,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         else None
     )
     image_fallback: ImageModelFallbackMiddleware | None = None
-    if not model_supports_images(model_id) or any(
-        not option["supports_images"] for option in (requested_models or {}).values()
+    if (
+        not model_supports_images(model_id)
+        or any(not option["supports_images"] for option in (requested_models or {}).values())
+        or (
+            adaptive_model_routing
+            and any(
+                not model_supports_images(route_id) for route_id, _ in routing_defaults.values()
+            )
+        )
     ):
         vision_model = main_model
         if not model_supports_images(model_id):
@@ -1760,6 +1771,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         for route, (routed_model_id, effort) in routing_defaults.items()
         if adaptive_model_routing
     }
+    if image_fallback is not None:
+        for route, model in routing_models.items():
+            if not model_supports_images(routing_defaults[route][0]):
+                image_fallback.add_text_only_model(model)
     model_selection = ModelSelectionMiddleware(
         routing_models,
         main_model,
