@@ -65,6 +65,7 @@ DeadlineStep = Literal["unclaimed", "auto_merge"]
 SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
+_DEADLINE_RETRY = timedelta(minutes=5)
 
 
 class RequestResult(BaseModel):
@@ -486,51 +487,76 @@ async def _settle_posted(
     if "APPROVED" in states.values():
         await mark_approved(request)
         return
+    now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
-        if row is None or row.state != "open" or snapshot.green == (row.ready_since is not None):
+        if row is None or row.state != "open":
             return
-        row.ready_since = datetime.now(UTC) if snapshot.green else None
-    if snapshot.green:
-        await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
-
-
-async def _sat_green(request: HumanReviewRequest) -> bool:
-    """Whether a posted pull request is still unapproved and has been green for the whole wait."""
-    await settle(request)
-    current = await HumanReviewRequest.get(request.id)
-    if current is None or current.state != "open" or current.approved_at is not None:
-        return False
-    waited = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
-    return current.ready_since is not None and datetime.now(UTC) - current.ready_since >= waited
-
-
-async def settle(request: HumanReviewRequest) -> None:
-    """Re-read the pull request and move the request on: react, update the card, or merge."""
-    if request.kind not in SETTLED_KINDS or request.state != "open":
+        previous = row.ready_since
+        if not snapshot.green:
+            row.ready_since = None
+            return
+        # A check that finished after the clock started was rerun unseen, so it restarts the clock.
+        ready_since = (
+            now if previous is None else max(previous, snapshot.checks_finished_at or previous)
+        )
+        if ready_since == previous:
+            return
+        row.ready_since = ready_since
+    wait = max(ready_since + timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - now, timedelta(0))
+    if await _schedule(request, "unclaimed", wait):
         return
+    # Without its deadline nothing would ever bump the post, so the next settle schedules it again.
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None and row.ready_since == ready_since:
+            row.ready_since = previous
+
+
+async def _posted_deadline(request: HumanReviewRequest) -> str | None:
+    """Why a posted request's deadline does not bump it yet; ``None`` when it should."""
+    if not await settle(request):
+        await _schedule(request, "unclaimed", _DEADLINE_RETRY)
+        return "retrying"
+    current = await HumanReviewRequest.get(request.id)
+    if current is None or current.state != "open":
+        return "closed"
+    if current.approved_at is not None:
+        return "approved"
+    waited = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    if current.ready_since is None or datetime.now(UTC) - current.ready_since < waited:
+        return "not_ready"
+    return None
+
+
+async def settle(request: HumanReviewRequest) -> bool:
+    """Re-read the pull request and move the request on: react, update the card, or merge.
+
+    ``False`` only when GitHub could not be read, so nothing is known to have changed.
+    """
+    if request.kind not in SETTLED_KINDS or request.state != "open":
+        return True
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
-        return
+        return False
     readiness = await assess_readiness(
         owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
     )
     if readiness is None:
-        return
+        return False
     snapshot = readiness.snapshot
     if snapshot.merged:
         await mark_merged(request)
-        return
+        return True
     if snapshot.state != "open":
         await retire(request, "cancelled", "the pull request was closed")
-        return
+        return True
     async with github_client(token=token) as client:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
-        return
+        return False
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
-        return
+        return True
     waiting = merge_wait(
         [reviewer.github_login for reviewer in request.reviewers],
         request.created_at,
@@ -541,10 +567,10 @@ async def settle(request: HumanReviewRequest) -> None:
         waiting = "; ".join(readiness.blockers)
     if waiting is not None:
         await refresh_card(await _set_detail(request, waiting))
-        return
+        return True
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
-            return
+            return True
         result = await merge_pull_request(
             row, snapshot.head_sha, snapshot.allowed_merge_methods, token
         )
@@ -552,7 +578,7 @@ async def settle(request: HumanReviewRequest) -> None:
             row.detail = result.message
     if result.status == "merged":
         await mark_merged(request)
-        return
+        return True
     logger.warning(
         "Auto-merge of a reviewed pull request was refused",
         extra={"request_id": str(request.id), "merge_status": result.status},
@@ -560,6 +586,7 @@ async def settle(request: HumanReviewRequest) -> None:
     current = await HumanReviewRequest.get(request.id)
     if current is not None:
         await refresh_card(current)
+    return True
 
 
 async def settle_pull_request(owner: str, repo: str, number: int) -> None:
@@ -622,8 +649,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     if step == "unclaimed":
         if request.reviewers:
             return {"status": "claimed"}
-        if request.kind == "posted" and not await _sat_green(request):
-            return {"status": "not_ready"}
+        if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
+            return {"status": waiting}
         return {"status": "woken" if await _wake_for_reviewer(request) else "not_woken"}
     if step == "auto_merge":
         await settle(request)
