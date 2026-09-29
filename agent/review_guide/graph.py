@@ -38,6 +38,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.prompts import apply_tool_descriptions, prompt
+from agent.review.walkthrough import Walkthrough
 from agent.review_guide import git
 from agent.review_guide.context import guide_repo_dir
 from agent.review_guide.github import fetch_head
@@ -54,6 +55,8 @@ from agent.runtime import (
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.approve_pull_request import approve_pull_request
 from agent.tools.approve_review_chunk import approve_review_chunk
+from agent.tools.mark_pull_request_ready import mark_pull_request_ready
+from agent.tools.record_author_feedback import record_author_feedback
 from agent.tools.review_reply import review_reply
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -101,6 +104,7 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
         )
         repo_dir = await guide_repo_dir(backend, pr.repo)
         work_dir = repo_dir.rsplit("/", 1)[0]
+        author = session.mode == "author"
         updates: dict[str, Any] = {
             "work_dir": work_dir,
             "rendered_system_prompt": prompt(
@@ -109,6 +113,9 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
                 repo_full_name=pr.repo_full_name,
                 repo_dir=repo_dir,
                 patch_dir=f"{work_dir}/.guide-patches",
+                author=author,
+                draft=head.draft,
+                human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
             ),
         }
         if await git.built_for(backend, repo_dir) == (head.base.sha, head.head.sha):
@@ -187,6 +194,13 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
         ),
     )
 
+    session = await ReviewGuideSession.get(thread_id)
+    closing_tools = (
+        [mark_pull_request_ready, record_author_feedback]
+        if session is not None and session.mode == "author"
+        else [approve_pull_request]
+    )
+
     async def reconnect_backend(_thread_id: str = thread_id) -> SandboxBackendProtocol:
         session = await ReviewGuideSession.get(_thread_id)
         if session is None:
@@ -197,7 +211,7 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
-        tools=apply_tool_descriptions([review_reply, approve_review_chunk, approve_pull_request]),
+        tools=apply_tool_descriptions([review_reply, approve_review_chunk, *closing_tools]),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

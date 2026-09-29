@@ -3,12 +3,14 @@
 import logging
 
 import httpx2
-from pydantic import BaseModel, ValidationError
+from fastapi import HTTPException
+from pydantic import AliasPath, BaseModel, Field, ValidationError
 
 from agent.dashboard.profiles import get_valid_access_token
 from agent.expedited_review.reviews import github_error, github_token_hint
 from agent.github.app import get_github_app_installation_token
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_actions import MarkReadyAction
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ class _Ref(BaseModel):
 class PullRequestHead(BaseModel):
     title: str = ""
     state: str = "open"
+    draft: bool = False
+    author: str = Field("", validation_alias=AliasPath("user", "login"))
     head: _Ref
     base: _Ref
 
@@ -67,4 +71,21 @@ async def approve(
     except httpx2.HTTPError:
         logger.warning("GitHub did not answer a review guide approval", exc_info=True)
         return f"GitHub did not answer when submitting @{login}'s review."
+    return None
+
+
+async def mark_ready(*, login: str, owner: str, repo: str, number: int) -> str | None:
+    """Take the PR out of draft as ``login``; why it failed, or ``None``."""
+    token = await get_valid_access_token(login)
+    if not token:
+        return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
+    try:
+        async with github_client(token=token) as client:
+            await MarkReadyAction(action="mark-ready").perform(client, owner, repo, number)
+    except HTTPException as exc:
+        logger.warning(
+            "GitHub refused to mark a guided pull request ready",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+        )
+        return f"GitHub did not mark the pull request ready: {exc.detail}"
     return None

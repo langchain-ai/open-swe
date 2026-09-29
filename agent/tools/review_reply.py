@@ -3,11 +3,10 @@
 from typing import Any
 
 from agent.review_guide import git
+from agent.review_guide.buttons import LOOKS_GOOD
 from agent.review_guide.context import GuideContext, GuideUnavailableError
 from agent.review_guide.render import MessageRenderer, RenderError
 from agent.slack.tools.reply import slack_reply
-
-LOOKS_GOOD = "Looks good"
 
 
 async def review_reply(

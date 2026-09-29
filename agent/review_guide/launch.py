@@ -13,7 +13,7 @@ from agent.input_messages import build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
 from agent.review_guide.github import fetch_head
-from agent.review_guide.sessions import ASSISTANT_ID, ReviewGuideSession
+from agent.review_guide.sessions import ASSISTANT_ID, GuideMode, ReviewGuideSession
 from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel, slack_user_ids
 from agent.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -71,6 +71,11 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     pull_request = await PullRequest(
         owner=start.owner, repo=start.repo, number=start.number
     ).ensure()
+    mode: GuideMode = (
+        "author"
+        if head.author.lower() == login.lower() or await pull_request.is_authored_by(login)
+        else "reviewer"
+    )
     thread_id = str(uuid4())
     channel_id, error = await create_code_channel(
         name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
@@ -110,6 +115,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             user_id=user.id,
             slack_channel_id=channel_id,
             workspace_slug=start.workspace_slug,
+            mode=mode,
         )
     except Exception:
         if not (await archive_code_channel(channel_id))[0]:

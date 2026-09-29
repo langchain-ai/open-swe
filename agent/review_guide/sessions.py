@@ -7,10 +7,10 @@ rather than commit, so a rebase or force-push never asks them to reread it.
 
 from collections import Counter
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, select
+from sqlalchemy import ForeignKey, Text, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -20,6 +20,9 @@ from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 
 ASSISTANT_ID = "review-guide"
+
+# A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
+GuideMode = Literal["reviewer", "author"]
 
 
 class ReviewGuideSeenLine(Base):
@@ -43,6 +46,7 @@ class ReviewGuideSession(Base):
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     slack_channel_id: Mapped[str]
     workspace_slug: Mapped[str | None] = mapped_column(default=None)
+    mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
 
@@ -74,6 +78,17 @@ class ReviewGuideSession(Base):
             return list(rows)
 
     @classmethod
+    async def author_threads(cls, pull_request_id: UUID) -> list[str]:
+        """The author's own guide sessions on a PR, oldest first."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls.thread_id)
+                .where(cls.pull_request_id == pull_request_id, cls.mode == "author")
+                .order_by(cls.created_at)
+            )
+            return list(rows)
+
+    @classmethod
     async def create(
         cls,
         *,
@@ -82,6 +97,7 @@ class ReviewGuideSession(Base):
         user_id: UUID,
         slack_channel_id: str,
         workspace_slug: str | None,
+        mode: GuideMode,
     ) -> None:
         async with postgres.session() as session:
             session.add(
@@ -91,6 +107,7 @@ class ReviewGuideSession(Base):
                     user_id=user_id,
                     slack_channel_id=slack_channel_id,
                     workspace_slug=workspace_slug,
+                    mode=mode,
                 )
             )
             await session.commit()

@@ -25,6 +25,8 @@ from pydantic import BaseModel, ConfigDict
 
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import input_message_text, message_sender_id
+from agent.review_guide.buttons import LABELS as BUTTON_LABELS
+from agent.review_guide.sessions import ReviewGuideSession
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,13 @@ class SteeringHistory(BaseModel):
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if not turns:
             return None
+        # The author's feedback while being walked through what the agent did steers the PR too.
+        turns += [
+            turn
+            for thread_id in await ReviewGuideSession.author_threads(pull_request.id)
+            for turn in await cls._human_turns(thread_id)
+            if turn.text not in BUTTON_LABELS
+        ]
         follow_ups = turns[1:]
         return cls(
             request=turns[0],
