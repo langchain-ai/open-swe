@@ -1569,6 +1569,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
         if candidate.has_groups:
             dynamic_tool_middleware = candidate
+    skill_tools = dynamic_tool_middleware.resolve_skill_tools if dynamic_tool_middleware else None
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1635,7 +1636,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **title_model_kwargs,
     )
     workspace_skills = (
-        WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
+        WorkspaceSkillsMiddleware(
+            backend=agent_backend, sources=skill_sources, skill_tools=skill_tools
+        )
         if credential_login is None and not local_run
         else None
     )
@@ -1662,6 +1665,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 ),
             ],
             skills=skill_sources,
+            skill_tools=skill_tools,
             backend=agent_backend,
             state_schema=DesktopAgentState if local_run else None,
             middleware=cast(

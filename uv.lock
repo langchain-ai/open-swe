@@ -8,7 +8,7 @@ constraints = [
     { name = "langgraph-runtime-inmem", specifier = ">=0.35.0rc1,<0.36" },
 ]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.17" },
+    { name = "deepagents", directory = "../deepagents/libs/deepagents" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -689,8 +689,8 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.17"
-source = { registry = "https://pypi.org/simple" }
+version = "0.7.19"
+source = { directory = "../deepagents/libs/deepagents" }
 dependencies = [
     { name = "langchain" },
     { name = "langchain-anthropic" },
@@ -700,9 +700,43 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/df/fd417dffd758c314d6f1226c01fa808ce6cf709fe39cbc742ad4fb820f3e/deepagents-0.7.17.tar.gz", hash = "sha256:de19e9f1a29e862d2efa2242c9246c13ed24eb44ade24ed3f17376e31127423f", size = 302253, upload-time = "2026-09-22T04:47:37.712Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/9c/dc9a66311c5d2bf49147512f6d8c644c23e87bc6f833a740afa903dd9b78/deepagents-0.7.17-py3-none-any.whl", hash = "sha256:5ec2e536acf5fee7246f89657b2d20b9534e81a42bb0f8cc1f493cb8af4fab08", size = 329185, upload-time = "2026-09-22T04:47:36.54Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "av", marker = "extra == 'video'", specifier = ">=18.0.0,<19.0.0" },
+    { name = "langchain", specifier = ">=1.4.2,<2.0.0" },
+    { name = "langchain-anthropic", specifier = ">=1.7.4,<2.0.0" },
+    { name = "langchain-aws", marker = "extra == 'aws'", specifier = ">=1.7.9,<2.0.0" },
+    { name = "langchain-core", specifier = ">=1.6.4,<2.0.0" },
+    { name = "langchain-google-genai", specifier = ">=4.4.0,<5.0.0" },
+    { name = "langchain-openai", marker = "extra == 'openai'", specifier = ">=1.6.5,<2.0.0" },
+    { name = "langchain-quickjs", marker = "extra == 'quickjs'", specifier = ">=0.3.7" },
+    { name = "langsmith", specifier = ">=0.14.0" },
+    { name = "packaging", specifier = ">=23.2" },
+    { name = "pillow", marker = "extra == 'video'", specifier = ">=12.3.0,<13.0.0" },
+    { name = "wcmatch", specifier = ">=11.0" },
+]
+provides-extras = ["aws", "openai", "quickjs", "video"]
+
+[package.metadata.requires-dev]
+test = [
+    { name = "av", specifier = ">=18.0.0,<19.0.0" },
+    { name = "build" },
+    { name = "langchain-openai", specifier = ">=1.6.5,<2.0.0" },
+    { name = "langchain-tests", specifier = ">=1.1.9" },
+    { name = "pillow", specifier = ">=12.3.0,<13.0.0" },
+    { name = "pytest" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pytest-benchmark" },
+    { name = "pytest-codspeed", specifier = ">=5.0.3,<6.0.0" },
+    { name = "pytest-cov" },
+    { name = "pytest-socket" },
+    { name = "pytest-timeout", specifier = ">=2.4.0,<3.0.0" },
+    { name = "pytest-watcher", specifier = ">=0.6.3,<1.0.0" },
+    { name = "pytest-xdist" },
+    { name = "ruff", specifier = ">=0.15.22,<0.16.0" },
+    { name = "twine" },
+    { name = "ty", specifier = ">=0.0.62,<1.0.0" },
 ]
 
 [[package]]
@@ -2217,7 +2251,7 @@ requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.17" },
+    { name = "deepagents", directory = "../deepagents/libs/deepagents" },
     { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fireworks-ai", specifier = ">=1.2.9" },

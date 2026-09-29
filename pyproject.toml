@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.17",
+    "deepagents==0.7.19",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -74,11 +74,16 @@ sandbox-providers = [
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.17", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.19", "wcmatch>=11.0"]
 constraint-dependencies = [
     "langgraph-api>=0.15.0rc1,<0.16",
     "langgraph-runtime-inmem>=0.35.0rc1,<0.36",
 ]
+
+# TEMPORARY: develop against the local deepagents checkout until a release
+# includes the skill tool resolver. Remove this and pin that release instead.
+[tool.uv.sources]
+deepagents = { path = "../deepagents/libs/deepagents" }
 
 [build-system]
 requires = ["hatchling"]

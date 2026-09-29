@@ -1,12 +1,19 @@
 """Exclude personal skill context retained by public thread checkpoints."""
 
-from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from collections.abc import Awaitable, Callable, Mapping
+from typing import cast
 
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
+from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 
 
 class WorkspaceSkillsMiddleware(SkillsMiddleware):
@@ -15,12 +22,13 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
         # Replace the built-in middleware in its existing stack position.
         return "SkillsMiddleware"
 
-    def _scoped_state(self, state: dict[str, Any]) -> SkillsState:
+    def _scoped_state(self, state: Mapping[str, object]) -> SkillsState:
         scoped = dict(state)
-        if "skills_metadata" in scoped:
+        skills = scoped.get("skills_metadata")
+        if isinstance(skills, list):
             scoped["skills_metadata"] = [
                 skill
-                for skill in scoped["skills_metadata"]
+                for skill in skills
                 if isinstance(skill, dict)
                 and isinstance(skill.get("path"), str)
                 and skill["path"].startswith(tuple(self.sources))
@@ -31,7 +39,7 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
     async def abefore_agent(
         self, state: SkillsState, runtime: Runtime, config: RunnableConfig
     ) -> SkillsStateUpdate | None:
-        scoped = self._scoped_state(cast(dict[str, Any], state))
+        scoped = self._scoped_state(state)
         loaded = await super().abefore_agent(scoped, runtime, config)
         if loaded:
             return loaded
@@ -42,6 +50,14 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
 
     async def awrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ) -> ModelResponse:
-        request = request.override(state=self._scoped_state(cast(dict[str, Any], request.state)))
+    ) -> ModelResponse | ExtendedModelResponse:
+        request = request.override(state=self._scoped_state(request.state))
         return await super().awrap_model_call(request, handler)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[object]]],
+    ) -> ToolMessage | Command[object]:
+        request = request.override(state=self._scoped_state(request.state))
+        return await super().awrap_tool_call(request, handler)
