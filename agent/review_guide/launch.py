@@ -231,12 +231,11 @@ async def dispatch_guide_run(
         "thread_id": thread_id,
         "slack_thread": location.dump(),
         "source": "slack",
+        "review_guide_prefetch": prefetch,
     }
     if workspace_slug:
         configurable["workspace"] = workspace_slug
-    if prefetch:
-        configurable["review_guide_prefetch"] = True
-    elif location.channel_id:
+    if not prefetch and location.channel_id:
         await set_session_status(location.channel_id, "processing")
     await create_durable_run(
         thread_id,

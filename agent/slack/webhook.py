@@ -64,6 +64,10 @@ from agent.workspaces.routing import resolve_workspace, workspace_for_repo
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+# Slack opens a new code channel by quoting its origin message on the requester's behalf.
+_CODE_CHANNEL_ORIGIN_QUOTE = re.compile(
+    r"<https://[^|>\s]+/archives/[A-Z0-9]+/p\d+\|Context> from <#"
+)
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
@@ -1122,6 +1126,9 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
     }
+    if review_guide:
+        # The thread keeps the last run's configurable, which may be a prepare run's.
+        configurable["review_guide_prefetch"] = False
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login
@@ -1183,6 +1190,13 @@ async def _process_slack_mention_impl(
     if message_update and review_guide:
         common.logger.info(
             "Ignoring a Slack message edit in a review guide", extra={"agent_thread_id": thread_id}
+        )
+        return False
+    # The guide starts its own first turn; this quote would only queue a second one behind it.
+    if review_guide and _CODE_CHANNEL_ORIGIN_QUOTE.match(text):
+        common.logger.info(
+            "Ignoring the code channel's origin quote in a review guide",
+            extra={"agent_thread_id": thread_id},
         )
         return False
     # A person writing in a closed guide wants it back.
