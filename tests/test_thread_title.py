@@ -1,6 +1,7 @@
 import asyncio
 import contextvars
-from typing import Any, cast
+from types import SimpleNamespace
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -88,6 +89,44 @@ async def test_generate_and_store_thread_title_only_replaces_explicit_seed(
     )
 
     assert threads.metadata == expected
+
+
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+async def test_title_persistence_failure_is_bounded_and_logged(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: Literal["error", "timeout"],
+) -> None:
+    threads = _Threads({"source": "dashboard", "title": "Fix the bug", "title_seed": "Fix the bug"})
+    cancelled = asyncio.Event()
+
+    async def fail_update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        if failure == "error":
+            raise OSError("Title storage unavailable")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(threads, "update", fail_update)
+    monkeypatch.setattr("agent.thread_title.TITLE_GENERATION_TIMEOUT_SECONDS", 0.01)
+    await asyncio.wait_for(
+        generate_and_store_thread_title(
+            thread_id="thread-123",
+            conversation="Fix the bug",
+            model=cast(BaseChatModel, _Model()),
+            client=SimpleNamespace(threads=threads),
+        ),
+        timeout=1,
+    )
+
+    assert threads.metadata["title"] == "Fix the bug"
+    assert threads.metadata["title_seed"] == "Fix the bug"
+    assert cancelled.is_set() is (failure == "timeout")
+    record = next(r for r in caplog.records if r.message == "Thread title persistence failed")
+    assert record.__dict__["thread_id"] == "thread-123"
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], TimeoutError if failure == "timeout" else OSError)
 
 
 class _PromotingThreads(_Threads):
