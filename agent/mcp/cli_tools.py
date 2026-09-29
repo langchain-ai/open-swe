@@ -9,8 +9,13 @@ from langgraph.config import var_child_runnable_config
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
 
 from agent.dashboard.deps import SESSION_DEP, session_is_admin
+from agent.mcp.instance import instance_mcp_source
+from agent.mcp.runtime import load_mcp_tools
+from agent.mcp.user import user_mcp_source
+from agent.mcp.workspace import workspace_mcp_source
 from agent.sandboxes.tool_runtime import tool_parameters
 from agent.tools.mcp_exposure import EXPOSED_TOOLS, Access
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 router = APIRouter(tags=["cli-mcp-tools"])
 _json = TypeAdapter(JsonValue)
@@ -53,20 +58,29 @@ def _tools() -> dict[str, tuple[BaseTool, Access]]:
     }
 
 
-def _available(session: dict[str, object]) -> dict[str, BaseTool]:
+async def _available(session: dict[str, object]) -> dict[str, tuple[BaseTool, Access]]:
     admin = session_is_admin(session)
-    return {name: tool for name, (tool, access) in _tools().items() if access == "session" or admin}
+    tools = {
+        name: (tool, access)
+        for name, (tool, access) in _tools().items()
+        if access == "session" or admin
+    }
+    sources = [instance_mcp_source(), workspace_mcp_source(DEFAULT_WORKSPACE_SLUG)]
+    sources.append(user_mcp_source(str(session["sub"])))
+    for tool in await load_mcp_tools(*sources):
+        if tool.name in tools:
+            raise ValueError(f"MCP tool name collides with a local tool: {tool.name}")
+        tools[tool.name] = (tool, "session")
+    return tools
 
 
 @router.get("/cli/mcp/tools", response_model=list[CLITool])
 async def cli_mcp_tools(session: dict[str, object] = SESSION_DEP) -> list[CLITool]:
-    admin = session_is_admin(session)
     return [
         CLITool(
             name=name, description=tool.description, parameters=tool_parameters(tool), access=access
         )
-        for name, (tool, access) in sorted(_tools().items())
-        if access == "session" or admin
+        for name, (tool, access) in sorted((await _available(session)).items())
     ]
 
 
@@ -74,9 +88,10 @@ async def cli_mcp_tools(session: dict[str, object] = SESSION_DEP) -> list[CLIToo
 async def cli_mcp_invoke(
     name: str, arguments: CLIArguments, session: dict[str, object] = SESSION_DEP
 ) -> CLIResult:
-    tool = _available(session).get(name)
-    if tool is None:
+    entry = (await _available(session)).get(name)
+    if entry is None:
         raise HTTPException(404, "Tool is unavailable")
+    tool, _access = entry
     config = {
         "configurable": {
             "source": "mcp",

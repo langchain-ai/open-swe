@@ -1,11 +1,15 @@
 """CLI MCP reuses the Python tool contract and rechecks caller permissions."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from mcp.types import Tool
 from pydantic import ValidationError
 
+from agent.mcp import MCPConnection, runtime
+from agent.mcp import cli_tools as cli_mcp
 from agent.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
 
 
@@ -50,3 +54,87 @@ async def test_invoke_validates_python_parameters(monkeypatch: pytest.MonkeyPatc
         await cli_mcp_invoke(
             "manage_feature_flags", CLIArguments(root={"action": "invalid"}), {"sub": "admin"}
         )
+
+
+@pytest.mark.asyncio
+async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = {
+        "linear": MCPConnection(
+            name="linear",
+            url="https://instance.example/mcp",
+            allowed_tools=["search"],
+            revision="instance-revision",
+            updated_at="2026-09-09T00:00:00Z",
+        )
+    }
+    personal = {
+        "linear": MCPConnection(
+            name="linear",
+            url="https://alice.example/mcp",
+            allowed_tools=["search"],
+            revision="user-revision",
+            updated_at="2026-09-09T00:00:00Z",
+        )
+    }
+
+    def source(namespace: tuple[str, ...], records: dict[str, MCPConnection]) -> runtime.MCPSource:
+        async def list_connections() -> list[MCPConnection]:
+            return list(records.values())
+
+        async def get_connection(name: str) -> MCPConnection | None:
+            return records.get(name)
+
+        return runtime.MCPSource(namespace, list_connections, get_connection)
+
+    monkeypatch.setattr(
+        cli_mcp, "instance_mcp_source", lambda: source(("instance_mcps",), instance)
+    )
+    monkeypatch.setattr(
+        cli_mcp,
+        "workspace_mcp_source",
+        lambda workspace: source(("workspace_mcps", workspace), {}),
+    )
+    monkeypatch.setattr(
+        cli_mcp,
+        "user_mcp_source",
+        lambda login: source(("user_mcps", login), personal if login == "alice" else {}),
+    )
+
+    async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+        return [Tool(name="search", inputSchema={"type": "object"})]
+
+    @asynccontextmanager
+    async def session(connection: dict[str, object], **kwargs: object):
+        class RemoteSession:
+            async def initialize(self) -> None:
+                return None
+
+            async def call_tool(self, name: str, arguments: dict[str, object], **kwargs: object):
+                from mcp.types import CallToolResult, TextContent
+
+                return CallToolResult(
+                    content=[TextContent(type="text", text=str(connection["url"]))]
+                )
+
+        yield RemoteSession()
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    alice = {"sub": "alice"}
+    bob = {"sub": "bob"}
+    alice_tools = await cli_mcp_tools(alice)
+    remote = next(tool for tool in alice_tools if tool.name.startswith("mcp_linear_search_"))
+    assert remote.parameters["type"] == "object"
+    assert next(tool for tool in await cli_mcp_tools(bob) if tool.name == remote.name)
+    assert "alice.example" in str(
+        (await cli_mcp_invoke(remote.name, CLIArguments(root={}), alice)).content
+    )
+    assert "instance.example" in str(
+        (await cli_mcp_invoke(remote.name, CLIArguments(root={}), bob)).content
+    )
+    personal["linear"] = personal["linear"].model_copy(update={"allowed_tools": []})
+    with pytest.raises(HTTPException) as exc:
+        await cli_mcp_invoke(remote.name, CLIArguments(root={}), alice)
+    assert exc.value.status_code == 404
