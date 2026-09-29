@@ -126,8 +126,8 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Preferred repositories
-            are available in <WorkspaceReposPopover repos={record.repos} /> to
+            Runs on the base snapshot to build the image. Bound repositories are
+            available in <WorkspaceReposPopover repos={record.repos} /> to
             preload; runs clone any other repository on demand.
           </span>
           <WorkspaceScriptEditor
