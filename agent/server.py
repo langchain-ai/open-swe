@@ -1619,6 +1619,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if not model_supports_images(model_id):
             image_fallback.add_text_only_model(main_model)
 
+    configurable["image_model_fallback_enabled"] = image_fallback is not None
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         assert model_routing_mode is not None

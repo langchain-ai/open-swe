@@ -552,6 +552,57 @@ async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None
     assert ("slack_read_channel_messages" in subagent_names) is private_thread
 
 
+async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
+    from langchain_core.messages import convert_to_messages
+    from langgraph.store.memory import InMemoryStore
+
+    from agent.middleware.check_message_queue import (
+        LinearNotifyState,
+        check_message_queue_before_model,
+    )
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+
+    config = _base_config()
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    store = InMemoryStore()
+    namespace = ("queue", "thread-ctx")
+    url = "https://example.com/image.png"
+    image = {"type": "image_url", "image_url": {"url": url}}
+    await store.aput(
+        namespace,
+        "pending_messages",
+        {"messages": [{"content": {"text": "Explain this", "image_urls": [url]}}]},
+    )
+    with (
+        patch("agent.middleware.check_message_queue.get_config", return_value=config),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+        patch("agent.middleware.check_message_queue.fetch_image_block", return_value=image),
+    ):
+        update = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
+    assert update is not None
+    messages = convert_to_messages(update["messages"])
+    content = messages[-1].content
+    assert isinstance(content, list) and image in content
+    fallback = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, ImageModelFallbackMiddleware)
+    )
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    await fallback.awrap_model_call(
+        ModelRequest(model=cast(BaseChatModel, captured["model"]), messages=messages), handler
+    )
+    assert handler.call_args.args[0].model is not captured["model"]
+    assert handler.call_args.args[0].messages == messages
+    assert await store.aget(namespace, "pending_messages") is None
+
+
 @pytest.mark.parametrize("image_source", ["initial", "retained", "tool"])
 @pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
 async def test_text_only_adaptive_route_uses_vision_fallback(
