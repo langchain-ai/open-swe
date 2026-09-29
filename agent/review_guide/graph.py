@@ -1,9 +1,10 @@
 """Review guide graph.
 
 Walks one person through a pull request in a Slack code channel, a small chunk
-at a time: the guide stages a chunk, shows and explains it, and commits it once
-they say it looks good. Every run first re-syncs the checkout with the PR head,
-carrying over every line the person already approved.
+at a time: the guide plans chunks as line ranges, and the server shows each one
+and records it once the reader says it looks good. Every run first pins the
+checkout to the PR head; a plan for an older head is dropped, and lines the
+reader already approved stay out of the next one.
 """
 
 import logging
@@ -41,6 +42,7 @@ from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.walkthrough import Walkthrough
 from agent.review_guide import git
 from agent.review_guide.context import guide_repo_dir
+from agent.review_guide.diff import parse, unseen
 from agent.review_guide.github import fetch_head
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.run_config import RunConfig
@@ -54,10 +56,18 @@ from agent.runtime import (
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.approve_pull_request import approve_pull_request
-from agent.tools.approve_review_chunk import approve_review_chunk
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
 from agent.tools.record_author_feedback import record_author_feedback
 from agent.tools.review_reply import review_reply
+from agent.tools.review_walkthrough import (
+    approve_review_chunk,
+    finish_walkthrough,
+    plan_walkthrough,
+    read_changes,
+    show_next_chunk,
+    show_other,
+    skip_review_chunks,
+)
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -112,49 +122,49 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
                 pr_number=pr.number,
                 repo_full_name=pr.repo_full_name,
                 repo_dir=repo_dir,
-                patch_dir=f"{work_dir}/.guide-patches",
                 author=author,
                 draft=head.draft,
                 human_input=(await Walkthrough.human_input_for(pr.id) or "") if author else "",
             ),
         }
-        if await git.built_for(backend, repo_dir) == (head.base.sha, head.head.sha):
+        if await git.built_for(backend, repo_dir) != (head.base.sha, head.head.sha):
+            ready = await prepare_review_repo(
+                backend,
+                work_dir=work_dir,
+                repo_owner=pr.owner,
+                repo_name=pr.repo,
+                head_sha=head.head.sha,
+                pr_number=pr.number,
+                base_sha=head.base.sha,
+            )
+            if not ready:
+                raise RuntimeError("review guide could not check out the pull request")
+            await git.pin(backend, repo_dir, base_sha=head.base.sha, head_sha=head.head.sha)
+        plan = session.plan
+        if plan is None or plan.head_sha == head.head.sha:
             return updates
-        ready = await prepare_review_repo(
-            backend,
-            work_dir=work_dir,
-            repo_owner=pr.owner,
-            repo_name=pr.repo,
-            head_sha=head.head.sha,
-            pr_number=pr.number,
-            base_sha=head.base.sha,
-        )
-        if not ready:
-            raise RuntimeError("review guide could not check out the pull request")
-        rebuilt = await git.rebuild(
-            backend,
-            repo_dir,
-            base_sha=head.base.sha,
-            head_sha=head.head.sha,
-            seen=await session.seen_lines(),
-            patch_path=f"{work_dir}/.review-guide-carried.patch",
-        )
+        changes = parse(await git.pr_diff(backend, repo_dir))
+        left = unseen(changes, await session.seen_lines())
+        await session.save_plan(None)
         logger.info(
-            "Rebuilt review guide checkout",
+            "Review guide plan dropped for a newer head",
             extra={
                 "agent_thread_id": self._thread_id,
                 "pr_number": pr.number,
                 "guide_head_sha": head.head.sha,
-                "guide_carried_lines": rebuilt.carried_lines,
+                "guide_unseen_lines": len(left),
             },
         )
         updates["messages"] = [
             HumanMessage(
                 content=prompt(
-                    "review-guide/rebuilt",
+                    "review-guide/pr-moved",
                     head_sha=head.head.sha,
-                    carried_lines=rebuilt.carried_lines,
-                    remaining=(await git.unstaged_stat(backend, repo_dir)).strip(),
+                    unseen="\n".join(
+                        change.stat([line for line in left if line.path == change.path])
+                        for change in changes
+                        if any(line.path == change.path for line in left)
+                    ),
                 )
             )
         ]
@@ -211,7 +221,19 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
-        tools=apply_tool_descriptions([review_reply, approve_review_chunk, *closing_tools]),
+        tools=apply_tool_descriptions(
+            [
+                read_changes,
+                plan_walkthrough,
+                show_next_chunk,
+                show_other,
+                approve_review_chunk,
+                skip_review_chunks,
+                finish_walkthrough,
+                review_reply,
+                *closing_tools,
+            ]
+        ),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

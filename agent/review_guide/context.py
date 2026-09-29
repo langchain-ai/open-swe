@@ -4,6 +4,10 @@ from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from agent.review_guide import git
+from agent.review_guide.diff import ChangedLine, FileChange, parse, unseen
+from agent.review_guide.plan import LineRef
+from agent.review_guide.render import MessageRenderer, render_chunk
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
@@ -42,6 +46,7 @@ class GuideContext:
     session: ReviewGuideSession
     backend: SandboxBackendProtocol
     repo_dir: str
+    head_sha: str
 
     @classmethod
     async def current(cls) -> Self:
@@ -50,8 +55,49 @@ class GuideContext:
         if thread_id is None or session is None:
             raise GuideUnavailableError("this thread is not a review guide session")
         backend = get_cached_sandbox_backend(thread_id)
-        return cls(
-            session=session,
-            backend=backend,
-            repo_dir=await guide_repo_dir(backend, session.pull_request.repo),
-        )
+        repo_dir = await guide_repo_dir(backend, session.pull_request.repo)
+        built = await git.built_for(backend, repo_dir)
+        if built is None:
+            raise GuideUnavailableError("the checkout is not ready; try again next turn")
+        return cls(session=session, backend=backend, repo_dir=repo_dir, head_sha=built[1])
+
+    async def changes(self) -> list[FileChange]:
+        return parse(await git.pr_diff(self.backend, self.repo_dir))
+
+    async def unseen(self, changes: list[FileChange]) -> list[ChangedLine]:
+        return unseen(changes, await self.session.seen_lines())
+
+    async def render(self, refs: list[LineRef]) -> str:
+        """``refs`` as the reader sees a chunk: its own lines only, at real line numbers."""
+        changes = await self.changes()
+        index = {LineRef.of(line): line for change in changes for line in change.lines}
+        lines = [index[ref] for ref in refs if ref in index]
+        paths = {line.path for line in lines}
+        head = {
+            change.path: (
+                await git.head_file(self.backend, self.repo_dir, change.path)
+            ).splitlines()
+            for change in changes
+            if change.path in paths and not change.deleted
+        }
+        added = {
+            change.path: {line.lineno for line in change.lines if line.sign == "+"}
+            for change in changes
+        }
+        return render_chunk(lines, head, added)
+
+    def renderer(self) -> MessageRenderer:
+        async def read_head(path: str) -> str:
+            return await git.head_file(self.backend, self.repo_dir, path)
+
+        async def file_diff(path: str) -> str:
+            return await git.pr_diff(self.backend, self.repo_dir, path=path, zero=False)
+
+        async def chunk() -> str:
+            plan = self.session.plan
+            current = plan.on_screen() if plan else None
+            if plan is None or current is None:
+                return "_(no chunk is on screen)_"
+            return await self.render(plan.chunks[current].lines)
+
+        return MessageRenderer(read_head=read_head, file_diff=file_diff, chunk=chunk)

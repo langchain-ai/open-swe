@@ -76,13 +76,15 @@ class SteeringHistory(BaseModel):
         turns = [turn for thread_id in thread_ids for turn in await cls._human_turns(thread_id)]
         if not turns:
             return None
-        # The author's feedback while being walked through what the agent did steers the PR too.
-        turns += [
-            turn
-            for thread_id in await ReviewGuideSession.author_threads(pull_request.id)
-            for turn in await cls._human_turns(thread_id)
-            if turn.text not in BUTTON_LABELS
-        ]
+        # The author's feedback while being walked through what the agent did steers the PR
+        # too. A guide forked from the builder repeats the builder's turns under the same ids.
+        seen = {turn.message_id for turn in turns if turn.message_id}
+        for thread_id in await ReviewGuideSession.author_threads(pull_request.id):
+            for turn in await cls._human_turns(thread_id):
+                if turn.text in BUTTON_LABELS or (turn.message_id and turn.message_id in seen):
+                    continue
+                seen.add(turn.message_id)
+                turns.append(turn)
         follow_ups = turns[1:]
         return cls(
             request=turns[0],

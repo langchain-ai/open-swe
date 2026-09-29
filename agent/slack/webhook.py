@@ -1177,7 +1177,12 @@ async def _process_slack_mention_impl(
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
-    # for the next message.
+    # for the next message. The review guide never drains that queue, so its edits are dropped.
+    if message_update and review_guide:
+        common.logger.info(
+            "Ignoring a Slack message edit in a review guide", extra={"agent_thread_id": thread_id}
+        )
+        return False
     if message_update and await queue_message_for_thread(
         thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
     ):
@@ -1196,15 +1201,19 @@ async def _process_slack_mention_impl(
 
     # Anything said in a DM is said to Open SWE, and the person expects the next
     # thing they type to redirect the work in front of them rather than queue
-    # behind it.
-    explicitly_tagged = concierge_mode or _interrupts_active_run(
-        text,
-        bot_user_id,
-        treat_all_messages_as_mentions=treat_all_messages_as_mentions
-        and not request.kitchen_channel,
-        code_channel=code_channel,
-        message_update=message_update,
-        explicit_request=request.explicit_request,
+    # behind it. A review guide's turns wait instead: interrupting one mid-post
+    # loses the chunk it was showing.
+    explicitly_tagged = not review_guide and (
+        concierge_mode
+        or _interrupts_active_run(
+            text,
+            bot_user_id,
+            treat_all_messages_as_mentions=treat_all_messages_as_mentions
+            and not request.kitchen_channel,
+            code_channel=code_channel,
+            message_update=message_update,
+            explicit_request=request.explicit_request,
+        )
     )
     visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(
         langgraph_client, thread_id
@@ -1281,6 +1290,7 @@ async def _process_slack_mention_impl(
             original_message_ts=original_message_ts,
             recipient_user_id=user_id,
             recipient_team_id=request.team_id,
+            assistant_id=REVIEW_GUIDE_ASSISTANT_ID if review_guide else "agent",
         )
     if is_first_mention:
         if isinstance(run_id, str) and run_id:

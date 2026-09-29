@@ -284,6 +284,7 @@ async def stream_slack_thinking_steps(
     original_message_ts: str,
     recipient_user_id: str = "",
     recipient_team_id: str = "",
+    assistant_id: str = "agent",
 ) -> None:
     """Mirror one run's structured tool lifecycle into a Slack timeline."""
     stream = SlackThinkingStream(
@@ -302,7 +303,7 @@ async def stream_slack_thinking_steps(
     status = "error"
     try:
         active = False
-        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+        async with client.threads.stream(thread_id, assistant_id=assistant_id) as thread_stream:
             async for event in thread_stream.subscribe(["lifecycle", "tools"]):
                 lifecycle = root_lifecycle(event)
                 if lifecycle is not None and lifecycle[0] == run_id:

@@ -1,8 +1,10 @@
 """Open a review guide code channel for a pull request, and wake it when the PR moves."""
 
 import logging
+import time
 from uuid import uuid4
 
+from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel
 
 from agent.dashboard.profiles import get_valid_access_token
@@ -25,6 +27,7 @@ from agent.slack.code_channels import (
 )
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
+from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import upsert_agent_thread_metadata
 
@@ -76,7 +79,8 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         if head.author.lower() == login.lower() or await pull_request.is_authored_by(login)
         else "reviewer"
     )
-    thread_id = str(uuid4())
+    client = langgraph_client()
+    thread_id = await _fork_builder(client, pull_request, login) or str(uuid4())
     channel_id, error = await create_code_channel(
         name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
         session_id=thread_id,
@@ -93,7 +97,6 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         team_id=start.team_id,
     )
     try:
-        client = langgraph_client()
         if not await upsert_agent_thread_metadata(
             thread_id,
             source="slack",
@@ -143,6 +146,56 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         workspace_slug=start.workspace_slug,
     )
     return StartedGuide(thread_id=thread_id, channel_id=channel_id)
+
+
+class _ThreadCopy(BaseModel):
+    thread_id: str
+    metadata: dict[str, object] = {}
+
+
+class _BuilderMetadata(BaseModel):
+    visibility: str | None = None
+
+
+async def _fork_builder(
+    client: LangGraphClient, pull_request: PullRequest, login: str
+) -> str | None:
+    """A copy of the thread that built the PR, so the guide remembers why, or ``None``.
+
+    The copy keeps every checkpoint but none of the builder's metadata: an
+    inherited ``sandbox_id`` or Slack location would point the guide at the
+    builder's sandbox and channel. Private builders are never copied, because
+    the guide talks in a channel anyone can join.
+    """
+    builder = pull_request.agent_thread_id or pull_request.primary_thread_id
+    if not builder:
+        return None
+    try:
+        source = _BuilderMetadata.model_validate(thread_metadata(await client.threads.get(builder)))
+        if source.visibility == "private":
+            return None
+        copied = _ThreadCopy.model_validate(await client.threads.copy(builder))
+        await client.threads.update(
+            thread_id=copied.thread_id,
+            metadata={
+                **dict.fromkeys(copied.metadata),
+                "visibility": "public",
+                "owner_type": "user",
+                "owner_login": login,
+                "created_at_ms": int(time.time() * 1000),
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Could not fork the thread that built a pull request",
+            extra={"agent_thread_id": builder, "pr_number": pull_request.number},
+        )
+        return None
+    logger.info(
+        "Forked the builder thread for a review guide",
+        extra={"agent_thread_id": copied.thread_id, "builder_thread_id": builder},
+    )
+    return copied.thread_id
 
 
 async def dispatch_guide_run(

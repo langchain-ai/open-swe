@@ -1,182 +1,192 @@
-import asyncio
 import shutil
 import subprocess
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from agent.review_guide import git
-from agent.review_guide.hunks import changed_line_keys, line_key
-from agent.review_guide.render import MessageRenderer, RenderError
+from agent.review_guide.diff import FileChange, parse, unseen
+from agent.review_guide.plan import ChunkSpec, FileRanges, PlanError, build_plan
+from agent.review_guide.render import MessageRenderer, RenderError, render_chunk
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
-
-@dataclass
-class _Result:
-    output: str
-    exit_code: int
-
-
-class _LocalShell:
-    async def aexecute(self, command: str, timeout: int | None = None) -> _Result:  # noqa: ARG002
-        process = await asyncio.create_subprocess_exec(
-            "bash",
-            "-c",
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await process.communicate()
-        return _Result(stdout.decode(), process.returncode or 0)
-
-    async def aupload_files(self, files: list[tuple[str, bytes]]) -> None:
-        for path, content in files:
-            Path(path).write_bytes(content)
+BASE_MIGRATION = "import os\n\ndef a():\n    return 1\n"
+MODULE = (
+    '"""Sessions."""\n'
+    "\n"
+    "from uuid import UUID\n"
+    "\n"
+    "from sqlalchemy import select\n"
+    "\n"
+    "\n"
+    "class Session:\n"
+    "    thread_id: str\n"
+    "    user_id: UUID\n"
+)
 
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=repo, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    ).stdout
 
 
-@dataclass
-class _Repos:
-    """Commits are made in ``origin``; the guide works in ``checkout``, which fetches them."""
+def _commit(repo: Path, files: dict[str, str | None], message: str) -> str:
+    for name, content in files.items():
+        if content is None:
+            _git(repo, "rm", "-q", name)
+        else:
+            (repo / name).write_text(content)
+            _git(repo, "add", name)
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD").strip()
 
-    origin: Path
-    checkout: Path
-    patch: Path
 
-    def commit(self, branch: str, files: dict[str, str | None], *, start: str = "") -> str:
-        _git(self.origin, "checkout", "-q", *(["-b", branch, start] if start else [branch]))
-        for name, content in files.items():
-            if content is None:
-                _git(self.origin, "rm", "-q", name)
-            else:
-                (self.origin / name).write_text(content)
-                _git(self.origin, "add", name)
-        _git(self.origin, "commit", "-qm", branch)
-        _git(self.checkout, "fetch", "-q", str(self.origin), "+refs/heads/*:refs/remotes/o/*")
-        return _git(self.origin, "rev-parse", "HEAD")
+def _changes(repo: Path, base: str, head: str) -> list[FileChange]:
+    return parse(_git(repo, "diff", "-U0", "--no-renames", f"{base}...{head}"))
 
-    def stage(self, patch: str) -> None:
-        self.patch.write_text(patch)
-        _git(self.checkout, "apply", "--cached", "--unidiff-zero", str(self.patch))
 
-    async def rebuild(self, base: str, head: str, seen: Counter[str]) -> git.Rebuild:
-        return await git.rebuild(
-            _LocalShell(),
-            str(self.checkout),
-            base_sha=base,
-            head_sha=head,
-            seen=seen,
-            patch_path=str(self.patch.with_name("carried.patch")),
-        )
+def _head(repo: Path, head: str, changes: list[FileChange]) -> dict[str, list[str]]:
+    return {
+        c.path: _git(repo, "show", f"{head}:{c.path}").splitlines()
+        for c in changes
+        if not c.deleted
+    }
+
+
+def _added(changes: list[FileChange]) -> dict[str, set[int]]:
+    return {c.path: {line.lineno for line in c.lines if line.sign == "+"} for c in changes}
 
 
 @pytest.fixture
-def repos(tmp_path: Path) -> _Repos:
-    origin, checkout = tmp_path / "origin", tmp_path / "checkout"
-    for repo in (origin, checkout):
-        repo.mkdir()
-        _git(repo, "init", "-q", "-b", "main")
-        _git(repo, "config", "user.name", "t")
-        _git(repo, "config", "user.email", "t@example.com")
-    (origin / "core.py").write_text("import os\n\ndef a():\n    return 1\n")
-    (origin / "gone.txt").write_text("x\n")
-    _git(origin, "add", ".")
-    _git(origin, "commit", "-qm", "base")
-    _git(checkout, "fetch", "-q", str(origin), "+refs/heads/*:refs/remotes/o/*")
-    return _Repos(origin=origin, checkout=checkout, patch=tmp_path / "chunk.patch")
+def repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "user.email", "t@example.com")
+    _commit(repo, {"core.py": BASE_MIGRATION, "gone.txt": "x\n"}, "base")
+    return repo
 
 
-async def test_approved_lines_are_not_shown_again_after_a_rebase(repos: _Repos) -> None:
-    base = _git(repos.origin, "rev-parse", "main")
-    head = repos.commit(
-        "feature",
-        {
-            "core.py": "import os\n\ndef a():\n    return 10\n\ndef c():\n    return a()\n",
-            "cli.py": "from core import c\nprint(c())\n",
-            "gone.txt": None,
-        },
-        start="main",
-    )
-    shell = _LocalShell()
-    checkout = str(repos.checkout)
-    assert (await repos.rebuild(base, head, Counter())).carried_lines == 0
+def test_a_new_file_shows_its_class_as_source_and_leaves_its_imports_to_other(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"sessions.py": MODULE}, "add sessions")
+    changes = _changes(repo, base, head)
 
-    repos.stage(
-        "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n"
-        "@@ -4 +4 @@\n-    return 1\n+    return 10\n"
-        "diff --git a/cli.py b/cli.py\nnew file mode 100644\n--- /dev/null\n+++ b/cli.py\n"
-        "@@ -0,0 +1 @@\n+from core import c\n"
-    )
-    await git.mark_shown(shell, checkout)
-    assert await git.shown_matches_index(shell, checkout)
-    seen = changed_line_keys(await git.staged_diff(shell, checkout, zero=True))
-    await git.commit_approved(shell, checkout, "Return 10 from `a`")
-
-    # A force-push onto a newer base, keeping the approved lines and adding new ones around them.
-    new_base = repos.commit("main", {"other.txt": "unrelated\n"})
-    new_head = repos.commit(
-        "feature-rebased",
-        {
-            "core.py": "import os\n\ndef a():\n    return 10\n\ndef c():\n    return a() + 1\n",
-            "cli.py": "from core import c\nprint(c())\nprint('done')\n",
-            "gone.txt": None,
-        },
-        start="main",
-    )
-    rebuilt = await repos.rebuild(new_base, new_head, seen)
-
-    assert rebuilt.carried_lines == 3
-    assert await git.built_for(shell, checkout) == (new_base, new_head)
-    assert changed_line_keys(_git(repos.checkout, "diff", "-U0", "--no-renames") + "\n") == Counter(
+    plan = build_plan(
+        head,
+        changes,
+        unseen(changes, Counter()),
         [
-            line_key("core.py", "+", ""),
-            line_key("core.py", "+", "def c():"),
-            line_key("core.py", "+", "    return a() + 1"),
-            line_key("cli.py", "+", "print(c())"),
-            line_key("cli.py", "+", "print('done')"),
-            line_key("gone.txt", "-", "x"),
-        ]
+            ChunkSpec(
+                title="The `Session` model", files=[FileRanges(path="sessions.py", added=[(8, 10)])]
+            )
+        ],
     )
-    _git(repos.checkout, "add", "-A")
-    assert _git(repos.checkout, "write-tree") == _git(
-        repos.checkout, "rev-parse", f"{new_head}^{{tree}}"
+    rendered = render_chunk(
+        [line for c in changes for line in c.lines if line.lineno >= 8],
+        _head(repo, head, changes),
+        _added(changes),
     )
 
-
-async def test_restaging_after_showing_is_not_the_chunk_the_reader_saw(repos: _Repos) -> None:
-    base = _git(repos.origin, "rev-parse", "main")
-    head = repos.commit("f", {"core.py": "import sys\n\ndef a():\n    return 2\n"}, start="main")
-    shell = _LocalShell()
-    await repos.rebuild(base, head, Counter())
-    repos.stage(
-        "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n"
-        "@@ -4 +4 @@\n-    return 1\n+    return 2\n"
+    assert {(ref.path, ref.lineno) for ref in plan.other} == {
+        ("sessions.py", n) for n in range(1, 8)
+    }
+    assert rendered == (
+        "`sessions.py` L8–10\n```python\nclass Session:\n    thread_id: str\n    user_id: UUID\n```"
     )
-    await git.mark_shown(shell, str(repos.checkout))
-    _git(repos.checkout, "add", "core.py")
-
-    assert not await git.shown_matches_index(shell, str(repos.checkout))
 
 
-async def test_messages_quote_the_checkout_and_cannot_escape_the_sandbox(repos: _Repos) -> None:
-    base = _git(repos.origin, "rev-parse", "main")
-    head = repos.commit("f", {"core.py": "import os\n\ndef a():\n    return 2\n"}, start="main")
-    await repos.rebuild(base, head, Counter())
-    _git(repos.checkout, "add", "core.py")
-    renderer = MessageRenderer(_LocalShell(), str(repos.checkout))
+def test_a_changed_line_renders_as_a_diff_with_unchanged_context(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"core.py": "import os\n\ndef a():\n    return 2\n"}, "return 2")
+    changes = _changes(repo, base, head)
 
-    text = await renderer.render('Returns 2 now.\n{{ staged() }}\n{{ code("core.py", 3, 4) }}')
+    rendered = render_chunk(changes[0].lines, _head(repo, head, changes), _added(changes))
 
-    assert "+    return 2" in text
-    assert "```py\ndef a():\n    return 2\n```" in text
-    assert renderer.quoted_chunk
+    assert rendered == (
+        "`core.py`\n```diff\n@@ -2,3 +2,3 @@\n \n def a():\n-    return 1\n+    return 2\n```"
+    )
+
+
+def test_the_walkthrough_cannot_finish_until_every_chunk_and_other_is_settled(
+    repo: Path,
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo,
+        {"core.py": "import os\nimport sys\n\ndef a():\n    return 2\n", "gone.txt": None},
+        "change",
+    )
+    changes = _changes(repo, base, head)
+    chunk = ChunkSpec(title="Return 2", files=[FileRanges(path="core.py", added=[(5, 5)])])
+
+    with pytest.raises(PlanError, match="already in chunk 1"):
+        build_plan(head, changes, unseen(changes, Counter()), [chunk, chunk])
+    with pytest.raises(PlanError, match="holds no unreviewed changed line"):
+        build_plan(
+            head,
+            changes,
+            unseen(changes, Counter()),
+            [ChunkSpec(title="Nothing", files=[FileRanges(path="core.py", added=[(1, 1)])])],
+        )
+
+    plan = build_plan(head, changes, unseen(changes, Counter()), [chunk])
+    assert len(plan.unfinished()) == 2
+    plan.chunks[0].status = "approved"
+    assert plan.unfinished() == [f"Other ({len(plan.other)} lines) is planned"]
+    plan.other_status = "approved"
+    assert plan.unfinished() == []
+    assert (
+        plan.coverage()
+        == "Walked through 1 of 1 chunks (1 changed lines); Other, 3 lines, summarized."
+    )
+
+
+def test_approved_lines_stay_approved_after_a_rebase(repo: Path) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo, {"core.py": "import os\n\ndef a():\n    return 10\n", "cli.py": "print(1)\n"}, "f"
+    )
+    changes = _changes(repo, base, head)
+    seen = Counter(line.key for c in changes for line in c.lines if line.path == "core.py")
+
+    _git(repo, "checkout", "-q", "main")
+    new_base = _commit(repo, {"other.txt": "unrelated\n"}, "main moves on")
+    _git(repo, "checkout", "-qb", "rebased")
+    new_head = _commit(
+        repo,
+        {"core.py": "import os\n\ndef a():\n    return 10\n", "cli.py": "print(1)\nprint(2)\n"},
+        "f, rebased",
+    )
+    left = unseen(_changes(repo, new_base, new_head), seen)
+
+    assert [(line.path, line.sign, line.text) for line in left] == [
+        ("cli.py", "+", "print(1)"),
+        ("cli.py", "+", "print(2)"),
+    ]
+
+
+async def test_messages_quote_through_helpers_and_cannot_escape_the_sandbox() -> None:
+    async def read_head(path: str) -> str:
+        return "one\ntwo\nthree\n" if path == "a.py" else ""
+
+    async def file_diff(path: str) -> str:
+        return f"+{path}"
+
+    async def chunk() -> str:
+        return "CHUNK"
+
+    renderer = MessageRenderer(read_head=read_head, file_diff=file_diff, chunk=chunk)
+
+    text = await renderer.render('See {{ code("a.py", 2, 3) }} and {{ chunk() }}')
+
+    assert text == "See ```python\ntwo\nthree\n``` and CHUNK"
     with pytest.raises(RenderError):
-        await renderer.render("{{ staged.__globals__ }}")
+        await renderer.render("{{ chunk.__globals__ }}")
