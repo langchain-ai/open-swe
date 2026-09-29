@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import posixpath
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -1279,8 +1280,8 @@ async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[st
         name = posixpath.basename(path)
         url = await _upload_attachment(owner, repo, name, content_type, content)
     except ValueError as exc:
+        logger.warning("PR attachment upload failed", extra={"error": str(exc)})
         return _upload_failure(str(exc))
-    markdown = (
-        url if content_type.startswith("video/") else f"![{posixpath.splitext(name)[0]}]({url})"
-    )
+    alt = re.sub(r"[\\\[\]\r\n]", " ", posixpath.splitext(name)[0])
+    markdown = url if content_type.startswith("video/") else f"![{alt}]({url})"
     return {"success": True, "url": url, "markdown": markdown}
