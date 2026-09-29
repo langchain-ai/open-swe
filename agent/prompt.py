@@ -75,14 +75,17 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
     return prompt("system/repo-instructions", instructions=instructions.strip())
 
 
-def _render_workspace_section(name: str | None, instructions: str | None) -> str:
-    if not instructions or not instructions.strip():
+def _render_workspace_section(
+    name: str | None, instructions: str | None, repos: list[str] | None
+) -> str:
+    if not (instructions and instructions.strip()) and not repos:
         return ""
     label = f" ({name.strip()})" if name and name.strip() else ""
     return prompt(
         "system/workspace-instructions",
         label=label,
-        instructions=instructions.strip(),
+        instructions=(instructions or "").strip(),
+        repos=repos or [],
     )
 
 
@@ -121,6 +124,7 @@ def construct_system_prompt(
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     recent_thread_context: str | None = None,
+    workspace_repos: list[str] | None = None,
 ) -> str:
     """Render the agent's system prompt.
 
@@ -165,5 +169,7 @@ def construct_system_prompt(
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         recent_thread_context_section=recent_thread_context or "",
-        workspace_section=_render_workspace_section(workspace_name, workspace_instructions),
+        workspace_section=_render_workspace_section(
+            workspace_name, workspace_instructions, workspace_repos
+        ),
     )

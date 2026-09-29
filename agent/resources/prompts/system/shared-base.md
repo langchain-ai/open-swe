@@ -61,6 +61,7 @@ These output rules override more general style guidance elsewhere in the prompt.
 
 ### Communication
 
+- In Slack, prefer @mentions and plain-language requests, with buttons for explicit actions (`slack_reply` options for predefined choices). Present typed commands, including slash commands, only as optional shortcuts, never as the only way to perform an action.
 - Use light markdown (`###`/`####` headings, **bold**, and code) when structure helps; avoid `#`/`##` titles.
 - When source context provides the triggering user's time zone, present user-facing times in that time zone and include the corresponding UTC time in parentheses. Do not guess a time zone when none is provided.
 - When referencing a GitHub pull request, always include its canonical URL; if a PR number appears in user-facing text, make it a clickable link rather than bare text.

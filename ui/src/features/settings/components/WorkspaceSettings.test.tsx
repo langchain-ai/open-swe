@@ -25,6 +25,23 @@ import { makeQueryClient } from "@/lib/query"
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
+vi.mock("@monaco-editor/react", () => ({
+  default: ({
+    value,
+    onChange,
+    options,
+  }: {
+    value: string
+    onChange: (value: string) => void
+    options: { ariaLabel: string }
+  }) => (
+    <textarea
+      aria-label={options.ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}))
 
 const RECORD: WorkspaceRecord = {
   slug: "oss",
@@ -218,7 +235,15 @@ describe("WorkspaceSettingsPanel", () => {
     // Bound channels read by name once the directory is in.
     expect((await screen.findAllByText("#oss-help")).length).toBeGreaterThan(0)
 
+    const general = name.closest("section")!
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.change(name, { target: { value: "Discard this" } })
+    fireEvent.click(within(general).getByRole("button", { name: "Cancel" }))
+    expect((name as HTMLInputElement).value).toBe("OSS")
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+
     fireEvent.change(name, { target: { value: " OSS support " } })
+    expect(within(general).getByRole("button", { name: "Cancel" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
@@ -289,6 +314,9 @@ describe("WorkspaceSettingsPanel", () => {
           .getByRole("button", { name: "Save" })
           .closest("section")
         if (!general) throw new Error("no General section")
+        expect(
+          within(general).queryByRole("button", { name: "Cancel" })
+        ).toBeNull()
         expect(within(general).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"
@@ -397,8 +425,8 @@ describe("WorkspaceSettingsPanel", () => {
       .mockResolvedValue({ started: true, run_id: "run-1" })
     renderPage()
 
-    const setup = await screen.findByLabelText("Setup script")
-    expect((setup as HTMLTextAreaElement).value).toBe("make setup")
+    await screen.findByRole("button", { name: "Edit setup script" })
+    expect(screen.queryByLabelText("Setup script")).toBeNull()
     expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
     expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
     for (const trigger of screen.getAllByRole("button", {
@@ -414,12 +442,38 @@ describe("WorkspaceSettingsPanel", () => {
       fireEvent.keyDown(popup, { key: "Escape" })
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     }
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    const setup = await screen.findByRole("textbox", { name: "Setup script" })
+    expect((setup as HTMLTextAreaElement).value).toBe("make setup")
     fireEvent.change(setup, { target: { value: "make setup && make build" } })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(update).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit update script" }))
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Update script" }),
+      {
+        target: { value: "git pull --ff-only" },
+      }
+    )
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    expect(
+      (
+        (await screen.findByRole("textbox", {
+          name: "Setup script",
+        })) as HTMLTextAreaElement
+      ).value
+    ).toBe("make setup && make build")
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
         setup_script: "make setup && make build",
-        update_script: "",
+        update_script: "git pull --ff-only",
       })
     )
 
