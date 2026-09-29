@@ -19,7 +19,6 @@ from agent.threads.diffs import (
     get_dashboard_thread_recovery_patch,
     get_dashboard_thread_working_tree_diff,
 )
-from agent.threads.feedback import feedback_router
 from agent.threads.files import (
     WorkspaceFileIndex,
     WorkspacePath,
@@ -73,7 +72,6 @@ from agent.utils.timing import server_timing_header
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
-router.include_router(feedback_router)
 
 
 @router.get("/me/local-trace-url/{thread_id}")

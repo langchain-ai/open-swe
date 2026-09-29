@@ -213,7 +213,6 @@ async def send_dashboard_message(
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "updated_at_ms": now_ms,
-        "feedback_last_activity_at_ms": now_ms,
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
     }

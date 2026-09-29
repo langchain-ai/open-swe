@@ -350,10 +350,6 @@ async def dispatch_agent_run(
             else await _dispatch_input(content, source, configurable)
         )
     client = client or dispatch_client()
-    if assistant_id == "agent" and source in {"slack", "web", "desktop", "dashboard"}:
-        from agent.thread_feedback import note_feedback_activity
-
-        await note_feedback_activity(thread_id, client=client)
     return await create_durable_run(
         thread_id,
         assistant_id,
