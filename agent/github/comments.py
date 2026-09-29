@@ -30,6 +30,7 @@ __all__ = [
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
+    "fence_github_comment_body",
     "format_github_comment_body_for_prompt",
     "mentions_open_swe",
     "post_github_comment",
@@ -142,8 +143,13 @@ def format_github_comment_body_for_prompt(
     ``trusted`` is the lowercased GitHub logins of known Open SWE users; anyone
     else's words are fenced as untrusted.
     """
+    return fence_github_comment_body(body, registered=author.strip().lower() in trusted)
+
+
+def fence_github_comment_body(body: str, *, registered: bool) -> str:
+    """Sanitize ``body``, fencing it as untrusted unless its author is a registered user."""
     sanitized_body = sanitize_github_comment_body(body)
-    if author.strip().lower() in trusted:
+    if registered:
         return sanitized_body
 
     return (

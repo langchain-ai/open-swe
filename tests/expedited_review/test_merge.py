@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 
-from agent.expedited_review import lifecycle, merge, reviews
-from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
+from agent.expedited_review import merge, reviews
 from agent.expedited_review.eligibility import ChangedFile, diff_fingerprint
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
+from agent.human_review import lifecycle, merging
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.users import User
 from tests.expedited_review.conftest import OpenApproval
 
@@ -48,13 +49,13 @@ class _GitHub:
         self.files = [_SOURCE, _TEST]
         self.readiness = _readiness()
         monkeypatch.setattr(merge, "repo_token", AsyncMock(return_value="app-token"))
-        monkeypatch.setattr(merge, "_merge_token", AsyncMock(return_value="merge-token"))
+        monkeypatch.setattr(merging, "merge_token", AsyncMock(return_value="merge-token"))
         monkeypatch.setattr(merge, "assess_readiness", self._assess)
         monkeypatch.setattr(merge, "fetch_changed_files", self._files)
         monkeypatch.setattr(merge, "fetch_pr", self._pr)
         self.current_head: str | None = None
         monkeypatch.setattr(merge, "submit_approval", self._review)
-        monkeypatch.setattr(merge, "github_request", self._request)
+        monkeypatch.setattr(merging, "github_request", self._request)
         monkeypatch.setattr(reviews, "github_request", self._request)
         monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="app-token"))
         monkeypatch.setattr(lifecycle, "fetch_pr", self._pull)
@@ -92,7 +93,7 @@ class _GitHub:
         return self.pull
 
     async def _review(
-        self, approval: ExpeditedApproval, vote: ApprovalVote, head_sha: str
+        self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
     ) -> str | None:
         self.reviews.append((vote.github_login, head_sha))
         vote.github_review_id = 100 + len(self.reviews)
@@ -123,30 +124,30 @@ def github(monkeypatch: pytest.MonkeyPatch) -> _GitHub:
     return _GitHub(monkeypatch)
 
 
-async def _reload(approval: ExpeditedApproval) -> ExpeditedApproval:
-    stored = await ExpeditedApproval.get(approval.id)
+async def _reload(approval: HumanReviewRequest) -> HumanReviewRequest:
+    stored = await HumanReviewRequest.get(approval.id)
     assert stored is not None
     return stored
 
 
-async def _approve(approval: ExpeditedApproval, *slack_ids: str) -> ExpeditedApproval:
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
+async def _approve(approval: HumanReviewRequest, *slack_ids: str) -> HumanReviewRequest:
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
         assert row is not None
         for slack_id in slack_ids:
             user = await User.for_person({"id": f"slack:{slack_id}", "platform": "slack"})
             assert user is not None
-            row.votes.append(ApprovalVote(voter_user_id=user.id, decision="approve"))
+            row.participants.append(HumanReviewParticipant(user_id=user.id, decision="approve"))
     return await _reload(approval)
 
 
-async def _approved(open_approval: OpenApproval, *slack_ids: str) -> ExpeditedApproval:
+async def _approved(open_approval: OpenApproval, *slack_ids: str) -> HumanReviewRequest:
     approval = await open_approval(fingerprint=diff_fingerprint([_SOURCE, _TEST]))
     return await _approve(approval, *slack_ids)
 
 
-async def _reviewed(approval: ExpeditedApproval, github: _GitHub) -> ExpeditedApproval:
+async def _reviewed(approval: HumanReviewRequest, github: _GitHub) -> HumanReviewRequest:
     """Submit every vote's review as the click would have."""
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
         assert row is not None
         for vote in row.approvals:
             await github._review(row, vote, row.head_sha)
@@ -160,13 +161,13 @@ async def test_merge_submits_a_missing_review_and_merges_pinned_to_the_head(
 
     result = await merge.merge_approved(approval)
 
-    stored = await ExpeditedApproval.get(approval.id)
+    stored = await HumanReviewRequest.get(approval.id)
     assert stored is not None
     assert result.status == "merged"
     assert stored.state == "merged"
     assert github.reviews == [("grace", "abc123")]
     assert github.merges == [{"sha": "abc123", "merge_method": "squash"}]
-    grace = next(vote for vote in stored.votes if vote.github_login == "grace")
+    grace = next(vote for vote in stored.participants if vote.github_login == "grace")
     assert (grace.github_review_id, grace.github_review_sha) == (101, "abc123")
     assert github.dismissed == []
 
@@ -362,7 +363,7 @@ async def test_a_card_closed_before_the_lock_is_taken_writes_nothing(
     github: _GitHub, open_approval: OpenApproval
 ) -> None:
     approval = await _approved(open_approval, "U_GRACE")
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
         assert row is not None
         row.state = "cancelled"
 
@@ -418,7 +419,7 @@ async def test_a_pr_closed_unmerged_closes_the_card_and_dismisses_its_reviews(
     stored = await _reload(approval)
     assert stored.state == "cancelled"
     assert github.dismissed == ["101"]
-    assert stored.votes[0].github_review_id is None
+    assert stored.participants[0].github_review_id is None
 
 
 async def test_a_late_close_webhook_leaves_a_reopened_pr_card_open(
@@ -443,6 +444,6 @@ async def test_a_dismissal_github_refused_is_retried_when_a_card_next_closes(
     github.dismiss_status = 200
     await lifecycle.withdraw_reviews(refused)
 
-    assert refused.votes[0].github_review_id == 101
+    assert refused.participants[0].github_review_id == 101
     assert github.dismissed == ["101", "101"]
-    assert (await _reload(approval)).votes[0].github_review_id is None
+    assert (await _reload(approval)).participants[0].github_review_id is None
