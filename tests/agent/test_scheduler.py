@@ -62,6 +62,20 @@ async def test_launch_preserves_legacy_cost_payloads(
     handler.assert_awaited_once_with(expected)
 
 
+async def test_queued_thread_feedback_job_is_skipped() -> None:
+    result = await scheduler.get_scheduler().ainvoke(
+        {
+            "task": "thread_feedback",
+            "agent_thread_id": "thread-1",
+            "run_id": "run-1",
+            "channel_id": "C1",
+            "feedback": {"status": "pending", "event_id": "answer:run-1"},
+        }
+    )
+
+    assert result["result"] == {"status": "skipped"}
+
+
 async def test_launch_runs_refresh_crons_registered_under_the_old_task_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1109,7 +1109,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
     patch_thread_module(monkeypatch, "append", fake_append)
     patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
     monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
 
     result = await thread_runs.steer_running_thread(
         "tid",

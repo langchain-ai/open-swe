@@ -40,7 +40,6 @@ from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
     ChallengeResponse,
-    FeedbackResponse,
     HealthResponse,
     SlashCommandResponse,
     WebhookResponse,
@@ -50,7 +49,6 @@ from agent.slack.responses import (
 )
 from agent.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from agent.slack.solo_threads import allow_solo_thread_followup
-from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -713,7 +711,7 @@ async def slack_code_channel_command(
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse:
+) -> WebhookResponse | BlockSuggestionResponse:
     """Handle Slack Block Kit interactions."""
     body = await request.body()
     _verify_signature(request, body, "interactivity")
@@ -737,9 +735,6 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
-    if is_slack_feedback_payload(payload):
-        return await handle_slack_feedback_interaction(payload, background_tasks)
-
     if interaction is None:
         return ignored("Invalid Slack interaction")
     if interaction.type == "block_actions":
@@ -748,7 +743,7 @@ async def slack_interactivity(
         )
         if feedback_action is not None:
             background_tasks.add_task(process_feedback, interaction, feedback_action)
-            return {}
+            return accepted("Feedback received")
 
     if interaction.type == "block_suggestion" and interaction.container.type == "code_channel_view":
         if not (interaction.channel_id and interaction.container.view_id and interaction.action_id):

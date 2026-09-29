@@ -250,7 +250,7 @@ async def test_monitor_uses_fresh_state_for_concurrent_launch(
 async def test_monitor_refreshes_task_state_after_completion_dispatch(
     monkeypatch: pytest.MonkeyPatch, slack: bool, run_active: bool
 ) -> None:
-    from agent import dispatch, thread_feedback
+    from agent import dispatch
 
     client = AsyncMock()
     stored: dict[str, object] = {
@@ -278,7 +278,6 @@ async def test_monitor_refreshes_task_state_after_completion_dispatch(
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
-    monkeypatch.setattr(thread_feedback, "note_feedback_activity", AsyncMock())
     monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
         background_tasks,

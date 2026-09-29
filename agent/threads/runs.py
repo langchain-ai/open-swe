@@ -335,7 +335,7 @@ async def _create_dashboard_thread_record(
         client,
         thread_id,
         title=initial_title,
-        metadata={**metadata, "feedback_initiator_login": login},
+        metadata=metadata,
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
@@ -870,7 +870,6 @@ async def _enrich_run_start_command(
         metadata_update["model"] = chosen_model
         metadata_update["effort"] = chosen_effort
     metadata_update["updated_at_ms"] = _now_ms()
-    metadata_update["feedback_last_activity_at_ms"] = metadata_update["updated_at_ms"]
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(client, thread_id):
@@ -1112,7 +1111,6 @@ async def steer_running_thread(
         thread_id=thread_id,
         metadata={
             "updated_at_ms": now_ms,
-            "feedback_last_activity_at_ms": now_ms,
             PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
             PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
         },

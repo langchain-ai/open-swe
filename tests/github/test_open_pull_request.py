@@ -512,20 +512,3 @@ def test_existing_pr_does_not_record_later_run_as_opening(
 
     assert result["created"] is False
     assert record_telemetry.await_args.kwargs["record_opening"] is False
-
-
-def test_updating_pr_preserves_original_feedback_run() -> None:
-    original = {
-        "url": "https://github.com/lc/repo/pull/7",
-        "repo_full_name": "lc/repo",
-        "number": 7,
-        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
-    }
-    updated = {
-        **original,
-        "state": "open",
-        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
-    }
-    result = opr._upsert_pull_request([original], updated)
-    assert result[0]["slack_feedback"] == original["slack_feedback"]
-    assert result[0]["state"] == "open"
