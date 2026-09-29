@@ -396,6 +396,7 @@ def _slack_context_input(
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
+    prior_message_text: str = "",
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -471,6 +472,19 @@ def _slack_context_input(
             human_input(text, message_context)
             if kind == "human"
             else system_input(text, message_context)
+        )
+    if prior_message_text:
+        run_messages.append(
+            human_input(
+                prior_message_text,
+                {
+                    "sender_id": trigger_person["id"],
+                    "channel_id": channel_entity_id,
+                    "surface": "slack",
+                    "kind": "human",
+                    "data": {"timestamp": event_ts},
+                },
+            )
         )
     if constant_context or turn_context:
         slack_context: SystemIdentity = {
@@ -1140,6 +1154,7 @@ async def _process_slack_mention_impl(
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
+        prior_message_text=request.prior_message_text,
         turn_context=turn_context,
         constant_context=constant_context,
         dispatched_timestamps=dispatched_timestamps,

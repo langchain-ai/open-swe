@@ -732,6 +732,32 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
     return [cast(str, message["content"]) for message in run_input["messages"]]
 
 
+def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [{"ts": "9.0", "text": "context <@UBOT> /breakout fix it", "user": "U123"}],
+        {"U123": "Alice"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="fix it",
+        request_blocks=[{"type": "text", "text": "fix it"}],
+        prior_message_text="context",
+    )
+    inputs = [
+        message["content"]
+        for message in run_input["messages"]
+        if message["role"] == "user" and 'kind="human"' in str(message["content"])
+    ]
+
+    assert len(inputs) == 2
+    assert "context" in inputs[0]
+    assert "/breakout" not in inputs[0]
+    assert "fix it" in inputs[1][0]["text"]
+    assert "/breakout" not in inputs[1][0]["text"]
+
+
 def test_slack_context_never_replays_open_swes_own_replies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
