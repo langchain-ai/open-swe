@@ -71,9 +71,6 @@ def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
             style="primary",
         ),
         button(
-            "Open on GitHub", action_id="open_swe_link_pull_request", url=request.pull_request.url
-        ),
-        button(
             "Dismiss",
             action_id="open_swe_option_select_dismiss",
             value=_button_value("dismiss", request),
