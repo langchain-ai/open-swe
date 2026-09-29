@@ -345,4 +345,4 @@ async def test_broadcast_to_configured_review_channel(
     stored = await _stored(approval)
     assert stored.slack_channel_id == "C_REVIEW"
     assert stored.slack_message_ts == stored.slack_thread_ts == "3.0"
-    assert await lifecycle._broadcast_channel(stored) is None
+    assert stored.slack_broadcast is False
