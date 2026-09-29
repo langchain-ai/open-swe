@@ -136,7 +136,7 @@ export function WorkspaceEditor({
       </label>
       <div className="text-sm">
         <span className="inline-flex items-center gap-1.5">
-          Repositories
+          Bound repositories
           <Tooltip>
             <TooltipTrigger
               aria-label="About workspace repositories"
@@ -156,7 +156,7 @@ export function WorkspaceEditor({
         </span>
         <div
           role="group"
-          aria-label="Repositories"
+          aria-label="Bound repositories"
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (
