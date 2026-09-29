@@ -268,18 +268,9 @@ test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
     await grantWrite(request);
-    await control(request, "/control/user-preferences", {
-      login: ALICE.login,
-      preferences: { human_review_requests: true },
-    });
   });
 
-  // Preferences live on the users row, which a reset keeps.
   test.afterEach(async ({ request }) => {
-    await control(request, "/control/user-preferences", {
-      login: ALICE.login,
-      preferences: { human_review_requests: false },
-    });
     await control(request, "/control/user-preferences", {
       login: BOB.login,
       preferences: { concierge_mode: false },
@@ -440,8 +431,9 @@ test.describe("Human review in Slack", () => {
     expect(await refused.text()).toContain("has no review channel");
     expect(await reviewRequests(request)).toEqual([]);
 
-    // 2. Asked from a thread in the channel the agent is told to use, the card
-    //    is a reply in that thread that is also sent to the channel.
+    // 2. Asked from a thread in the configured channel, the card is a reply
+    //    in that thread that is also sent to the channel.
+    await setReviewChannel(request);
     const pr = await pull(request, seeded.number);
     const sent = (await control(request, "/mock/slack/send", {
       channel: REVIEW_CHANNEL,
@@ -507,7 +499,6 @@ test.describe("Human review in Slack", () => {
     request,
   }) => {
     test.setTimeout(240_000);
-    await setReviewChannel(request);
 
     // Bob keeps his bot DM as one concierge conversation, which already exists.
     await control(request, "/control/user-preferences", {
@@ -550,6 +541,11 @@ test.describe("Human review in Slack", () => {
     const row = page
       .getByRole("listitem")
       .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) });
+    await expect(
+      row.getByRole("button", { name: "Request review in Slack" }),
+    ).toHaveCount(0);
+    await setReviewChannel(request);
+    await page.reload();
     await row.getByRole("button", { name: "Request review in Slack" }).click();
     await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
       timeout: 30_000,

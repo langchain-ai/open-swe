@@ -79,6 +79,7 @@ const pull = (
   mergeState: "blocked",
   headSha: "a".repeat(40),
   headRef: "feature/example",
+  reviewChannel: "",
   reviewDecision: "none",
   reviewRequired: false,
   statusAvailable: true,

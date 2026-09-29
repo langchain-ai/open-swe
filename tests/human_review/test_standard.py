@@ -8,10 +8,13 @@ from agent.expedited_review.readiness import PullRequestSnapshot
 from agent.github.repo_files import RepoSettings
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
+    RequestResult,
+    _target_channel,
     merge_wait,
     request_blockers,
     summary_line,
 )
+from agent.slack.client import GitHubPrRef
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -139,3 +142,34 @@ async def test_repo_settings_fall_back_to_the_default_branch() -> None:
 async def test_missing_or_invalid_settings_have_no_review_channel(status: int, text: str) -> None:
     with patch("agent.github.repo_files.github_request", _github(status, text)):
         assert (await RepoSettings.fetch("o", "r", token="t")).review_channel == ""
+
+
+@pytest.mark.parametrize("override", ["", "#elsewhere"])
+async def test_review_channel_must_be_configured_even_with_an_override(override: str) -> None:
+    with (
+        patch.object(RepoSettings, "fetch", new_callable=AsyncMock, return_value=RepoSettings()),
+        patch(
+            "agent.human_review.standard.SlackChannel.resolve", new_callable=AsyncMock
+        ) as resolve,
+    ):
+        result = await _target_channel(GitHubPrRef("o", "r", 1, "url"), override, "t", "abc")
+    assert isinstance(result, RequestResult)
+    assert not result.success
+    assert "has no review channel" in result.error
+    resolve.assert_not_awaited()
+
+
+async def test_review_channel_override_changes_only_the_destination() -> None:
+    with (
+        patch.object(
+            RepoSettings,
+            "fetch",
+            new_callable=AsyncMock,
+            return_value=RepoSettings(review_channel="#configured"),
+        ),
+        patch(
+            "agent.human_review.standard.SlackChannel.resolve", new_callable=AsyncMock
+        ) as resolve,
+    ):
+        await _target_channel(GitHubPrRef("o", "r", 1, "url"), "#elsewhere", "t", "abc")
+    resolve.assert_awaited_once_with("#elsewhere")

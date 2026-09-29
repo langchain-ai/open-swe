@@ -111,19 +111,18 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 async def _target_channel(
     pr_ref: GitHubPrRef, override: str, token: str, head_sha: str
 ) -> SlackChannel | RequestResult:
-    configured = override.strip()
+    configured = (
+        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+    ).review_channel.strip()
     if not configured:
-        configured = (
-            await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
-        ).review_channel
-    if not configured.strip():
         return _failure(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
-            "`.open-swe/settings.json`, or name a Slack channel."
+            "`.open-swe/settings.json` first."
         )
-    channel = await SlackChannel.resolve(configured)
+    destination = override.strip() or configured
+    channel = await SlackChannel.resolve(destination)
     if channel is None:
-        return _failure(f"Slack channel {configured.strip()!r} was not found.")
+        return _failure(f"Slack channel {destination!r} was not found.")
     return channel
 
 
@@ -203,13 +202,12 @@ async def request_review(
             "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
         )
 
-    active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None:
-        return await _existing(active)
-
     target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
     if isinstance(target, RequestResult):
         return target
+    active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if active is not None:
+        return await _existing(active)
     payload = await fetch_pr(
         owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
     )

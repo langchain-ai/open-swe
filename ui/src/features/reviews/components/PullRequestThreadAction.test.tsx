@@ -33,6 +33,7 @@ const pr: OpenPullRequest = {
   mergeState: "blocked",
   headSha: "a".repeat(40),
   headRef: "feature",
+  reviewChannel: "",
   reviewDecision: "none",
   reviewRequired: false,
   statusAvailable: true,

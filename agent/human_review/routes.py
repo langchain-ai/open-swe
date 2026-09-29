@@ -22,8 +22,6 @@ async def api_request_human_review(
         raise HTTPException(422, "invalid pull request")
     login = str(session["sub"])
     requester = await User.for_login("github", login)
-    if requester is None or not requester.typed_preferences.human_review_requests:
-        raise HTTPException(403, "Human review requests are not enabled for you")
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     pr_ref = GitHubPrRef(
         owner=owner,

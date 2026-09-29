@@ -1773,6 +1773,11 @@
             "title": "Repo",
             "type": "string"
           },
+          "reviewChannel": {
+            "default": "",
+            "title": "Reviewchannel",
+            "type": "string"
+          },
           "reviewDecision": {
             "anyOf": [
               {
@@ -2336,17 +2341,6 @@
               }
             ],
             "title": "Experimental Assistant Ui"
-          },
-          "human_review_requests": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Human Review Requests"
           },
           "model_routing_enabled": {
             "anyOf": [

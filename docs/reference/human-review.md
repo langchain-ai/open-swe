@@ -22,16 +22,15 @@ for a standard review while an expedited card is open is refused.
 
 The value is a channel name or id. It is read from the pull request's head commit,
 falling back to the default branch when the head has no settings file. The
-`request_human_review` tool accepts a `channel` that overrides it or stands in when
-the repository sets none.
+The setting enables human review requests for that repository. The
+`request_human_review` tool accepts a `channel` override for where to post the card,
+but the repository must have a review channel configured.
 
 ## Requesting
 
-- Asking is a per-person feature flag, **Request human reviews in Slack** on the
-  Feature Flags page (`human_review_requests`), off by default. Without it the
-  dashboard hides its button and refuses the request, and the agent does not get
-  `request_human_review` in runs that person starts. Signing up, dismissing, and the
-  agent's pick of a reviewer work for everyone.
+- Asking is enabled for repositories with `reviewChannel` configured. Without it the
+  dashboard hides its button and the API and agent tool refuse a request. Signing up,
+  dismissing, and the agent's pick of a reviewer do not depend on the setting.
 - The agent calls `request_human_review`; people use **Request review in Slack** on
   the dashboard's pull request views.
 - Refused while the pull request is closed, a draft, conflicted, or failing a required

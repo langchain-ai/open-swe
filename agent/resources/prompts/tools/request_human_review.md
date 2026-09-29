@@ -4,7 +4,7 @@ Use it when someone asks for a human review, or when a pull request you opened i
 
 `inline_summary` is required: one or two plain sentences, at most 280 characters, on what the change does and why, as a reviewer wants to know before opening it. No pull request numbers, URLs, SHAs, file paths or names, and no request to review it.
 
-Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to post somewhere other than the repository's review channel; it is required when the repository has none. When this conversation is already a thread in that channel, the card is posted in the thread and also sent to the channel; otherwise it is posted in that channel and this thread gets a one-line pointer to it.
+The repository must set `reviewChannel` in `.open-swe/settings.json` to enable human review. Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to override the destination when asked; it cannot enable review for a repository without a review channel. When this conversation is already a thread in that channel, the card is posted in the thread and also sent to the channel; otherwise it is posted in that channel and this thread gets a one-line pointer to it.
 
 The card is the announcement. Do not follow it with a status update, and never link to the card: Slack unfurls that link into a second copy of it.
 

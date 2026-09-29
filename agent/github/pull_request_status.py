@@ -20,6 +20,7 @@ from agent.github.http import (
     github_client,
     github_request,
 )
+from agent.github.repo_files import RepoSettings
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class OpenPullRequest(BaseModel):
     merge_state: str = "unknown"
     head_sha: str | None = None
     head_ref: str | None = None
+    review_channel: str = ""
     status_available: bool = False
     ci: CheckState = "unknown"
     review_decision: ReviewDecision | None = None
@@ -711,7 +713,9 @@ async def list_open_pull_requests(
 
         async def load(item: object) -> OpenPullRequest | None:
             async with semaphore:
-                return await load_open_pull_request(client, item, details=not lightweight)
+                return await load_open_pull_request(
+                    client, item, details=not lightweight, token=token
+                )
 
         items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
     total = payload.get("total_count")
@@ -727,7 +731,7 @@ async def list_open_pull_requests(
 
 
 async def load_open_pull_request(
-    client: httpx2.AsyncClient, item: object, details: bool = True
+    client: httpx2.AsyncClient, item: object, details: bool = True, *, token: str | None = None
 ) -> OpenPullRequest | None:
     if not isinstance(item, dict):
         return None
@@ -772,12 +776,14 @@ async def load_open_pull_request(
     if sha is None or not _SHA_PATTERN.fullmatch(sha):
         return result
     result.head_sha = sha
-    runs, statuses, decision, review_state = await asyncio.gather(
+    runs, statuses, decision, review_state, settings = await asyncio.gather(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
         _fetch_review_decision(client, owner, name, number),
         _fetch_review_state(client, owner, name, number),
+        RepoSettings.fetch(owner, name, token=token, ref=sha),
     )
+    result.review_channel = settings.review_channel.strip()
     result.review_decision = decision
     result.review_required = review_state.review_required
     result.unresolved_threads = review_state.unresolved_threads

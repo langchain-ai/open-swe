@@ -25,6 +25,11 @@ def response(payload, status=200):
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
     monkeypatch.setattr(prs, "github_client", client)
+    monkeypatch.setattr(
+        prs.RepoSettings,
+        "fetch",
+        AsyncMock(return_value=prs.RepoSettings(review_channel="#eng-reviews")),
+    )
     queries = []
 
     async def request(_client, method, url, **kwargs):
@@ -91,6 +96,8 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
     assert queries == ["is:pr is:open author:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
     live, unavailable, no_checks = result.pull_requests
+    assert live.review_channel == "#eng-reviews"
+    assert unavailable.review_channel == ""
     assert live.ci == "failing"
     assert live.failing_checks == ["legacy-ci"]
     assert live.pending_checks == ["unit"]
@@ -134,6 +141,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(
         prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
+    monkeypatch.setattr(prs.RepoSettings, "fetch", AsyncMock(return_value=prs.RepoSettings()))
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
     monkeypatch.setattr(prs, "read_required_checks", rules)
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
@@ -265,6 +273,7 @@ def _patch_detail_fetchers(monkeypatch):
     monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(prs.RepoSettings, "fetch", AsyncMock(return_value=prs.RepoSettings()))
     monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
 
@@ -297,5 +306,6 @@ async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch
     assert result.unresolved_threads is None
     assert result.review_decision == "approved"
     assert result.head_sha == "a" * 40
+    assert result.review_channel == ""
     assert result.merge_state == "clean"
     assert result.ci == "none"
