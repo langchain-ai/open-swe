@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.review_guide.sessions import ReviewGuideSession
 from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -197,6 +198,9 @@ async def proxy_dashboard_thread_commands(
     else:
         metadata = thread_metadata(thread)
         post_command = method in _THREAD_POST_COMMAND_METHODS
+        # Posting here would start the main agent on a review guide's thread.
+        if post_command and await ReviewGuideSession.exists(thread_id):
+            raise HTTPException(409, "This review runs in its Slack channel; reply there.")
         if post_command:
             principal.assert_can_post(metadata)
         else:

@@ -32,6 +32,7 @@ from agent.slack.code_channels import (
 )
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.common import upsert_agent_thread_metadata
@@ -112,7 +113,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             source_context=SourceContext(slack_thread=location),
             workspace=start.workspace_slug,
             owner_login=login,
-            # Web messages run the main agent, not the guide, so keep it off the dashboard.
+            # Reachable from the channel's web link, but read-only there, so kept out of lists.
             unlisted=True,
         ):
             raise GuideStartError("could not create the review thread")
@@ -142,7 +143,11 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         )
     await set_context_bar(
         channel_id,
-        repo_context_bar_items({"owner": start.owner, "name": start.repo}, pr_url=pull_request.url),
+        repo_context_bar_items(
+            {"owner": start.owner, "name": start.repo},
+            pr_url=pull_request.url,
+            dashboard_url=dashboard_thread_url(thread_id) or "",
+        ),
     )
     await dispatch_guide_run(
         thread_id,
