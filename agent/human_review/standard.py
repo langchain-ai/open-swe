@@ -410,8 +410,8 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
 def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str, bool]:
     """What the thread is told about a pick, and whether it bumps the post in the channel.
 
-    The deadline's wording is used only when its wait really passed, so a pick someone
-    asked for early says so.
+    The deadline's wording is used only when its wait really passed; any other pick is
+    announced plainly.
     """
     now = datetime.now(UTC)
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
@@ -428,7 +428,7 @@ def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str
         and now - request.created_at >= wait
     ):
         return f"{who}, nobody signed up to review {label}, so Open SWE picked you.", False
-    return f"{who}, Open SWE was asked to pick a reviewer for {label} and picked you.", False
+    return f"{who}, Open SWE picked you to review {label}.", False
 
 
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
