@@ -55,11 +55,11 @@ class ResponseProjection:
     """
 
     def __init__(
-        self, response: Response, ids: OpenSweId, *, mirror_web_search: bool = False
+        self, response: Response, ids: OpenSweId, *, web_search_tools: bool = False
     ) -> None:
         self.response = response
         self._ids = ids
-        self._mirror_web_search = mirror_web_search
+        self._web_search_tools = web_search_tools
         self._turn_id: UUID | None = None
         self._sequence = 0
         self._messages: dict[str, tuple[int, MessageItem]] = {}
@@ -216,9 +216,21 @@ class ResponseProjection:
         ]
 
     def _start_tool(self, body: ToolStarted) -> list[StreamEvent]:
-        if body.tool_call_id in self._tools:
+        if body.tool_call_id in self._tools or body.tool_call_id in self._searches:
             return []
         index = len(self.response.output)
+        if self._web_search_tools:
+            search = WebSearchCallItem.for_call(
+                self._ids.item_id("ws", body.tool_call_id), body.name, body.input
+            )
+            self.response.output.append(search)
+            self._searches[body.tool_call_id] = (index, search)
+            return [
+                self._event("response.output_item.added", output_index=index, item=search),
+                self._event(
+                    "response.web_search_call.in_progress", item_id=search.id, output_index=index
+                ),
+            ]
         item = McpCallItem(
             id=self._ids.item_id("mcp", body.tool_call_id),
             name=TOOL_NAME_PREFIX + body.name,
@@ -226,38 +238,32 @@ class ResponseProjection:
         )
         self.response.output.append(item)
         self._tools[body.tool_call_id] = (index, item)
-        events = [
+        return [
             self._event("response.output_item.added", output_index=index, item=item),
             self._event("response.mcp_call.in_progress", item_id=item.id, output_index=index),
         ]
-        if self._mirror_web_search:
-            search = WebSearchCallItem.for_call(
-                self._ids.item_id("ws", body.tool_call_id), body.name, body.input
-            )
-            self.response.output.append(search)
-            self._searches[body.tool_call_id] = (index + 1, search)
-            events += [
-                self._event("response.output_item.added", output_index=index + 1, item=search),
-                self._event(
-                    "response.web_search_call.in_progress",
-                    item_id=search.id,
-                    output_index=index + 1,
-                ),
-            ]
-        return events
 
     async def _complete_tool(self, thread_id: str, body: ToolCompleted) -> list[StreamEvent]:
+        failed = body.status == "error"
+        if body.tool_call_id in self._searches:
+            index, search = self._searches[body.tool_call_id]
+            search.status = "failed" if failed else "completed"
+            return [
+                self._event(
+                    "response.web_search_call.completed", item_id=search.id, output_index=index
+                ),
+                self._event("response.output_item.done", output_index=index, item=search),
+            ]
         if body.tool_call_id not in self._tools:
             return []
         index, item = self._tools[body.tool_call_id]
         output = body.output_preview
         if body.has_output:
             output = await tool_output.load(thread_id, body.tool_call_id) or output
-        failed = body.status == "error"
         item.status = "failed" if failed else "completed"
         item.output = output
         item.error = (output or "tool call failed") if failed else None
-        events = [
+        return [
             self._event(
                 "response.mcp_call.failed" if failed else "response.mcp_call.completed",
                 item_id=item.id,
@@ -265,18 +271,6 @@ class ResponseProjection:
             ),
             self._event("response.output_item.done", output_index=index, item=item),
         ]
-        if body.tool_call_id in self._searches:
-            search_index, search = self._searches[body.tool_call_id]
-            search.status = item.status
-            events += [
-                self._event(
-                    "response.web_search_call.completed",
-                    item_id=search.id,
-                    output_index=search_index,
-                ),
-                self._event("response.output_item.done", output_index=search_index, item=search),
-            ]
-        return events
 
     def _finish(self, status: Terminal) -> list[StreamEvent]:
         events = [

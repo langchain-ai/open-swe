@@ -54,7 +54,7 @@ def _body(response: Response) -> JSONResponse:
 def _projection(request: Request, response: Response, ids: OpenSweId) -> ResponseProjection:
     # Codex drops ``mcp_call`` items; ``web_search_call`` is the one server tool it renders.
     codex = request.headers.get("originator", "").startswith("codex")
-    return ResponseProjection(response, ids, mirror_web_search=codex)
+    return ResponseProjection(response, ids, web_search_tools=codex)
 
 
 def _stream(run: ResponseRun) -> StreamingResponse:

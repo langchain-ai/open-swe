@@ -51,7 +51,8 @@ def stored(version: int, body: BaseModel) -> StoredEvent:
     )
 
 
-async def test_projection_streams_text_and_executed_tool_calls() -> None:
+@pytest.mark.parametrize("codex", [False, True])
+async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> None:
     ids = OpenSweId(THREAD, RUN)
     turn, other_turn = uuid.uuid4(), uuid.uuid4()
     response = Response(
@@ -61,7 +62,7 @@ async def test_projection_streams_text_and_executed_tool_calls() -> None:
         model="open-swe",
         conversation=ConversationRef(id=THREAD),
     )
-    projection = ResponseProjection(response, ids, mirror_web_search=True)
+    projection = ResponseProjection(response, ids, web_search_tools=codex)
     bodies: list[BaseModel] = [
         MessageAppended(turn_id=turn, message_id="early", text="before the run"),
         TurnStarted(turn_id=turn, run_id=RUN),
@@ -80,17 +81,20 @@ async def test_projection_streams_text_and_executed_tool_calls() -> None:
         events.extend(await projection.apply(stored(version, body)))
 
     assert response.status == "completed"
-    message, tool, search = response.output
-    assert isinstance(message, MessageItem) and isinstance(tool, McpCallItem)
-    assert isinstance(search, WebSearchCallItem)
-    assert (search.action.query, search.status) == ("oswe_execute: ls", "completed")
+    message, tool = response.output
+    assert isinstance(message, MessageItem)
     assert (message.content[0].text, message.status) == ("Hello", "completed")
-    assert (tool.name, tool.arguments, tool.output, tool.status) == (
-        "oswe_execute",
-        '{"command": "ls"}',
-        "a",
-        "completed",
-    )
+    if codex:
+        assert isinstance(tool, WebSearchCallItem)
+        assert (tool.action.query, tool.status) == ("oswe_execute: ls", "completed")
+    else:
+        assert isinstance(tool, McpCallItem)
+        assert (tool.name, tool.arguments, tool.output, tool.status) == (
+            "oswe_execute",
+            '{"command": "ls"}',
+            "a",
+            "completed",
+        )
     assert [e.delta for e in events if e.type == "response.output_text.delta"] == ["Hel", "lo"]
     added = next(e for e in events if e.type == "response.output_item.added")
     assert isinstance(added.item, MessageItem) and added.item.content == []
