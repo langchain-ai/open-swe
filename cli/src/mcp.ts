@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import * as z from "zod"
+import { exposedTools } from "./mcp-tools.ts"
 
 import { ApiClient, ApiError } from "./api.ts"
 import { readConfig } from "./config.ts"
@@ -35,79 +35,35 @@ function rejectedSession(api: ApiClient): (cause: unknown) => never {
   }
 }
 
-interface McpTool {
-  title: string
-  description: string
-  inputSchema: Record<string, z.ZodType>
-  annotations: { readOnlyHint: boolean; openWorldHint: boolean }
-}
-type ToolAccess = "session" | "admin"
-
-interface ExposedTool {
-  name: string
-  access: ToolAccess
-  definition: McpTool
-  handler: (api: ApiClient, args: Record<string, unknown>) => Promise<unknown>
-}
-
-const exposedTools: ExposedTool[] = [
-  {
-    name: "get_thread",
-    access: "session",
-    definition: {
-      title: "Get an Open SWE thread",
-      description: "Read a thread you can access without marking it viewed.",
-      inputSchema: { thread_id: z.string().min(1) },
-      annotations: { readOnlyHint: true, openWorldHint: true },
-    },
-    handler: (api, args) => api.getThread(args.thread_id as string),
-  },
-  {
-    name: "list_workspaces",
-    access: "admin",
-    definition: {
-      title: "List Open SWE workspaces",
-      description:
-        "List workspace definitions and snapshot status (workspace admins only).",
-      inputSchema: {},
-      annotations: { readOnlyHint: true, openWorldHint: true },
-    },
-    handler: (api) => api.listWorkspaces(),
-  },
-  {
-    name: "get_workspace",
-    access: "admin",
-    definition: {
-      title: "Get an Open SWE workspace",
-      description:
-        "Read a workspace definition and snapshot status (workspace admins only).",
-      inputSchema: { slug: z.string().min(1) },
-      annotations: { readOnlyHint: true, openWorldHint: true },
-    },
-    handler: (api, args) => api.getWorkspace(args.slug as string),
-  },
-]
-
 export function createMcpServer(
   version: string,
   client: () => Promise<ApiClient> = sessionClient
 ): McpServer {
   const server = new McpServer({ name: "oswe", version })
   for (const tool of exposedTools) {
-    server.registerTool(tool.name, tool.definition, async (args) => {
-      const api = await client()
-      if (tool.access === "admin") {
-        const identity = await api.me().catch(rejectedSession(api))
-        if (identity.is_admin !== true)
-          throw new Error("Only workspace admins can use this tool")
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { readOnlyHint: tool.readOnly, openWorldHint: true },
+      },
+      async (args) => {
+        const api = await client()
+        if (tool.access === "admin") {
+          const identity = await api.me().catch(rejectedSession(api))
+          if (identity.is_admin !== true)
+            throw new Error("Only workspace admins can use this tool")
+        }
+        const result = await tool.run(api, args).catch(rejectedSession(api))
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+        }
       }
-      const result = await tool.handler(api, args).catch(rejectedSession(api))
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-      }
-    })
+    )
   }
   server.registerTool(
     "list_threads",

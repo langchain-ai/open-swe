@@ -189,12 +189,12 @@ export class ApiClient {
     )
   }
 
-  async listWorkspaces(): Promise<unknown> {
-    return this.json("GET", "/workspaces")
-  }
-
-  async getWorkspace(slug: string): Promise<unknown> {
-    return this.json("GET", `/workspaces/${encodeURIComponent(slug)}`)
+  async mcpRequest(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<unknown> {
+    return this.json(method, path, { body })
   }
 
   /** Create a thread from a gzipped JSONL session upload; returns its id. */

@@ -193,6 +193,38 @@ describe("exposed dashboard tools", () => {
     expect(bodies).toHaveLength(1)
   })
 
+  test("exposes independent tools and keeps admin mutations behind identity checks", async () => {
+    const { client, queries, bodies } = await connect((url) =>
+      url.pathname.endsWith("/me")
+        ? Response.json({ login: "admin", is_admin: true })
+        : Response.json({ ok: true })
+    )
+    const catalog = await client.listTools()
+    expect(catalog.tools.map((tool) => tool.name)).toContain(
+      "create_automation"
+    )
+    expect(catalog.tools.map((tool) => tool.name)).toContain(
+      "set_my_instructions"
+    )
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain("execute")
+    const result = await client.callTool({
+      name: "create_skill",
+      arguments: { name: "review", description: "Review code" },
+    })
+    expect(result.isError).toBeFalsy()
+    expect(JSON.parse(bodies[0] ?? "null")).toEqual({
+      name: "review",
+      description: "Review code",
+      instructions: "",
+    })
+    const adminResult = await client.callTool({
+      name: "refresh_workspace",
+      arguments: { slug: "default" },
+    })
+    expect(adminResult.isError).toBeFalsy()
+    expect(queries).toHaveLength(3)
+  })
+
   test("allows admins to read workspace data", async () => {
     const { client, bodies } = await connect((url) =>
       url.pathname.endsWith("/me")
