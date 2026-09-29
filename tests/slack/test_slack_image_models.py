@@ -11,7 +11,7 @@ from agent.webhooks import common as webhook_common
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
-_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
+_KIMI = "fireworks:accounts/fireworks/models/glm-5p3"
 _VISION = "anthropic:claude-opus-5-5"
 
 

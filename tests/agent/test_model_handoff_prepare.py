@@ -125,7 +125,7 @@ async def test_initial_handoff_persists_before_work_and_attributes_selected_mode
     assert handoff.settings["model_handoff_complete"] is True
     assert handoff.settings["repo_instructions"] == "retain"
     assert prepared["selected_model_id"] == (requested or "openai:gpt-6-luna")
-    assert prepared["selected_effort"] == ("high" if requested else "low")
+    assert prepared["selected_effort"] == ("medium" if requested else "low")
     assert prepared["requested_model"] == requested
     assert handoff.record.call_args.kwargs["model_id"] == prepared["selected_model_id"]
     if requested:
@@ -172,9 +172,9 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
 @pytest.mark.parametrize(
     ("model", "image_type", "failure"),
     [
-        ("fireworks:accounts/fireworks/models/kimi-k3", "image", "image"),
-        ("fireworks:accounts/fireworks/models/kimi-k3", "image_url", "image"),
-        ("fireworks:accounts/fireworks/models/kimi-k3", None, None),
+        ("fireworks:accounts/fireworks/models/glm-5p3", "image", "image"),
+        ("fireworks:accounts/fireworks/models/glm-5p3", "image_url", "image"),
+        ("fireworks:accounts/fireworks/models/glm-5p3", None, None),
         ("anthropic:claude-opus-5-5", "image", None),
         ("anthropic:claude-fable-5-1", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "unavailable"),

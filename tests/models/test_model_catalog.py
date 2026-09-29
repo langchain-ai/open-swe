@@ -13,6 +13,16 @@ from agent.dashboard.options import (
     update_catalog_options,
 )
 from agent.dashboard.workspace_settings import WorkspaceSettings
+from agent.utils.model import provider_model_kwargs
+
+
+def test_catalog_models_use_supported_provider_thinking_modes():
+    assert "anthropic:claude-opus-4-5" not in model_catalog.CATALOG
+    for model_id in ("google_genai:gemini-flash-latest", "google_genai:gemini-flash-lite-latest"):
+        for effort in ("low", "high"):
+            assert (
+                provider_model_kwargs(model_id, effort, max_tokens=1000)["thinking_level"] == effort
+            )
 
 
 @pytest.mark.asyncio
@@ -28,14 +38,14 @@ async def test_refresh_updates_imported_registry_and_keeps_last_snapshot_on_fail
         200, json=payload, request=httpx2.Request("GET", "https://models.dev/api.json")
     )
     monkeypatch.setattr(model_catalog, "CACHE", tmp_path / "models.json")
-    monkeypatch.setattr(model_catalog, "_last_refresh", 0)
+    monkeypatch.setattr(model_catalog, "_last_refresh", float("-inf"))
     monkeypatch.setattr(httpx2.AsyncClient, "get", AsyncMock(return_value=response))
     try:
         assert await model_catalog.refresh_catalog()
         assert "openai:future-sol" in SUPPORTED_MODEL_IDS
         assert model_supports_effort("openai:future-sol", "max")
         assert not model_supports_effort("openai:future-sol", "medium")
-        monkeypatch.setattr(model_catalog, "_last_refresh", 0)
+        monkeypatch.setattr(model_catalog, "_last_refresh", float("-inf"))
         monkeypatch.setattr(
             httpx2.AsyncClient, "get", AsyncMock(side_effect=httpx2.ConnectError("offline"))
         )
@@ -69,6 +79,8 @@ async def test_released_desktop_receives_only_legacy_models_and_defaults(monkeyp
     legacy = await options_routes.options(request)
     assert "openai:gpt-6.1-sol" not in {m["id"] for m in legacy["models"]}
     assert any(m["id"] == "openai:gpt-6-sol" for m in legacy["models"])
+    for model in legacy["models"]:
+        assert all(model_supports_effort(model["id"], e) for e in model["efforts"])
     for role in ("agent", "agent_subagent"):
         model = next(m for m in legacy["models"] if m["id"] == legacy[f"default_{role}_model"])
         assert legacy[f"default_{role}_reasoning_effort"] in model["efforts"]
@@ -83,7 +95,7 @@ async def test_released_desktop_receives_only_legacy_models_and_defaults(monkeyp
     )
     released = await options_routes.options(request)
     sol = next(m for m in released["models"] if m["id"] == "openai:gpt-6.1-sol")
-    assert "none" in sol["efforts"]
+    assert "none" not in sol["efforts"]
     assert "max" not in sol["efforts"]
     request = Request(
         {

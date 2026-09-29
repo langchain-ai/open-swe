@@ -595,7 +595,7 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
     from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
     from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
 
-    model_id = "fireworks:accounts/fireworks/models/kimi-k3"
+    model_id = "fireworks:accounts/fireworks/models/glm-5p3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
     captured = await _capture_create_deep_agent_kwargs(
@@ -713,7 +713,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
     config = _base_config()
     captured = await _capture_create_deep_agent_kwargs(
         config,
-        thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
+        thread_settings={"model_id": "fireworks:accounts/fireworks/models/glm-5p3"},
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
     store = InMemoryStore()

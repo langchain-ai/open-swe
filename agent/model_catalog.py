@@ -75,6 +75,7 @@ def parse_catalog(payload: object) -> dict[str, CatalogModel]:
             if model.tool_call
             and "text" in model.modalities.output
             and model.efforts()
+            and not (provider == "anthropic" and model.id.startswith("claude-opus-4-5"))
             and model.limit.context > 0
             and model.limit.output > 0
         }
@@ -85,7 +86,7 @@ def parse_catalog(payload: object) -> dict[str, CatalogModel]:
 
 
 CATALOG = parse_catalog(json.loads(RESOURCE.read_text()))
-_last_refresh = 0.0
+_last_refresh = float("-inf")
 _lock = asyncio.Lock()
 
 

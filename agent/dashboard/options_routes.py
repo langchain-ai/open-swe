@@ -46,7 +46,7 @@ async def options(request: Request, workspace: str = DEFAULT_WORKSPACE_SLUG) -> 
     subagent_model, subagent_effort = gate_fable_model(
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
-    models = (
+    models: list[ModelOption] = (
         SUPPORTED_MODELS
         if fable_enabled
         else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
@@ -71,9 +71,20 @@ async def options(request: Request, workspace: str = DEFAULT_WORKSPACE_SLUG) -> 
             ),
             "default",
         )
-        models = snapshots[version]
-        if not fable_enabled:
-            models = [m for m in models if not m["id"].startswith("anthropic:claude-fable")]
+        current = {model["id"]: model for model in models}
+        models = [
+            {
+                **model,
+                "efforts": efforts,
+                "default_effort": model["default_effort"]
+                if model["default_effort"] in efforts
+                else efforts[0],
+                "supports_images": current[model["id"]]["supports_images"],
+            }
+            for model in snapshots[version]
+            if model["id"] in current
+            and (efforts := [e for e in model["efforts"] if e in current[model["id"]]["efforts"]])
+        ]
         agent_model, agent_effort = legacy_model_pair(models, agent_model, agent_effort)
         subagent_model, subagent_effort = legacy_model_pair(models, subagent_model, subagent_effort)
     return {

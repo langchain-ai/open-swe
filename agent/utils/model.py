@@ -298,7 +298,9 @@ def provider_model_kwargs(
         effort = anthropic_effort_for(profile_effort)
         if effort is not None:
             kwargs["effort"] = effort
-    elif model_id.startswith("google_genai:") and is_gemini_3_family(model_id):
+    elif model_id.startswith("google_genai:") and (
+        is_gemini_3_family(model_id) or (catalog_model is not None and catalog_model.reasoning)
+    ):
         thinking_level = google_thinking_level_for(profile_effort)
         if thinking_level is not None:
             kwargs["thinking_level"] = thinking_level
