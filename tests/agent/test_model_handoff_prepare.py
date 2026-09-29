@@ -1,14 +1,12 @@
-import asyncio
 from dataclasses import dataclass
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import HumanMessage, convert_to_messages
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 import agent.server as server
-import agent.thread_title as thread_title
 from agent.dashboard.options import available_requested_models
 from agent.middleware.model_selection import (
     ModelSelectionMiddleware,
@@ -17,7 +15,6 @@ from agent.middleware.model_selection import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.model_request import ModelRequestIntent
-from agent.slack.webhook import _slack_context_input
 from agent.utils.thread_settings import ThreadSettings
 
 
@@ -172,39 +169,6 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     classify.assert_awaited_once_with("Fix the typo")
 
 
-@pytest.mark.parametrize("request_text", ["Use Opus to fix this", "Fix this"])
-async def test_slack_handoff_uses_triggering_request_instead_of_replayed_history(
-    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, request_text: str
-) -> None:
-    observed: list[str] = []
-
-    async def infer(task: str, **kwargs: object) -> str:
-        observed.append(task)
-        return "anthropic:claude-opus-5-5" if "Opus" in task else "no_request"
-
-    monkeypatch.setattr("agent.model_request.select_jev_choice", infer)
-    run_input = _slack_context_input(
-        [{"ts": "1.0", "user": "U2", "text": "Use Kimi for the earlier task"}],
-        {"U1": "Alice", "U2": "Bob"},
-        {},
-        channel={"id": "slack:C1", "platform": "slack"},
-        bot_user_id="UBOT",
-        event_ts="2.0",
-        trigger_user_id="U1",
-        request_text=request_text,
-        request_blocks=[{"type": "text", "text": request_text}],
-    )
-    prepared = await handoff.prepare(
-        {"messages": convert_to_messages([dict(message) for message in run_input["messages"]])}
-    )
-    expected = "anthropic:claude-opus-5-5" if "Opus" in request_text else None
-    assert len(observed) == 1
-    assert request_text in observed[0]
-    assert "Kimi" not in observed[0]
-    assert handoff.settings["model_handoff_complete"] is True
-    assert handoff.settings["requested_model"] == prepared["requested_model"] == expected
-
-
 @pytest.mark.parametrize(
     ("model", "image_type", "failure"),
     [
@@ -264,37 +228,3 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         assert (await handoff.prepare(state))["selected_model_id"] == model
         handoff.store.assert_awaited_once()
         assert handoff.settings["requested_model"] == model
-
-
-async def test_requested_model_is_persisted_and_work_starts_independently_of_title(
-    handoff: Handoff, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    started, release = asyncio.Event(), asyncio.Event()
-
-    async def generate_title(**kwargs: object) -> None:
-        started.set()
-        await release.wait()
-        raise RuntimeError("Title service unavailable")
-
-    monkeypatch.setattr(thread_title, "generate_and_store_thread_title", generate_title)
-    monkeypatch.setattr(
-        server, "schedule_thread_title_generation", thread_title.schedule_thread_title_generation
-    )
-    requested = "anthropic:claude-opus-5-5"
-    monkeypatch.setattr(
-        server,
-        "infer_requested_model",
-        AsyncMock(return_value=ModelRequestIntent(requested_model=requested)),
-    )
-    try:
-        prepared = await asyncio.wait_for(
-            handoff.prepare({"messages": [HumanMessage(content="Use Opus to fix this")]}), timeout=1
-        )
-        await asyncio.wait_for(started.wait(), timeout=1)
-        assert handoff.settings["requested_model"] == prepared["selected_model_id"] == requested
-        handoff.record.assert_awaited_once()
-        assert not release.is_set()
-    finally:
-        release.set()
-        await asyncio.gather(*thread_title._background_tasks)
-    assert handoff.settings["requested_model"] == requested

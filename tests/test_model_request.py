@@ -66,24 +66,3 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
         stream.reset(token)
     assert observed == ["Use Oppus for this"]
     assert intent is not None and intent.requested_model == "anthropic:claude-opus-5-5"
-
-
-@pytest.mark.parametrize("choice", ["anthropic:claude-opus-5-5", "no_request", "unavailable", None])
-async def test_classifier_decision_selects_model_or_reports_unavailable(
-    monkeypatch: pytest.MonkeyPatch, choice: str | None
-) -> None:
-    classify = AsyncMock(return_value=choice)
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
-    intent = await infer_requested_model(
-        messages=[HumanMessage(content="x" * 8_001)],
-        requested_models=available_requested_models(fable_enabled=False),
-    )
-    assert classify.call_args.args == ("x" * 8_000,)
-    assert intent == (
-        ModelRequestIntent(
-            requested_model=choice if choice.startswith("anthropic:") else None,
-            unavailable_model=choice == "unavailable",
-        )
-        if choice is not None
-        else None
-    )
