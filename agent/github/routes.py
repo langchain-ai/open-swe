@@ -45,7 +45,7 @@ async def github_webhook(
         refs=EventRefs.github(body),
     )
     if logged is not None:
-        background_tasks.add_task(EventSubscription.deliver, logged)
+        await EventSubscription.deliver(logged)
     common.logger.info(
         "GitHub webhook received",
         extra={
