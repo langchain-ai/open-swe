@@ -11,10 +11,10 @@ Every request reaches the service with the viewer's identity. Inbound copies of 
 stripped first, so a client cannot forge them:
 
 - `X-Langsmith-User-Id` and `X-Langsmith-User-Email` (omitted when the account has no email):
-  plain values. Code that runs in this sandbox, such as an app or proxy that gates access, should
-  read these directly instead of verifying the token.
-- `X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes, for
-  handing the identity to something outside the sandbox. Claims are `sub` (the LangSmith user id),
+  plain values. Use these by default, including to gate access.
+- `X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes. Use it
+  only when there is a strong reason to, such as code that must also work outside this sandbox.
+  Claims are `sub` (the LangSmith user id),
   `email`, `name`, `iss` (the LangSmith app URL) and `aud` (a one-element array holding the service
   host). Verify it with a JWT library against `{{ jwks_url }}` — the keys live on the LangSmith API
   host, not on the app URL the token names as its issuer.
