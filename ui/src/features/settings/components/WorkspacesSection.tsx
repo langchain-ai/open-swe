@@ -277,7 +277,9 @@ export function WorkspacesSection({
                     setCreateError(null)
                   }}
                 >
-                  Cancel
+                  {JSON.stringify(createDraft) !== JSON.stringify(EMPTY_DRAFT)
+                    ? "Cancel"
+                    : "Close"}
                 </Button>
                 <Button
                   size="sm"

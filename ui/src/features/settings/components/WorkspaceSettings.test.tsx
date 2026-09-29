@@ -419,6 +419,7 @@ describe("WorkspaceSettingsPanel", () => {
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
     })
     const refresh = vi
       .spyOn(api, "refreshWorkspace")
@@ -426,6 +427,10 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage()
 
     await screen.findByRole("button", { name: "Edit setup script" })
+    const sandbox = screen
+      .getByRole("button", { name: "Save scripts" })
+      .closest("section")!
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
     expect(screen.queryByLabelText("Setup script")).toBeNull()
     expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
     expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
@@ -445,7 +450,19 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
     const setup = await screen.findByRole("textbox", { name: "Setup script" })
     expect((setup as HTMLTextAreaElement).value).toBe("make setup")
-    fireEvent.change(setup, { target: { value: "make setup && make build" } })
+    fireEvent.change(setup, { target: { value: "Discard this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(within(sandbox).getByRole("button", { name: "Cancel" }))
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    const restoredSetup = await screen.findByRole("textbox", {
+      name: "Setup script",
+    })
+    expect((restoredSetup as HTMLTextAreaElement).value).toBe("make setup")
+    fireEvent.change(restoredSetup, {
+      target: { value: "make setup && make build" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(update).not.toHaveBeenCalled()
@@ -477,11 +494,22 @@ describe("WorkspaceSettingsPanel", () => {
       })
     )
 
+    await waitFor(() =>
+      expect(
+        within(
+          screen
+            .getByRole("button", { name: "Save scripts" })
+            .closest("section")!
+        ).queryByRole("button", { name: "Cancel" })
+      ).toBeNull()
+    )
+
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.
     const getWorkspace = vi.spyOn(api, "getWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
       refresh_status: "refreshing",
     })
     const readsBefore = getWorkspace.mock.calls.length
