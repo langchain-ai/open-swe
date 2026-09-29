@@ -537,8 +537,8 @@ describe("WorkspaceSettingsPanel", () => {
     vi.spyOn(api, "repos").mockResolvedValue({
       installations: [],
       repositories: [
-        { full_name: "acme/oss", private: false },
-        { full_name: "acme/api", private: true },
+        { full_name: "acme/oss", private: false, archived: false },
+        { full_name: "acme/api", private: true, archived: false },
       ],
     })
     renderPage()
