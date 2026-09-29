@@ -983,14 +983,20 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    params["config"] = {**client_config, "configurable": merged_configurable}
-    config_metadata = params["config"].get("metadata")
-    if isinstance(config_metadata, dict):
-        params["config"]["metadata"] = {k: v for k, v in config_metadata.items() if k != "user_id"}
-    user_id = await _run_user_id(params["config"], source=DASHBOARD_SOURCE)
+    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
     if user_id:
         run_metadata["user_id"] = user_id
-    params["config"]["metadata"] = {**params["config"].get("metadata", {}), **run_metadata}
+    config_metadata = client_config.get("metadata")
+    if not isinstance(config_metadata, dict):
+        config_metadata = {}
+    params["config"] = {
+        **client_config,
+        "configurable": merged_configurable,
+        "metadata": {
+            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **run_metadata,
+        },
+    }
     params["metadata"] = run_metadata
     command["params"] = params
     return command

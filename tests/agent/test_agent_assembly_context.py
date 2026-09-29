@@ -26,9 +26,9 @@ from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import _registered_tool_name, get_agent
 
 _MODEL_DEFAULTS = {
-    "default_agent_model": "openai:gpt-6-sol",
+    "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
-    "default_agent_subagent_model": "openai:gpt-6-sol",
+    "default_agent_subagent_model": "openai:gpt-6.1-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
 
@@ -154,7 +154,7 @@ async def _capture_create_deep_agent_kwargs(
                     **_MODEL_DEFAULTS,
                     "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
                     "default_agent_routing_fast_reasoning_effort": "low",
-                    "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+                    "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
                     "default_agent_routing_balanced_reasoning_effort": "medium",
                     "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
                     "default_agent_routing_performance_reasoning_effort": "high",
@@ -199,7 +199,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
         profile={"draft_prs": False},
         thread_settings={
             "owner_login": "draft-preference-owner",
-            "model_id": "openai:gpt-6-sol",
+            "model_id": "openai:gpt-6.1-sol",
         },
     )
 
@@ -223,11 +223,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         return WorkspaceSettings(
             {
                 **_MODEL_DEFAULTS,
-                "default_agent_routing_fast_model": "openai:gpt-6-sol",
+                "default_agent_routing_fast_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_fast_reasoning_effort": "low",
-                "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+                "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_balanced_reasoning_effort": "medium",
-                "default_agent_routing_performance_model": "openai:gpt-6-sol",
+                "default_agent_routing_performance_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_performance_reasoning_effort": "high",
                 "gateway_enabled": False,
                 "fable_enabled": True,
@@ -280,7 +280,7 @@ async def test_router_failure_uses_same_model_as_routing_off() -> None:
 @pytest.mark.parametrize("legacy_thread", [False, True])
 async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) -> None:
     initial_settings = (
-        {"model_id": "openai:gpt-6-sol", "effort": "medium", "model_routing_enabled": True}
+        {"model_id": "openai:gpt-6.1-sol", "effort": "medium", "model_routing_enabled": True}
         if legacy_thread
         else {}
     )
@@ -574,16 +574,16 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
     configurable.update(
         source=source,
         model_selection="auto",
-        agent_model_id="openai:gpt-6-sol",
+        agent_model_id="openai:gpt-6.1-sol",
         agent_effort="low",
     )
     await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
     assert configurable["resolved_agent_model_id"] == "anthropic:claude-opus-5-5"
     configurable.update(
-        model_selection="explicit", agent_model_id="openai:gpt-6-sol", agent_effort="low"
+        model_selection="explicit", agent_model_id="openai:gpt-6.1-sol", agent_effort="low"
     )
     await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
-    assert configurable["resolved_agent_model_id"] == "openai:gpt-6-sol"
+    assert configurable["resolved_agent_model_id"] == "openai:gpt-6.1-sol"
 
 
 @pytest.mark.parametrize("image_source", ["initial", "retained", "tool"])
@@ -601,7 +601,7 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
     captured = await _capture_create_deep_agent_kwargs(
         config,
         thread_settings={
-            "model_id": "openai:gpt-6-sol",
+            "model_id": "openai:gpt-6.1-sol",
             "effort": "medium",
             "model_handoff_complete": True,
             "model_routing_enabled": True,
@@ -640,7 +640,7 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
         )
         await selection.awrap_model_call(request, handle_selected)
         actual = handler.call_args.args[0]
-        assert actual.model.model_id == ("openai:gpt-6-sol" if with_image else model_id)
+        assert actual.model.model_id == ("openai:gpt-6.1-sol" if with_image else model_id)
         assert actual.messages == request.messages
 
 
@@ -648,7 +648,7 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_effort"),
     [
-        (None, "openai:gpt-6-sol", "medium"),
+        (None, "openai:gpt-6.1-sol", "medium"),
         (
             {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "high"},
             "google_genai:gemini-3.8-flash",

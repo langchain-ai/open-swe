@@ -2,9 +2,10 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired
 
 from langgraph_sdk.client import LangGraphClient
+from typing_extensions import TypedDict
 
 from agent.invocation import resolve_invocation_id
 from agent.slack.client import (
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
 
 
-class SessionCostRefresh(TypedDict):
+class SessionCostRefresh(TypedDict, closed=True):
     task: Literal["session_cost"]
     agent_thread_id: str
     run_id: str

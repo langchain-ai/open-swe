@@ -59,7 +59,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
 ) -> None:
     requester["source"] = source
     profile = {
-        "default_model": "openai:gpt-6-sol",
+        "default_model": "openai:gpt-6.1-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
@@ -167,7 +167,7 @@ async def test_invalid_patch_rejects_all_changes(
     settings: dict[str, SettingValue],
 ) -> None:
     fake_store.seed(
-        ["profiles"], "Alice", {"default_model": "openai:gpt-6-sol", "reasoning_effort": "high"}
+        ["profiles"], "Alice", {"default_model": "openai:gpt-6.1-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
     assert (await save_user_settings(settings))["ok"] is False
