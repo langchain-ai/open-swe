@@ -1,5 +1,7 @@
 """Slack interactivity for standard human review cards: I'll review and Dismiss."""
 
+import logging
+
 from fastapi import BackgroundTasks
 
 from agent.human_review import card
@@ -11,6 +13,8 @@ from agent.human_review.standard import claim
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import WebhookResponse, accepted, ignored
 from agent.users import User
+
+logger = logging.getLogger(__name__)
 
 BUTTON_TYPE = card.BUTTON_TYPE
 
@@ -38,10 +42,20 @@ async def handle_button(
     channel_id = interaction.channel_id
     thread_ts = interaction.thread_ts
     user_id = interaction.user.id
+    extra = {
+        "request_id": button.fingerprint,
+        "button_action": button.action,
+        "slack_user": user_id,
+        "slack_channel": channel_id,
+        "slack_thread_ts": thread_ts,
+    }
     if not channel_id or not thread_ts or not button.fingerprint or not user_id:
+        logger.warning("Ignored a human review click missing its context", extra=extra)
         return ignored("Missing human review context")
     if button.action not in {"review", "dismiss"}:
+        logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
+    logger.info("Queued a human review click", extra=extra)
     background_tasks.add_task(
         _process,
         button.fingerprint,

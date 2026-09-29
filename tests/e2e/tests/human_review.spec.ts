@@ -447,7 +447,22 @@ test.describe("Human review in Slack", () => {
     expect(broadcast.reply_broadcast).toBe(true);
     await shootCard(page, "thread-broadcast");
 
-    // 3. Anyone may dismiss it. The channel copy goes; the thread keeps the
+    // 3. Signing up from a card posted in a thread and sent to the channel works
+    //    like one posted at the top of the channel.
+    await click(request, posted, "I'll review", ALICE.slack);
+    await expect
+      .poll(async () => (await latestRequest(request)).reviewers, {
+        timeout: 30_000,
+      })
+      .toEqual([{ github_login: "alice", assigned_by_agent: false }]);
+    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
+      "alice",
+    ]);
+    await expect
+      .poll(async () => cardText(await reviewCard(request, posted)))
+      .toMatch(/<@U_ALICE>.*reviewing/);
+
+    // 4. Anyone may dismiss it. The channel copy goes; the thread keeps the
     //    closed card.
     await click(request, posted, "Dismiss", BOB.slack);
     await expect

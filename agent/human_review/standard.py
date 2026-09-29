@@ -310,6 +310,14 @@ async def _add_reviewer(
                 user_id=reviewer.user.id, decision="review", assigned_by_agent=assigned_by_agent
             )
         )
+    logger.info(
+        "Added a human reviewer",
+        extra={
+            "request_id": str(request.id),
+            "github_login": reviewer.github_login,
+            "assigned_by_agent": assigned_by_agent,
+        },
+    )
     current = await HumanReviewRequest.get(request.id)
     if current is None:
         return Outcome("This review request vanished.")

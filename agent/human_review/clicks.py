@@ -26,6 +26,10 @@ async def answer_click(
     except ValueError:
         request = None
     if request is None:
+        logger.warning(
+            "Human review click names no request",
+            extra={"request_id": request_id, "slack_user": slack_user_id},
+        )
         await post_slack_ephemeral_message(
             channel_id, slack_user_id, "That review request no longer exists.", thread_ts
         )
@@ -41,5 +45,20 @@ async def answer_click(
             extra={"request_id": request_id, "kind": request.kind},
         )
         outcome = Outcome("Something went wrong recording your click. Try again.")
-    if outcome.message:
-        await post_slack_ephemeral_message(channel_id, slack_user_id, outcome.message, thread_ts)
+    # The outcome is only ever shown to the clicker, so this is the one record of why.
+    logger.info(
+        "Human review click answered",
+        extra={
+            "request_id": request_id,
+            "kind": request.kind,
+            "slack_user": slack_user_id,
+            "outcome": outcome.message,
+        },
+    )
+    if outcome.message and not await post_slack_ephemeral_message(
+        channel_id, slack_user_id, outcome.message, thread_ts
+    ):
+        logger.warning(
+            "Could not answer a human review click",
+            extra={"request_id": request_id, "slack_user": slack_user_id},
+        )
