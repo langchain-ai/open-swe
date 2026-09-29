@@ -1,6 +1,6 @@
 Listen for inbound events in this thread's workspace and have each matching one delivered to this thread.
 
-Events come from GitHub (repositories bound to the workspace), Slack (channels bound to the workspace), and Linear. Use `list_event_types` to see which sources, event types, and actions actually arrive. Events Open SWE itself caused never match, except GitHub CI results.
+Events come from GitHub (repositories bound to the workspace) and Slack (channels bound to the workspace). Slack events match only from public channels, or from this thread's own Slack channel; private channels, DMs, and Slack events that do not name a public channel (such as reactions) match only in this thread's own channel. Use `list_event_types` to see which sources, event types, and actions actually arrive. Events Open SWE itself caused never match, except GitHub CI results.
 
 Every matching event is delivered exactly once, oldest first, as a message from the event listener. None is lost when the thread is busy or when a run is interrupted: if a run is stopped before an event reached it, the next run on this thread receives that event before anything newer. A subscription ends after its first match when `one_shot` is set, after it delivers a subscribed pull request's `closed` event, when it expires, or when you cancel it.
 
@@ -8,7 +8,7 @@ Prefer narrow filters: each matching event costs a model turn. For CI, `event_ty
 
 Args:
     action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
-    sources: `github`, `slack`, and/or `linear`. Empty matches every source.
+    sources: `github` and/or `slack`. Empty matches every source.
     repo: A GitHub repository (`owner/name`) of this workspace; only its events match.
     pr_url: A GitHub pull request URL; only that pull request's events match (reviews, comments, pushes, CI).
     event_types: Event names to match, e.g. GitHub `pull_request_review`, `issue_comment`, `check_suite`, `issues`; Slack `message`, `reaction_added`. Empty matches every type. `subscribe` needs at least one of `event_types`, `repo`, or `pr_url`.

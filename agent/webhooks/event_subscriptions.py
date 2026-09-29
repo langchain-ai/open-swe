@@ -19,6 +19,7 @@ from agent.github.org_membership import INTERNAL_BOT_LOGINS
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.prompts import prompt
+from agent.run_config import RunConfig
 from agent.webhooks.event_log import LoggedEvent, WebhookSource
 from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
 
@@ -69,6 +70,7 @@ class _SlackMessage(BaseModel):
     user: JsonValue = ""
     text: JsonValue = ""
     channel: JsonValue = ""
+    channel_type: JsonValue = ""
 
     @property
     def user_id(self) -> str:
@@ -120,6 +122,8 @@ class EventSummary(BaseModel):
     body: str = ""
     trusted: bool = False
     from_open_swe: bool = False
+    slack_channel_id: str = ""
+    slack_public: bool = False
 
     @classmethod
     def of(cls, event: LoggedEvent) -> Self:
@@ -173,6 +177,8 @@ class EventSummary(BaseModel):
             body=message.message_text,
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,
+            slack_channel_id=message.channel_id,
+            slack_public=message.channel_type == "channel",
         )
 
     @classmethod
@@ -281,6 +287,8 @@ class EventSubscription(Base):
             return
         strategies: dict[str, MultitaskStrategy] = {}
         for subscription in subscriptions:
+            if not subscription.sees(summary):
+                continue
             try:
                 if not await subscription.match(event, summary):
                     continue
@@ -350,6 +358,15 @@ class EventSubscription(Base):
                 )
             )
             return list(rows.unique())
+
+    def sees(self, summary: EventSummary) -> bool:
+        """Slack events reach a thread only from a public channel or its own Slack channel."""
+        if summary.source != "slack" or summary.slack_public:
+            return True
+        own = RunConfig.parse(self.run_config).slack_thread
+        return bool(summary.slack_channel_id) and (
+            own is not None and own.channel_id == summary.slack_channel_id
+        )
 
     async def match(self, event: LoggedEvent, summary: EventSummary) -> bool:
         """Record ``event`` as owed to this thread; ``False`` when nothing new is owed."""
