@@ -144,12 +144,6 @@ def _status(approval: HumanReviewRequest, author: str, channel: str | None) -> l
             section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
             actions(_ready_button(approval), _dismiss_button(approval)),
         ]
-    if approval.approved:
-        return [
-            section(
-                f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
-            )
-        ]
     return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval, channel))]
 
 
@@ -162,12 +156,18 @@ def open_card(
     diff_image_id: str | None = None,
     channel: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for an open card; diff and buttons go once it is approved.
+    """Text fallback and blocks for an open card; an approved one collapses to one line.
 
     ``author`` is the PR author's Slack mention, from :meth:`HumanReviewRequest.author_mention`.
     ``channel`` (``#name``) offers broadcasting the card there; ``None`` offers nothing.
     """
     pr = approval.pull_request
+    if approval.approved and not approval.awaiting_ready:
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        heading = f"Expedited review: {_vote_summary(approval, author)}"
+        return f"{heading} — {pr.url}", [
+            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        ]
     blocks: list[Block] = [
         *_header(approval, title, author),
         divider(),
