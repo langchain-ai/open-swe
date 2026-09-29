@@ -6,6 +6,79 @@ from mcp.types import CallToolResult, TextContent, Tool
 from agent.mcp import MCPConnection, runtime
 
 
+def test_partial_result_annotation_uses_next_start_at() -> None:
+    content = [{"type": "text", "text": "payload"}]
+    artifact = {
+        "structured_content": {
+            "is_truncated": True,
+            "displayed_items": 10,
+            "truncation_message": "Response truncated. Call again with start_at=10.",
+        }
+    }
+
+    annotated, unchanged_artifact = runtime._annotate_partial_result(content, artifact)
+
+    assert annotated[0]["text"] == (
+        "PARTIAL RESULT: Re-issue the identical query with start_at=10 before concluding no match."
+    )
+    assert annotated[1:] == content
+    assert unchanged_artifact is artifact
+
+
+def test_partial_result_annotation_supports_cursor() -> None:
+    content = "payload"
+    artifact = {
+        "structured_content": {
+            "is_truncated": True,
+            "displayed_items": 10,
+            "truncation_message": 'Call again with cursor="next-page".',
+        }
+    }
+
+    annotated, _ = runtime._annotate_partial_result(content, artifact)
+
+    assert annotated.startswith(
+        "PARTIAL RESULT: Re-issue the identical query with cursor=next-page"
+    )
+    assert annotated.endswith("\npayload")
+
+
+def test_partial_result_annotation_derives_start_at_from_range() -> None:
+    content = [{"type": "text", "text": "payload"}]
+    artifact = {
+        "structured_content": {
+            "is_truncated": True,
+            "displayed_items": 10,
+            "truncation_message": "Matches 1-10 of 115 in timestamp order.",
+        }
+    }
+
+    annotated, _ = runtime._annotate_partial_result(content, artifact)
+
+    assert annotated[0]["text"].endswith("start_at=10 before concluding no match.")
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"is_truncated": False, "displayed_items": 10},
+        {
+            "is_truncated": True,
+            "displayed_items": 10,
+            "truncation_message": "Caller limit reached.",
+        },
+    ],
+)
+def test_partial_result_annotation_leaves_non_actionable_results_unchanged(metadata) -> None:
+    content = [{"type": "text", "text": "payload"}]
+    artifact = {"structured_content": metadata}
+
+    annotated, unchanged_artifact = runtime._annotate_partial_result(content, artifact)
+
+    assert annotated is content
+    assert unchanged_artifact is artifact
+
+
 def record(name="linear", **fields):
     return MCPConnection(
         **{

@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -36,6 +36,8 @@ type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
+_PARTIAL_RANGE = re.compile(r"\bMatches\s+1-(\d+)\s+of\s+\d+\b", re.IGNORECASE)
+_CONTINUATION = re.compile(r"\b(start_at|cursor)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s,.;)]+))")
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,76 @@ def _connection(record: MCPConnection, namespace: tuple[str, ...]) -> Connection
     if auth := connection_auth(record, namespace):
         connection["auth"] = auth
     return connection
+
+
+def _partial_continuation(metadata: Mapping[str, Any]) -> str | None:
+    if metadata.get("is_truncated") is not True:
+        return None
+    message = metadata.get("truncation_message")
+    if not isinstance(message, str):
+        return None
+    match = _CONTINUATION.search(message)
+    if match:
+        name = match.group(1)
+        value = next(value for value in match.groups()[1:] if value is not None)
+        if name == "cursor" and not value:
+            return None
+        if name == "start_at":
+            try:
+                if int(value) < 0:
+                    return None
+            except ValueError:
+                return None
+        return f"{name}={value}"
+    range_match = _PARTIAL_RANGE.search(message)
+    displayed_items = metadata.get("displayed_items")
+    if range_match and isinstance(displayed_items, int) and displayed_items > 0:
+        end = int(range_match.group(1))
+        if end == displayed_items:
+            return f"start_at={end}"
+    return None
+
+
+def _metadata_from_content(content: Any) -> list[Mapping[str, Any]]:
+    if isinstance(content, Mapping):
+        return [content]
+    if isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            return []
+        return [parsed] if isinstance(parsed, Mapping) else []
+    if isinstance(content, list):
+        metadata: list[Mapping[str, Any]] = []
+        for block in content:
+            if isinstance(block, Mapping):
+                metadata.extend(_metadata_from_content(block.get("text")))
+        return metadata
+    return []
+
+
+def _annotate_partial_result(content: Any, artifact: Any) -> tuple[Any, Any]:
+    metadata_candidates = _metadata_from_content(content)
+    if isinstance(artifact, Mapping):
+        structured_content = artifact.get("structured_content")
+        if isinstance(structured_content, Mapping):
+            metadata_candidates.append(structured_content)
+    continuation = next(
+        (
+            continuation
+            for metadata in metadata_candidates
+            if (continuation := _partial_continuation(metadata)) is not None
+        ),
+        None,
+    )
+    if continuation is None:
+        return content, artifact
+    instruction = f"PARTIAL RESULT: Re-issue the identical query with {continuation} before concluding no match."
+    if isinstance(content, str):
+        return f"{instruction}\n{content}", artifact
+    if isinstance(content, list):
+        return [{"type": "text", "text": instruction}, *content], artifact
+    return content, artifact
 
 
 async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
@@ -179,7 +251,8 @@ def _wrap_tool(
             )
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
-            return await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
+            result = await asyncio.wait_for(fresh.coroutine(), timeout=_TIMEOUT_SECONDS)
+            return _annotate_partial_result(*result)
         except ToolException:
             raise
         except Exception:
