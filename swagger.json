@@ -3416,6 +3416,19 @@
             ],
             "title": "Effort"
           },
+          "message_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Pattern"
+          },
           "model_id": {
             "anyOf": [
               {
@@ -3493,7 +3506,8 @@
             "default": "schedule",
             "enum": [
               "schedule",
-              "github_issue_opened"
+              "github_issue_opened",
+              "slack_channel_message"
             ],
             "title": "Trigger",
             "type": "string"
@@ -3546,6 +3560,19 @@
               }
             ],
             "title": "Enabled"
+          },
+          "message_pattern": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Pattern"
           },
           "model_id": {
             "anyOf": [
@@ -3638,7 +3665,8 @@
               {
                 "enum": [
                   "schedule",
-                  "github_issue_opened"
+                  "github_issue_opened",
+                  "slack_channel_message"
                 ],
                 "type": "string"
               },
@@ -3813,6 +3841,98 @@
           "is_ext_shared"
         ],
         "title": "SlackChannelOption",
+        "type": "object"
+      },
+      "SlackMessageMatch": {
+        "properties": {
+          "permalink": {
+            "title": "Permalink",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ts",
+          "user",
+          "text",
+          "permalink"
+        ],
+        "title": "SlackMessageMatch",
+        "type": "object"
+      },
+      "SlackMessagePreview": {
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/SlackMessageMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "pattern": {
+            "title": "Pattern",
+            "type": "string"
+          },
+          "scanned": {
+            "title": "Scanned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel_id",
+          "pattern",
+          "days",
+          "scanned",
+          "matches"
+        ],
+        "title": "SlackMessagePreview",
+        "type": "object"
+      },
+      "SlackMessagePreviewBody": {
+        "properties": {
+          "days": {
+            "default": 7,
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          },
+          "message_pattern": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message Pattern",
+            "type": "string"
+          },
+          "slack_channel_id": {
+            "minLength": 1,
+            "title": "Slack Channel Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slack_channel_id",
+          "message_pattern"
+        ],
+        "title": "SlackMessagePreviewBody",
         "type": "object"
       },
       "SlashCommandResponse": {
@@ -12422,6 +12542,52 @@
           }
         ],
         "summary": "Api Create Schedule",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/schedules/slack-message-preview": {
+      "post": {
+        "operationId": "api_preview_slack_message_pattern_dashboard_api_schedules_slack_message_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackMessagePreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackMessagePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Preview Slack Message Pattern",
         "tags": [
           "dashboard"
         ]
