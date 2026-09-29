@@ -371,10 +371,11 @@ test.describe("Human review in Slack", () => {
         { timeout: 30_000 },
       )
       .toEqual(["alice", "bob"]);
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "alice",
-      "bob",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["alice", "bob"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing[\s\S]*<@U_BOB>.*reviewing/);
@@ -489,9 +490,11 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toEqual([{ github_login: "alice", assigned_by_agent: false }]);
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "alice",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["alice"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing/);
@@ -597,9 +600,11 @@ test.describe("Human review in Slack", () => {
       })
       .toEqual([{ github_login: "bob", assigned_by_agent: true }]);
     expect((await latestRequest(request)).thread_id).not.toBe("");
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "bob",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["bob"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toContain("picked by Open SWE");
