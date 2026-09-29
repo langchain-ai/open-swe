@@ -2963,6 +2963,11 @@
           "success": {
             "title": "Success",
             "type": "boolean"
+          },
+          "summary_updated": {
+            "default": false,
+            "title": "Summary Updated",
+            "type": "boolean"
           }
         },
         "required": [
