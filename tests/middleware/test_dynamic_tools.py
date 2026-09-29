@@ -261,17 +261,24 @@ async def test_a_tool_loaded_again_in_a_later_run_is_added_at_the_new_load() -> 
     await thread.tool_turn(["notion-search"])
     after_reload = await thread.model_call()
 
-    assert _offered(before_reload) == ["execute"]
-    assert _shape(before_reload.messages) == ["human", "ai", "tool", "ai", "human"]
-    assert _shape(after_reload.messages) == [
-        "human",
-        "ai",
-        "tool",
-        "ai",
+    assert _offered(before_reload) == ["execute", "notion-search"]
+    assert _shape(before_reload.messages) == [
         "human",
         "ai",
         "tool",
         "+notion-search",
+        "ai",
+        "human",
+    ]
+    assert _shape(after_reload.messages) == [
+        "human",
+        "ai",
+        "tool",
+        "+notion-search",
+        "ai",
+        "human",
+        "ai",
+        "tool",
     ]
 
 
@@ -445,3 +452,42 @@ async def test_fork_preserves_loaded_integration_schemas() -> None:
         },
     )
     assert await middleware.abefore_agent(state, cast(Runtime, MagicMock())) == {}
+
+
+async def test_before_agent_restores_loaded_integration_tools_from_history() -> None:
+    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
+    state = cast(
+        DynamicToolState,
+        {
+            "messages": [
+                AIMessage(
+                    "",
+                    tool_calls=[
+                        {
+                            "name": "load_integration_tools",
+                            "args": {"tool_names": ["notion-search"]},
+                            "id": "load-1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    "Loaded integration tool schemas: notion-search.",
+                    tool_call_id="load-1",
+                    artifact={"newly_loaded": ["notion-search", "removed-tool"]},
+                ),
+            ]
+        },
+    )
+
+    update = await middleware.abefore_agent(state, cast(Runtime, MagicMock()))
+    loaded = update["loaded_integration_tools"]
+    assert isinstance(loaded, Overwrite)
+    assert loaded.value == ["notion-search"]
+
+    fresh_update = await middleware.abefore_agent(
+        cast(DynamicToolState, {"messages": []}), cast(Runtime, MagicMock())
+    )
+    fresh_loaded = fresh_update["loaded_integration_tools"]
+    assert isinstance(fresh_loaded, Overwrite)
+    assert fresh_loaded.value == []

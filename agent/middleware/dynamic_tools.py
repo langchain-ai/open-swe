@@ -226,7 +226,15 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
     async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         if state.get("_deepagents_forked_context"):
             return {}
-        return {"loaded_integration_tools": Overwrite([])}
+        loaded = self._loaded_names_from_history(state.get("messages", []))
+        return {"loaded_integration_tools": Overwrite(loaded)}
+
+    def _loaded_names_from_history(self, messages: Sequence[AnyMessage]) -> list[str]:
+        loaded: set[str] = set()
+        for message in messages:
+            if isinstance(message, ToolMessage):
+                loaded.update(_newly_loaded(message.artifact))
+        return sorted(name for name in loaded if name in self._group_of)
 
     async def awrap_model_call(
         self,
@@ -354,11 +362,7 @@ def _newly_loaded(artifact: object) -> list[str]:
 
 
 def _anchors(messages: Sequence[AnyMessage]) -> dict[str, int]:
-    """Index of the latest load result that newly loaded each tool.
-
-    The per-run reset empties the loaded list and a repeat load lists nothing new,
-    so the latest load result naming a tool is its first load in this run.
-    """
+    """Index of the latest load result that newly loaded each tool."""
     load_calls: set[str] = set()
     anchors: dict[str, int] = {}
     for index, message in enumerate(messages):
