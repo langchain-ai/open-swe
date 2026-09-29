@@ -133,6 +133,105 @@ test.describe("finished transcript (shared fixture thread)", () => {
 });
 
 test.describe("transcript rendering", () => {
+  for (const surface of ["slack", "web"] as const) {
+    test(`settles work after a final ${surface} answer with stale running status`, async ({
+      page,
+    }) => {
+      await loginAs(page, SAME_USER);
+      await openThreadViaSlackLink(page);
+      const threadId = threadIdFromUrl(page);
+      await waitForThreadIdle(page, threadId);
+      await waitForThreadNotBusy(page, threadId);
+      await page.route("**/transcript/events*", (route) => route.abort());
+      await page.route(
+        `**/dashboard/api/threads/${threadId}/transcript`,
+        async (route) => {
+          const response = await route.fetch();
+          const body = (await response.json()) as {
+            thread: Record<string, unknown>;
+            turns: Array<{ turn_id: string; state: string }>;
+            messages: Array<Record<string, unknown>>;
+            tool_calls: Array<Record<string, unknown>>;
+          };
+          const turnId = body.turns[0].turn_id;
+          body.thread.status = "running";
+          body.turns = body.turns.slice(0, 1).map((turn) => ({
+            ...turn,
+            state: "running",
+          }));
+          body.messages = [
+            {
+              message_id: "repro-request",
+              turn_id: turnId,
+              role: "human",
+              text: "Investigate the reported issue",
+              reasoning: "",
+              namespace: [],
+              attachments: null,
+              usage: null,
+              created_at: "2026-09-29T22:50:48Z",
+            },
+            ...(surface === "web"
+              ? [
+                  {
+                    message_id: "repro-answer",
+                    turn_id: turnId,
+                    role: "ai",
+                    text: "Investigation complete.",
+                    reasoning: "",
+                    namespace: [],
+                    attachments: null,
+                    usage: null,
+                    created_at: "2026-09-29T22:51:28Z",
+                  },
+                ]
+              : []),
+          ];
+          body.tool_calls = [
+            {
+              tool_call_id: "repro-read",
+              turn_id: turnId,
+              name: "read_file",
+              input: { file_path: "/workspace/example.py" },
+              status: "completed",
+              output_preview: "File contents",
+              has_output: true,
+              namespace: [],
+              started_at: "2026-09-29T22:50:50Z",
+            },
+            ...(surface === "slack"
+              ? [
+                  {
+                    tool_call_id: "repro-final",
+                    turn_id: turnId,
+                    name: "slack_reply",
+                    input: {
+                      message: "Investigation complete.",
+                      response_type: "final",
+                    },
+                    status: "completed",
+                    output_preview: '{"success":true}',
+                    has_output: true,
+                    namespace: [],
+                    started_at: "2026-09-29T22:51:28Z",
+                  },
+                ]
+              : []),
+          ];
+          await route.fulfill({ response, json: body });
+        },
+      );
+      await page.reload();
+      await expect(
+        page.getByText("Investigation complete.", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", {
+          name: /^Worked(?: for .+)? · \d+ actions?$/,
+        }),
+      ).toBeVisible();
+    });
+  }
   test("renders Slack mrkdwn and identifies the Slack sender", async ({
     page,
   }) => {
