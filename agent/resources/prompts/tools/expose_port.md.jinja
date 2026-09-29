@@ -7,13 +7,19 @@ reload work with no base-path configuration.
 The link carries no credential and never expires: whoever opens it signs in with their own
 LangSmith session, and any member of this sandbox's LangSmith workspace gets through.
 
-Every request reaches the service with the viewer's identity in one header,
-`X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes, with
-`sub` (the LangSmith user id), `email`, `name`, `iss` (the LangSmith app URL) and `aud` (the
-service host). Verify it against `{{ jwks_url }}` — the keys live on the LangSmith API host, not on
-the app URL the token names as its issuer. Any inbound copy of that header is
-stripped first, so a verified token is the only identity a client cannot forge, and there is no
-other identity header. The credential that authenticated the request never reaches the service.
+Every request reaches the service with the viewer's identity. Inbound copies of these headers are
+stripped first, so a client cannot forge them:
+
+- `X-Langsmith-User-Id` and `X-Langsmith-User-Email` (omitted when the account has no email):
+  plain values. Code that runs in this sandbox, such as an app or proxy that gates access, should
+  read these directly instead of verifying the token.
+- `X-Langsmith-User-Token`: an EdDSA-signed JWT minted per request and good for ten minutes, for
+  handing the identity to something outside the sandbox. Claims are `sub` (the LangSmith user id),
+  `email`, `name`, `iss` (the LangSmith app URL) and `aud` (a one-element array holding the service
+  host). Verify it with a JWT library against `{{ jwks_url }}` — the keys live on the LangSmith API
+  host, not on the app URL the token names as its issuer.
+
+The credential that authenticated the request never reaches the service.
 
 Sharing one port twice returns the same link. A port that already handed out a short-lived
 service token is refused until that token expires.
