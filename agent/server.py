@@ -75,8 +75,10 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
+    default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
+    model_supports_images,
 )
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -123,6 +125,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
@@ -1597,6 +1600,26 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    image_fallback: ImageModelFallbackMiddleware | None = None
+    if not model_supports_images(model_id) or (
+        adaptive_model_routing
+        and any(not model_supports_images(route_id) for route_id, _ in routing_defaults.values())
+    ):
+        vision_model = main_model
+        if not model_supports_images(model_id):
+            vision_model_id, vision_effort = default_vision_model_pair()
+            vision_model = _make_model_or_defer(
+                vision_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                ),
+            )
+        image_fallback = ImageModelFallbackMiddleware(vision_model)
+        if not model_supports_images(model_id):
+            image_fallback.add_text_only_model(main_model)
+
+    configurable["image_model_fallback_enabled"] = image_fallback is not None
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         assert model_routing_mode is not None
@@ -1612,6 +1635,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
+        if image_fallback is not None:
+            for route, model in routing_models.items():
+                if not model_supports_images(routing_defaults[route][0]):
+                    image_fallback.add_text_only_model(model)
         model_selection = ModelSelectionMiddleware(
             routing_models,
             main_model,
@@ -1740,6 +1767,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
+                    *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
