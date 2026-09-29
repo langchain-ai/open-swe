@@ -293,16 +293,24 @@ test.describe("Human review in Slack", () => {
     });
     const pr = await pull(request, seeded.number);
 
-    // 1. Asked from another channel, the card is a new post in the review channel.
-    await control(request, "/mock/slack/send", {
+    // 1. Asked from another channel, the card is a new post in the review channel
+    //    and the asking thread is told where it went.
+    const asked = (await control(request, "/mock/slack/send", {
       text: `<@U0BOT> get ${pr.url} reviewed by a human E2E_HUMAN_REVIEW`,
       mention_bot: true,
-    });
+    })) as { thread_ts: string };
     await expect
       .poll(async () => (await reviewRequests(request)).length, {
         timeout: 90_000,
       })
       .toBe(1);
+    await expect
+      .poll(async () =>
+        (await channelMessages(request, "C_DEMO", asked.thread_ts)).map(
+          (m) => m.text,
+        ),
+      )
+      .toContain(`Review requested in <#${REVIEW_CHANNEL}>.`);
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.slack_thread_ts).toBe("");

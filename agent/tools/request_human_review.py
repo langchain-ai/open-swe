@@ -75,9 +75,8 @@ async def request_human_review(
         "success": True,
         "request_id": result.request_id,
         "slack_channel_id": result.channel,
-        "permalink": result.permalink,
         "next": f"{posted} People sign up from the card and it merges on its own once they "
-        "approve. You are woken if nobody signs up. Link the card in your reply; do not poll.",
+        "approve. You are woken if nobody signs up. Do not announce or link the card; do not poll.",
     }
 
 
@@ -100,6 +99,5 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
         return _failure(result.error)
     return {
         "success": True,
-        "permalink": result.permalink,
         "next": "They are tagged on the card and messaged directly. Nothing else to post.",
     }

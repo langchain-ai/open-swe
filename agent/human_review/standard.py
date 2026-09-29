@@ -127,6 +127,23 @@ async def _target_channel(
     return channel
 
 
+async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: SlackChannel) -> None:
+    """Tell the asking thread where the card went, since a broadcast cannot reach another channel."""
+    # A channel mention, not the card's permalink: Slack unfurls that into a second card.
+    _, error = await post_slack_thread_reply_with_ts(
+        origin.slack_channel_id,
+        origin.slack_thread_ts,
+        f"Review requested in <#{target.id}>.",
+        unfurl_links=False,
+        unfurl_media=False,
+    )
+    if error:
+        logger.warning(
+            "Could not point the asking thread at its review card",
+            extra={"request_id": str(request.id), "slack_error": error},
+        )
+
+
 async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
@@ -253,6 +270,8 @@ async def request_review(
         )
     request.slack_message_ts = message_ts
     request = await request.save()
+    if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
+        await _point_to_card(request, origin, target)
     return RequestResult(
         success=True,
         request_id=str(request.id),
