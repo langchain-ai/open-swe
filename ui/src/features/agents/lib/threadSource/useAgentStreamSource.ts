@@ -17,7 +17,7 @@ import type { StreamThreadSource, ThreadRunInput } from "./types"
 
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
-  const { stream, connection } = useAgentThreadStream({
+  const { stream, connection, trackRunAcceptance } = useAgentThreadStream({
     transport: "cloud",
     threadId,
   })
@@ -53,32 +53,35 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       const config = Object.keys(configurable).length
         ? { configurable }
         : undefined
-      // `submit()` never rejects on its own; it only routes failures to
-      // `onError`. Capture and rethrow so this promise keeps the rejection
-      // contract `startRun` callers rely on.
+      const accepted = message ? trackRunAcceptance(message.id) : undefined
       let submitError: unknown
-      await stream.submit(
-        message
-          ? {
-              messages: [
-                {
-                  ...promptMessage(message.text, message.images),
-                  id: message.id,
-                },
-              ],
-            }
-          : {},
-        {
-          config,
-          ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
-          onError: (error: unknown) => {
-            submitError = error
-          },
-        }
-      )
-      if (submitError) throw submitError
+      try {
+        await stream.submit(
+          message
+            ? {
+                messages: [
+                  {
+                    ...promptMessage(message.text, message.images),
+                    id: message.id,
+                  },
+                ],
+              }
+            : {},
+          {
+            config,
+            ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
+            onError: (error: unknown) => {
+              submitError = error
+            },
+          }
+        )
+      } catch (error) {
+        submitError = error
+      }
+      const wasAccepted = await accepted?.()
+      if (submitError && !wasAccepted) throw submitError
     },
-    [stream]
+    [trackRunAcceptance, stream]
   )
 
   const contextTokens = useMemo(

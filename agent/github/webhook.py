@@ -1048,30 +1048,6 @@ async def process_github_pr_comment(
         common.logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return
 
-    if comment_id:
-        try:
-            await common.react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=github_token,
-                pull_number=pr_number,
-                node_id=node_id,
-            )
-        except GitHubAuthError:
-            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-            if not github_token:
-                common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
-                return
-            await common.react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=github_token,
-                pull_number=pr_number,
-                node_id=node_id,
-            )
-
     if not pr_number:
         common.logger.warning("No PR number found in payload, skipping")
         return
@@ -1129,6 +1105,39 @@ async def process_github_pr_comment(
     if not comments:
         common.logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
+
+    if (
+        agent_thread_id is not None
+        and event_type == "pull_request_review"
+        and event.get("state", "").lower() == "approved"
+        and not (event.get("body") or "").strip()
+        and not any(item.get("type") == "review_comment" for item in comments)
+    ):
+        return
+
+    if comment_id:
+        try:
+            await common.react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
+        except GitHubAuthError:
+            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
+            if not github_token:
+                common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+                return
+            await common.react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
 
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)

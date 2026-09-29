@@ -39,7 +39,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Make user-initiated UI mutations optimistic by default: update the visible state immediately, roll it back on failure, and show an error toast. Use a non-optimistic flow when an immediate update would be unsafe or misleading.
 - Create database migrations with `make migration m="Short description"`.
 - Use structured logging with a static message and values in `extra`; never interpolate values into log messages. Avoid standard `LogRecord` field names in `extra`.
-- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Direct UI controls may ship without a corresponding tool, especially for secret input until a secure tool-driven input flow exists. Do not add a tool when the agent can already do the same thing through a CLI in its sandbox, such as the authenticated `gh`.
+- Prefer making API write operations exposed through UI controls available as appropriately authorized agent tools, but treat this as a guideline, not a requirement. Destructive or sensitive UI actions may remain human-only. Prefer reversible operations and existing sandbox CLIs, such as the authenticated `gh`, over adding tools.
 - A person's concierge DM thread must know everything that happens in their DM with the bot. Anything Open SWE posts into that DM outside the concierge thread's own run (approval cards, notifications, messages from other threads or schedules), and every button the person clicks there, must reach the concierge thread's context. Never add a DM post or DM button without that.
 - Never discard an error. Every `except` either propagates (re-raise, or raise a more useful error) or logs what it swallowed — a bare `except ...: return None` / `pass` hides the failure from everyone debugging it later.
 
@@ -47,7 +47,14 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 
 Never run the full test suite locally; run only tests related to the change.
 
-Add tests only when they meaningfully protect observable behavior. Do not add change-detector tests that merely restate constants, mappings, prompt text, source structure, or incidental interactions such as internal call order. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do. Cover meaningful edge cases and keep tests deterministic.
+Tests are maintenance cost, not a deliverable quota. Default to no new tests unless you can name a concrete, plausible behavioral regression that existing coverage would miss. A code change alone is not justification for a test.
+
+- Prefer extending one existing behavioral test over adding a new test file, fixture framework, or mock-heavy harness. Add the smallest deterministic test that catches the identified failure.
+- Do not add tests for documentation, prompt wording, constants, mappings, source structure, trivial getters/setters, or behavior already guaranteed by types or a library. Test a meaningful observable outcome, not that the implementation matches itself.
+- Reject change-detector tests, snapshots of incidental details, internal call-order assertions, and mocks that merely prove the mocked calls happened. Refactors that preserve behavior should not require mechanical test updates; rewrite or remove tests that do.
+- Do not enumerate speculative edge cases or duplicate the same behavior across layers. Each case must protect a distinct, credible failure with real user impact; security, authorization, data integrity, and tricky state transitions are worth targeted coverage.
+- For bug fixes, prefer a focused regression test that fails before the fix and passes after it when it adds missing behavioral coverage. Do not build elaborate scaffolding solely to test a tiny change.
+- Before submitting, prune redundant or low-signal tests introduced by the change. It is correct to ship no new tests when existing coverage or a focused manual check is sufficient.
 
 ## Pull Requests
 
