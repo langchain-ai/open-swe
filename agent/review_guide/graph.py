@@ -55,6 +55,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
+from agent.slack.code_channels import set_view
 from agent.tools.approve_pull_request import approve_pull_request
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
 from agent.tools.record_author_feedback import record_author_feedback
@@ -141,6 +142,18 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
             if not ready:
                 raise RuntimeError("review guide could not check out the pull request")
             await git.pin(backend, repo_dir, base_sha=head.base.sha, head_sha=head.head.sha)
+            _, view_error = await set_view(
+                session.slack_channel_id,
+                "diff",
+                content=await git.pr_diff(backend, repo_dir, zero=False),
+                base_branch=head.base.ref,
+                head_branch=head.head.ref,
+            )
+            if view_error:
+                logger.warning(
+                    "Could not attach the pull request diff to a review guide channel",
+                    extra={"agent_thread_id": self._thread_id, "slack_error": view_error},
+                )
         walk = session.walk
         if walk is None or walk.head_sha == head.head.sha:
             return updates

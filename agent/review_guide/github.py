@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class _Ref(BaseModel):
     sha: str
+    ref: str = ""
 
 
 class PullRequestHead(BaseModel):
