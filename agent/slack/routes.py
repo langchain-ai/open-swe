@@ -9,6 +9,7 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
+from agent.human_review import slack as human_review
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -832,6 +833,8 @@ async def slack_interactivity(
     async def dispatch() -> WebhookResponse:
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
+        if button.type == human_review.BUTTON_TYPE:
+            return await human_review.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:

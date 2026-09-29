@@ -129,8 +129,9 @@ posted in Slack and the agent is not woken.
 
 ### Storage
 
-PostgreSQL, alongside the pull request and users tables: one row per card, one per
-vote. A vote records its decision and, once submitted, the GitHub review id
+PostgreSQL, alongside the pull request and users tables: an expedited card is a
+[human review request](human-review.md) of kind `expedited`, and each vote is one of its
+participants. A vote records its decision and, once submitted, the GitHub review id
 and the SHA it was submitted on. Votes reference `users.id`, never a GitHub or Slack
 handle; handles are looked up for display only.
 

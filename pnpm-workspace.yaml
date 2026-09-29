@@ -11,6 +11,12 @@ allowBuilds:
   node-pty: true
   unrs-resolver: true
 
+# unplugin's typings import "bun"; a hoisted @types/bun would inject Bun globals into ui's tsc.
+hoistPattern:
+  - '*'
+  - '!@types/bun'
+  - '!bun-types'
+
 minimumReleaseAgeExclude:
   - '@langchain/langgraph-sdk@1.12.0-rc.0'
   - '@langchain/react@1.2.0-rc.0'

@@ -515,6 +515,7 @@ class PullRequest(Base):
 class PullRequestPayload(BaseModel):
     number: int | None = None
     title: str = ""
+    body: str | None = None
     state: str = ""
     draft: bool = False
     merged: bool = False

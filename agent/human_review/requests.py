@@ -1,15 +1,16 @@
-"""Expedited approvals: a Slack vote on what one card showed of a small pull request.
+"""Human review requests: a Slack card asking people to review one pull request.
 
-An approval pins the head SHA the card was posted for and a fingerprint of the
-diff the card drew. One approval from someone other than the author completes
-it. Each vote is also submitted as its voter's GitHub review, and a later
-commit keeps it only if the fingerprint still matches.
-One approval per pull request may be ``open`` at a time; a partial unique index
-enforces that. A vote names its voter by ``users.id``, never by a GitHub or
-Slack handle.
+A request has a kind. An ``expedited`` request is a vote on what its card showed of
+a tiny pull request: it pins the head SHA the card was posted for and a fingerprint
+of the diff it drew, and one approval from someone other than the author completes
+it. A ``standard`` request is a card in the repository's review channel that people
+sign up to review on GitHub; it merges once they approve.
+
+One request per pull request may be ``open`` at a time, whatever its kind; a partial
+unique index enforces that. A participant is a ``users.id``, never a GitHub or Slack
+handle.
 """
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -28,34 +29,11 @@ from agent.github.repositories import Repository
 from agent.users import User
 from agent.utils.json_types import JsonObject
 
-logger = logging.getLogger(__name__)
-
-ApprovalState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
-VoteDecision = Literal["approve", "reject"]
-
-
-class ApprovalVote(Base):
-    __tablename__ = "expedited_approval_vote"
-
-    voter_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    approval_id: Mapped[UUID] = mapped_column(
-        ForeignKey("expedited_approval.id", ondelete="CASCADE"), primary_key=True, init=False
-    )
-    decision: Mapped[VoteDecision] = mapped_column(Text, default="approve")
-    github_review_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
-    github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
-    voted_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    voter: Mapped[User] = relationship(init=False)
-
-    @property
-    def github_login(self) -> str:
-        return self.voter.login_for("github")
-
-    @property
-    def slack_mention(self) -> str:
-        return slack_mention(self.voter, self.github_login)
+RequestKind = Literal["expedited", "standard"]
+RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
+# ``approve`` and ``reject`` are Slack votes on an expedited card; ``review`` is a
+# person signed up to review a standard request on GitHub.
+ParticipantDecision = Literal["approve", "reject", "review"]
 
 
 def slack_mention(user: User | None, fallback_login: str) -> str:
@@ -65,51 +43,92 @@ def slack_mention(user: User | None, fallback_login: str) -> str:
     return f"@{fallback_login}"
 
 
-class ExpeditedApproval(Base):
-    __tablename__ = "expedited_approval"
+class HumanReviewParticipant(Base):
+    __tablename__ = "human_review_participant"
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("human_review_request.id", ondelete="CASCADE"), primary_key=True, init=False
+    )
+    decision: Mapped[ParticipantDecision] = mapped_column(Text, default="approve")
+    github_review_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
+    assigned_by_agent: Mapped[bool] = mapped_column(server_default="false", default=False)
+    joined_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    user: Mapped[User] = relationship(init=False)
+
+    @property
+    def github_login(self) -> str:
+        return self.user.login_for("github")
+
+    @property
+    def slack_mention(self) -> str:
+        return slack_mention(self.user, self.github_login)
+
+
+class HumanReviewRequest(Base):
+    __tablename__ = "human_review_request"
 
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
     head_sha: Mapped[str]
+    kind: Mapped[RequestKind] = mapped_column(Text)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     thread_id: Mapped[str] = mapped_column(server_default="", default="")
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
-    state: Mapped[ApprovalState] = mapped_column(Text, default="open")
+    tldr: Mapped[str] = mapped_column(server_default="", default="")
+    state: Mapped[RequestState] = mapped_column(Text, default="open")
     detail: Mapped[str] = mapped_column(server_default="", default="")
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    # Empty for a standard card posted at the top of the review channel.
     slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
-    # A draft PR's card offers only "Mark ready", to its author, until they click it.
+    # A draft PR's expedited card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
     slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
-    votes: Mapped[list[ApprovalVote]] = relationship(
-        default_factory=list, cascade="all, delete-orphan", order_by=lambda: ApprovalVote.voted_at
+    participants: Mapped[list[HumanReviewParticipant]] = relationship(
+        default_factory=list,
+        cascade="all, delete-orphan",
+        order_by=lambda: HumanReviewParticipant.joined_at,
     )
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
+    requested_by: Mapped[User | None] = relationship(
+        init=False, foreign_keys=[requested_by_user_id]
+    )
 
     @property
     def active(self) -> bool:
         return self.state == "open"
 
     @property
-    def approvals(self) -> list[ApprovalVote]:
-        """Approvals from anyone but the author; older cards may still hold an author's vote."""
+    def approvals(self) -> list[HumanReviewParticipant]:
+        """Slack approvals from anyone but the author; older cards may still hold an author's vote."""
         return [
-            vote
-            for vote in self.votes
-            if vote.decision == "approve"
-            and not self.is_author(vote.voter_user_id, vote.github_login)
+            participant
+            for participant in self.participants
+            if participant.decision == "approve"
+            and not self.is_author(participant.user_id, participant.github_login)
         ]
 
     @property
     def approved(self) -> bool:
         """One approval from someone other than the author is enough."""
         return bool(self.approvals)
+
+    @property
+    def reviewers(self) -> list[HumanReviewParticipant]:
+        """People signed up to review a standard request, in the order they joined."""
+        return [p for p in self.participants if p.decision == "review"]
 
     async def author_mention(self) -> str:
         pr = self.pull_request
@@ -120,15 +139,15 @@ class ExpeditedApproval(Base):
         pr = self.pull_request
         if pr.author_user_id is not None:
             return pr.author_user_id == user_id
-        return bool(pr.author) and pr.author.lower() == login.lower()
+        return bool(pr.author) and bool(login) and pr.author.lower() == login.lower()
 
     @property
     def approvers(self) -> list[str]:
         """GitHub handles of the approvers, for display."""
-        return [vote.github_login for vote in self.approvals]
+        return [participant.github_login for participant in self.approvals]
 
-    def vote_by(self, user_id: UUID) -> ApprovalVote | None:
-        return next((vote for vote in self.votes if vote.voter_user_id == user_id), None)
+    def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
+        return next((p for p in self.participants if p.user_id == user_id), None)
 
     @property
     def slack_location(self) -> tuple[str, str] | None:
@@ -139,14 +158,17 @@ class ExpeditedApproval(Base):
     @classmethod
     def _loaded(cls, statement):  # noqa: ANN001, ANN206
         return statement.options(
-            selectinload(cls.votes).selectinload(ApprovalVote.voter).selectinload(User.identities),
+            selectinload(cls.participants)
+            .selectinload(HumanReviewParticipant.user)
+            .selectinload(User.identities),
+            selectinload(cls.requested_by).selectinload(User.identities),
             selectinload(cls.pull_request),
         )
 
     @classmethod
-    async def get(cls, approval_id: UUID) -> Self | None:
+    async def get(cls, request_id: UUID) -> Self | None:
         async with postgres.session() as session:
-            return await session.scalar(cls._loaded(select(cls)).where(cls.id == approval_id))
+            return await session.scalar(cls._loaded(select(cls)).where(cls.id == request_id))
 
     @classmethod
     async def active_for(cls, owner: str, repo: str, number: int) -> Self | None:
@@ -161,6 +183,21 @@ class ExpeditedApproval(Base):
                     cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def open_in_repository(cls, owner: str, repo: str, *, kind: RequestKind) -> list[Self]:
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    cls.kind == kind,
+                    cls.state == "open",
+                )
+            )
+            return list(rows)
 
     @classmethod
     async def superseded_on_slack(cls, pull_request_id: UUID) -> list[Self]:
@@ -183,14 +220,14 @@ class ExpeditedApproval(Base):
                 cls._loaded(select(cls)).where(
                     cls.pull_request_id == pull_request_id,
                     cls.state.not_in(("open", "merged")),
-                    cls.votes.any(ApprovalVote.github_review_id.is_not(None)),
+                    cls.participants.any(HumanReviewParticipant.github_review_id.is_not(None)),
                 )
             )
             return list(rows)
 
     @classmethod
     async def all_for_repo(cls, owner: str, repo: str) -> list[Self]:
-        """Every approval a repository has ever had, oldest first."""
+        """Every request a repository has ever had, oldest first."""
         async with postgres.session() as session:
             rows = await session.scalars(
                 cls._loaded(select(cls))
@@ -212,17 +249,17 @@ class ExpeditedApproval(Base):
                 .execution_options(populate_existing=True)
             )
         if stored is None:
-            raise RuntimeError(f"expedited approval {self.id} vanished during save")
+            raise RuntimeError(f"human review request {self.id} vanished during save")
         return stored
 
     @classmethod
     @asynccontextmanager
-    async def locked(cls, approval_id: UUID) -> AsyncIterator[tuple[AsyncSession, Self | None]]:
+    async def locked(cls, request_id: UUID) -> AsyncIterator[tuple[AsyncSession, Self | None]]:
         """The row locked for update; changes made to it commit when the block exits."""
         async with postgres.session() as session:
             row = await session.scalar(
                 cls._loaded(select(cls))
-                .where(cls.id == approval_id)
+                .where(cls.id == request_id)
                 .with_for_update(of=cls)
                 .execution_options(populate_existing=True)
             )

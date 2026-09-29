@@ -5,8 +5,8 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.dashboard.workspace_settings import get_workspace_settings
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.merge import merge_approved
+from agent.human_review.requests import HumanReviewRequest
 from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
 
@@ -21,8 +21,8 @@ async def merge_expedited_pr(pr_url: str, keep_approval_reason: str = "") -> dic
         return {"success": False, "error": "No executable agent thread is available"}
     if not (await get_workspace_settings()).expedited_review_enabled:
         return {"success": False, "error": "Expedited review is disabled for this instance."}
-    approval = await ExpeditedApproval.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if approval is None:
+    approval = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if approval is None or approval.kind != "expedited":
         return {
             "success": False,
             "status": "no_card",
