@@ -841,11 +841,15 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
         pending_blocks,
     )
     final_text, final_blocks = slack_utils.with_slack_session_cost(
-        pending_text, pending_blocks, 0.42
+        pending_text, pending_blocks, 0.42, run_cost=0.001
     )
-    assert final_text.endswith("model-a • $0.42")
+    assert final_text.endswith("model-a • $0.42 (<$0.01)")
     assert final_blocks is not None
-    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
+    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42 (<$0.01)")
+    assert slack_utils.with_slack_session_cost(final_text, final_blocks, 0.42, run_cost=0.001) == (
+        final_text,
+        final_blocks,
+    )
 
     # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
     assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
