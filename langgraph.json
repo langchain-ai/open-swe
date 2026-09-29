@@ -7,6 +7,7 @@
     "reviewer": "agent.graphs.reviewer:traced_reviewer_agent",
     "analyzer": "agent.graphs.analyzer:traced_analyzer",
     "review-scout": "agent.graphs.review_scout:traced_review_scout",
+    "review-guide": "agent.graphs.review_guide:traced_review_guide",
     "chat": "agent.graphs.chat:traced_chat_agent",
     "scheduler": "agent.graphs.scheduler:get_scheduler"
   },

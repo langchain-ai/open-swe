@@ -998,7 +998,11 @@ async def slack_interactivity(
         if not response:
             return ignored("Empty response")
 
-        option_thread_ts = thread_ts or action_ts
+        # A code channel is one session, so its buttons map to the session, not the clicked message.
+        in_code_channel = await common.is_code_channel(channel_id)
+        option_thread_ts = (
+            common.CODE_CHANNEL_SESSION_TS if in_code_channel else thread_ts or action_ts
+        )
         if not channel_id or not option_thread_ts or not action_ts or not user_id:
             return ignored("Missing Slack action context")
 
@@ -1028,6 +1032,9 @@ async def slack_interactivity(
                 thread_id=thread_id,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts,
+                treat_all_messages_as_mentions=in_code_channel,
+                code_channel=in_code_channel,
+                explicit_request=in_code_channel,
             ),
             repo,
         )
