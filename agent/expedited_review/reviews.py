@@ -63,10 +63,17 @@ async def submit_approval(
     try:
         async with github_client(token=user_token) as client:
             response = await github_request(client, "POST", url, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        if response.status_code == 401:
+            refreshed = await get_valid_access_token(login, force_refresh=True)
+            if not refreshed:
+                return f"Open SWE has no valid GitHub token for @{login}. {github_token_hint()}"
+            async with github_client(token=refreshed) as client:
+                response = await github_request(client, "POST", url, json=payload)
+        response.raise_for_status()
+        data = response.json()
     except httpx2.HTTPStatusError as exc:
-        return f"GitHub rejected @{login}'s review: {github_error(exc.response)}"
+        hint = f" {github_token_hint()}" if exc.response.status_code == 401 else ""
+        return f"GitHub rejected @{login}'s review: {github_error(exc.response)}{hint}"
     except httpx2.HTTPError, ValueError:
         return f"GitHub did not answer when submitting @{login}'s review."
     review_id = data.get("id") if isinstance(data, dict) else None
