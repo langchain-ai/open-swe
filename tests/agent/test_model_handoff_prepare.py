@@ -31,7 +31,7 @@ class Handoff:
 
 @pytest.fixture
 def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
-    settings: ThreadSettings = {"model_id": "openai:gpt-6-sol", "repo_instructions": "retain"}
+    settings: ThreadSettings = {"model_id": "openai:gpt-6.1-sol", "repo_instructions": "retain"}
 
     async def persist(
         client: object, thread_id: str, value: ThreadSettings, *, strict: bool
@@ -89,7 +89,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         config=config,
         profile_login=None,
         repo_instructions=None,
-        model_id="openai:gpt-6-sol",
+        model_id="openai:gpt-6.1-sol",
         effort=None,
         title_model=MagicMock(),
         source="slack",
@@ -163,7 +163,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     assert state["requested_model"] is None
     assert state["model_route"] == fresh_route
     assert prepared["selected_model_id"] == (
-        "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6-sol"
+        "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6.1-sol"
     )
     assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
     classify.assert_awaited_once_with("Fix the typo")
@@ -177,8 +177,8 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
         ("fireworks:accounts/fireworks/models/kimi-k3", None, None),
         ("anthropic:claude-opus-5-5", "image", None),
         ("anthropic:claude-fable-5-1", None, "unavailable"),
-        ("openai:gpt-6-sol", None, "unavailable"),
-        ("openai:gpt-6-sol", None, "persistence"),
+        ("openai:gpt-6.1-sol", None, "unavailable"),
+        ("openai:gpt-6.1-sol", None, "persistence"),
     ],
 )
 async def test_handoff_validates_and_persists_before_selecting_model(
@@ -194,7 +194,7 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         AsyncMock(
             return_value=ModelRequestIntent(
                 requested_model=model,
-                unavailable_model=failure == "unavailable" and model == "openai:gpt-6-sol",
+                unavailable_model=failure == "unavailable" and model == "openai:gpt-6.1-sol",
             )
         ),
     )
@@ -223,7 +223,7 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         handoff.record.assert_not_awaited()
         if failure != "persistence":
             handoff.store.assert_not_awaited()
-        assert handoff.settings == {"model_id": "openai:gpt-6-sol", "repo_instructions": "retain"}
+        assert handoff.settings == {"model_id": "openai:gpt-6.1-sol", "repo_instructions": "retain"}
     else:
         assert (await handoff.prepare(state))["selected_model_id"] == model
         handoff.store.assert_awaited_once()

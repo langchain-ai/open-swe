@@ -48,7 +48,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-sol", "medium")
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
@@ -328,7 +328,7 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "openai:gpt-6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+        "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
         "default_agent_routing_performance_reasoning_effort": "low",

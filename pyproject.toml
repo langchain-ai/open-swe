@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.17",
+    "deepagents==0.7.20",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -32,20 +32,20 @@ dependencies = [
     "slack-sdk>=3.44.1,<4.0.0",
     "aiohttp>=3.14.3,<4.0.0",
     "alembic==1.20.0",
-    "sqlalchemy[asyncio]==2.0.52",
+    "sqlalchemy[asyncio]==2.1.1",
     "asyncpg==0.31.0",
     "langgraph-checkpoint-sqlite>=3.1.1",
     "pillow>=12.1.0",
     "Pygments>=2.21.0",
     "githubkit[auth-app]==0.16.1",
-    "githubkit-schemas[2022-11-28]==26.9.13",
+    "githubkit-schemas[2022-11-28]==26.9.29",
     "jinja2>=3.1.6",
     "langchain-typesafe==0.0.1a3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ty==0.0.78",
+    "ty==0.0.84",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
@@ -69,12 +69,12 @@ sandbox-providers = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.17 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.20 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.17", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.20", "wcmatch>=11.0"]
 constraint-dependencies = [
     "langgraph-api>=0.15.0rc1,<0.16",
     "langgraph-runtime-inmem>=0.35.0rc1,<0.36",

@@ -66,6 +66,7 @@ class RequestResult(BaseModel):
     channel: str = ""
     permalink: str = ""
     reused: bool = False
+    summary_updated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,12 @@ class Origin:
     run_config: JsonObject = field(default_factory=dict)
     slack_channel_id: str = ""
     slack_thread_ts: str = ""
+
+    def asked(self, request: HumanReviewRequest) -> bool:
+        """Whether ``request`` came from this thread or this person."""
+        if self.thread_id and request.thread_id == self.thread_id:
+            return True
+        return self.requester is not None and request.requested_by_user_id == self.requester.id
 
 
 def _failure(error: str) -> RequestResult:
@@ -183,6 +190,24 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
     )
 
 
+async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
+    """Whoever asked replaces their own card's summary."""
+    if tldr == active.tldr:
+        return await _existing(active)
+    async with HumanReviewRequest.locked(active.id) as (_, row):
+        if row is None or row.state != "open":
+            return _failure("This review request closed before its summary could change.")
+        row.tldr = tldr
+        # Under the lock, so a concurrent dismissal waits and renders its closed card last.
+        await refresh_card(row)
+    current = await HumanReviewRequest.get(active.id)
+    if current is None:
+        return _failure("This review request vanished.")
+    result = await _existing(current)
+    result.summary_updated = True
+    return result
+
+
 async def request_review(
     pr_ref: GitHubPrRef, origin: Origin, *, channel: str = "", inline_summary: str | None = None
 ) -> RequestResult:
@@ -193,6 +218,13 @@ async def request_review(
     token = await repo_token(pr_ref.owner, pr_ref.repo)
     if token is None:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
+    # An open card stays correctable whatever has happened to the pull request since.
+    active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if active is not None:
+        if active.kind == "standard" and inline_summary is not None and origin.asked(active):
+            return await _resummarize(active, summary_line(inline_summary))
+        return await _existing(active)
+
     readiness = await assess_readiness(
         owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
     )
@@ -202,10 +234,6 @@ async def request_review(
         return _failure(
             "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
         )
-
-    active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None:
-        return await _existing(active)
 
     target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
     if isinstance(target, RequestResult):

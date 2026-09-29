@@ -22,6 +22,8 @@ const ALICE = { login: "alice", email: "alice@example.com", slack: "U_ALICE" };
 const BOB = { login: "bob", email: "bob@example.com", slack: "U_BOB" };
 const TLDR =
   "Makes the greeting punctuation consistent and covers it with a test.";
+const CORRECTED_TLDR =
+  "Ends every greeting with one exclamation mark, with a test.";
 const GREEN = [
   {
     id: 7001,
@@ -343,6 +345,22 @@ test.describe("Human review in Slack", () => {
     );
     await shootCard(page, "open");
 
+    // Asked in the same thread, the agent corrects the card's summary in place.
+    await control(request, "/mock/slack/send", {
+      thread_ts: asked.thread_ts,
+      text: `<@U0BOT> that summary is wrong, fix it E2E_HUMAN_REVIEW_RESUMMARIZE`,
+      mention_bot: true,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).tldr, {
+        timeout: 60_000,
+      })
+      .toBe(CORRECTED_TLDR);
+    expect(await reviewRequests(request)).toHaveLength(1);
+    await expect
+      .poll(async () => cardText(await reviewCard(request, posted)))
+      .toContain(CORRECTED_TLDR);
+
     // 2. Alice and Bob both sign up; each becomes a requested reviewer on GitHub.
     await click(request, posted, "I'll review", ALICE.slack);
     await click(request, posted, "I'll review", BOB.slack);
@@ -353,10 +371,11 @@ test.describe("Human review in Slack", () => {
         { timeout: 30_000 },
       )
       .toEqual(["alice", "bob"]);
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "alice",
-      "bob",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["alice", "bob"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing[\s\S]*<@U_BOB>.*reviewing/);
@@ -471,9 +490,11 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toEqual([{ github_login: "alice", assigned_by_agent: false }]);
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "alice",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["alice"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing/);
@@ -579,9 +600,11 @@ test.describe("Human review in Slack", () => {
       })
       .toEqual([{ github_login: "bob", assigned_by_agent: true }]);
     expect((await latestRequest(request)).thread_id).not.toBe("");
-    expect((await pull(request, seeded.number)).requested_reviewers).toEqual([
-      "bob",
-    ]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["bob"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toContain("picked by Open SWE");
@@ -621,5 +644,95 @@ test.describe("Human review in Slack", () => {
       })
       .toBe(true);
     expect((await latestRequest(request)).state).toBe("merged");
+  });
+
+  test("the agent dismisses the review request its thread posted", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await setReviewChannel(request);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Tidy the greeting",
+      author: "octocat",
+      body: "Ends every greeting with one exclamation mark.",
+      check_runs: GREEN,
+    });
+    const pr = await pull(request, seeded.number);
+    const asked = (await control(request, "/mock/slack/send", {
+      text: `<@U0BOT> get ${pr.url} reviewed by a human E2E_HUMAN_REVIEW`,
+      mention_bot: true,
+    })) as { thread_ts: string };
+    await expect
+      .poll(
+        async () =>
+          (await reviewRequests(request)).at(-1)?.slack_message_ts ?? "",
+        { timeout: 90_000 },
+      )
+      .not.toBe("");
+    const posted = await latestRequest(request);
+
+    await control(request, "/mock/slack/send", {
+      thread_ts: asked.thread_ts,
+      text: "<@U0BOT> take that review request down E2E_HUMAN_REVIEW_DISMISS",
+      mention_bot: true,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).state, {
+        timeout: 60_000,
+      })
+      .toBe("cancelled");
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      "Review request: dismissed by Open SWE: posted with the wrong summary",
+    );
+  });
+
+  test("the oswe MCP tools' endpoints post a card with their summary, re-summarize it, and dismiss it", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+    await loginAs(page, ALICE);
+    await setReviewChannel(request);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Tidy the greeting",
+      author: "octocat",
+      body: "Ends every greeting with one exclamation mark.",
+      check_runs: GREEN,
+    });
+    const url = `/dashboard/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
+
+    const asked = await page.request.post(url, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { inline_summary: TLDR },
+    });
+    expect(asked.status()).toBe(200);
+    const posted = await latestRequest(request);
+    expect(posted.tldr).toBe(TLDR);
+    expect(cardText(await reviewCard(request, posted))).toContain(TLDR);
+
+    const again = await page.request.post(url, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { inline_summary: CORRECTED_TLDR },
+    });
+    expect(await again.json()).toMatchObject({
+      reused: true,
+      summary_updated: true,
+    });
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      CORRECTED_TLDR,
+    );
+
+    const dismissed = await page.request.post(`${url}/dismiss`, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { reason: "wrong channel" },
+    });
+    expect(await dismissed.json()).toEqual({ request_id: posted.id });
+    expect((await latestRequest(request)).state).toBe("cancelled");
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      `Review request: dismissed by <@${ALICE.slack}>: wrong channel`,
+    );
   });
 });

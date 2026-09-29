@@ -39,7 +39,7 @@ _ANTHROPIC_TOOL_ADDITION_MODELS = (
     "claude-sonnet-5-5",
 )
 # Responses API only: Chat Completions rejects ``additional_tools``.
-_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
+_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")
 
 ToolAddition = dict[str, object]
 """A provider-native content block that adds one tool from its position onward."""

@@ -182,6 +182,7 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
+    dismiss_human_review_request,
     expedite_pr_approval,
     expose_port,
     fetch_url,
@@ -504,6 +505,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "merge_expedited_pr",
         "request_human_review",
         "assign_human_reviewer",
+        "dismiss_human_review_request",
         "manage_baby_sit",
         "manage_thread",
         "link_pull_request",
@@ -1566,6 +1568,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         merge_expedited_pr,
         request_human_review,
         assign_human_reviewer,
+        dismiss_human_review_request,
         notify_automation_channel,
         open_pull_request,
         link_pull_request,
@@ -1622,7 +1625,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [
             tool
             for tool in static_tools
-            if tool not in (request_human_review, assign_human_reviewer)
+            if tool
+            not in (request_human_review, assign_human_reviewer, dismiss_human_review_request)
         ]
     elif not await _human_review_requests_enabled(profile_login):
         static_tools = [tool for tool in static_tools if tool is not request_human_review]

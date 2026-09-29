@@ -45,7 +45,7 @@ def _opus() -> ChatAnthropic:
 
 def _gpt(*, use_responses_api: bool = True) -> ChatOpenAI:
     return ChatOpenAI(
-        model="gpt-6-sol",
+        model="gpt-6.1-sol",
         api_key=SecretStr("test"),
         use_responses_api=use_responses_api,
         store=False,
