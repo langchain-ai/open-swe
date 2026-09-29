@@ -21,6 +21,9 @@ TOOLS_HEADER = "X-Open-SWE-Tools-Token"
 TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
+OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
+OPENAI_API_KEY_PLACEHOLDER = "open-swe-sandbox"
+SANDBOX_HOST_THREAD_KEY = "sandbox_host_thread_id"
 
 
 class ToolAccess(BaseModel):
@@ -42,12 +45,19 @@ def tools_base_url() -> str | None:
     return base.rstrip("/") + TOOLS_PATH
 
 
+async def sandbox_host_thread_id(thread_id: str) -> str:
+    """The thread whose capability a shared sandbox carries: its creator, not a guest."""
+    thread = await get_client().threads.get(thread_id)
+    host = (thread.get("metadata") or {}).get(SANDBOX_HOST_THREAD_KEY)
+    return host if isinstance(host, str) and host else thread_id
+
+
 async def issue_tool_access(thread_id: str, sandbox_id: str) -> tuple[str, str] | None:
     secret = ENV.DASHBOARD_JWT_SECRET.optional()
     url = tools_base_url()
     if not secret or not url:
         return None
-    access = ToolAccess(thread_id=thread_id, sandbox_id=sandbox_id)
+    access = ToolAccess(thread_id=await sandbox_host_thread_id(thread_id), sandbox_id=sandbox_id)
     token = jwt.encode({"aud": TOOLS_AUDIENCE, **access.model_dump()}, secret, algorithm="HS256")
     return url, token
 
@@ -87,7 +97,11 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
         "name": TOOLS_RULE,
         "match_hosts": [urlsplit(url).hostname],
         "headers": [{"name": TOOLS_HEADER, "type": "opaque", "value": token}],
-        "env_vars": {"OPEN_SWE_TOOLS_URL": url},
+        "env_vars": {
+            "OPEN_SWE_TOOLS_URL": url,
+            "OPENAI_BASE_URL": url.removesuffix(TOOLS_PATH) + OPENAI_PATH,
+            "OPENAI_API_KEY": OPENAI_API_KEY_PLACEHOLDER,
+        },
     }
 
 

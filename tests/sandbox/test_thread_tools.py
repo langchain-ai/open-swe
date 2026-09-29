@@ -67,6 +67,9 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
@@ -76,9 +79,18 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     )
     assert claims["thread_id"] == "thread-a"
     assert claims["sandbox_id"] == "sandbox-a"
-    client = MagicMock()
-    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
-    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": "sandbox-a", tool_access.SANDBOX_HOST_THREAD_KEY: "thread-a"}
+    }
+    guest = await tool_access.issue_tool_access("thread-guest", "sandbox-a")
+    assert guest is not None
+    assert (
+        jwt.decode(
+            guest[1], TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        )["thread_id"]
+        == "thread-a"
+    )
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-a"}}
     assert (await tool_access.authenticate_tool_access(token)).thread_id == "thread-a"
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-b"}}
     with pytest.raises(HTTPException, match="Invalid sandbox capability"):
@@ -96,6 +108,9 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
     await langsmith.configure_sandbox_proxy(
         "sandbox-a",
@@ -109,7 +124,9 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
     assert rule["env_vars"] == {
-        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools"
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools",
+        "OPENAI_BASE_URL": "https://agent.example.test/dashboard/api/sandbox-openai/v1",
+        "OPENAI_API_KEY": tool_access.OPENAI_API_KEY_PLACEHOLDER,
     }
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
