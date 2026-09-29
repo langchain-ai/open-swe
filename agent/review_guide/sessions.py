@@ -1,7 +1,7 @@
 """Review guide sessions and the changed lines each person has approved.
 
 A session is one code channel walking one person through one pull request,
-along with the plan for the head it is walking. What they approved is kept per
+along with where the walkthrough of its current head stands. What they approved is kept per
 person and pull request, keyed by line content rather than commit, so a rebase
 or force-push never asks them to reread it.
 """
@@ -19,7 +19,7 @@ from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
-from agent.review_guide.plan import Plan
+from agent.review_guide.walk import Walk
 from agent.utils.json_types import JsonObject
 
 ASSISTANT_ID = "review-guide"
@@ -50,7 +50,7 @@ class ReviewGuideSession(Base):
     slack_channel_id: Mapped[str]
     workspace_slug: Mapped[str | None] = mapped_column(default=None)
     mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
-    plan_json: Mapped[JsonObject | None] = mapped_column("plan", JSONB, default=None)
+    walk_json: Mapped[JsonObject | None] = mapped_column("walkthrough", JSONB, default=None)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     closed_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
@@ -82,16 +82,16 @@ class ReviewGuideSession(Base):
             )
 
     @property
-    def plan(self) -> Plan | None:
-        return Plan.model_validate(self.plan_json) if self.plan_json else None
+    def walk(self) -> Walk | None:
+        return Walk.model_validate(self.walk_json) if self.walk_json else None
 
-    async def save_plan(self, plan: Plan | None) -> None:
-        self.plan_json = plan.model_dump(mode="json") if plan else None
+    async def save_walk(self, walk: Walk | None) -> None:
+        self.walk_json = walk.model_dump(mode="json") if walk else None
         async with postgres.session() as session:
             await session.execute(
                 update(ReviewGuideSession)
                 .where(ReviewGuideSession.thread_id == self.thread_id)
-                .values(plan_json=self.plan_json)
+                .values(walk_json=self.walk_json)
             )
             await session.commit()
 

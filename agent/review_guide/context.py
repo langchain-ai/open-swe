@@ -6,9 +6,9 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 
 from agent.review_guide import git
 from agent.review_guide.diff import ChangedLine, FileChange, parse, unseen
-from agent.review_guide.plan import LineRef
 from agent.review_guide.render import MessageRenderer, render_chunk
 from agent.review_guide.sessions import ReviewGuideSession
+from agent.review_guide.walk import LineRef, Walk
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
 from agent.sandboxes.paths import resolve_sandbox_work_dir
@@ -67,6 +67,13 @@ class GuideContext:
     async def unseen(self, changes: list[FileChange]) -> list[ChangedLine]:
         return unseen(changes, await self.session.seen_lines())
 
+    def walk(self, changes: list[FileChange]) -> Walk:
+        """The walkthrough of the checkout's head, started fresh when the head moved."""
+        walk = self.session.walk
+        if walk is not None and walk.head_sha == self.head_sha:
+            return walk
+        return Walk.start(self.head_sha, changes)
+
     async def render(self, refs: list[LineRef]) -> str:
         """``refs`` as the reader sees a chunk: its own lines only, at real line numbers."""
         changes = await self.changes()
@@ -94,10 +101,10 @@ class GuideContext:
             return await git.pr_diff(self.backend, self.repo_dir, path=path, zero=False)
 
         async def chunk() -> str:
-            plan = self.session.plan
-            current = plan.on_screen() if plan else None
-            if plan is None or current is None:
+            walk = self.session.walk
+            current = walk.on_screen() if walk and walk.head_sha == self.head_sha else None
+            if current is None:
                 return "_(no chunk is on screen)_"
-            return await self.render(plan.chunks[current].lines)
+            return await self.render(current.lines)
 
         return MessageRenderer(read_head=read_head, file_diff=file_diff, chunk=chunk)

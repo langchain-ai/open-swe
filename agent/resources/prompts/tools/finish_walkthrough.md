@@ -2,4 +2,4 @@ Post the closing message: your summary, then the server's account of how much of
 
 - `summary`: a few plain sentences. It is a Jinja template; see the system prompt for its helpers.
 
-It refuses while any chunk or Other has been neither approved nor skipped, and names what is left.
+It refuses while any line is left, a chunk is on screen, or Other has been neither approved nor skipped, and says what is in the way.

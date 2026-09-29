@@ -4,4 +4,4 @@ Post a message to the reader in the review channel, such as a greeting or an ans
 
 - `options`: buttons to add. A click arrives as the reader's next message.
 
-Never use it to show a chunk or Other; `show_next_chunk` and `show_other` do that.
+Never use it to show a chunk or Other; `show_chunk` and `show_other` do that.

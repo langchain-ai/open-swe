@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from agent.review_guide.diff import FileChange, parse, unseen
-from agent.review_guide.plan import ChunkSpec, FileRanges, PlanError, build_plan
 from agent.review_guide.render import MessageRenderer, RenderError, render_chunk
+from agent.review_guide.walk import FileRanges, Group, LineRef, RangeError, Walk, claim
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
@@ -75,26 +75,17 @@ def test_a_new_file_shows_its_class_as_source_and_leaves_its_imports_to_other(re
     _git(repo, "checkout", "-qb", "feature")
     head = _commit(repo, {"sessions.py": MODULE}, "add sessions")
     changes = _changes(repo, base, head)
+    walk = Walk.start(head, changes)
+    pool = unseen(changes, Counter())
 
-    plan = build_plan(
-        head,
-        changes,
-        unseen(changes, Counter()),
-        [
-            ChunkSpec(
-                title="The `Session` model", files=[FileRanges(path="sessions.py", added=[(8, 10)])]
-            )
-        ],
-    )
+    walk.other += claim([FileRanges(path="sessions.py", added=[(1, 7)])], walk.left(pool), changes)
+    shown = claim([FileRanges(path="sessions.py", added=[(1, 10)])], walk.left(pool), changes)
+    index = {LineRef.of(line): line for c in changes for line in c.lines}
     rendered = render_chunk(
-        [line for c in changes for line in c.lines if line.lineno >= 8],
-        _head(repo, head, changes),
-        _added(changes),
+        [index[ref] for ref in shown], _head(repo, head, changes), _added(changes)
     )
 
-    assert {(ref.path, ref.lineno) for ref in plan.other} == {
-        ("sessions.py", n) for n in range(1, 8)
-    }
+    assert [ref.lineno for ref in shown] == [8, 9, 10]
     assert rendered == (
         "`sessions.py` L8–10\n```python\nclass Session:\n    thread_id: str\n    user_id: UUID\n```"
     )
@@ -113,9 +104,7 @@ def test_a_changed_line_renders_as_a_diff_with_unchanged_context(repo: Path) -> 
     )
 
 
-def test_the_walkthrough_cannot_finish_until_every_chunk_and_other_is_settled(
-    repo: Path,
-) -> None:
+def test_the_walkthrough_cannot_finish_until_every_line_is_settled(repo: Path) -> None:
     base = _git(repo, "rev-parse", "HEAD").strip()
     _git(repo, "checkout", "-qb", "feature")
     head = _commit(
@@ -124,27 +113,31 @@ def test_the_walkthrough_cannot_finish_until_every_chunk_and_other_is_settled(
         "change",
     )
     changes = _changes(repo, base, head)
-    chunk = ChunkSpec(title="Return 2", files=[FileRanges(path="core.py", added=[(5, 5)])])
+    pool = unseen(changes, Counter())
+    walk = Walk.start(head, changes)
+    return_2 = [FileRanges(path="core.py", added=[(5, 5)])]
 
-    with pytest.raises(PlanError, match="already in chunk 1"):
-        build_plan(head, changes, unseen(changes, Counter()), [chunk, chunk])
-    with pytest.raises(PlanError, match="holds no unreviewed changed line"):
-        build_plan(
-            head,
-            changes,
-            unseen(changes, Counter()),
-            [ChunkSpec(title="Nothing", files=[FileRanges(path="core.py", added=[(1, 1)])])],
-        )
+    walk.groups.append(
+        Group(title="Return 2", lines=claim(return_2, walk.left(pool), changes), status="shown")
+    )
+    with pytest.raises(RangeError, match="holds no line that is still left"):
+        claim(return_2, walk.left(pool), changes)
+    walk.withdraw()
+    assert [ref.lineno for ref in claim(return_2, walk.left(pool), changes)] == [5]
 
-    plan = build_plan(head, changes, unseen(changes, Counter()), [chunk])
-    assert len(plan.unfinished()) == 2
-    plan.chunks[0].status = "approved"
-    assert plan.unfinished() == [f"Other ({len(plan.other)} lines) is planned"]
-    plan.other_status = "approved"
-    assert plan.unfinished() == []
+    walk.groups.append(
+        Group(title="Return 2", lines=claim(return_2, walk.left(pool), changes), status="shown")
+    )
+    walk.other += [LineRef.of(line) for line in walk.left(pool)]
+    assert walk.unfinished(pool) == [
+        "“Return 2” is on screen and not yet approved",
+        "Other (3 lines) has not been approved",
+    ]
+    walk.groups[0].status = "approved"
+    walk.other_status = "approved"
+    assert walk.unfinished(pool) == []
     assert (
-        plan.coverage()
-        == "Walked through 1 of 1 chunks (1 changed lines); Other, 3 lines, summarized."
+        walk.coverage() == "Walked through 1 chunks (1 changed lines); Other, 3 lines, summarized."
     )
 
 

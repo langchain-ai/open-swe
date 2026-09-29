@@ -1,10 +1,10 @@
 """Review guide graph.
 
 Walks one person through a pull request in a Slack code channel, a small chunk
-at a time: the guide plans chunks as line ranges, and the server shows each one
-and records it once the reader says it looks good. Every run first pins the
-checkout to the PR head; a plan for an older head is dropped, and lines the
-reader already approved stay out of the next one.
+at a time: the guide picks each chunk as line ranges as the conversation goes,
+and the server shows it and records it once the reader says it looks good.
+Every run first pins the checkout to the PR head; a newer head restarts the
+walkthrough, and lines the reader already approved never come back.
 """
 
 import logging
@@ -63,11 +63,11 @@ from agent.tools.review_walkthrough import (
     approve_review_chunk,
     end_walkthrough,
     finish_walkthrough,
-    plan_walkthrough,
+    move_to_other,
     read_changes,
-    show_next_chunk,
+    show_chunk,
     show_other,
-    skip_review_chunks,
+    skip_changes,
 )
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
@@ -141,14 +141,14 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
             if not ready:
                 raise RuntimeError("review guide could not check out the pull request")
             await git.pin(backend, repo_dir, base_sha=head.base.sha, head_sha=head.head.sha)
-        plan = session.plan
-        if plan is None or plan.head_sha == head.head.sha:
+        walk = session.walk
+        if walk is None or walk.head_sha == head.head.sha:
             return updates
         changes = parse(await git.pr_diff(backend, repo_dir))
         left = unseen(changes, await session.seen_lines())
-        await session.save_plan(None)
+        await session.save_walk(None)
         logger.info(
-            "Review guide plan dropped for a newer head",
+            "Review guide walkthrough restarted for a newer head",
             extra={
                 "agent_thread_id": self._thread_id,
                 "pr_number": pr.number,
@@ -225,11 +225,11 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
         tools=apply_tool_descriptions(
             [
                 read_changes,
-                plan_walkthrough,
-                show_next_chunk,
-                show_other,
+                show_chunk,
+                move_to_other,
                 approve_review_chunk,
-                skip_review_chunks,
+                skip_changes,
+                show_other,
                 finish_walkthrough,
                 end_walkthrough,
                 review_reply,

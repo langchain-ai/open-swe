@@ -17,8 +17,8 @@ async def approve_pull_request(body: str = "") -> dict[str, Any]:
         return {"success": False, "error": str(exc)}
     if ctx.session.mode == "author":
         return {"success": False, "error": "the author cannot approve their own pull request"}
-    plan = ctx.session.plan
-    coverage = plan.coverage() if plan and plan.head_sha == ctx.head_sha else ""
+    walk = ctx.session.walk
+    coverage = walk.coverage() if walk and walk.head_sha == ctx.head_sha else ""
     pr = ctx.session.pull_request
     error = await approve(
         login=login,
