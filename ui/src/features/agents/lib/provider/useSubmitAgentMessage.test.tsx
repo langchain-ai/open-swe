@@ -151,7 +151,12 @@ describe("useSubmitAgentMessage", () => {
     )
     const { client, result } = setup()
 
-    await result.current.mutateAsync({ content: "try me", images: [] })
+    const onStartError = vi.fn()
+    await result.current.mutateAsync({
+      content: "try me",
+      images: [],
+      onStartError,
+    })
 
     await waitFor(() =>
       expect(pendingMessages(client)).toEqual([
@@ -163,6 +168,11 @@ describe("useSubmitAgentMessage", () => {
       ])
     )
     expect(sidebarStatus(client)).toBe("error")
+    expect(onStartError).toHaveBeenCalledOnce()
+    expect(reportError).toHaveBeenCalledWith({
+      title: "Couldn't send message",
+      error: expect.any(AgentsApiError),
+    })
   })
 
   it("clears queued on a failed enqueue so the failed row leaves the queue", async () => {
@@ -186,27 +196,5 @@ describe("useSubmitAgentMessage", () => {
         }),
       ])
     )
-  })
-
-  it("rolls back submission intent and reports a late start failure", async () => {
-    let rejectStart!: (error: Error) => void
-    source.startRun.mockReturnValueOnce(
-      new Promise((_, reject) => {
-        rejectStart = reject
-      })
-    )
-    const { client, result } = setup()
-    const onStartError = vi.fn()
-    await result.current.mutateAsync({ content: "retry Auto", onStartError })
-    expect(onStartError).not.toHaveBeenCalled()
-
-    const error = new Error("Network unavailable")
-    rejectStart(error)
-    await waitFor(() => expect(onStartError).toHaveBeenCalledOnce())
-    expect(pendingMessages(client)?.[0]?.status).toBe("failed")
-    expect(reportError).toHaveBeenCalledWith({
-      title: "Couldn't send message",
-      error,
-    })
   })
 })
