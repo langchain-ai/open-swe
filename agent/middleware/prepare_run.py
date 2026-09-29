@@ -25,7 +25,7 @@ class PrepareRunState(AgentState):
     run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
-    requested_model: NotRequired[str | None]
+    requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     selected_model_id: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     selected_effort: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
 
