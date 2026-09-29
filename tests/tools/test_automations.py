@@ -27,7 +27,10 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     monkeypatch.setattr(automations.schedules, "create_agent_schedule", create)
 
     result = await automations.create_automation(
-        "Check open pull requests", "0 9 * * 1-5", repo="langchain-ai/open-swe"
+        "Check open pull requests",
+        workspace="default",
+        schedule="0 9 * * 1-5",
+        repo="langchain-ai/open-swe",
     )
 
     assert result["ok"] is True

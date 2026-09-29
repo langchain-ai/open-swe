@@ -36,6 +36,7 @@ _ANTHROPIC_TOOL_ADDITION_MODELS = (
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-mythos-5",
+    "claude-sonnet-5-5",
 )
 # Responses API only: Chat Completions rejects ``additional_tools``.
 _OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")

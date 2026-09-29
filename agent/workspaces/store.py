@@ -1153,6 +1153,13 @@ class WorkspaceStore:
         record = await self.get(slug)
         if record is None:
             return False
+        # Its automations go first. They live in the LangGraph Store, which
+        # shares no transaction with this delete, so a failure part way leaves
+        # the workspace in place, and deleting it again finishes the job; the
+        # other order would strand automations nothing can delete by retrying.
+        from agent.schedules.store import delete_workspace_automations
+
+        await delete_workspace_automations(slug)
         await self.delete(slug)
         from agent.workspaces.refresh import remove_refresh_cron
 

@@ -9,6 +9,11 @@ import {
   listThreadsResultFrom,
   threadsPageQuery,
 } from "./threads.ts"
+import {
+  sessionUpload,
+  uploadSessionArgs,
+  uploadSessionResult,
+} from "./upload.ts"
 
 async function sessionClient(): Promise<ApiClient> {
   const config = await readConfig()
@@ -16,9 +21,17 @@ async function sessionClient(): Promise<ApiClient> {
     throw new Error("not signed in — run `oswe login`, or set OPEN_SWE_SESSION")
   if (config.credential.machine)
     throw new Error(
-      `${config.credential.source} cannot list threads; sign in as a person with \`oswe login\``
+      `${config.credential.source} cannot act for a person; sign in with \`oswe login\``
     )
   return new ApiClient(config.backend, config.credential)
+}
+
+function rejectedSession(api: ApiClient): (cause: unknown) => never {
+  return (cause) => {
+    if (cause instanceof ApiError && cause.status === 401)
+      throw new Error(api.credential.rejected)
+    throw cause
+  }
 }
 
 export function createMcpServer(
@@ -40,14 +53,36 @@ export function createMcpServer(
       const api = await client()
       const page = await api
         .listThreadsPage(threadsPageQuery(args))
-        .catch((cause: unknown) => {
-          if (cause instanceof ApiError && cause.status === 401)
-            throw new Error(api.credential.rejected)
-          throw cause
-        })
+        .catch(rejectedSession(api))
       const result = listThreadsResultFrom(page, (id) =>
         api.dashboardUrl(`/agents/${encodeURIComponent(id)}`)
       )
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      }
+    }
+  )
+  server.registerTool(
+    "upload_session",
+    {
+      title: "Upload this session to Open SWE",
+      description:
+        "Move this local coding session to Open SWE: its transcript becomes a new thread you continue from the dashboard, where a cloud agent picks up the work. No agent run starts until you send a message there. Before calling, commit every change in the working directory, including untracked files, and push it to `branch` on `repo`, or to the head branch of the pull request at `pr_url`; the cloud agent sees only what was pushed.",
+      inputSchema: uploadSessionArgs,
+      outputSchema: uploadSessionResult,
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async (args) => {
+      const upload = await sessionUpload(args)
+      const api = await client()
+      const threadId = await api
+        .uploadSession(upload)
+        .catch(rejectedSession(api))
+      const result = {
+        thread_id: threadId,
+        url: api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`),
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
