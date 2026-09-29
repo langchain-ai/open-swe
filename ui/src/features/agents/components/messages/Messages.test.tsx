@@ -126,6 +126,68 @@ describe("Messages", () => {
     ).toBeTruthy()
   })
 
+  it("keeps mid-turn messages visible between folded work", () => {
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "tool-execution",
+                toolCallId: "read",
+                title: "read_file",
+                toolKind: "read",
+                status: "completed",
+              },
+              { kind: "text", text: "Found the bug, fixing it now." },
+              {
+                kind: "tool-execution",
+                toolCallId: "shell-1",
+                title: "pytest",
+                toolKind: "execute",
+                status: "completed",
+              },
+              {
+                kind: "tool-execution",
+                toolCallId: "shell-2",
+                title: "ruff",
+                toolKind: "execute",
+                status: "completed",
+              },
+              { kind: "text", text: "All tests pass." },
+            ],
+          },
+        ]}
+      />
+    )
+
+    const [firstFold, secondFold] = screen.getAllByRole("button", {
+      name: /^Worked/,
+    })
+    const update = screen.getByText("Found the bug, fixing it now.")
+    const reply = screen.getByText("All tests pass.")
+
+    expect(firstFold?.textContent).toBe("Worked · 1 action")
+    expect(secondFold?.textContent).toBe("Worked · 2 actions")
+    for (const [before, after] of [
+      [firstFold, update],
+      [update, secondFold],
+      [secondFold, reply],
+    ] as const) {
+      expect(
+        before && after
+          ? before.compareDocumentPosition(after) &
+              Node.DOCUMENT_POSITION_FOLLOWING
+          : 0
+      ).toBeTruthy()
+    }
+    expect(screen.queryByText("pytest")).toBeNull()
+  })
+
   it("hides user names when disabled", () => {
     render(
       <Messages

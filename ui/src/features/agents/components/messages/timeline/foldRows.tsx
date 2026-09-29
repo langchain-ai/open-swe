@@ -3,24 +3,26 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
- * Collapses a settled turn's work log behind a single "Worked for …" line, so
- * the transcript reads as replies until the reader asks for the details.
+ * Collapses one stretch of a turn's work log behind a single line, so the
+ * transcript reads as what the agent said until the reader asks for details.
  */
 export function TurnFoldRow({
   label,
   active,
+  divider,
   expanded,
   onToggle,
 }: {
   label: string
   active: boolean
+  divider: boolean
   expanded: boolean
   onToggle: () => void
 }) {
   const Icon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className={cn("pt-1 pb-2", !active && "border-b border-border/60")}>
+    <div className={cn("pt-1 pb-2", divider && "border-b border-border/60")}>
       <button
         type="button"
         aria-expanded={expanded}

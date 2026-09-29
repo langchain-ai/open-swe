@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   buildRenderItems,
   countWorkActions,
-  selectCollapsedTurnItems,
-  splitWorkAndReply,
+  segmentTurn,
+  selectCollapsedWorkItems,
 } from "./renderItems"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -53,8 +53,8 @@ describe("buildRenderItems", () => {
       { type: "sql-item", key: "tool-call-sql", chunk },
     ])
     const items = buildRenderItems([chunk])
-    expect(selectCollapsedTurnItems(items)).toEqual([])
-    expect(countWorkActions(splitWorkAndReply(items).workItems)).toBe(1)
+    expect(selectCollapsedWorkItems(items)).toEqual([])
+    expect(countWorkActions(items)).toBe(1)
   })
 
   it.each([
@@ -79,7 +79,7 @@ describe("buildRenderItems", () => {
     }
   )
 
-  it("keeps sent replies visible when later work runs", () => {
+  it("splits a turn into work and the messages between it", () => {
     const sentReply: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "call-reply",
@@ -95,17 +95,29 @@ describe("buildRenderItems", () => {
       status: "completed",
     }
     const items = buildRenderItems([
+      { kind: "reasoning", text: "Planning" },
       sentReply,
       iframeChunk(),
       laterTool,
+      { kind: "text", text: "Found it, fixing now" },
+      { ...laterTool, toolCallId: "call-3" },
+      { kind: "error", text: "Rate limited" },
       { kind: "text", text: "Done" },
     ])
 
-    const { workItems, replyItems } = splitWorkAndReply(items)
-    expect(workItems.map((item) => item.type)).toEqual(["tool-item"])
-    expect(replyItems.map((item) => item.type)).toEqual([
+    expect(
+      segmentTurn(items).map((segment) =>
+        segment.kind === "work"
+          ? segment.items.map((item) => item.type)
+          : segment.item.type
+      )
+    ).toEqual([
+      ["reasoning-item"],
       "reply-item",
       "iframe-item",
+      ["tool-item"],
+      "text-chunk",
+      ["tool-item", "text-chunk"],
       "text-chunk",
     ])
   })
@@ -136,14 +148,12 @@ describe("buildRenderItems", () => {
       },
       { kind: "text", text: "Done" },
     ]
-    const items = buildRenderItems(chunks)
+    const [work] = segmentTurn(buildRenderItems(chunks))
+    if (work?.kind !== "work") throw new Error("expected a work segment")
 
-    const collapsed = selectCollapsedTurnItems(items)
+    const collapsed = selectCollapsedWorkItems(work.items)
 
-    expect(collapsed.map((item) => item.type)).toEqual([
-      "tool-item",
-      "text-chunk",
-    ])
+    expect(collapsed.map((item) => item.type)).toEqual(["tool-item"])
     expect(
       collapsed.flatMap((item) =>
         "chunk" in item && item.chunk.kind === "tool-execution"
@@ -164,8 +174,8 @@ describe("buildRenderItems", () => {
       },
     ])
 
-    expect(selectCollapsedTurnItems(items)).toEqual([])
-    expect(selectCollapsedTurnItems(items, true)).toEqual(items)
+    expect(selectCollapsedWorkItems(items)).toEqual([])
+    expect(selectCollapsedWorkItems(items, true)).toEqual(items)
   })
 
   it("counts tool actions without counting reasoning or final output", () => {
@@ -194,8 +204,6 @@ describe("buildRenderItems", () => {
       },
       { kind: "text", text: "Done" },
     ])
-    const { workItems } = splitWorkAndReply(items)
-
-    expect(countWorkActions(workItems)).toBe(3)
+    expect(countWorkActions(items)).toBe(3)
   })
 })

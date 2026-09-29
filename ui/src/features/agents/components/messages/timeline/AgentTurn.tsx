@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
@@ -7,8 +14,8 @@ import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
   countWorkActions,
-  selectCollapsedTurnItems,
-  splitWorkAndReply,
+  segmentTurn,
+  selectCollapsedWorkItems,
 } from "../renderItems"
 import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
@@ -155,39 +162,34 @@ export function AgentTurn({
     message.timestampIsFallback,
   ])
 
-  const { workItems, replyItems } = useMemo(
-    () => splitWorkAndReply(renderItems),
-    [renderItems]
-  )
-  const collapsedItems = useMemo(
-    () => selectCollapsedTurnItems(renderItems, !isStreaming),
-    [isStreaming, renderItems]
-  )
-  const actionCount = useMemo(() => countWorkActions(workItems), [workItems])
-  const replyText = useMemo(
-    () =>
-      replyItems
-        .map((item) =>
-          item.type === "text-chunk" && item.chunk.kind === "text"
-            ? item.chunk.text
-            : ""
-        )
-        .join("")
-        .trim(),
-    [replyItems]
-  )
-  const canFoldWork = !!isStreaming || workItems.length > 0
-  const [workFoldExpanded, setWorkFoldExpanded] = useState(false)
-  const toggleWorkFold = useCallback(
-    () => setWorkFoldExpanded((value) => !value),
-    []
-  )
+  const segments = useMemo(() => segmentTurn(renderItems), [renderItems])
+  const lastItemKey = renderItems.at(-1)?.key
+  const lastWorkKey = segments.findLast(
+    (segment) => segment.kind === "work"
+  )?.key
+  const replyText = useMemo(() => {
+    const trailing: Array<string> = []
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      const segment = segments[index]
+      if (!segment || segment.kind !== "message") break
+      if (
+        segment.item.type === "text-chunk" &&
+        segment.item.chunk.kind === "text"
+      )
+        trailing.unshift(segment.item.chunk.text)
+    }
+    return trailing.join("").trim()
+  }, [segments])
+  // While the agent is writing, a live status line still sits beneath it.
+  const hasLiveTail = !!isStreaming && segments.at(-1)?.kind !== "work"
+  const [expandedSegments, setExpandedSegments] = useState<
+    Record<string, boolean>
+  >({})
+  const toggleSegment = useCallback((key: string) => {
+    setExpandedSegments((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
+  }, [])
 
-  const renderItem = (
-    item: RenderItem,
-    index: number,
-    total: number
-  ): ReactNode => {
+  const renderItem = (item: RenderItem): ReactNode => {
     switch (item.type) {
       case "reasoning-item": {
         const reasoningChunk =
@@ -196,7 +198,7 @@ export function AgentTurn({
           <div key={item.key} className="min-w-0 flex-1">
             <ReasoningBlock
               text={reasoningChunk?.text ?? ""}
-              isLive={!!isStreaming && index === total - 1}
+              isLive={!!isStreaming && item.key === lastItemKey}
             />
           </div>
         )
@@ -282,48 +284,52 @@ export function AgentTurn({
     workDurationMs && workDurationMs >= 1000
       ? `Worked for ${formatElapsed(workDurationMs)}`
       : "Worked"
-  const foldLabel = isStreaming ? (activityLabel ?? "Working…") : workLabel
-  const foldLabelWithCount =
-    actionCount > 0
-      ? `${foldLabel} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
-      : foldLabel
-  const visibleItems =
-    canFoldWork && workFoldExpanded
-      ? renderItems
-      : isStreaming || canFoldWork
-        ? collapsedItems
-        : renderItems
-  const workItemKeys = new Set(workItems.map((item) => item.key))
-  const firstWorkIndex = renderItems.findIndex((item) =>
-    workItemKeys.has(item.key)
-  )
-  const renderItemIndex = new Map(
-    renderItems.map((item, index) => [item.key, index])
-  )
-  const foldIndex = visibleItems.filter(
-    (item) =>
-      (renderItemIndex.get(item.key) ?? Number.POSITIVE_INFINITY) <
-      firstWorkIndex
-  ).length
+  const renderWorkSegment = (
+    key: string,
+    items: Array<RenderItem>,
+    isLive: boolean
+  ): ReactNode => {
+    const expanded = expandedSegments[key] ?? false
+    const actionCount = countWorkActions(items)
+    const label = isLive
+      ? (activityLabel ?? "Working…")
+      : key === lastWorkKey
+        ? workLabel
+        : "Worked"
+    const labelWithCount =
+      actionCount > 0
+        ? `${label} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
+        : label
+    const shownItems = expanded
+      ? items
+      : selectCollapsedWorkItems(items, !isStreaming)
+
+    return (
+      <Fragment key={key}>
+        <TurnFoldRow
+          label={labelWithCount}
+          active={isLive}
+          divider={!isLive && key === lastWorkKey}
+          expanded={expanded}
+          onToggle={() => toggleSegment(key)}
+        />
+        {shownItems.map(renderItem)}
+      </Fragment>
+    )
+  }
 
   return (
     <div className="group/turn my-2 min-w-0 space-y-1.5">
-      {visibleItems
-        .slice(0, foldIndex)
-        .map((item, index) => renderItem(item, index, visibleItems.length))}
-      {canFoldWork && (
-        <TurnFoldRow
-          label={foldLabelWithCount}
-          active={!!isStreaming}
-          expanded={workFoldExpanded}
-          onToggle={toggleWorkFold}
-        />
+      {segments.map((segment, index) =>
+        segment.kind === "message"
+          ? renderItem(segment.item)
+          : renderWorkSegment(
+              segment.key,
+              segment.items,
+              !!isStreaming && index === segments.length - 1
+            )
       )}
-      {visibleItems
-        .slice(foldIndex)
-        .map((item, index) =>
-          renderItem(item, foldIndex + index, visibleItems.length)
-        )}
+      {hasLiveTail && renderWorkSegment("work-live", [], true)}
 
       <div className="mt-1 flex items-center gap-1">
         {replyText && !isStreaming && (

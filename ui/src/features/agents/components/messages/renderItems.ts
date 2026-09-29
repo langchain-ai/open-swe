@@ -27,37 +27,36 @@ export type RenderItem =
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
 
-const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
-  "text-chunk",
-  "reply-item",
-  "iframe-item",
-])
+/**
+ * A turn alternates between work the reader can fold away and things the agent
+ * said, which stay visible so mid-turn updates aren't buried under the fold.
+ */
+export type TurnSegment =
+  | { kind: "work"; key: string; items: Array<RenderItem> }
+  | { kind: "message"; item: RenderItem }
 
-export function splitWorkAndReply(items: Array<RenderItem>): {
-  workItems: Array<RenderItem>
-  replyItems: Array<RenderItem>
-} {
-  let trailingReplyIndex = items.length
-  while (trailingReplyIndex > 0) {
-    const prev = items[trailingReplyIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    trailingReplyIndex -= 1
-  }
+function isMessageItem(item: RenderItem): boolean {
+  if (item.type === "reply-item" || item.type === "iframe-item") return true
+  if (item.type !== "text-chunk") return false
+  // Errors surface through the fold's attention items; todos are bookkeeping.
+  return item.chunk.kind !== "error" && item.chunk.kind !== "todo"
+}
 
-  const workItems: Array<RenderItem> = []
-  const replyItems: Array<RenderItem> = []
-  items.forEach((item, index) => {
-    if (
-      item.type === "reply-item" ||
-      item.type === "iframe-item" ||
-      index >= trailingReplyIndex
-    ) {
-      replyItems.push(item)
-    } else {
-      workItems.push(item)
+export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
+  const segments: Array<TurnSegment> = []
+  for (const item of items) {
+    if (isMessageItem(item)) {
+      segments.push({ kind: "message", item })
+      continue
     }
-  })
-  return { workItems, replyItems }
+    const last = segments.at(-1)
+    if (last?.kind === "work") {
+      last.items.push(item)
+    } else {
+      segments.push({ kind: "work", key: `work-${item.key}`, items: [item] })
+    }
+  }
+  return segments
 }
 
 function toolNeedsAttention(
@@ -99,16 +98,12 @@ function attentionItems(
   return []
 }
 
-export function selectCollapsedTurnItems(
+/** What a folded work segment still shows: approvals, errors, and (once the run stops) unfinished tools. */
+export function selectCollapsedWorkItems(
   items: Array<RenderItem>,
   includeUnfinished = false
 ): Array<RenderItem> {
-  const { replyItems } = splitWorkAndReply(items)
-  const replyKeys = new Set(replyItems.map((item) => item.key))
-
-  return items.flatMap((item) =>
-    replyKeys.has(item.key) ? [item] : attentionItems(item, includeUnfinished)
-  )
+  return items.flatMap((item) => attentionItems(item, includeUnfinished))
 }
 
 export function countWorkActions(items: Array<RenderItem>): number {
