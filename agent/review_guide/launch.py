@@ -1,4 +1,8 @@
-"""Open a review guide code channel for a pull request, and wake it when the PR moves."""
+"""Open a review guide code channel for a pull request, and wake it when the PR moves.
+
+A closed guide is never woken: the guide ended it, or Slack archived its
+channel. Only the reader's own message reopens it.
+"""
 
 import logging
 import time
@@ -16,6 +20,7 @@ from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
 from agent.review_guide.github import fetch_head
 from agent.review_guide.sessions import ASSISTANT_ID, GuideMode, ReviewGuideSession
+from agent.slack.channels import SlackChannel
 from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel, slack_user_ids
 from agent.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
@@ -144,6 +149,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         location,
         prompt("review-guide/kickoff", pr_number=start.number),
         workspace_slug=start.workspace_slug,
+        mark_processing=True,
     )
     return StartedGuide(thread_id=thread_id, channel_id=channel_id)
 
@@ -199,9 +205,18 @@ async def _fork_builder(
 
 
 async def dispatch_guide_run(
-    thread_id: str, location: SlackThreadRef, text: str, *, workspace_slug: str | None
+    thread_id: str,
+    location: SlackThreadRef,
+    text: str,
+    *,
+    workspace_slug: str | None,
+    mark_processing: bool = False,
 ) -> None:
-    """Run the guide on a system turn: no person triggered it, so it cannot approve."""
+    """Run the guide on a system turn: no person triggered it, so it cannot approve.
+
+    Only the kickoff marks the session processing; a status change on any other
+    system turn would reopen a session the reader closed.
+    """
     configurable: dict[str, object] = {
         "thread_id": thread_id,
         "slack_thread": location.dump(),
@@ -209,7 +224,7 @@ async def dispatch_guide_run(
     }
     if workspace_slug:
         configurable["workspace"] = workspace_slug
-    if location.channel_id:
+    if mark_processing and location.channel_id:
         await set_session_status(location.channel_id, "processing")
     await create_durable_run(
         thread_id,
@@ -226,6 +241,26 @@ async def dispatch_guide_run(
     )
 
 
+class _ChannelState(BaseModel):
+    is_archived: bool = False
+
+
+async def channel_archived(channel_id: str) -> bool:
+    channel = await SlackChannel.fetch(channel_id, use_cache=False)
+    return channel is not None and _ChannelState.model_validate(channel).is_archived
+
+
+async def close_guide_for_channel(channel_id: str) -> None:
+    """Close the guide bound to a channel Slack just archived, if there is one."""
+    session = await ReviewGuideSession.for_channel(channel_id)
+    if session is not None and not session.closed:
+        await session.set_closed(True)
+        logger.info(
+            "Closed a review guide whose channel was archived",
+            extra={"agent_thread_id": session.thread_id, "slack_channel": channel_id},
+        )
+
+
 async def notify_pr_updated(payload: dict[str, object]) -> None:
     """Wake every guide on a pull request that just moved so it shows the new code."""
     event = PullRequestEvent.parse(payload)
@@ -234,6 +269,11 @@ async def notify_pr_updated(payload: dict[str, object]) -> None:
         return
     owner, repo, number = identity
     for session in await ReviewGuideSession.for_pull_request(owner, repo, number):
+        if session.closed:
+            continue
+        if await channel_archived(session.slack_channel_id):
+            await session.set_closed(True)
+            continue
         location = SlackThreadRef(
             channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS
         )

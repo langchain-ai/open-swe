@@ -61,6 +61,7 @@ from agent.tools.record_author_feedback import record_author_feedback
 from agent.tools.review_reply import review_reply
 from agent.tools.review_walkthrough import (
     approve_review_chunk,
+    end_walkthrough,
     finish_walkthrough,
     plan_walkthrough,
     read_changes,
@@ -230,6 +231,7 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
                 approve_review_chunk,
                 skip_review_chunks,
                 finish_walkthrough,
+                end_walkthrough,
                 review_reply,
                 *closing_tools,
             ]

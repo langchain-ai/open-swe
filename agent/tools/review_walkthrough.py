@@ -8,6 +8,7 @@ from agent.review_guide.context import GuideContext, GuideUnavailableError
 from agent.review_guide.github import fetch_head
 from agent.review_guide.plan import ChunkSpec, LineRef, Plan, PlanError, build_plan, other_stat
 from agent.review_guide.render import RenderError, fenced
+from agent.slack.code_channels import archive_code_channel, set_session_status_result
 from agent.slack.tools.reply import slack_reply
 
 MAX_CHANGE_ROWS = 2_000
@@ -171,6 +172,30 @@ async def skip_review_chunks(
         plan.other_status = "skipped"
     await ctx.session.save_plan(plan)
     return {"success": True, "left": plan.unfinished()}
+
+
+async def end_walkthrough(message: str) -> dict[str, Any]:
+    """Implement the `end_walkthrough` tool."""
+    try:
+        ctx = await GuideContext.current()
+        prose = await ctx.renderer().render(message)
+    except (GuideUnavailableError, RenderError) as exc:
+        return {"success": False, "error": str(exc)}
+    posted = await slack_reply(prose, "progress")
+    await ctx.session.set_closed(True)
+    channel_id = ctx.session.slack_channel_id
+    _, status_error = await set_session_status_result(channel_id, "closed")
+    archived, archive_error = await archive_code_channel(channel_id)
+    warnings = [
+        f"could not {what}: {error}"
+        for what, error in (
+            ("post the message", None if posted["success"] is True else str(posted["error"])),
+            ("close the session", status_error),
+            ("archive the channel", None if archived else archive_error),
+        )
+        if error
+    ]
+    return {"success": True, "ended": True, **({"warnings": warnings} if warnings else {})}
 
 
 async def finish_walkthrough(summary: str) -> dict[str, Any]:

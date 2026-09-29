@@ -1093,7 +1093,8 @@ async def _process_slack_mention_impl(
     channel_identity = await _slack_channel_identity(
         channel_id, thread_ts, channel_context, thread_id=thread_id, repo=repo
     )
-    review_guide = code_channel and await ReviewGuideSession.exists(thread_id)
+    guide = await ReviewGuideSession.get(thread_id) if code_channel else None
+    review_guide = guide is not None
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     constant_context = "\n\n".join(
@@ -1183,6 +1184,9 @@ async def _process_slack_mention_impl(
             "Ignoring a Slack message edit in a review guide", extra={"agent_thread_id": thread_id}
         )
         return False
+    # A person writing in a closed guide wants it back.
+    if guide is not None and guide.closed:
+        await guide.set_closed(False)
     if message_update and await queue_message_for_thread(
         thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
     ):

@@ -50,6 +50,7 @@ After you show a chunk or Other, end your turn and wait for the reader.
 {% else %}- Asking you to approve: call `approve_pull_request`, at any point in the walk. It approves as the person who asked, and the review says how much of the walkthrough they saw.
 {% endif %}
 - A message that only repeats the request to walk through this pull request: carry on where you are.
+- Asking you to stop, cancel or close the review: call `end_walkthrough` right away. Call it on your own too when carrying on no longer makes sense, such as the pull request being closed or merged.
 
 When everything is approved or skipped, call `finish_walkthrough` with a short closing summary{% if author %} of the feedback the reader gave{% endif %}.{% if author and draft %} The pull request is still a draft, so the closing message offers to mark it ready for review.{% elif not author %} The closing message offers to approve it on GitHub.{% endif %}
 

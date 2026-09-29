@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Text, select, update
+from sqlalchemy import ForeignKey, Text, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -52,7 +52,34 @@ class ReviewGuideSession(Base):
     mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
     plan_json: Mapped[JsonObject | None] = mapped_column("plan", JSONB, default=None)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    closed_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
+
+    @property
+    def closed(self) -> bool:
+        return self.closed_at is not None
+
+    async def set_closed(self, closed: bool) -> None:
+        """Close the session so nothing but a person's message wakes it, or reopen it."""
+        async with postgres.session() as session:
+            self.closed_at = await session.scalar(
+                update(ReviewGuideSession)
+                .where(ReviewGuideSession.thread_id == self.thread_id)
+                .values(closed_at=func.clock_timestamp() if closed else None)
+                .returning(ReviewGuideSession.closed_at)
+            )
+            await session.commit()
+
+    @classmethod
+    async def for_channel(cls, channel_id: str) -> Self | None:
+        if not postgres.configured():
+            return None
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(cls)
+                .options(selectinload(cls.pull_request))
+                .where(cls.slack_channel_id == channel_id)
+            )
 
     @property
     def plan(self) -> Plan | None:
