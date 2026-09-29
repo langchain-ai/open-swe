@@ -19,7 +19,7 @@ def upgrade() -> None:
             repository_id uuid REFERENCES repository (id) ON DELETE CASCADE,
             pull_request_id uuid REFERENCES pull_request (id) ON DELETE CASCADE,
             event_types text[] NOT NULL DEFAULT '{}',
-            actions text[] NOT NULL DEFAULT '{}',
+            payload_match jsonb NOT NULL DEFAULT '{}',
             multitask_strategy text NOT NULL
                 CHECK (multitask_strategy IN ('enqueue', 'interrupt')),
             instructions text NOT NULL DEFAULT '',
@@ -71,8 +71,8 @@ def upgrade() -> None:
         "pull request match.'",
         "COMMENT ON COLUMN event_subscription.event_types IS 'event_log.event_type values to "
         "match; empty matches every type.'",
-        "COMMENT ON COLUMN event_subscription.actions IS 'Payload action values to match, e.g. "
-        "completed or submitted; empty matches every action.'",
+        "COMMENT ON COLUMN event_subscription.payload_match IS 'A JSON object the event_log "
+        "payload must contain (jsonb @>); the empty object matches every payload.'",
         "COMMENT ON COLUMN event_subscription.run_config IS 'The configurable each woken run "
         "starts with.'",
         "COMMENT ON COLUMN event_subscription.one_shot IS 'Deleted after its first match.'",

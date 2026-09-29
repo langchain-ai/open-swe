@@ -69,6 +69,17 @@ _EVENT_KINDS = text(
     """
 )
 
+_LATEST_PAYLOADS = text(
+    f"""
+    SELECT DISTINCT ON (COALESCE(payload->>'action', ''))
+           COALESCE(payload->>'action', '') AS action, payload
+    FROM {_TABLE}
+    WHERE received_at >= :since AND source = :source AND event_type = :event_type
+    ORDER BY COALESCE(payload->>'action', ''), received_at DESC
+    """
+)
+_SHAPE_DEPTH = 6
+
 
 class LoggedEvent(BaseModel):
     """A row as written, with the links resolved on insert."""
@@ -90,6 +101,7 @@ class EventKind(BaseModel):
     action: str
     count: int
     last_received_at: datetime
+    payload_shape: JsonValue = None
 
 
 class EventRefs(BaseModel):
@@ -232,12 +244,46 @@ class EventLog:
         await EventSubscription.deliver(LoggedEvent.model_validate({**row, "payload": payload}))
 
     @classmethod
-    async def kinds(cls, since: datetime) -> list[EventKind]:
-        """Every distinct source, event type, and action received since ``since``."""
+    async def kinds(
+        cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
+    ) -> list[EventKind]:
+        """Every distinct source, event type, and action received since ``since``.
+
+        Naming both ``source`` and ``event_type`` narrows to that type and adds each
+        action's payload shape: keys and value types of the newest one, never values.
+        """
         await cls.ensure_partitions()
         async with transaction() as conn:
             rows = await conn.execute(_EVENT_KINDS, {"since": since})
-            return [EventKind.model_validate(dict(row)) for row in rows.mappings()]
+            kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]
+            if source is None or not event_type:
+                return kinds
+            latest = await conn.execute(
+                _LATEST_PAYLOADS, {"since": since, "source": source, "event_type": event_type}
+            )
+            shapes = {row["action"]: cls.shape(row["payload"]) for row in latest.mappings()}
+        return [
+            kind.model_copy(update={"payload_shape": shapes.get(kind.action)})
+            for kind in kinds
+            if kind.source == source and kind.event_type == event_type
+        ]
+
+    @classmethod
+    def shape(cls, value: JsonValue, depth: int = 0) -> JsonValue:
+        """``value`` with every leaf replaced by its JSON type name."""
+        if isinstance(value, dict):
+            if depth >= _SHAPE_DEPTH:
+                return "object"
+            return {key: cls.shape(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls.shape(value[0], depth + 1)] if value else []
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "number"
+        if value is None:
+            return "null"
+        return "string"
 
     @classmethod
     async def ensure_partitions(cls) -> None:

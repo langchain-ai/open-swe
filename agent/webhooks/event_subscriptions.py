@@ -7,7 +7,17 @@ from uuid import UUID, uuid7
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, JsonValue, ValidationError
-from sqlalchemy import ColumnElement, ForeignKey, Text, delete, func, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    ForeignKey,
+    Text,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -212,7 +222,7 @@ class EventSubscription(Base):
         ForeignKey("pull_request.id"), default=None
     )
     event_types: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
-    actions: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
+    payload_match: Mapped[dict[str, JsonValue]] = mapped_column(JSONB, default_factory=dict)
     instructions: Mapped[str] = mapped_column(default="")
     one_shot: Mapped[bool] = mapped_column(default=False)
     trigger_count: Mapped[int] = mapped_column(server_default="0", init=False)
@@ -277,7 +287,7 @@ class EventSubscription(Base):
         if summary.from_open_swe:
             return
         try:
-            subscriptions = await cls._matching(event, summary.action)
+            subscriptions = await cls._matching(event)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Loading event subscriptions failed",
@@ -338,7 +348,7 @@ class EventSubscription(Base):
             )
 
     @classmethod
-    async def _matching(cls, event: LoggedEvent, action: str) -> list[Self]:
+    async def _matching(cls, event: LoggedEvent) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls).where(
@@ -354,7 +364,7 @@ class EventSubscription(Base):
                         func.cardinality(cls.event_types) == 0,
                         cls.event_types.contains([event.event_type]),
                     ),
-                    or_(func.cardinality(cls.actions) == 0, cls.actions.contains([action])),
+                    literal(event.payload, JSONB).contains(cls.payload_match),
                 )
             )
             return list(rows.unique())

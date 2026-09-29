@@ -1,9 +1,12 @@
 """Tools for listening to inbound events: subscribe a thread, and list what arrives."""
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID
+
+from pydantic import JsonValue
 
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
@@ -27,6 +30,7 @@ _MAX_HOURS = 24 * 14
 _MAX_FILTERS = 20
 _MAX_PER_THREAD = 5
 _MAX_INSTRUCTIONS_CHARS = 4_000
+_MAX_PAYLOAD_MATCH_CHARS = 4_000
 _CARRIED_CONFIG_KEYS = frozenset(
     {
         "thread_id",
@@ -55,7 +59,7 @@ def _describe(subscription: EventSubscription) -> dict[str, object]:
         "target": subscription.target,
         "sources": subscription.sources,
         "event_types": subscription.event_types,
-        "actions": subscription.actions,
+        "payload_match": subscription.payload_match,
         "when_busy": _WHEN_BUSY[subscription.multitask_strategy],
         "one_shot": subscription.one_shot,
         "instructions": subscription.instructions,
@@ -81,7 +85,7 @@ async def listen_events(
     repo: str = "",
     pr_url: str = "",
     event_types: list[str] | None = None,
-    actions: list[str] | None = None,
+    payload_match: dict[str, JsonValue] | None = None,
     when_busy: WhenBusy = "wait",
     one_shot: bool = False,
     instructions: str = "",
@@ -106,11 +110,15 @@ async def listen_events(
             "cancelled": await EventSubscription.cancel(thread_id, cancelled_id),
         }
 
-    types, wanted_actions = _filters(event_types), _filters(actions)
+    types = _filters(event_types)
     if not (types or repo or pr_url):
         return _error("Narrow the subscription with event_types, repo, or pr_url")
-    if max(len(types), len(wanted_actions)) > _MAX_FILTERS:
-        return _error(f"event_types and actions accept at most {_MAX_FILTERS} values each")
+    if len(types) > _MAX_FILTERS:
+        return _error(f"event_types accepts at most {_MAX_FILTERS} values")
+    if len(json.dumps(payload_match or {})) > _MAX_PAYLOAD_MATCH_CHARS:
+        return _error(
+            f"payload_match must be at most {_MAX_PAYLOAD_MATCH_CHARS} characters of JSON"
+        )
     if not 1 <= expires_in_hours <= _MAX_HOURS:
         return _error(f"expires_in_hours must be between 1 and {_MAX_HOURS}")
     if len(instructions) > _MAX_INSTRUCTIONS_CHARS:
@@ -154,7 +162,7 @@ async def listen_events(
         repository_id=repository.id if repository else None,
         pull_request_id=pull_request.id if pull_request else None,
         event_types=types,
-        actions=wanted_actions,
+        payload_match=payload_match or {},
         multitask_strategy=_STRATEGIES[when_busy],
         one_shot=one_shot,
         instructions=instructions.strip(),
@@ -168,10 +176,12 @@ async def listen_events(
     return {"success": True, "subscription": _describe(subscription)}
 
 
-async def list_event_types() -> dict[str, object]:
+async def list_event_types(
+    source: WebhookSource | None = None, event_type: str = ""
+) -> dict[str, object]:
     """Implement the `list_event_types` tool."""
     since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)
-    kinds = await EventLog.kinds(since)
+    kinds = await EventLog.kinds(since, source=source, event_type=event_type.strip())
     return {
         "since": since.isoformat(),
         "event_types": [kind.model_dump(mode="json") for kind in kinds],
