@@ -223,7 +223,7 @@ async def load_access(thread_id: str, *, conn: AsyncConnection | None = None) ->
             "SELECT metadata FROM thread WHERE thread_id = :thread_id",
             {"thread_id": thread_id},
         )
-    return None if row is None else dict(row["metadata"])
+    return None if row is None else dict[str, JsonValue](row["metadata"])
 
 
 # The checkpoint is joined in rather than fetched per page: it is one row per
