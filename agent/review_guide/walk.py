@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from agent.review_guide.diff import ChangedLine, FileChange, Sign
 
-GroupStatus = Literal["shown", "approved", "skipped"]
+GroupStatus = Literal["queued", "shown", "approved", "skipped"]
 OtherStatus = Literal["open", "shown", "approved", "skipped"]
 LineRange = tuple[int, int]
 _MAX_ERRORS = 20
@@ -48,7 +48,11 @@ class FileRanges(BaseModel):
 
 
 class Group(BaseModel):
-    """A chunk the reader was shown, or lines they chose to skip."""
+    """A chunk prepared for the reader or shown to them, or lines they chose to skip.
+
+    A queued chunk is fully rendered ahead of time, so "Looks good" can show it
+    without waiting on the model.
+    """
 
     title: str
     lines: list[LineRef]
@@ -104,6 +108,10 @@ class Walk(BaseModel):
         moved = type(self).start(head_sha, changes)
         gone: list[Group] = []
         for group in self.groups:
+            # A queued chunk was rendered at the old line numbers; it is prepared again.
+            if group.status == "queued":
+                gone.append(group)
+                continue
             lines = take(group.lines, whole=group.status == "shown")
             if lines:
                 moved.groups.append(group.model_copy(update={"lines": lines}))
@@ -122,8 +130,19 @@ class Walk(BaseModel):
     def on_screen(self) -> Group | None:
         return next((g for g in self.groups if g.status == "shown"), None)
 
+    @property
+    def queue(self) -> list[Group]:
+        """Chunks prepared ahead of the reader, in the order they will be shown."""
+        return [g for g in self.groups if g.status == "queued"]
+
+    def keep_queue(self, positions: list[int]) -> None:
+        """Keep only these queued chunks (1-based positions), in this order."""
+        queue = self.queue
+        kept = [queue[p - 1] for p in positions]
+        self.groups = [g for g in self.groups if g.status != "queued"] + kept
+
     def left(self, unseen: list[ChangedLine]) -> list[ChangedLine]:
-        """Unseen lines that are not on screen, in Other, or skipped."""
+        """Unseen lines that are not queued, on screen, in Other, or skipped."""
         taken = set(self.other) | {ref for g in self.groups for ref in g.lines}
         return [line for line in unseen if LineRef.of(line) not in taken]
 
@@ -145,6 +164,8 @@ class Walk(BaseModel):
         reasons: list[str] = []
         if left := self.left(unseen):
             reasons.append(summary(left))
+        if queue := self.queue:
+            reasons.append(f"{len(queue)} prepared chunks have not been shown")
         if (current := self.on_screen()) is not None:
             reasons.append(f"“{current.title}” is on screen and not yet approved")
         if self.has_other and self.other_status in ("open", "shown"):

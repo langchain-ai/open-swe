@@ -83,6 +83,19 @@ async def refresh_progress(
         )
 
 
+async def post_with_buttons(session: ReviewGuideSession, text: str, buttons: list[str]) -> str:
+    """Post a message the guide prepared earlier; its timestamp, or ``""`` when Slack refused."""
+    message_ts, error = await post_slack_top_level_message_with_ts(
+        session.slack_channel_id, text, blocks=_text_blocks(text, buttons=buttons)
+    )
+    if not message_ts:
+        logger.warning(
+            "Could not post a prepared review guide chunk",
+            extra={"agent_thread_id": session.thread_id, "slack_error": error},
+        )
+    return message_ts or ""
+
+
 async def retire(channel_id: str, message_ts: str, text: str, note: str) -> None:
     """Take the buttons off a message the guide posted, saying why."""
     if not message_ts:

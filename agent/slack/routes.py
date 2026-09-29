@@ -13,6 +13,8 @@ from agent.act_as import slack as act_as
 from agent.expedited_review import slack as expedited_review
 from agent.human_review import slack as human_review
 from agent.human_review.posted import watch_post
+from agent.review_guide.advance import advance
+from agent.review_guide.buttons import LOOKS_GOOD
 from agent.review_guide.launch import close_guide_for_channel
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.slack import webhook as service
@@ -1028,25 +1030,31 @@ async def slack_interactivity(
             thread_id=thread_id,
         )
         background_tasks.add_task(_update_selected_option_message, interaction, action, response)
-        background_tasks.add_task(
-            service.process_slack_mention,
-            SlackRequest(
-                channel_id=channel_id,
-                channel_context=channel_context,
-                thread_ts=option_thread_ts,
-                event_ts=action_ts,
-                user_id=user_id,
-                text=response,
-                bot_user_id=common.SLACK_BOT_USER_ID,
-                thread_id=thread_id,
-                concierge_mode=in_concierge_mode,
-                reply_thread_ts=reply_thread_ts,
-                treat_all_messages_as_mentions=in_code_channel,
-                code_channel=in_code_channel,
-                explicit_request=in_code_channel,
-            ),
-            repo,
+        request = SlackRequest(
+            channel_id=channel_id,
+            channel_context=channel_context,
+            thread_ts=option_thread_ts,
+            event_ts=action_ts,
+            user_id=user_id,
+            text=response,
+            bot_user_id=common.SLACK_BOT_USER_ID,
+            thread_id=thread_id,
+            concierge_mode=in_concierge_mode,
+            reply_thread_ts=reply_thread_ts,
+            treat_all_messages_as_mentions=in_code_channel,
+            code_channel=in_code_channel,
+            explicit_request=in_code_channel,
         )
+
+        # A review guide shows its next prepared chunk itself, without waiting on a turn.
+        if in_code_channel and response == LOOKS_GOOD:
+
+            async def as_a_turn() -> None:
+                await service.process_slack_mention(request, repo)
+
+            background_tasks.add_task(advance, channel_id, as_a_turn)
+        else:
+            background_tasks.add_task(service.process_slack_mention, request, repo)
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)

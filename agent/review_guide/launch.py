@@ -42,6 +42,7 @@ from agent.webhooks.common import upsert_agent_thread_metadata
 logger = logging.getLogger(__name__)
 
 _SENDER_ID = "system:review-guide"
+PREFETCH_KIND = "review_guide_prefetch"
 
 
 class GuideStart(BaseModel):
@@ -214,9 +215,18 @@ async def _fork_builder(
 
 
 async def dispatch_guide_run(
-    thread_id: str, location: SlackThreadRef, text: str, *, workspace_slug: str | None
+    thread_id: str,
+    location: SlackThreadRef,
+    text: str,
+    *,
+    workspace_slug: str | None,
+    prefetch: bool = False,
 ) -> None:
-    """Kick the guide off: no person triggered this turn, so it cannot approve."""
+    """Start a guide turn no person triggered, so it cannot approve.
+
+    A prefetch turn prepares chunks in the background: it shows nothing, so it
+    leaves the session's status alone.
+    """
     configurable: dict[str, object] = {
         "thread_id": thread_id,
         "slack_thread": location.dump(),
@@ -224,7 +234,9 @@ async def dispatch_guide_run(
     }
     if workspace_slug:
         configurable["workspace"] = workspace_slug
-    if location.channel_id:
+    if prefetch:
+        configurable["review_guide_prefetch"] = True
+    elif location.channel_id:
         await set_session_status(location.channel_id, "processing")
     await create_durable_run(
         thread_id,
@@ -237,6 +249,7 @@ async def dispatch_guide_run(
         source="review-guide",
         thread_title=None,
         config={"configurable": with_invocation_id(configurable, new_invocation_id())},
+        metadata={"kind": PREFETCH_KIND} if prefetch else None,
         multitask_strategy="enqueue",
     )
 

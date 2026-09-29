@@ -2,7 +2,7 @@
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from agent.review_guide.buttons import APPROVE, LOOKS_GOOD, MARK_READY
 from agent.review_guide.context import GuideContext, GuideUnavailableError
@@ -102,11 +102,66 @@ async def read_changes(paths: list[str] | None = None) -> dict[str, Any]:
         "success": True,
         "left": state.status(),
         "other_lines": len(state.walk.other),
+        "on_screen": (current.title if (current := state.walk.on_screen()) else None),
+        "queue": [
+            {"position": i, "title": g.title, "lines": _ranges(g)}
+            for i, g in enumerate(state.walk.queue, start=1)
+        ],
         "changes": "\n".join(rows[:MAX_CHANGE_ROWS]) or "(nothing left to show)",
     }
     if len(rows) > MAX_CHANGE_ROWS:
         result["truncated"] = "pass `paths` to read the rest a few files at a time"
     return result
+
+
+def _ranges(group: Group) -> str:
+    """A chunk's lines as compact per-file ranges, such as ``a.py +3-9 -4``."""
+    parts: list[str] = []
+    for path in dict.fromkeys(ref.path for ref in group.lines):
+        spans: list[str] = []
+        for sign in ("+", "-"):
+            numbers = sorted(r.lineno for r in group.lines if r.path == path and r.sign == sign)
+            runs: list[list[int]] = []
+            for number in numbers:
+                if runs and number == runs[-1][-1] + 1:
+                    runs[-1].append(number)
+                else:
+                    runs.append([number])
+            spans += [f"{sign}{r[0]}" + (f"-{r[-1]}" if len(r) > 1 else "") for r in runs]
+        parts.append(f"{path} {' '.join(spans)}")
+    return "; ".join(parts)
+
+
+async def _prepare(
+    state: _State,
+    title: str,
+    show: list[FileRanges],
+    explanation: str,
+    other: list[FileRanges] | None,
+    status: Literal["queued", "shown"],
+) -> Group:
+    """Claim, render and add a chunk; lines named in ``other`` go to Other first."""
+    state.walk.add_other(claim(other, state.left, state.changes) if other else [])
+    lines = claim(show, state.left, state.changes)
+    prose = await state.ctx.renderer().render(explanation)
+    code = await state.ctx.render(lines)
+    chunk = Group(title=" ".join(title.split())[:120], lines=lines, status=status)
+    chunk.message_text = f"*{chunk.title}*\n{prose}\n\n{code}"
+    state.walk.groups.append(chunk)
+    return chunk
+
+
+async def _post(state: _State, chunk: Group, replaced: Group | None) -> dict[str, Any]:
+    posted = await slack_reply(chunk.message_text, "progress", options=[LOOKS_GOOD])
+    if posted["success"] is not True:
+        return posted
+    chunk.status = "shown"
+    chunk.message_ts = str(posted["message_ts"] or "")
+    chunk.run_id = RunConfig.from_runtime().run_id or ""
+    state.mark_shown_this_turn()
+    await state.retire(replaced, "Replaced by another chunk")
+    await state.save()
+    return {"success": True, "shown": chunk.title, "queued": len(state.walk.queue)}
 
 
 async def show_chunk(
@@ -118,31 +173,57 @@ async def show_chunk(
         if state.shown_this_turn():
             return {"success": False, "error": _ONE_PER_TURN}
         replaced = state.walk.withdraw()
-        moved = claim(other, state.left, state.changes) if other else []
-        state.walk.add_other(moved)
-        lines = claim(show, state.left, state.changes)
-        prose = await state.ctx.renderer().render(explanation)
-        code = await state.ctx.render(lines)
+        chunk = await _prepare(state, title, show, explanation, other, "shown")
     except (GuideUnavailableError, RangeError, RenderError) as exc:
         return {"success": False, "error": str(exc)}
-    chunk = Group(title=" ".join(title.split())[:120], lines=lines, status="shown")
-    state.walk.groups.append(chunk)
-    footer = (
-        f"_{left_summary(state.left)} after this_"
-        if state.left
-        else "_Only Other is left after this_"
-    )
-    text = f"*{chunk.title}*\n{prose}\n\n{code}\n{footer}"
-    posted = await slack_reply(text, "progress", options=[LOOKS_GOOD])
-    if posted["success"] is not True:
-        return posted
-    chunk.message_ts = str(posted["message_ts"] or "")
-    chunk.message_text = text
-    chunk.run_id = RunConfig.from_runtime().run_id or ""
-    state.mark_shown_this_turn()
-    await state.retire(replaced, "Replaced by another chunk")
+    return await _post(state, chunk, replaced)
+
+
+async def show_queued() -> dict[str, Any]:
+    """Implement the `show_queued` tool."""
+    try:
+        state = await _State.load()
+    except GuideUnavailableError as exc:
+        return {"success": False, "error": str(exc)}
+    if state.shown_this_turn():
+        return {"success": False, "error": _ONE_PER_TURN}
+    if not state.walk.queue:
+        return {"success": False, "error": "nothing is queued; use `show_chunk`"}
+    replaced = state.walk.withdraw()
+    return await _post(state, state.walk.queue[0], replaced)
+
+
+async def queue_chunk(
+    title: str, show: list[FileRanges], explanation: str, other: list[FileRanges] | None = None
+) -> dict[str, Any]:
+    """Implement the `queue_chunk` tool."""
+    try:
+        state = await _State.load()
+        chunk = await _prepare(state, title, show, explanation, other, "queued")
+    except (GuideUnavailableError, RangeError, RenderError) as exc:
+        return {"success": False, "error": str(exc)}
     await state.save()
-    return {"success": True, "shown_lines": len(lines), "moved_to_other": len(moved)}
+    return {
+        "success": True,
+        "queued": chunk.title,
+        "position": len(state.walk.queue),
+        "left": state.status(),
+    }
+
+
+async def edit_queue(keep: list[int]) -> dict[str, Any]:
+    """Implement the `edit_queue` tool."""
+    try:
+        state = await _State.load()
+    except GuideUnavailableError as exc:
+        return {"success": False, "error": str(exc)}
+    size = len(state.walk.queue)
+    bad = [p for p in keep if not 1 <= p <= size]
+    if bad or len(set(keep)) != len(keep):
+        return {"success": False, "error": f"positions must be distinct and within 1-{size}"}
+    state.walk.keep_queue(keep)
+    await state.save()
+    return {"success": True, "queue": [g.title for g in state.walk.queue], "left": state.status()}
 
 
 async def move_to_other(files: list[FileRanges], back: bool = False) -> dict[str, Any]:
@@ -187,7 +268,9 @@ async def approve_review_chunk() -> dict[str, Any]:
     else:
         return {"success": False, "error": "nothing is on screen to approve"}
     await state.save("walking")
-    if state.left:
+    if state.walk.queue:
+        following = "show_queued"
+    elif state.left:
         following = "show_chunk"
     elif state.walk.has_other and state.walk.other_status == "open":
         following = "show_other"
@@ -230,7 +313,7 @@ async def show_other(description: str) -> dict[str, Any]:
         return {"success": False, "error": str(exc)}
     if state.shown_this_turn():
         return {"success": False, "error": _ONE_PER_TURN}
-    if state.left or state.walk.on_screen() is not None:
+    if state.left or state.walk.queue or state.walk.on_screen() is not None:
         return {
             "success": False,
             "error": f"show, move to Other or skip everything first: {state.status()}",

@@ -33,6 +33,7 @@ from agent.input_messages import (
     visible_dynamic_context_hashes,
 )
 from agent.prompts import load_prompt
+from agent.review_guide.advance import cancel_prefetch
 from agent.review_guide.sessions import ASSISTANT_ID as REVIEW_GUIDE_ASSISTANT_ID
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.run_config import Repo
@@ -1187,6 +1188,9 @@ async def _process_slack_mention_impl(
     # A person writing in a closed guide wants it back.
     if guide is not None and guide.closed:
         await guide.set_closed(False)
+    # The reader spoke: stop preparing ahead so the guide hears them now, not after.
+    if guide is not None:
+        await cancel_prefetch(langgraph_client, thread_id)
     if message_update and await queue_message_for_thread(
         thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
     ):

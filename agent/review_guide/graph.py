@@ -64,12 +64,15 @@ from agent.tools.record_author_feedback import record_author_feedback
 from agent.tools.review_reply import review_reply
 from agent.tools.review_walkthrough import (
     approve_review_chunk,
+    edit_queue,
     end_walkthrough,
     finish_walkthrough,
     move_to_other,
+    queue_chunk,
     read_changes,
     show_chunk,
     show_other,
+    show_queued,
     skip_changes,
 )
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -259,10 +262,16 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
+        # A prepare run works in the background, so it gets nothing that posts to the channel.
         tools=apply_tool_descriptions(
-            [
+            [read_changes, queue_chunk, edit_queue, move_to_other]
+            if cfg.review_guide_prefetch
+            else [
                 read_changes,
                 show_chunk,
+                show_queued,
+                queue_chunk,
+                edit_queue,
                 move_to_other,
                 approve_review_chunk,
                 skip_changes,
