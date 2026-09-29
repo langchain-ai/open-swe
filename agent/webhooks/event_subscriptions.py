@@ -19,6 +19,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent.config import ENV
@@ -419,9 +420,11 @@ class EventSubscription(Base):
         )
 
     async def match(self, event: LoggedEvent, summary: EventSummary) -> bool:
-        """Record ``event`` as owed to this thread; ``False`` when nothing new is owed."""
-        if not await self._claim():
-            return False
+        """Record ``event`` as owed to this thread; ``False`` when nothing new is owed.
+
+        The trigger is counted in the same transaction as the insert, so a
+        redelivered webhook leaves the subscription exactly as it was.
+        """
         details = summary.details
         content = prompt(
             "runs/event-subscription",
@@ -433,20 +436,21 @@ class EventSubscription(Base):
             subscription_id=str(self.id),
             one_shot=self.one_shot,
         )
+        match = EventMatch(
+            thread_id=self.thread_id,
+            subscription_id=self.id,
+            source=event.source,
+            delivery_id=event.delivery_id,
+            content=content,
+            run_config=self.run_config,
+        )
         try:
-            recorded = await EventMatch(
-                thread_id=self.thread_id,
-                subscription_id=self.id,
-                source=event.source,
-                delivery_id=event.delivery_id,
-                content=content,
-                run_config=self.run_config,
-            ).record()
-        except Exception:
-            await self._unclaim()
-            raise
-        if not recorded:
-            await self._unclaim()
+            async with postgres.session() as session:
+                if not await self._claim(session):
+                    return False
+                if not await match.record(session):
+                    raise _AlreadyOwedError
+        except _AlreadyOwedError:
             return False
         pull_request_closed = event.event_type == "pull_request" and summary.action == "closed"
         if self.one_shot or (self.pull_request_id is not None and pull_request_closed):
@@ -457,25 +461,17 @@ class EventSubscription(Base):
         async with postgres.session() as session:
             await session.execute(delete(type(self)).where(type(self).id == self.id))
 
-    async def _claim(self) -> bool:
+    async def _claim(self, session: AsyncSession) -> bool:
         """Count a trigger; a one-shot that already fired, or a cancelled one, claims nothing."""
         cls = type(self)
-        async with postgres.session() as session:
-            claimed = await session.scalar(
-                update(cls)
-                .where(cls.id == self.id, ~cls._expired(), ~cls.one_shot | (cls.trigger_count == 0))
-                .values(
-                    trigger_count=cls.trigger_count + 1, last_triggered_at=func.clock_timestamp()
-                )
-                .returning(cls.id)
-            )
-            return claimed is not None
+        claimed = await session.scalar(
+            update(cls)
+            .where(cls.id == self.id, ~cls._expired(), ~cls.one_shot | (cls.trigger_count == 0))
+            .values(trigger_count=cls.trigger_count + 1, last_triggered_at=func.clock_timestamp())
+            .returning(cls.id)
+        )
+        return claimed is not None
 
-    async def _unclaim(self) -> None:
-        cls = type(self)
-        async with postgres.session() as session:
-            await session.execute(
-                update(cls)
-                .where(cls.id == self.id)
-                .values(trigger_count=func.greatest(cls.trigger_count - 1, 0))
-            )
+
+class _AlreadyOwedError(Exception):
+    """Rolls back a trigger whose delivery the thread already has."""

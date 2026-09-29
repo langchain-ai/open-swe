@@ -16,6 +16,7 @@ from uuid import UUID, uuid7
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
@@ -68,29 +69,28 @@ class EventMatch(Base):
     delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
-    async def record(self) -> bool:
-        """Save; ``False`` when the thread already owes or holds this delivery."""
+    async def record(self, session: AsyncSession) -> bool:
+        """Save in ``session``; ``False`` when the thread already owes or holds this delivery."""
         cls = type(self)
-        async with postgres.session() as session:
-            await session.execute(delete(cls).where(cls.matched_at < func.now() - _RETAINED))
-            recorded = await session.scalar(
-                insert(cls)
-                .values(
-                    id=self.id,
-                    thread_id=self.thread_id,
-                    subscription_id=self.subscription_id,
-                    source=self.source,
-                    delivery_id=self.delivery_id,
-                    content=self.content,
-                    run_config=self.run_config,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["thread_id", "source", "delivery_id"],
-                    index_where=cls.delivery_id != "",
-                )
-                .returning(cls.id)
+        await session.execute(delete(cls).where(cls.matched_at < func.now() - _RETAINED))
+        recorded = await session.scalar(
+            insert(cls)
+            .values(
+                id=self.id,
+                thread_id=self.thread_id,
+                subscription_id=self.subscription_id,
+                source=self.source,
+                delivery_id=self.delivery_id,
+                content=self.content,
+                run_config=self.run_config,
             )
-            return recorded is not None
+            .on_conflict_do_nothing(
+                index_elements=["thread_id", "source", "delivery_id"],
+                index_where=cls.delivery_id != "",
+            )
+            .returning(cls.id)
+        )
+        return recorded is not None
 
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:

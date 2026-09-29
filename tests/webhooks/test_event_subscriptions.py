@@ -168,14 +168,15 @@ async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
     await _subscribe(workspace, event_types=["check_suite"])
     for delivery_id in ("d-1", "d-2", "d-3"):
         await _github("check_suite", _check_suite("failure"), delivery_id)
+    (before,) = await EventSubscription.for_thread(_THREAD)
     await _github("check_suite", _check_suite("failure"), "d-2")
 
     owed = await _owed()
     assert [match.delivery_id for match in owed] == ["d-1", "d-2", "d-3"]
     first_two = EventMatch.messages(owed[:2])
     assert [match.delivery_id for match in await EventMatch.owed(_THREAD, first_two)] == ["d-3"]
-    (subscription,) = await EventSubscription.for_thread(_THREAD)
-    assert subscription.trigger_count == 3
+    (after,) = await EventSubscription.for_thread(_THREAD)
+    assert (after.trigger_count, after.last_triggered_at) == (3, before.last_triggered_at)
 
 
 async def test_a_ci_result_reaches_every_pull_request_it_lists_with_its_text_fenced(
