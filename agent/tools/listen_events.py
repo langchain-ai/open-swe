@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_HOURS = 24 * 7
 _MAX_HOURS = 24 * 14
 _MAX_FILTERS = 20
-_MAX_PER_THREAD = 20
+_MAX_PER_THREAD = 5
 _MAX_INSTRUCTIONS_CHARS = 4_000
 _CARRIED_CONFIG_KEYS = frozenset(
     {
