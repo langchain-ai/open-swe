@@ -407,6 +407,30 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
+def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str, bool]:
+    """What the thread is told about a pick, and whether it bumps the post in the channel.
+
+    The deadline's wording is used only when its wait really passed, so a pick someone
+    asked for early says so.
+    """
+    now = datetime.now(UTC)
+    wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    if not request.has_card and request.ready_since and now - request.ready_since >= wait:
+        return (
+            f"{who}, {label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an "
+            "approval, so Open SWE picked you.",
+            True,
+        )
+    if (
+        request.has_card
+        and not request.reviewers
+        and request.created_at
+        and now - request.created_at >= wait
+    ):
+        return f"{who}, nobody signed up to review {label}, so Open SWE picked you.", False
+    return f"{who}, Open SWE was asked to pick a reviewer for {label} and picked you.", False
+
+
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
     user = await User.for_login("github", github_login)
@@ -415,33 +439,28 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
+    pr = request.pull_request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    who = mention(user)
+    notice, bump = _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, assigned_by_agent=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
     await _request_github_review(added, github_login)
-    pr = added.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    who = mention(user)
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     thread_ts = added.slack_thread_ts or added.slack_message_ts
-    posted = not added.has_card
-    waited = (
-        f"{label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an approval"
-        if posted
-        else f"nobody signed up to review {label}"
-    )
     await post_slack_thread_reply_with_ts(
         added.slack_channel_id,
         thread_ts,
-        f"{who}, {waited}, so Open SWE picked you.{why}",
+        f"{notice}{why}",
         unfurl_links=False,
         agent_thread_id=added.thread_id or None,
-        # The reply in the channel is the bump that brings someone's post back up.
-        reply_broadcast=posted,
+        reply_broadcast=bump,
     )
     permalink = await _permalink(added)
     if user.slack_user_id:
-        card = f" (<{permalink}|{'Slack post' if posted else 'review card'}>)" if permalink else ""
+        where = "review card" if added.has_card else "Slack post"
+        card = f" (<{permalink}|{where}>)" if permalink else ""
         await send_dm(
             user.slack_user_id,
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
@@ -601,7 +620,11 @@ async def settle_repository(owner: str, repo: str) -> None:
         await settle(request)
 
 
-async def _wake_for_reviewer(request: HumanReviewRequest) -> bool:
+async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False) -> bool:
+    """Wake an agent to pick a reviewer, as the unclaimed deadline does; whether one was woken.
+
+    ``asked`` is someone requesting it now rather than the deadline passing.
+    """
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
@@ -609,6 +632,7 @@ async def _wake_for_reviewer(request: HumanReviewRequest) -> bool:
         minutes=UNCLAIMED_AFTER_MINUTES,
         author=pr.author,
         posted=not request.has_card,
+        asked=asked,
     )
     if request.thread_id:
         return await notify_agent(request, text)
@@ -651,7 +675,7 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
-        return {"status": "woken" if await _wake_for_reviewer(request) else "not_woken"}
+        return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}

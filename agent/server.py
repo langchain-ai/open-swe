@@ -173,6 +173,7 @@ from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     assign_human_reviewer,
+    auto_assign_human_reviewer,
     background_execute,
     background_task,
     configure_repository,
@@ -505,6 +506,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "merge_expedited_pr",
         "request_human_review",
         "assign_human_reviewer",
+        "auto_assign_human_reviewer",
         "dismiss_human_review_request",
         "manage_baby_sit",
         "manage_thread",
@@ -1568,6 +1570,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         merge_expedited_pr,
         request_human_review,
         assign_human_reviewer,
+        auto_assign_human_reviewer,
         dismiss_human_review_request,
         notify_automation_channel,
         open_pull_request,
@@ -1626,7 +1629,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             tool
             for tool in static_tools
             if tool
-            not in (request_human_review, assign_human_reviewer, dismiss_human_review_request)
+            not in (
+                request_human_review,
+                assign_human_reviewer,
+                auto_assign_human_reviewer,
+                dismiss_human_review_request,
+            )
         ]
     elif not await _human_review_requests_enabled(profile_login):
         static_tools = [tool for tool in static_tools if tool is not request_human_review]
