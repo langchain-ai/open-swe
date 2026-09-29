@@ -162,6 +162,53 @@ describe("list_threads", () => {
   })
 })
 
+describe("exposed dashboard tools", () => {
+  test("reads a thread without marking it viewed", async () => {
+    const { client, queries } = await connect(() =>
+      Response.json({ id: "t-1" })
+    )
+    const result = await client.callTool({
+      name: "get_thread",
+      arguments: { thread_id: "t/1" },
+    })
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toEqual([
+      { type: "text", text: '{\n  "id": "t-1"\n}' },
+    ])
+    expect(queries[0]?.get("mark_viewed")).toBe("false")
+  })
+
+  test("denies admin tools to non-admin sessions before requesting workspace data", async () => {
+    const { client, bodies } = await connect((url) =>
+      url.pathname.endsWith("/me")
+        ? Response.json({ login: "user", is_admin: false })
+        : Response.json({ workspaces: [] })
+    )
+    const result = await client.callTool({
+      name: "list_workspaces",
+      arguments: {},
+    })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toContain("Only workspace admins")
+    expect(bodies).toHaveLength(1)
+  })
+
+  test("allows admins to read workspace data", async () => {
+    const { client, bodies } = await connect((url) =>
+      url.pathname.endsWith("/me")
+        ? Response.json({ login: "admin", is_admin: true })
+        : Response.json({ workspaces: [{ slug: "default" }] })
+    )
+    const result = await client.callTool({
+      name: "list_workspaces",
+      arguments: {},
+    })
+    expect(result.isError).toBeFalsy()
+    expect(JSON.stringify(result.content)).toContain("default")
+    expect(bodies).toHaveLength(2)
+  })
+})
+
 describe("upload_session", () => {
   test("streams a header line and the transcript verbatim as gzipped JSONL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oswe-upload-"))

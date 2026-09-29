@@ -182,6 +182,21 @@ export class ApiClient {
     return parsed.data
   }
 
+  async getThread(threadId: string): Promise<unknown> {
+    return this.json(
+      "GET",
+      `/threads/${encodeURIComponent(threadId)}?mark_viewed=false`
+    )
+  }
+
+  async listWorkspaces(): Promise<unknown> {
+    return this.json("GET", "/workspaces")
+  }
+
+  async getWorkspace(slug: string): Promise<unknown> {
+    return this.json("GET", `/workspaces/${encodeURIComponent(slug)}`)
+  }
+
   /** Create a thread from a gzipped JSONL session upload; returns its id. */
   async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
     const parsed = uploadedThreadSchema.safeParse(
