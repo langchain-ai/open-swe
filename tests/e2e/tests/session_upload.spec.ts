@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import {
   SAME_ORIGIN_HEADERS,
@@ -67,6 +68,10 @@ const toolResults = new Map(
   ),
 );
 
+function jsonlUpload(header: Record<string, string>, body: string): Buffer {
+  return Buffer.from(`${JSON.stringify(header)}\n${body}`);
+}
+
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -84,13 +89,14 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
   try {
     await loginAs(page, SAME_USER);
     const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: SAME_ORIGIN_HEADERS,
-      data: {
-        type: "claude",
-        transcript,
-        repo: "fakeorg/demo",
-        branch: "never-pushed",
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/x-ndjson",
       },
+      data: jsonlUpload(
+        { type: "claude", repo: "fakeorg/demo", branch: "never-pushed" },
+        transcript,
+      ),
     });
     expect(unpushed.status()).toBe(422);
     expect(await unpushed.text()).toContain("push it first");
@@ -107,13 +113,21 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     const { number } = (await seeded.json()) as { number: number };
 
     const upload = await page.request.post("/dashboard/api/threads/uploads", {
-      headers: SAME_ORIGIN_HEADERS,
-      data: {
-        type: "claude",
-        transcript,
-        pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
-        visibility: "private",
+      headers: {
+        ...SAME_ORIGIN_HEADERS,
+        "content-type": "application/x-ndjson",
+        "content-encoding": "gzip",
       },
+      data: gzipSync(
+        jsonlUpload(
+          {
+            type: "claude",
+            pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
+            visibility: "private",
+          },
+          transcript,
+        ),
+      ),
     });
     expect(upload.ok(), await upload.text()).toBeTruthy();
     threadId = (await upload.json()).id as string;

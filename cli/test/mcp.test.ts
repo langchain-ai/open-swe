@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gunzipSync } from "node:zlib"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 
@@ -19,16 +20,23 @@ async function connect(respond: (url: URL) => Response): Promise<{
   client: Client
   queries: URLSearchParams[]
   bodies: string[]
+  encodings: (string | null)[]
 }> {
   const queries: URLSearchParams[] = []
   const bodies: string[] = []
+  const encodings: (string | null)[] = []
   const backend = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const url = new URL(request.url)
       queries.push(url.searchParams)
-      bodies.push(await request.text())
+      const encoding = request.headers.get("content-encoding")
+      encodings.push(encoding)
+      const raw = Buffer.from(await request.arrayBuffer())
+      bodies.push(
+        (encoding === "gzip" ? gunzipSync(raw) : raw).toString("utf8")
+      )
       return respond(url)
     },
   })
@@ -45,7 +53,7 @@ async function connect(respond: (url: URL) => Response): Promise<{
     await server.close()
     await backend.stop(true)
   })
-  return { client, queries, bodies }
+  return { client, queries, bodies, encodings }
 }
 
 describe("list_threads", () => {
@@ -155,14 +163,14 @@ describe("list_threads", () => {
 })
 
 describe("upload_session", () => {
-  test("posts the transcript verbatim and links the new thread", async () => {
+  test("streams a header line and the transcript verbatim as gzipped JSONL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oswe-upload-"))
     stops.push(() => rm(dir, { recursive: true, force: true }))
     const transcript =
       '{"type":"user","uuid":"u1","message":{"content":"hi"}}\n'
     const path = join(dir, "session.jsonl")
     await writeFile(path, transcript)
-    const { client, bodies } = await connect(() =>
+    const { client, bodies, encodings } = await connect(() =>
       Response.json({ id: "t-9", title: "hi" })
     )
 
@@ -177,13 +185,16 @@ describe("upload_session", () => {
     })
 
     expect(result.isError).toBeFalsy()
-    expect(JSON.parse(bodies[0] ?? "")).toEqual({
+    expect(encodings[0]).toBe("gzip")
+    const body = bodies[0] ?? ""
+    const newline = body.indexOf("\n")
+    expect(JSON.parse(body.slice(0, newline))).toEqual({
       type: "claude",
-      transcript,
       repo: "acme/web",
       branch: "fix-login",
       visibility: "workspace",
     })
+    expect(body.slice(newline + 1)).toBe(transcript)
     expect(result.structuredContent).toMatchObject({
       thread_id: "t-9",
       url: expect.stringMatching(/\/agents\/t-9$/),
