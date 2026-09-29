@@ -332,6 +332,7 @@ async def test_a_copied_card_leaves_the_other_channel_once_it_closes_and_is_offe
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
+    monkeypatch.setattr(voting, "still_internal", AsyncMock(return_value=True))
     approval = await open_approval()
     grace = await User.for_person({"id": "slack:U_GRACE", "platform": "slack"})
 

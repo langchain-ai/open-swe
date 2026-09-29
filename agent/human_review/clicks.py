@@ -40,7 +40,13 @@ async def answer_click(
         async with slack_thread_mutation_lock(
             langgraph_client(), lock_channel, lock_ts, purpose=f"human-review:{request_id}"
         ):
-            outcome = await handle(request)
+            # Another click may have changed the request while this one waited for the lock.
+            current = await HumanReviewRequest.get(request.id)
+            outcome = (
+                await handle(current)
+                if current is not None
+                else Outcome("That review request no longer exists.")
+            )
     except Exception:
         logger.exception(
             "Human review click failed",

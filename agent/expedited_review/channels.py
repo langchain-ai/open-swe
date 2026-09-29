@@ -60,9 +60,13 @@ async def _thread_channels(login: str, since: datetime) -> list[str]:
     return channels
 
 
+def _can_receive(channel: SlackChannel | None) -> bool:
+    return channel is not None and channel.public and channel.context.allows_operations
+
+
 async def _offerable(channel_id: str) -> ChannelChoice | None:
-    channel = await sendable_channel(channel_id)
-    if channel is None or not channel.name:
+    channel = await SlackChannel.load(channel_id)
+    if channel is None or not channel.name or not _can_receive(channel):
         return None
     return {"id": channel.id, "name": channel.name}
 
@@ -103,8 +107,12 @@ async def channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
 
 
 async def sendable_channel(channel_id: str) -> SlackChannel | None:
-    """A channel the card may be copied into: public, and not externally shared."""
-    channel = await SlackChannel.load(channel_id)
-    if channel is None or not channel.public or not channel.context.allows_operations:
-        return None
-    return channel
+    """A channel the card may be copied into: public, and not externally shared right now."""
+    channel = await SlackChannel.load(channel_id, use_cache=False)
+    return channel if _can_receive(channel) else None
+
+
+async def still_internal(channel_id: str) -> bool:
+    """Whether Slack confirms, uncached, that the channel is not externally shared."""
+    channel = await SlackChannel.load(channel_id, use_cache=False)
+    return channel is not None and channel.context.allows_operations

@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
-from agent.expedited_review.channels import sendable_channel
+from agent.expedited_review.channels import sendable_channel, still_internal
 from agent.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
 from agent.expedited_review.reviews import github_token_hint, submit_approval
 from agent.github.ci import fetch_pr
@@ -183,6 +183,9 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
 
 async def request_copy(approval: HumanReviewRequest, channel_id: str, user: User | None) -> Outcome:
     """Only someone with write access may show the diff to another channel's members."""
+    # A modal can be submitted long after it opened, past the click's own channel check.
+    if not await still_internal(approval.slack_channel_id):
+        return Outcome("This card's channel is shared outside the workspace, so it cannot be sent.")
     if channel_id == approval.slack_channel_id:
         return await request_broadcast(approval)
     if approval.state != "open" or approval.approved:

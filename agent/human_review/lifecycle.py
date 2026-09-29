@@ -274,6 +274,7 @@ async def _repost(
                 row is not None
                 and row.slack_message_ts == old_ts
                 and (outcome is not None or row.state == "open")
+                and not (broadcast and row.slack_copy is not None)
             )
             if kept:
                 row.slack_message_ts = message_ts
