@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "assign_human_reviewer": ".request_human_review",
+    "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -77,6 +78,7 @@ _TOOL_MODULES = {
 __all__ = [
     "add_finding",
     "assign_human_reviewer",
+    "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
     "create_automation",
@@ -198,6 +200,7 @@ if TYPE_CHECKING:
     from agent.tools.report_platform_issue import report_platform_issue
     from agent.tools.request_human_review import (
         assign_human_reviewer,
+        auto_assign_human_reviewer,
         dismiss_human_review_request,
         request_human_review,
     )
