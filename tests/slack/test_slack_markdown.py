@@ -32,3 +32,10 @@ Use `x &lt; y &amp; z`."""
 
 def test_markdown_to_mrkdwn_separates_unterminated_fence_content() -> None:
     assert markdown_to_mrkdwn("```\ncode") == "```\ncode\n```"
+
+
+def test_markdown_to_mrkdwn_keeps_slack_mentions_and_escapes_other_brackets() -> None:
+    assert (
+        markdown_to_mrkdwn("hi <@U06KD8BFY95> in <#C123|general> <!here>, a < b")
+        == "hi <@U06KD8BFY95> in <#C123|general> <!here>, a &lt; b"
+    )

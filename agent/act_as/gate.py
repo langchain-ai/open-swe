@@ -17,8 +17,8 @@ from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
 from agent.prompts import prompt
 from agent.slack.blocks import block_payload, escape
-from agent.slack.client import open_slack_dm, post_slack_top_level_message_with_ts
-from agent.slack.dm import note_for_concierge
+from agent.slack.client import post_slack_top_level_message_with_ts
+from agent.slack.dm import note_for_concierge, open_dm
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -110,8 +110,8 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
         f"`{repo}` — `{escape(request.head)}` → `{escape(request.base)}`\n\n"
         "Approve, always allow, or deny."
     )
-    dm_channel_id, error = await open_slack_dm(slack_user_id)
-    message_ts = None
+    dm_channel_id = await open_dm(slack_user_id)
+    message_ts, error = None, "dm_not_opened"
     if dm_channel_id:
         message_ts, error = await post_slack_top_level_message_with_ts(
             dm_channel_id, message, blocks=block_payload(card_blocks(message, request, thread_id))

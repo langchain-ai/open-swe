@@ -22,7 +22,7 @@ def dm(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) -> AsyncMoc
         return requested or "alice"
 
     monkeypatch.setattr(gate, "pr_author_login", author_login)
-    monkeypatch.setattr(gate, "open_slack_dm", AsyncMock(return_value=("D-ALICE", None)))
+    monkeypatch.setattr(gate, "open_dm", AsyncMock(return_value="D-ALICE"))
     send = AsyncMock(return_value=("123.456", None))
     monkeypatch.setattr(gate, "post_slack_top_level_message_with_ts", send)
     send.concierge = AsyncMock()

@@ -8,9 +8,7 @@ commit so a pull request cannot rewrite the policy it is judged by.
 
 import logging
 
-import httpx2
-
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.repo_files import fetch_repo_file
 from agent.review.styles import REVIEW_STYLES, ApprovalMode, effective_approval_mode
 
 logger = logging.getLogger(__name__)
@@ -26,36 +24,9 @@ async def fetch_approvals_md(
 
     ``None`` when the file is absent, empty, too large, or unreadable.
     """
-    if not owner or not repo:
-        return None
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{APPROVALS_PATH}"
-    extra = {"repository": f"{owner}/{repo}", "ref": ref or ""}
-    try:
-        async with github_client(
-            token=token, headers={"Accept": "application/vnd.github.raw"}
-        ) as client:
-            response = await github_request(
-                client, "GET", url, params={"ref": ref} if ref else None
-            )
-    except httpx2.HTTPError:
-        logger.exception("approvals file fetch failed", extra=extra)
-        return None
-    if response.status_code == 404:
-        return None
-    if response.status_code != 200:
-        logger.warning(
-            "approvals file fetch returned an unexpected status",
-            extra={**extra, "status_code": response.status_code},
-        )
-        return None
-    content = response.text.strip()
-    if len(content) > APPROVALS_MAX_CHARS:
-        logger.warning(
-            "approvals file exceeds the size cap; ignoring it",
-            extra={**extra, "chars": len(content), "max_chars": APPROVALS_MAX_CHARS},
-        )
-        return None
-    return content or None
+    return await fetch_repo_file(
+        owner, repo, APPROVALS_PATH, ref, token=token, max_chars=APPROVALS_MAX_CHARS
+    )
 
 
 async def approval_mode_for(owner: str, repo: str) -> ApprovalMode:

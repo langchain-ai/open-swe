@@ -72,6 +72,7 @@ Sandboxes have powerful tools and may have network access. Use least-privilege c
 
 - [Customization guide](docs/CUSTOMIZATION.md) — Models, sandboxes, tools, skills, prompts, triggers, and middleware
 - [Workspaces reference](docs/reference/workspaces.md) — Routing, settings, images, and access
+- [Human review in Slack](docs/reference/human-review.md) — Review requests in a repository's Slack channel, merged once reviewers approve
 - [Expedited Slack review](docs/reference/expedited-slack-review.md) — Human approval for small pull requests
 - [Backend API documentation](docs/DEVELOPMENT.md#backend-api-documentation) — Live API docs and the generated [OpenAPI schema](swagger.json)
 - [Original announcement](https://blog.langchain.com/open-swe-an-open-source-framework-for-internal-coding-agents/) — Background on the internal coding-agent framework
