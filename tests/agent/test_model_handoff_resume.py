@@ -19,7 +19,7 @@ from agent.utils.thread_settings import ThreadSettings
 @pytest.fixture
 def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
     settings: ThreadSettings = {
-        "model_id": "openai:gpt-6-sol",
+        "model_id": "openai:gpt-6.1-sol",
         "effort": "high",
         "model_routing_enabled": False,
         "model_handoff_complete": False,
