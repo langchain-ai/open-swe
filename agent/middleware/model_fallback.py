@@ -145,7 +145,8 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
     """Retry the model call across primary and fallback providers on transient errors.
 
     Args:
-        fallback_model: Cross-provider model used on odd-numbered attempts.
+        fallback_model: Default cross-provider model used on odd-numbered attempts,
+            or ``None`` to pass through calls without a registered fallback.
         backoff_schedule: Seconds slept before each retry. ``len(schedule) + 1``
             is the total number of attempts. Delays get ±25% jitter.
         surface_outage_message: When all attempts fail, return a terminal
@@ -157,20 +158,28 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
 
     def __init__(
         self,
-        fallback_model: BaseChatModel,
+        fallback_model: BaseChatModel | None,
         *,
         backoff_schedule: Sequence[float] = DEFAULT_BACKOFF_SCHEDULE,
         surface_outage_message: bool = True,
     ) -> None:
         super().__init__()
         self._fallback_model = fallback_model
+        self._model_fallbacks: list[tuple[BaseChatModel, BaseChatModel | None]] = []
         self._backoff_schedule = tuple(backoff_schedule)
         self._surface_outage_message = surface_outage_message
 
-    def _fallback_name(self) -> str:
+    def register_fallback(
+        self, primary_model: BaseChatModel, fallback_model: BaseChatModel | None
+    ) -> None:
+        """Set a handoff's fallback without changing other models sharing this middleware."""
+        self._model_fallbacks.append((primary_model, fallback_model))
+
+    @staticmethod
+    def _fallback_name(fallback_model: BaseChatModel) -> str:
         return (
-            getattr(self._fallback_model, "model_name", None)
-            or getattr(self._fallback_model, "model", None)
+            getattr(fallback_model, "model_name", None)
+            or getattr(fallback_model, "model", None)
             or "fallback"
         )
 
@@ -179,6 +188,16 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> Any:
+        fallback_model = next(
+            (
+                fallback
+                for primary, fallback in reversed(self._model_fallbacks)
+                if primary is request.model
+            ),
+            self._fallback_model,
+        )
+        if fallback_model is None:
+            return await handler(request)
         total_attempts = len(self._backoff_schedule) + 1
         last_exc: BaseException | None = None
         delay = 0.0
@@ -187,13 +206,11 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
             # Alternate: primary on even attempts, fallback on odd. If one
             # provider recovers first (or only one is down), we find it.
             use_fallback = attempt % 2 == 1
-            attempt_request = (
-                request.override(model=self._fallback_model) if use_fallback else request
-            )
+            attempt_request = request.override(model=fallback_model) if use_fallback else request
             try:
                 if last_exc is None:
                     return await handler(attempt_request)
-                failed_model = request.model if use_fallback else self._fallback_model
+                failed_model = request.model if use_fallback else fallback_model
                 metadata: dict[str, str | int | float | None] = {
                     "attempt": attempt + 1,
                     "max_attempts": total_attempts,
@@ -254,7 +271,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                             "attempt": attempt + 1,
                             "attempts": total_attempts,
                             "retry_with": retry_with,
-                            "fallback_model": self._fallback_name(),
+                            "fallback_model": self._fallback_name(fallback_model),
                             "delay_seconds": delay,
                             **fields,
                         },
@@ -270,7 +287,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                 **error_tracking_fields(last_exc),
                 "model_call_failure": {
                     "attempts": total_attempts,
-                    "fallback_model": self._fallback_name(),
+                    "fallback_model": self._fallback_name(fallback_model),
                     **last_fields,
                 },
             },

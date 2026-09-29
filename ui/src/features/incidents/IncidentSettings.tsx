@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
 import { incidentsApi } from "./api"
 import type { IncidentPolicy, IncidentSettingsPayload } from "./api"
 import { ErrorState, formatTime, LoadingState } from "./shared"
@@ -120,6 +121,9 @@ function PolicyForm({
 }) {
   const queryClient = useQueryClient()
   const [initial] = useState(settings.policy)
+  const [excludedChannelIds, setExcludedChannelIds] = useState(
+    settings.policy.excluded_channel_ids
+  )
   const [validation, setValidation] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: incidentsApi.saveSettings,
@@ -133,14 +137,6 @@ function PolicyForm({
   const operation = settings.last_operation
   const submittedOperation =
     operation?.command_id === save.data?.command_id ? operation : null
-  const list = (data: FormData, key: string) => [
-    ...new Set(
-      String(data.get(key) ?? "")
-        .split(/[,\n]/)
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-    ),
-  ]
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -148,7 +144,7 @@ function PolicyForm({
       ...initial,
       enabled: form.has("enabled"),
       channel_prefix: String(form.get("channel_prefix") ?? "").trim(),
-      excluded_channel_ids: list(form, "excluded_channel_ids"),
+      excluded_channel_ids: excludedChannelIds,
       model: String(form.get("model") ?? "").trim() || null,
       max_model_calls: Number(form.get("max_model_calls")),
     }
@@ -187,12 +183,17 @@ function PolicyForm({
               value={initial.channel_prefix}
               placeholder="inc-"
             />
-            <Field
-              name="excluded_channel_ids"
-              label="Excluded channel IDs"
-              value={initial.excluded_channel_ids.join(", ")}
-              placeholder="C0123456789"
-            />
+            <div className="space-y-2">
+              <span className="block text-xs font-medium">
+                Excluded channels
+              </span>
+              <SlackChannelMultiCombobox
+                value={excludedChannelIds}
+                onValueChange={setExcludedChannelIds}
+                aria-label="Excluded channels"
+                className="min-h-9 bg-background"
+              />
+            </div>
           </div>
         </SettingsPanel>
         <details>

@@ -1,6 +1,47 @@
 {
   "components": {
     "schemas": {
+      "AddressCommentIntent": {
+        "properties": {
+          "comment_url": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment Url",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 10000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "intent": {
+            "const": "address-comment",
+            "title": "Intent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "comment_url"
+        ],
+        "title": "AddressCommentIntent",
+        "type": "object"
+      },
+      "AddressCommentsIntent": {
+        "properties": {
+          "intent": {
+            "const": "address-comments",
+            "title": "Intent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent"
+        ],
+        "title": "AddressCommentsIntent",
+        "type": "object"
+      },
       "AgentInstructions": {
         "properties": {
           "created_at": {
@@ -131,11 +172,173 @@
         "title": "AllowedSlackBot",
         "type": "object"
       },
+      "ApiKeyCreate": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "workspace": {
+            "minLength": 1,
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "name",
+          "expires_at"
+        ],
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiKeyView": {
+        "description": "A stored key as the admin API reports it. Has no field for the secret.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key_suffix": {
+            "title": "Key Suffix",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace",
+          "name",
+          "key_suffix",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at",
+          "status"
+        ],
+        "title": "ApiKeyView",
+        "type": "object"
+      },
+      "ApprovalsFileStatus": {
+        "properties": {
+          "found": {
+            "title": "Found",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "found"
+        ],
+        "title": "ApprovalsFileStatus",
+        "type": "object"
+      },
+      "AssessmentFeedback": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "helpful",
+              "unhelpful"
+            ],
+            "title": "Rating",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating",
+          "login",
+          "updated_at"
+        ],
+        "title": "AssessmentFeedback",
+        "type": "object"
+      },
       "BlockSuggestionResponse": {
         "properties": {
           "options": {
             "items": {
-              "$ref": "#/components/schemas/JsonObject"
+              "$ref": "#/components/schemas/agent__utils__json_types__JsonObject"
             },
             "title": "Options",
             "type": "array"
@@ -145,6 +348,146 @@
           "options"
         ],
         "title": "BlockSuggestionResponse",
+        "type": "object"
+      },
+      "BridgeClaimBody": {
+        "description": "One long poll: how long to wait, how many to take, and what the CLI is already running.",
+        "properties": {
+          "held": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "title": "Held",
+            "type": "array"
+          },
+          "limit": {
+            "default": 8,
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "wait": {
+            "default": 25,
+            "maximum": 30.0,
+            "minimum": 0.0,
+            "title": "Wait",
+            "type": "integer"
+          }
+        },
+        "title": "BridgeClaimBody",
+        "type": "object"
+      },
+      "BridgeOpenBody": {
+        "properties": {
+          "bridge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bridge Id"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "root_path": {
+            "title": "Root Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_path",
+          "hostname"
+        ],
+        "title": "BridgeOpenBody",
+        "type": "object"
+      },
+      "BridgeOpenResponse": {
+        "properties": {
+          "alive_threshold_seconds": {
+            "title": "Alive Threshold Seconds",
+            "type": "integer"
+          },
+          "bridge_id": {
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "heartbeat_interval_seconds": {
+            "title": "Heartbeat Interval Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "heartbeat_interval_seconds",
+          "alive_threshold_seconds"
+        ],
+        "title": "BridgeOpenResponse",
+        "type": "object"
+      },
+      "BridgeReplyBody": {
+        "description": "The CLI's answer: a result, or the reason it could not produce one.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "title": "BridgeReplyBody",
+        "type": "object"
+      },
+      "BridgeRequestsResponse": {
+        "properties": {
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimedRequest"
+            },
+            "title": "Requests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "requests"
+        ],
+        "title": "BridgeRequestsResponse",
         "type": "object"
       },
       "ChallengeResponse": {
@@ -158,6 +501,215 @@
           "challenge"
         ],
         "title": "ChallengeResponse",
+        "type": "object"
+      },
+      "CheckpointFile": {
+        "additionalProperties": false,
+        "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FileChangeKind"
+          }
+        },
+        "required": [
+          "path",
+          "additions",
+          "deletions",
+          "status"
+        ],
+        "title": "CheckpointFile",
+        "type": "object"
+      },
+      "CheckpointStatus": {
+        "enum": [
+          "ready",
+          "missing",
+          "error"
+        ],
+        "type": "string"
+      },
+      "CheckpointView": {
+        "additionalProperties": false,
+        "description": "The commit a turn left behind, as ``turn.checkpoint.completed`` recorded it.",
+        "properties": {
+          "assistant_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Message Id"
+          },
+          "checkpoint_ref": {
+            "title": "Checkpoint Ref",
+            "type": "string"
+          },
+          "checkpoint_turn_count": {
+            "title": "Checkpoint Turn Count",
+            "type": "integer"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CheckpointFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CheckpointStatus"
+          }
+        },
+        "required": [
+          "checkpoint_turn_count",
+          "checkpoint_ref",
+          "commit",
+          "status",
+          "files",
+          "assistant_message_id",
+          "error"
+        ],
+        "title": "CheckpointView",
+        "type": "object"
+      },
+      "ClaimedRequest": {
+        "description": "One request handed to the CLI, in the shape the wire contract gives it.",
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Params",
+            "type": "object"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "method",
+          "params"
+        ],
+        "title": "ClaimedRequest",
+        "type": "object"
+      },
+      "ClientErrorReport": {
+        "properties": {
+          "error_id": {
+            "pattern": "^(req|err)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Error Id",
+            "type": "string"
+          },
+          "error_message": {
+            "maxLength": 2000,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "mutation": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation"
+          },
+          "path": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Path",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "maximum": 599.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_id",
+          "title",
+          "error_message"
+        ],
+        "title": "ClientErrorReport",
+        "type": "object"
+      },
+      "CloseAction": {
+        "properties": {
+          "action": {
+            "const": "close",
+            "title": "Action",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 65536,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "CloseAction",
         "type": "object"
       },
       "CommentBody": {
@@ -183,6 +735,176 @@
           "body"
         ],
         "title": "CommentBody",
+        "type": "object"
+      },
+      "Conversation": {
+        "properties": {
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "comment": "#/components/schemas/ConversationComment",
+                  "review": "#/components/schemas/ConversationReview"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ConversationComment"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationReview"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Conversation",
+        "type": "object"
+      },
+      "ConversationAuthor": {
+        "properties": {
+          "avatar_url": {
+            "title": "Avatar Url",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "avatar_url"
+        ],
+        "title": "ConversationAuthor",
+        "type": "object"
+      },
+      "ConversationComment": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "comment",
+            "default": "comment",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "created_at",
+          "body",
+          "html_url"
+        ],
+        "title": "ConversationComment",
+        "type": "object"
+      },
+      "ConversationCommentCreate": {
+        "properties": {
+          "body": {
+            "maxLength": 65536,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "ConversationCommentCreate",
+        "type": "object"
+      },
+      "ConversationReview": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "inline_comment_count": {
+            "title": "Inline Comment Count",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "review",
+            "default": "review",
+            "title": "Kind",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "APPROVED",
+              "CHANGES_REQUESTED",
+              "COMMENTED",
+              "DISMISSED"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "created_at",
+          "body",
+          "html_url",
+          "state",
+          "inline_comment_count"
+        ],
+        "title": "ConversationReview",
         "type": "object"
       },
       "DashboardImageBody": {
@@ -314,41 +1036,36 @@
         "title": "FeedbackResponse",
         "type": "object"
       },
-      "FeedbackSubmission": {
+      "FileChangeKind": {
+        "enum": [
+          "added",
+          "removed",
+          "modified"
+        ],
+        "type": "string"
+      },
+      "FixIntent": {
         "properties": {
-          "action": {
-            "default": "submit",
-            "enum": [
-              "submit",
-              "comment",
-              "dismiss"
-            ],
-            "title": "Action",
-            "type": "string"
-          },
-          "comment": {
-            "default": "",
-            "maxLength": 3000,
-            "title": "Comment",
-            "type": "string"
-          },
-          "rating": {
+          "context": {
             "anyOf": [
               {
-                "enum": [
-                  "bad",
-                  "good"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/PullRequestFixContext"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Rating"
+            ]
+          },
+          "intent": {
+            "const": "fix",
+            "title": "Intent",
+            "type": "string"
           }
         },
-        "title": "FeedbackSubmission",
+        "required": [
+          "intent"
+        ],
+        "title": "FixIntent",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -443,10 +1160,6 @@
           "policy"
         ],
         "title": "IncidentSettingsBody",
-        "type": "object"
-      },
-      "JsonObject": {
-        "additionalProperties": true,
         "type": "object"
       },
       "JsonValue": {},
@@ -700,8 +1413,685 @@
         "title": "MCPToolDescription",
         "type": "object"
       },
+      "MarkReadyAction": {
+        "properties": {
+          "action": {
+            "const": "mark-ready",
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "MarkReadyAction",
+        "type": "object"
+      },
+      "MergeAction": {
+        "properties": {
+          "action": {
+            "const": "merge",
+            "title": "Action",
+            "type": "string"
+          },
+          "merge_method": {
+            "enum": [
+              "squash",
+              "merge",
+              "rebase"
+            ],
+            "title": "Merge Method",
+            "type": "string"
+          },
+          "sha": {
+            "pattern": "^[0-9a-fA-F]{40,64}$",
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "sha",
+          "merge_method"
+        ],
+        "title": "MergeAction",
+        "type": "object"
+      },
+      "MessageRole": {
+        "enum": [
+          "human",
+          "ai"
+        ],
+        "type": "string"
+      },
+      "MessageView": {
+        "additionalProperties": false,
+        "properties": {
+          "attachments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachments"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "namespace": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Namespace",
+            "type": "array"
+          },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message_id",
+          "turn_id",
+          "role",
+          "text",
+          "reasoning",
+          "namespace",
+          "sender",
+          "attachments",
+          "usage",
+          "created_at"
+        ],
+        "title": "MessageView",
+        "type": "object"
+      },
+      "MintedApiKey": {
+        "description": "The creation response \u2014 the only place the plaintext secret appears.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key_suffix": {
+            "title": "Key Suffix",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "workspace": {
+            "title": "Workspace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace",
+          "name",
+          "key_suffix",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at",
+          "status",
+          "secret"
+        ],
+        "title": "MintedApiKey",
+        "type": "object"
+      },
+      "OpenPullRequest": {
+        "properties": {
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions"
+          },
+          "ci": {
+            "default": "unknown",
+            "enum": [
+              "passing",
+              "failing",
+              "pending",
+              "unknown",
+              "none"
+            ],
+            "title": "Ci",
+            "type": "string"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions"
+          },
+          "detailsLoading": {
+            "default": false,
+            "title": "Detailsloading",
+            "type": "boolean"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "failingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failingchecks",
+            "type": "array"
+          },
+          "headRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headref"
+          },
+          "headSha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headsha"
+          },
+          "mergeState": {
+            "default": "unknown",
+            "title": "Mergestate",
+            "type": "string"
+          },
+          "mergeable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mergeable"
+          },
+          "missingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missingchecks",
+            "type": "array"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "pendingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pendingchecks",
+            "type": "array"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "reviewDecision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "approved",
+                  "changes_requested",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewdecision"
+          },
+          "reviewRequired": {
+            "default": false,
+            "title": "Reviewrequired",
+            "type": "boolean"
+          },
+          "statusAvailable": {
+            "default": false,
+            "title": "Statusavailable",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unresolvedThreads": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unresolvedthreads"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "required": [
+          "repo",
+          "number",
+          "title"
+        ],
+        "title": "OpenPullRequest",
+        "type": "object"
+      },
+      "OpenPullRequests": {
+        "properties": {
+          "incomplete": {
+            "title": "Incomplete",
+            "type": "boolean"
+          },
+          "nextPage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextpage"
+          },
+          "pullRequests": {
+            "items": {
+              "$ref": "#/components/schemas/OpenPullRequest"
+            },
+            "title": "Pullrequests",
+            "type": "array"
+          },
+          "updatedAt": {
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pullRequests",
+          "nextPage",
+          "incomplete",
+          "updatedAt"
+        ],
+        "title": "OpenPullRequests",
+        "type": "object"
+      },
+      "OpenThreadIntent": {
+        "properties": {
+          "intent": {
+            "const": "open",
+            "title": "Intent",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "title"
+        ],
+        "title": "OpenThreadIntent",
+        "type": "object"
+      },
+      "PendingReview": {
+        "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
+        "properties": {
+          "comments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PendingReviewComment"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "node_id"
+        ],
+        "title": "PendingReview",
+        "type": "object"
+      },
+      "PendingReviewComment": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "LEFT",
+                  "RIGHT"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          },
+          "start_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "LEFT",
+                  "RIGHT"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Side"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "path",
+          "body"
+        ],
+        "title": "PendingReviewComment",
+        "type": "object"
+      },
+      "PendingReviewCommentInput": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "side": {
+            "default": "RIGHT",
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          },
+          "start_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "LEFT",
+                  "RIGHT"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Side"
+          }
+        },
+        "required": [
+          "path",
+          "line",
+          "body"
+        ],
+        "title": "PendingReviewCommentInput",
+        "type": "object"
+      },
+      "PendingReviewCommentUpdate": {
+        "properties": {
+          "body": {
+            "maxLength": 65000,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "PendingReviewCommentUpdate",
+        "type": "object"
+      },
+      "PendingReviewDiscarded": {
+        "properties": {
+          "discarded": {
+            "title": "Discarded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "discarded"
+        ],
+        "title": "PendingReviewDiscarded",
+        "type": "object"
+      },
       "PlanUpdate": {
         "properties": {
+          "dismissed": {
+            "default": false,
+            "title": "Dismissed",
+            "type": "boolean"
+          },
           "html": {
             "anyOf": [
               {
@@ -726,6 +2116,136 @@
           }
         },
         "title": "PlanUpdate",
+        "type": "object"
+      },
+      "PreviewCheck": {
+        "properties": {
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "PreviewCheck",
+        "type": "object"
+      },
+      "PreviewFile": {
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "status",
+          "additions",
+          "deletions"
+        ],
+        "title": "PreviewFile",
+        "type": "object"
+      },
+      "PreviewThread": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "body",
+          "path"
+        ],
+        "title": "PreviewThread",
         "type": "object"
       },
       "ProfileUpdate": {
@@ -757,6 +2277,17 @@
             ],
             "title": "Branch Prefix"
           },
+          "concierge_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concierge Mode"
+          },
           "default_model": {
             "title": "Default Model",
             "type": "string"
@@ -783,11 +2314,6 @@
             ],
             "title": "Default Subagent Model"
           },
-          "dm_session_enabled": {
-            "default": false,
-            "title": "Dm Session Enabled",
-            "type": "boolean"
-          },
           "draft_prs": {
             "anyOf": [
               {
@@ -798,6 +2324,29 @@
               }
             ],
             "title": "Draft Prs"
+          },
+          "experimental_assistant_ui": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Assistant Ui"
+          },
+          "human_review_requests": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Requests"
           },
           "model_routing_enabled": {
             "anyOf": [
@@ -810,9 +2359,25 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "preserve_sandbox_memory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preserve Sandbox Memory"
+          },
           "reasoning_effort": {
             "title": "Reasoning Effort",
             "type": "string"
+          },
+          "recent_thread_context_enabled": {
+            "default": false,
+            "title": "Recent Thread Context Enabled",
+            "type": "boolean"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -824,6 +2389,11 @@
               }
             ],
             "title": "Review Draft Prs"
+          },
+          "slack_onboarding_dismissed": {
+            "default": false,
+            "title": "Slack Onboarding Dismissed",
+            "type": "boolean"
           },
           "subagent_reasoning_effort": {
             "anyOf": [
@@ -842,6 +2412,30 @@
           "reasoning_effort"
         ],
         "title": "ProfileUpdate",
+        "type": "object"
+      },
+      "PullRequestActionResult": {
+        "properties": {
+          "action": {
+            "enum": [
+              "merge",
+              "close",
+              "mark-ready",
+              "update-branch"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "done": {
+            "title": "Done",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action",
+          "done"
+        ],
+        "title": "PullRequestActionResult",
         "type": "object"
       },
       "PullRequestChecksRef": {
@@ -876,6 +2470,278 @@
           }
         },
         "title": "PullRequestChecksRequest",
+        "type": "object"
+      },
+      "PullRequestFixContext": {
+        "properties": {
+          "ci": {
+            "enum": [
+              "passing",
+              "failing",
+              "pending",
+              "unknown",
+              "none"
+            ],
+            "title": "Ci",
+            "type": "string"
+          },
+          "failingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Failingchecks",
+            "type": "array"
+          },
+          "headRef": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headref"
+          },
+          "headSha": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headsha"
+          },
+          "mergeState": {
+            "maxLength": 100,
+            "title": "Mergestate",
+            "type": "string"
+          },
+          "mergeable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mergeable"
+          },
+          "pendingChecks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Pendingchecks",
+            "type": "array"
+          },
+          "reviewDecision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "approved",
+                  "changes_requested",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewdecision"
+          },
+          "statusAvailable": {
+            "title": "Statusavailable",
+            "type": "boolean"
+          },
+          "title": {
+            "maxLength": 1000,
+            "title": "Title",
+            "type": "string"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "required": [
+          "title",
+          "headRef",
+          "headSha",
+          "mergeable",
+          "mergeState",
+          "ci",
+          "failingChecks",
+          "pendingChecks",
+          "statusAvailable",
+          "updatedAt",
+          "reviewDecision"
+        ],
+        "title": "PullRequestFixContext",
+        "type": "object"
+      },
+      "PullRequestPreview": {
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "author_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Avatar Url"
+          },
+          "base_ref": {
+            "title": "Base Ref",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "changed_files": {
+            "title": "Changed Files",
+            "type": "integer"
+          },
+          "checks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PreviewCheck"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks"
+          },
+          "commits": {
+            "title": "Commits",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "head_ref": {
+            "title": "Head Ref",
+            "type": "string"
+          },
+          "human_input": {
+            "title": "Human Input",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unresolved": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PreviewThread"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unresolved"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "author",
+          "author_avatar_url",
+          "state",
+          "draft",
+          "head_ref",
+          "base_ref",
+          "commits",
+          "additions",
+          "deletions",
+          "changed_files",
+          "files",
+          "unresolved",
+          "checks",
+          "human_input"
+        ],
+        "title": "PullRequestPreview",
+        "type": "object"
+      },
+      "PullRequestReviewSubmit": {
+        "properties": {
+          "body": {
+            "default": "",
+            "maxLength": 65000,
+            "title": "Body",
+            "type": "string"
+          },
+          "event": {
+            "enum": [
+              "APPROVE",
+              "REQUEST_CHANGES",
+              "COMMENT"
+            ],
+            "title": "Event",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "title": "PullRequestReviewSubmit",
         "type": "object"
       },
       "PullRequestState": {
@@ -914,6 +2780,37 @@
           "state"
         ],
         "title": "PullRequestState",
+        "type": "object"
+      },
+      "PullRequestThreadRun": {
+        "properties": {
+          "already_running": {
+            "default": false,
+            "title": "Already Running",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "title": "PullRequestThreadRun",
+        "type": "object"
+      },
+      "PullRequestThreadStatus": {
+        "properties": {
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running"
+        ],
+        "title": "PullRequestThreadStatus",
         "type": "object"
       },
       "RefreshStep": {
@@ -978,62 +2875,142 @@
         "title": "RefreshStep",
         "type": "object"
       },
-      "ReviewCommentCreate": {
+      "RepositoryConfiguration": {
+        "description": "Settings to change on one repository. Anything left out keeps its value.",
         "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          },
-          "line": {
-            "title": "Line",
-            "type": "integer"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "side": {
-            "enum": [
-              "LEFT",
-              "RIGHT"
-            ],
-            "title": "Side",
-            "type": "string"
-          },
-          "start_line": {
+          "may_start_threads": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Start Line"
-          },
-          "start_side": {
-            "anyOf": [
-              {
-                "enum": [
-                  "LEFT",
-                  "RIGHT"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Side"
+            "title": "May Start Threads"
+          }
+        },
+        "title": "RepositoryConfiguration",
+        "type": "object"
+      },
+      "RepositoryMergeMethods": {
+        "properties": {
+          "mergeMethods": {
+            "items": {
+              "enum": [
+                "squash",
+                "merge",
+                "rebase"
+              ],
+              "type": "string"
+            },
+            "title": "Mergemethods",
+            "type": "array"
           }
         },
         "required": [
-          "path",
-          "line",
-          "side",
-          "body"
+          "mergeMethods"
         ],
-        "title": "ReviewCommentCreate",
+        "title": "RepositoryMergeMethods",
+        "type": "object"
+      },
+      "RepositorySettings": {
+        "description": "How one repository is configured inside one workspace.\n\nSeparate from the binding itself: belonging to a workspace says the agent\nmay work in the repository, while these say what the repository may do.",
+        "properties": {
+          "may_start_threads": {
+            "default": false,
+            "title": "May Start Threads",
+            "type": "boolean"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "title": "RepositorySettings",
+        "type": "object"
+      },
+      "RequestResult": {
+        "properties": {
+          "channel": {
+            "default": "",
+            "title": "Channel",
+            "type": "string"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "RequestResult",
+        "type": "object"
+      },
+      "ResolveReviewThreads": {
+        "properties": {
+          "thread_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Thread Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_ids"
+        ],
+        "title": "ResolveReviewThreads",
+        "type": "object"
+      },
+      "ResolveReviewThreadsResult": {
+        "properties": {
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "resolved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resolved",
+            "type": "array"
+          }
+        },
+        "required": [
+          "resolved",
+          "failed"
+        ],
+        "title": "ResolveReviewThreadsResult",
         "type": "object"
       },
       "ReviewCommentUpdate": {
@@ -1047,6 +3024,63 @@
           "body"
         ],
         "title": "ReviewCommentUpdate",
+        "type": "object"
+      },
+      "ReviewCounts": {
+        "properties": {
+          "bugs": {
+            "title": "Bugs",
+            "type": "integer"
+          },
+          "dismissed": {
+            "title": "Dismissed",
+            "type": "integer"
+          },
+          "flags": {
+            "title": "Flags",
+            "type": "integer"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open",
+          "resolved",
+          "dismissed",
+          "bugs",
+          "flags"
+        ],
+        "title": "ReviewCounts",
+        "type": "object"
+      },
+      "ReviewScoutTrigger": {
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "started": {
+            "title": "Started",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "started"
+        ],
+        "title": "ReviewScoutTrigger",
         "type": "object"
       },
       "ReviewStyle": {
@@ -1083,6 +3117,22 @@
               }
             ],
             "title": "Analysis Thread Id"
+          },
+          "approval_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "dry_run",
+                  "approve"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Mode"
           },
           "continual_cron_id": {
             "anyOf": [
@@ -1197,20 +3247,23 @@
       },
       "ReviewStylePromptUpdate": {
         "properties": {
+          "approval_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "dry_run",
+                  "approve"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Mode"
+          },
           "custom_prompt": {
-            "title": "Custom Prompt",
-            "type": "string"
-          }
-        },
-        "required": [
-          "custom_prompt"
-        ],
-        "title": "ReviewStylePromptUpdate",
-        "type": "object"
-      },
-      "SandboxSettingsUpdate": {
-        "properties": {
-          "base_snapshot_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -1219,10 +3272,141 @@
                 "type": "null"
               }
             ],
-            "title": "Base Snapshot Id"
+            "title": "Custom Prompt"
           }
         },
-        "title": "SandboxSettingsUpdate",
+        "title": "ReviewStylePromptUpdate",
+        "type": "object"
+      },
+      "ReviewSummariesRequest": {
+        "properties": {
+          "pullRequests": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSummaryRef"
+            },
+            "maxItems": 100,
+            "title": "Pullrequests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pullRequests"
+        ],
+        "title": "ReviewSummariesRequest",
+        "type": "object"
+      },
+      "ReviewSummary": {
+        "description": "A reviewer thread's durable state, as the dashboard reads it.",
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "base_ref": {
+            "title": "Base Ref",
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ReviewCounts"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "head_ref": {
+            "title": "Head Ref",
+            "type": "string"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "error",
+              "idle"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "watch": {
+            "title": "Watch",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "thread_id",
+          "owner",
+          "repo",
+          "full_name",
+          "number",
+          "title",
+          "url",
+          "head_ref",
+          "base_ref",
+          "author",
+          "head_sha",
+          "watch",
+          "status",
+          "counts"
+        ],
+        "title": "ReviewSummary",
+        "type": "object"
+      },
+      "ReviewSummaryRef": {
+        "properties": {
+          "number": {
+            "minimum": 1.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "maxLength": 140,
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number"
+        ],
+        "title": "ReviewSummaryRef",
         "type": "object"
       },
       "ScheduleCreateBody": {
@@ -1324,10 +3508,17 @@
             ],
             "title": "Trigger",
             "type": "string"
+          },
+          "workspace": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Workspace",
+            "type": "string"
           }
         },
         "required": [
-          "prompt"
+          "prompt",
+          "workspace"
         ],
         "title": "ScheduleCreateBody",
         "type": "object"
@@ -1467,6 +3658,17 @@
               }
             ],
             "title": "Trigger"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
           }
         },
         "title": "ScheduleUpdateBody",
@@ -1589,6 +3791,11 @@
             "title": "Is Member",
             "type": "boolean"
           },
+          "is_pending_ext_shared": {
+            "default": false,
+            "title": "Is Pending Ext Shared",
+            "type": "boolean"
+          },
           "is_private": {
             "title": "Is Private",
             "type": "boolean"
@@ -1639,6 +3846,29 @@
           "text"
         ],
         "title": "SlashCommandResponse",
+        "type": "object"
+      },
+      "SubmittedReview": {
+        "properties": {
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "html_url",
+          "state"
+        ],
+        "title": "SubmittedReview",
         "type": "object"
       },
       "TextAnchor": {
@@ -1813,6 +4043,334 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
+      "ToolArguments": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/JsonValue"
+        },
+        "title": "ToolArguments",
+        "type": "object"
+      },
+      "ToolCallView": {
+        "additionalProperties": false,
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "has_output": {
+            "title": "Has Output",
+            "type": "boolean"
+          },
+          "input": {
+            "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Namespace",
+            "type": "array"
+          },
+          "output_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Preview"
+          },
+          "output_truncated": {
+            "title": "Output Truncated",
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "title": "Tool Call Id",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_call_id",
+          "turn_id",
+          "message_id",
+          "name",
+          "input",
+          "status",
+          "output_preview",
+          "output_truncated",
+          "has_output",
+          "namespace",
+          "started_at",
+          "ended_at"
+        ],
+        "title": "ToolCallView",
+        "type": "object"
+      },
+      "ToolDescription": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "parameters"
+        ],
+        "title": "ToolDescription",
+        "type": "object"
+      },
+      "ToolList": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolDescription"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tools",
+          "total"
+        ],
+        "title": "ToolList",
+        "type": "object"
+      },
+      "ToolResult": {
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "content"
+        ],
+        "title": "ToolResult",
+        "type": "object"
+      },
+      "TranscriptTurnPage": {
+        "additionalProperties": false,
+        "description": "One page of turns strictly older than the cursor that asked for it.\n\nNo notices and no thread row: both describe the newest turn, which an older\npage by definition does not hold.",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "older_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Older Cursor"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/ToolCallView"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnView"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "thread_id",
+          "turns",
+          "messages",
+          "tool_calls",
+          "older_cursor"
+        ],
+        "title": "TranscriptTurnPage",
+        "type": "object"
+      },
+      "TurnView": {
+        "additionalProperties": false,
+        "properties": {
+          "checkpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CheckpointView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "run_id",
+          "state",
+          "requested_at",
+          "started_at",
+          "completed_at",
+          "error",
+          "checkpoint"
+        ],
+        "title": "TurnView",
+        "type": "object"
+      },
+      "UpdateBranchAction": {
+        "properties": {
+          "action": {
+            "const": "update-branch",
+            "title": "Action",
+            "type": "string"
+          },
+          "sha": {
+            "pattern": "^[0-9a-fA-F]{40,64}$",
+            "title": "Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "sha"
+        ],
+        "title": "UpdateBranchAction",
+        "type": "object"
+      },
       "UserInstructionsUpdate": {
         "properties": {
           "instructions": {
@@ -1845,6 +4403,21 @@
               }
             ],
             "title": "Default Workspace"
+          },
+          "follow_up_behavior": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queue",
+                  "steer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Behavior"
           },
           "local_tracing_project": {
             "anyOf": [
@@ -1902,6 +4475,19 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WalkthroughDismissed": {
+        "properties": {
+          "dismissed": {
+            "title": "Dismissed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "title": "WalkthroughDismissed",
         "type": "object"
       },
       "WebhookResponse": {
@@ -1974,6 +4560,13 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "kitchen_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kitchen Channel Ids",
+            "type": "array"
           },
           "last_captured_at": {
             "anyOf": [
@@ -2265,6 +4858,13 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "kitchen_channel_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kitchen Channel Ids",
+            "type": "array"
           },
           "mem_bytes": {
             "anyOf": [
@@ -2576,28 +5176,6 @@
             ],
             "title": "Default Chat Reasoning Effort"
           },
-          "default_grouping_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Grouping Model"
-          },
-          "default_grouping_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Grouping Reasoning Effort"
-          },
           "default_repo": {
             "anyOf": [
               {
@@ -2676,6 +5254,7 @@
             "title": "Default Thread Title Reasoning Effort"
           },
           "expedited_review_enabled": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2687,6 +5266,7 @@
             "title": "Expedited Review Enabled"
           },
           "fable_enabled": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2698,6 +5278,7 @@
             "title": "Fable Enabled"
           },
           "gateway_enabled": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2709,6 +5290,7 @@
             "title": "Gateway Enabled"
           },
           "model_routing_enabled": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2731,6 +5313,7 @@
             "title": "Org Guidelines"
           },
           "pr_summaries": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2742,6 +5325,7 @@
             "title": "Pr Summaries"
           },
           "review_draft_prs": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2753,6 +5337,7 @@
             "title": "Review Draft Prs"
           },
           "review_trace_links": {
+            "agent_feature_flag": true,
             "anyOf": [
               {
                 "type": "boolean"
@@ -2827,6 +5412,20 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "kitchen_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kitchen Channel Ids"
           },
           "mem_bytes": {
             "anyOf": [
@@ -2938,14 +5537,79 @@
         },
         "title": "WorkspaceUpdate",
         "type": "object"
+      },
+      "agent__review__assessment_feedback__FeedbackSubmission": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "enum": [
+              "helpful",
+              "unhelpful"
+            ],
+            "title": "Rating",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "title": "FeedbackSubmission",
+        "type": "object"
+      },
+      "agent__threads__feedback__FeedbackSubmission": {
+        "properties": {
+          "action": {
+            "default": "submit",
+            "enum": [
+              "submit",
+              "comment",
+              "dismiss"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "comment": {
+            "default": "",
+            "maxLength": 3000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bad",
+                  "good"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          }
+        },
+        "title": "FeedbackSubmission",
+        "type": "object"
+      },
+      "agent__transcript__events__JsonObject": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/JsonValue"
+        },
+        "type": "object"
+      },
+      "agent__utils__json_types__JsonObject": {
+        "additionalProperties": true,
+        "type": "object"
       }
     },
     "securitySchemes": {
-      "AdminBearer": {
-        "description": "An admin's GitHub user token or an allowlisted GitHub Actions OIDC token.",
-        "scheme": "bearer",
-        "type": "http"
-      },
       "DashboardSession": {
         "in": "cookie",
         "name": "osw_session",
@@ -2959,6 +5623,151 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dashboard/api/admin/api-keys": {
+      "get": {
+        "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "workspace",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyView"
+                  },
+                  "title": "Response Api List Api Keys Dashboard Api Admin Api Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Api Keys",
+        "tags": [
+          "dashboard",
+          "api-keys"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_api_key_dashboard_api_admin_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedApiKey"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Api Key",
+        "tags": [
+          "dashboard",
+          "api-keys"
+        ]
+      }
+    },
+    "/dashboard/api/admin/api-keys/{key_id}": {
+      "delete": {
+        "operationId": "api_revoke_api_key_dashboard_api_admin_api_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Revoke Api Key",
+        "tags": [
+          "dashboard",
+          "api-keys"
+        ]
+      }
+    },
     "/dashboard/api/admin/evals/reviewer": {
       "get": {
         "description": "Read-only status for the reviewer eval (triggered from the GitHub Action).",
@@ -3039,9 +5848,10 @@
         ]
       }
     },
-    "/dashboard/api/admin/user-mappings": {
+    "/dashboard/api/admin/users": {
       "get": {
-        "operationId": "admin_list_user_mappings_dashboard_api_admin_user_mappings_get",
+        "description": "One page of users with the identities each one signed in or linked with.",
+        "operationId": "admin_list_users_dashboard_api_admin_users_get",
         "parameters": [
           {
             "in": "query",
@@ -3049,6 +5859,7 @@
             "required": false,
             "schema": {
               "default": 1,
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
@@ -3059,6 +5870,8 @@
             "required": false,
             "schema": {
               "default": 20,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Page Size",
               "type": "integer"
             }
@@ -3070,7 +5883,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Admin List User Mappings Dashboard Api Admin User Mappings Get",
+                  "title": "Response Admin List Users Dashboard Api Admin Users Get",
                   "type": "object"
                 }
               }
@@ -3093,62 +5906,10 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Admin List User Mappings",
+        "summary": "Admin List Users",
         "tags": [
           "dashboard",
-          "user-mappings"
-        ]
-      }
-    },
-    "/dashboard/api/admin/user-mappings/{github_login}": {
-      "delete": {
-        "operationId": "admin_delete_user_mapping_dashboard_api_admin_user_mappings__github_login__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "github_login",
-            "required": true,
-            "schema": {
-              "title": "Github Login",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Admin Delete User Mapping Dashboard Api Admin User Mappings  Github Login  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Admin Delete User Mapping",
-        "tags": [
-          "dashboard",
-          "user-mappings"
+          "users"
         ]
       }
     },
@@ -3424,6 +6185,47 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "rank",
+              "enum": [
+                "rank",
+                "user",
+                "favorite_model",
+                "invocations",
+                "threads",
+                "avg_invocations_per_thread",
+                "total_tokens",
+                "total_cost_usd",
+                "avg_invocation_seconds",
+                "avg_thread_seconds",
+                "prs_opened",
+                "merged_prs",
+                "merged_prs_per_thread",
+                "agent_loc",
+                "feedback_given"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3690,6 +6492,55 @@
         ]
       }
     },
+    "/dashboard/api/auth/dev-login": {
+      "get": {
+        "description": "Sign in locally as the `gh` CLI's user, with no GitHub App involved.\n\nRefused outside `langgraph dev`, and still subject to the login allowlist.",
+        "operationId": "auth_dev_login_dashboard_api_auth_dev_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Dev Login",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
     "/dashboard/api/auth/login": {
       "get": {
         "operationId": "auth_login_dashboard_api_auth_login_get",
@@ -3799,6 +6650,282 @@
         "tags": [
           "dashboard",
           "auth"
+        ]
+      }
+    },
+    "/dashboard/api/bridges": {
+      "post": {
+        "operationId": "api_open_bridge_dashboard_api_bridges_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeOpenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeOpenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Open Bridge",
+        "tags": [
+          "dashboard",
+          "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/bridges/{bridge_id}": {
+      "delete": {
+        "operationId": "api_close_bridge_dashboard_api_bridges__bridge_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Close Bridge",
+        "tags": [
+          "dashboard",
+          "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/bridges/{bridge_id}/heartbeat": {
+      "post": {
+        "operationId": "api_bridge_heartbeat_dashboard_api_bridges__bridge_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Bridge Heartbeat",
+        "tags": [
+          "dashboard",
+          "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/bridges/{bridge_id}/requests/claim": {
+      "post": {
+        "operationId": "api_claim_bridge_requests_dashboard_api_bridges__bridge_id__requests_claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeClaimBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeRequestsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Claim Bridge Requests",
+        "tags": [
+          "dashboard",
+          "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/bridges/{bridge_id}/requests/{request_id}": {
+      "post": {
+        "operationId": "api_answer_bridge_request_dashboard_api_bridges__bridge_id__requests__request_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeReplyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Answer Bridge Request",
+        "tags": [
+          "dashboard",
+          "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/client-errors": {
+      "post": {
+        "operationId": "api_report_client_error_dashboard_api_client_errors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientErrorReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Report Client Error",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -4873,36 +8000,6 @@
         ]
       }
     },
-    "/dashboard/api/my-mapping": {
-      "get": {
-        "description": "Return the logged-in user's own GitHub\u2194Slack mapping (or empty).",
-        "operationId": "get_my_mapping_dashboard_api_my_mapping_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Mapping Dashboard Api My Mapping Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get My Mapping",
-        "tags": [
-          "dashboard",
-          "user-mappings"
-        ]
-      }
-    },
     "/dashboard/api/my-mcps": {
       "get": {
         "operationId": "api_list_my_mcps_dashboard_api_my_mcps_get",
@@ -5828,6 +8925,57 @@
         ]
       }
     },
+    "/dashboard/api/plan/{thread_id}/comments/submit": {
+      "post": {
+        "operationId": "submit_plan_comments_dashboard_api_plan__thread_id__comments_submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Submit Plan Comments Dashboard Api Plan  Thread Id  Comments Submit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Plan Comments",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/dashboard/api/plan/{thread_id}/comments/{comment_id}": {
       "delete": {
         "operationId": "remove_plan_comment_dashboard_api_plan__thread_id__comments__comment_id__delete",
@@ -5962,6 +9110,114 @@
         ]
       }
     },
+    "/dashboard/api/pull-requests": {
+      "get": {
+        "operationId": "api_list_pull_requests_dashboard_api_pull_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lightweight",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Lightweight",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "created",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "const": "mine",
+              "default": "mine",
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenPullRequests"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
     "/dashboard/api/repos": {
       "get": {
         "description": "List repos where Open SWE is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
@@ -6011,6 +9267,541 @@
         "tags": [
           "dashboard",
           "github"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/merge-methods": {
+      "get": {
+        "operationId": "api_repository_merge_methods_dashboard_api_repos__owner___repo__merge_methods_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryMergeMethods"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Repository Merge Methods",
+        "tags": [
+          "dashboard",
+          "github"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}": {
+      "get": {
+        "operationId": "api_pull_request_details_dashboard_api_repos__owner___repo__pulls__number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenPullRequest"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Pull Request Details Dashboard Api Repos  Owner   Repo  Pulls  Number  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Pull Request Details",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/action": {
+      "post": {
+        "operationId": "api_act_on_pull_request_dashboard_api_repos__owner___repo__pulls__number__action_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "close": "#/components/schemas/CloseAction",
+                    "mark-ready": "#/components/schemas/MarkReadyAction",
+                    "merge": "#/components/schemas/MergeAction",
+                    "update-branch": "#/components/schemas/UpdateBranchAction"
+                  },
+                  "propertyName": "action"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MergeAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CloseAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MarkReadyAction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UpdateBranchAction"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestActionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Act On Pull Request",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
+      "post": {
+        "operationId": "api_request_human_review_dashboard_api_repos__owner___repo__pulls__number__human_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Request Human Review",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve": {
+      "post": {
+        "operationId": "api_resolve_review_threads_dashboard_api_repos__owner___repo__pulls__number__review_threads_resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReviewThreads"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveReviewThreadsResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Resolve Review Threads",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/thread": {
+      "get": {
+        "operationId": "api_pull_request_thread_status_dashboard_api_repos__owner___repo__pulls__number__thread_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestThreadStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Pull Request Thread Status",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      },
+      "post": {
+        "operationId": "api_start_pull_request_thread_dashboard_api_repos__owner___repo__pulls__number__thread_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "address-comment": "#/components/schemas/AddressCommentIntent",
+                    "address-comments": "#/components/schemas/AddressCommentsIntent",
+                    "fix": "#/components/schemas/FixIntent",
+                    "open": "#/components/schemas/OpenThreadIntent"
+                  },
+                  "propertyName": "intent"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/OpenThreadIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FixIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AddressCommentsIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AddressCommentIntent"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestThreadRun"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Start Pull Request Thread",
+        "tags": [
+          "dashboard",
+          "pull-requests"
         ]
       }
     },
@@ -6286,6 +10077,54 @@
         ]
       }
     },
+    "/dashboard/api/review-styles/{full_name}/approvals-file": {
+      "get": {
+        "operationId": "api_get_review_style_approvals_file_dashboard_api_review_styles__full_name__approvals_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "full_name",
+            "required": true,
+            "schema": {
+              "title": "Full Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalsFileStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Style Approvals File",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/review-styles/{full_name}/cancel": {
       "post": {
         "operationId": "api_cancel_review_style_dashboard_api_review_styles__full_name__cancel_post",
@@ -6389,6 +10228,64 @@
           }
         ],
         "summary": "Api List Reviews",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/summaries": {
+      "post": {
+        "operationId": "api_get_review_summaries_dashboard_api_reviews_summaries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSummariesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ReviewSummary"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Get Review Summaries Dashboard Api Reviews Summaries Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Summaries",
         "tags": [
           "dashboard",
           "review"
@@ -6525,147 +10422,6 @@
           }
         ],
         "summary": "Api Get Review Chat",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads": {
-      "get": {
-        "operationId": "api_list_review_chat_threads_dashboard_api_reviews__owner___repo___pr_number__chat_threads_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Review Chat Threads Dashboard Api Reviews  Owner   Repo   Pr Number  Chat Threads Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Review Chat Threads",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}": {
-      "delete": {
-        "operationId": "api_delete_review_chat_thread_dashboard_api_reviews__owner___repo___pr_number__chat_threads__thread_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Review Chat Thread",
         "tags": [
           "dashboard",
           "review"
@@ -7030,82 +10786,6 @@
           "dashboard",
           "review"
         ]
-      },
-      "post": {
-        "operationId": "api_create_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewCommentCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Create Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Comments Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Create Review Comment",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
       }
     },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}": {
@@ -7195,6 +10875,148 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/conversation": {
+      "get": {
+        "operationId": "api_get_review_conversation_dashboard_api_reviews__owner___repo___pr_number__conversation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Conversation",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/conversation/comments": {
+      "post": {
+        "operationId": "api_post_review_conversation_comment_dashboard_api_reviews__owner___repo___pr_number__conversation_comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCommentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationComment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Post Review Conversation Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/diff": {
       "get": {
         "operationId": "api_get_review_diff_dashboard_api_reviews__owner___repo___pr_number__diff_get",
@@ -7257,6 +11079,172 @@
           }
         ],
         "summary": "Api Get Review Diff",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}": {
+      "get": {
+        "operationId": "get_assessment_feedback_dashboard_api_reviews__owner___repo___pr_number__feedback__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AssessmentFeedback"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get Assessment Feedback Dashboard Api Reviews  Owner   Repo   Pr Number  Feedback  Review Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Assessment Feedback",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "put": {
+        "operationId": "submit_assessment_feedback_dashboard_api_reviews__owner___repo___pr_number__feedback__review_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "title": "Review Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/agent__review__assessment_feedback__FeedbackSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentFeedback"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Submit Assessment Feedback",
         "tags": [
           "dashboard",
           "review"
@@ -7336,6 +11324,452 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review": {
+      "delete": {
+        "operationId": "api_discard_pending_review_dashboard_api_reviews__owner___repo___pr_number__pending_review_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingReviewDiscarded"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discard Pending Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "get": {
+        "operationId": "api_get_pending_review_dashboard_api_reviews__owner___repo___pr_number__pending_review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PendingReview"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Get Pending Review Dashboard Api Reviews  Owner   Repo   Pr Number  Pending Review Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pending Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments": {
+      "post": {
+        "operationId": "api_add_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingReviewCommentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Add Pending Review Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}": {
+      "delete": {
+        "operationId": "api_delete_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PendingReview"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Api Delete Pending Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Pending Review Comments  Comment Id  Delete"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Pending Review Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "patch": {
+        "operationId": "api_update_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "comment_id",
+            "required": true,
+            "schema": {
+              "title": "Comment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingReviewCommentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Update Pending Review Comment",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/preview": {
+      "get": {
+        "operationId": "api_get_pull_request_preview_dashboard_api_reviews__owner___repo___pr_number__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pull Request Preview",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/re-review": {
       "post": {
         "operationId": "api_re_review_dashboard_api_reviews__owner___repo___pr_number__re_review_post",
@@ -7404,57 +11838,44 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-settings": {
-      "get": {
-        "operationId": "api_get_sandbox_settings_dashboard_api_sandbox_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Sandbox Settings Dashboard Api Sandbox Settings Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/scout": {
+      "post": {
+        "operationId": "api_run_review_scout_dashboard_api_reviews__owner___repo___pr_number__scout_post",
+        "parameters": [
           {
-            "DashboardSession": []
-          },
-          {
-            "AdminBearer": []
-          }
-        ],
-        "summary": "Api Get Sandbox Settings",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      },
-      "put": {
-        "operationId": "api_set_sandbox_settings_dashboard_api_sandbox_settings_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SandboxSettingsUpdate"
-              }
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
             }
           },
-          "required": true
-        },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Set Sandbox Settings Dashboard Api Sandbox Settings Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewScoutTrigger"
                 }
               }
             },
@@ -7474,15 +11895,469 @@
         "security": [
           {
             "DashboardSession": []
-          },
-          {
-            "AdminBearer": []
           }
         ],
-        "summary": "Api Set Sandbox Settings",
+        "summary": "Api Run Review Scout",
         "tags": [
           "dashboard",
-          "workspaces"
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/submit-review": {
+      "post": {
+        "operationId": "api_submit_pull_request_review_dashboard_api_reviews__owner___repo___pr_number__submit_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullRequestReviewSubmit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmittedReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Submit Pull Request Review",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/viewed": {
+      "post": {
+        "operationId": "api_mark_review_viewed_dashboard_api_reviews__owner___repo___pr_number__viewed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Mark Review Viewed",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/walkthrough": {
+      "delete": {
+        "description": "Drop the stored walkthrough so the next scout run rebuilds it.",
+        "operationId": "api_dismiss_walkthrough_dashboard_api_reviews__owner___repo___pr_number__walkthrough_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkthroughDismissed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Dismiss Walkthrough",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools": {
+      "get": {
+        "operationId": "list_tools_dashboard_api_sandbox_tools_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/invoke/{tool_name}": {
+      "post": {
+        "operationId": "invoke_tool_dashboard_api_sandbox_tools_invoke__tool_name__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool_name",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Tool Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolArguments"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invoke Tool",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/list": {
+      "get": {
+        "operationId": "list_tools_dashboard_api_sandbox_tools_list_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/search": {
+      "get": {
+        "operationId": "list_tools_dashboard_api_sandbox_tools_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
         ]
       }
     },
@@ -8224,7 +13099,7 @@
     },
     "/dashboard/api/slack/channels": {
       "get": {
-        "description": "The channels a workspace can be bound to, for the picker on the Workspaces page.",
+        "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
         "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
         "responses": {
           "200": {
@@ -8387,6 +13262,16 @@
               "title": "All",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "title": "Limit",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -8416,11 +13301,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api List Threads",
         "tags": [
           "dashboard",
@@ -8838,6 +13718,108 @@
         ]
       }
     },
+    "/dashboard/api/threads/uploads": {
+      "post": {
+        "operationId": "api_upload_session_dashboard_api_threads_uploads_post",
+        "requestBody": {
+          "content": {
+            "application/x-ndjson": {
+              "schema": {
+                "type": "string"
+              },
+              "x-first-line-schema": {
+                "$defs": {
+                  "SessionType": {
+                    "const": "claude",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "The upload's first line: which agent wrote the transcript that follows, and where its work was pushed.",
+                "properties": {
+                  "branch": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Branch"
+                  },
+                  "pr_url": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Pr Url"
+                  },
+                  "repo": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Repo"
+                  },
+                  "type": {
+                    "$ref": "#/$defs/SessionType"
+                  },
+                  "visibility": {
+                    "default": "workspace",
+                    "enum": [
+                      "workspace",
+                      "private"
+                    ],
+                    "title": "Visibility",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "title": "SessionUploadHeader",
+                "type": "object"
+              }
+            }
+          },
+          "description": "JSONL, optionally with Content-Encoding: gzip. The first line is a SessionUploadHeader object; every following line is the session transcript, verbatim.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Upload Session",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}": {
       "delete": {
         "operationId": "api_delete_thread_dashboard_api_threads__thread_id__delete",
@@ -8926,11 +13908,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Get Thread",
         "tags": [
           "dashboard",
@@ -9084,11 +14061,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Cancel Thread",
         "tags": [
           "dashboard",
@@ -9098,6 +14070,7 @@
     },
     "/dashboard/api/threads/{thread_id}/commands": {
       "post": {
+        "description": "Every way a thread is started or continued, whoever is asking.\n\nThe dashboard, an API key and a federated workflow all post the same command\nhere; what differs is the thread the first one stamps.",
         "operationId": "api_thread_commands_dashboard_api_threads__thread_id__commands_post",
         "parameters": [
           {
@@ -9130,11 +14103,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Thread Commands",
         "tags": [
           "dashboard",
@@ -9257,7 +14225,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FeedbackSubmission"
+                "$ref": "#/components/schemas/agent__threads__feedback__FeedbackSubmission"
               }
             }
           },
@@ -9879,6 +14847,155 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/runs": {
+      "get": {
+        "operationId": "api_list_thread_runs_dashboard_api_threads__thread_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "select",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Select"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Thread Runs",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_thread_run_dashboard_api_threads__thread_id__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Create Thread Run Dashboard Api Threads  Thread Id  Runs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/runs/{run_id}/cancel": {
       "post": {
         "operationId": "api_cancel_thread_run_dashboard_api_threads__thread_id__runs__run_id__cancel_post",
@@ -9950,69 +15067,6 @@
         "summary": "Api Cancel Thread Run",
         "tags": [
           "dashboard",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/service-url": {
-      "get": {
-        "description": "Mint a sandbox service credential for the dashboard's service proxy.\n\nThe token, not the ``browser_url`` that carries it, so it stays server-side:\nthe dashboard app attaches it as a header and the browser never holds it.",
-        "operationId": "api_thread_service_url_dashboard_api_threads__thread_id__service_url_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "port",
-            "required": true,
-            "schema": {
-              "title": "Port",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Api Thread Service Url Dashboard Api Threads  Thread Id  Service Url Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Thread Service Url",
-        "tags": [
-          "dashboard",
-          "threads",
           "threads"
         ]
       }
@@ -10097,11 +15151,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
         "summary": "Api Thread Stream Events",
         "tags": [
           "dashboard",
@@ -10159,6 +15208,300 @@
           "dashboard",
           "threads",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript": {
+      "get": {
+        "operationId": "api_get_thread_transcript_dashboard_api_threads__thread_id__transcript_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Transcript",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
+      "get": {
+        "description": "The bytes of one file attached to a message in this thread.",
+        "operationId": "api_get_thread_attachment_dashboard_api_threads__thread_id__transcript_attachments__attachment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Attachment",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/events": {
+      "get": {
+        "operationId": "api_stream_thread_transcript_dashboard_api_threads__thread_id__transcript_events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Stream Thread Transcript",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/tool-calls/{tool_call_id}/output": {
+      "get": {
+        "operationId": "api_get_thread_tool_output_dashboard_api_threads__thread_id__transcript_tool_calls__tool_call_id__output_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tool_call_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Call Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Get Thread Tool Output Dashboard Api Threads  Thread Id  Transcript Tool Calls  Tool Call Id  Output Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Tool Output",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/turns": {
+      "get": {
+        "description": "The page of turns immediately older than ``before``.\n\nA cursor that does not decode, or that was minted for another thread, is a\nclient bug rather than a stale window: serving this thread's newest page\ninstead would silently duplicate history the client already has, so it is\nrejected.",
+        "operationId": "api_get_thread_transcript_turns_dashboard_api_threads__thread_id__transcript_turns_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": true,
+            "schema": {
+              "title": "Before",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptTurnPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Transcript Turns",
+        "tags": [
+          "dashboard",
+          "transcript"
         ]
       }
     },
@@ -10674,6 +16017,135 @@
           }
         ],
         "summary": "Api Refresh Workspace",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/repositories": {
+      "get": {
+        "operationId": "api_list_workspace_repositories_dashboard_api_workspaces__slug__repositories_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RepositorySettings"
+                  },
+                  "title": "Response Api List Workspace Repositories Dashboard Api Workspaces  Slug  Repositories Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Workspace Repositories",
+        "tags": [
+          "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/repositories/{owner}/{name}": {
+      "put": {
+        "description": "Change how one of a workspace's repositories is configured there.",
+        "operationId": "api_configure_workspace_repository_dashboard_api_workspaces__slug__repositories__owner___name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryConfiguration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositorySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Configure Workspace Repository",
         "tags": [
           "dashboard",
           "workspaces"
@@ -11262,9 +16734,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SlashCommandResponse"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

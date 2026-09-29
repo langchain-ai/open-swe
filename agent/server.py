@@ -75,8 +75,10 @@ from agent.dashboard.agent_overrides import (
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     canonical_model_pair,
+    default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
+    model_supports_images,
 )
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -123,6 +125,7 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
@@ -166,6 +169,7 @@ from agent.threads.recent_context import RecentContextAudience, recent_thread_co
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
+    assign_human_reviewer,
     background_execute,
     background_task,
     configure_repository,
@@ -198,6 +202,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_human_review,
     request_pr_review,
     save_organization_skill,
     save_plan,
@@ -367,6 +372,20 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
+async def _human_review_requests_enabled(login: str | None) -> bool:
+    if not login:
+        return False
+    try:
+        return (await User.preferences_for_login(login)).human_review_requests
+    except Exception:
+        logger.warning(
+            "Could not load the human review preference; leaving the tool out",
+            extra={"profile_login": login},
+            exc_info=True,
+        )
+        return False
+
+
 async def _user_for_login(login: str) -> User | None:
     """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
     try:
@@ -480,6 +499,8 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
+        "request_human_review",
+        "assign_human_reviewer",
         "manage_baby_sit",
         "manage_thread",
         "link_pull_request",
@@ -1439,6 +1460,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,
+        request_human_review,
+        assign_human_reviewer,
         notify_automation_channel,
         open_pull_request,
         link_pull_request,
@@ -1491,6 +1514,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
+    if local_run or not ENV.SLACK_BOT_TOKEN.get():
+        static_tools = [
+            tool
+            for tool in static_tools
+            if tool not in (request_human_review, assign_human_reviewer)
+        ]
+    elif not await _human_review_requests_enabled(profile_login):
+        static_tools = [tool for tool in static_tools if tool is not request_human_review]
     if (
         local_run
         or not ENV.SLACK_BOT_TOKEN.get()
@@ -1569,6 +1600,26 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
+    image_fallback: ImageModelFallbackMiddleware | None = None
+    if not model_supports_images(model_id) or (
+        adaptive_model_routing
+        and any(not model_supports_images(route_id) for route_id, _ in routing_defaults.values())
+    ):
+        vision_model = main_model
+        if not model_supports_images(model_id):
+            vision_model_id, vision_effort = default_vision_model_pair()
+            vision_model = _make_model_or_defer(
+                vision_model_id,
+                use_gateway=use_gateway,
+                **provider_model_kwargs(
+                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                ),
+            )
+        image_fallback = ImageModelFallbackMiddleware(vision_model)
+        if not model_supports_images(model_id):
+            image_fallback.add_text_only_model(main_model)
+
+    configurable["image_model_fallback_enabled"] = image_fallback is not None
     model_selection: ModelSelectionMiddleware | None = None
     if adaptive_model_routing:
         assert model_routing_mode is not None
@@ -1584,6 +1635,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
             for route, (routed_model_id, effort) in routing_defaults.items()
         }
+        if image_fallback is not None:
+            for route, model in routing_models.items():
+                if not model_supports_images(routing_defaults[route][0]):
+                    image_fallback.add_text_only_model(model)
         model_selection = ModelSelectionMiddleware(
             routing_models,
             main_model,
@@ -1712,6 +1767,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     record_run_usage,
                     *([model_selection] if model_selection else []),
                     *fallback_middleware,
+                    *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),

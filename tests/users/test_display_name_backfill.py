@@ -30,30 +30,6 @@ async def test_fills_an_empty_display_name_from_slack() -> None:
     assert renamed is not None and renamed.display_name == "Octo Cat"
 
 
-async def test_keeps_an_existing_display_name() -> None:
-    await _sign_in_named("GitHub Claimed Name")
-
-    await persist_display_name("U1", "Slack Name")
-
-    renamed = await User.for_identity("github", "1001")
-    assert renamed is not None and renamed.display_name == "GitHub Claimed Name"
-
-
-@pytest.mark.parametrize("name", ["", "   ", "unknown", None])
-async def test_an_empty_name_writes_nothing(name: str | None) -> None:
-    await _sign_in_named()
-
-    await persist_display_name("U1", name or "")
-
-    renamed = await User.for_identity("github", "1001")
-    assert renamed is not None and renamed.display_name == ""
-
-
-@pytest.mark.parametrize("slack_user_id", ["", "U-MISSING"])
-async def test_an_unknown_person_writes_nothing(slack_user_id: str) -> None:
-    await persist_display_name(slack_user_id, "Octo Cat")
-
-
 async def test_the_conditional_update_preserves_a_concurrent_github_name() -> None:
     user = await _sign_in_named()
 

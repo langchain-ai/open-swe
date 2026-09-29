@@ -113,12 +113,14 @@ compatible upgrade behavior, or drop it, which a locked-down install should pref
 
 ### GitHub access and the sandbox image
 
-Every thread's sandbox gets a token for the whole GitHub App installation, so a thread in any
-workspace can clone and push to any repository the App can reach. The one exception is a thread
-started by a GitHub event or an issue automation on a **public** repository: it records that
-repository in its thread metadata when it is created, server-side and never from run
-configuration, and its token is narrowed to that repository alone, including on every proxy
-refresh. Threads that members start from Slack, the dashboard, or Linear get the full token.
+Coding sandboxes normally get a token for the whole GitHub App installation, not just the
+workspace's preferred repositories. Threads started by a GitHub event or an issue automation on
+a **public** repository record that repository in their metadata when created, server-side and
+never from run configuration, and receive a token narrowed to that repository, including on every
+proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer,
+analyzer, and review-scout sandboxes explicitly scope their tokens to the repository being
+examined. Coding threads that members start from Slack, the dashboard, or Linear normally get
+the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts
 receive them in `OPENSWE_WORKSPACE_REPOS`, and changing them rebuilds the image. Any other

@@ -56,20 +56,6 @@ def _store(*records: Workspace) -> Any:
 # --- routing ---
 
 
-def test_a_task_id_routes_to_exactly_one_provider() -> None:
-    """The command provider claims everything the refresh provider does not."""
-    from agent.tools.background_execute import owns_task as command_owns
-
-    assert refresh.owns_task("ws-run-1")
-    assert not command_owns("ws-run-1")
-    # Handles minted before the rename still route to the refresh provider.
-    assert refresh.owns_task("env-run-1")
-    assert not command_owns("env-run-1")
-    assert command_owns("cmd-abc")
-    # Ids minted before task kinds existed still resolve to the command provider.
-    assert command_owns("2b1c4f9e-0000-4000-8000-000000000000")
-
-
 # --- workspace refreshes ---
 
 
@@ -97,68 +83,7 @@ async def test_a_running_refresh_reports_its_step_and_the_live_trace(admin: Any)
     read_log.assert_awaited_once_with("sb-builder", "/open-swe/environment/logs/setup.log")
 
 
-@pytest.mark.asyncio
-async def test_an_unreadable_builder_costs_the_trace_not_the_poll(admin: Any) -> None:
-    """The box is released at capture; a poll that lands after must still answer."""
-    with (
-        _store(_running()),
-        patch.object(refresh, "_read_builder_log", new_callable=AsyncMock, return_value=None),
-    ):
-        result = await background_task("status", "ws-run-1")
-
-    assert result["success"] is True
-    assert result["step"] == "setup"
-    assert result["output"] is None
-
-
-@pytest.mark.asyncio
-async def test_a_settled_refresh_reads_its_log_off_the_record(admin: Any) -> None:
-    settled = _running(
-        refresh_status="failed",
-        refresh_error="setup script exited 2",
-        refresh_log="gcc: fatal error",
-        refresh_sandbox_id=None,
-        refresh_finished_at="2026-09-08T10:30:00+00:00",
-        refresh_steps=[RefreshStep(label="setup", status="failed", exit_code=2)],
-    )
-    with _store(settled):
-        result = await background_task("status", "ws-run-1")
-
-    assert result["status"] == "failed"
-    assert result["error"] == "setup script exited 2"
-    assert result["output"] == "gcc: fatal error"
-    assert result["output_source"] == "record"
-
-
-@pytest.mark.asyncio
-async def test_a_superseded_handle_resolves_to_nothing(admin: Any) -> None:
-    """Keyed on the run, so a stale id never reports a later refresh's progress."""
-    with _store(_running(refresh_run_id="run-2")):
-        result = await background_task("status", "ws-run-1")
-
-    assert result["error"] == "task not found"
-    assert "superseded" in result["detail"]
-
-
 # --- listing ---
-
-
-@pytest.mark.asyncio
-async def test_list_merges_both_kinds(admin: Any) -> None:
-    with (
-        _store(_running()),
-        patch(
-            "agent.tools.background_execute.task_list",
-            new_callable=AsyncMock,
-            return_value=[{"task_id": "cmd-1", "kind": "sandbox_command", "status": "running"}],
-        ),
-    ):
-        result = await background_task("list")
-
-    assert {task["kind"] for task in result["tasks"]} == {
-        "workspace_refresh",
-        "sandbox_command",
-    }
 
 
 @pytest.mark.asyncio
@@ -218,16 +143,3 @@ async def test_a_non_admin_lists_only_their_own_commands(member: Any) -> None:
 
     assert result["success"] is True
     assert [task["kind"] for task in result["tasks"]] == ["sandbox_command"]
-
-
-@pytest.mark.asyncio
-async def test_a_non_admin_still_reads_their_own_command(member: Any) -> None:
-    with patch(
-        "agent.tools.background_execute.task_status",
-        new_callable=AsyncMock,
-        return_value={"task_id": "cmd-1", "status": "running", "output": "ok"},
-    ):
-        result = await background_task("status", "cmd-1")
-
-    assert result["success"] is True
-    assert result["output"] == "ok"

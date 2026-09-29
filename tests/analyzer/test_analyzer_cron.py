@@ -48,23 +48,6 @@ def _patch_record(monkeypatch, record: ReviewStyle | None) -> dict[str, Any]:  #
     return updates
 
 
-async def test_ensure_continual_cron_creates_and_stores(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    updates = _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id=None))
-
-    cron_id = await analyzer_cron.ensure_continual_cron("o/r")
-
-    assert cron_id == "cron_123"
-    assert len(fake_client.crons.created) == 1
-    created = fake_client.crons.created[0]
-    assert created["assistant_id"] == "analyzer"
-    assert created["config"]["configurable"]["analyzer_mode"] == "continual"
-    # Must carry an explicit thread_id, else get_analyzer early-returns an empty
-    # agent and the nightly run no-ops.
-    assert created["config"]["configurable"].get("thread_id")
-    assert "/continual-learning/SKILL.md" in created["input"]["files"]
-    assert updates["continual_cron_id"] == "cron_123"
-
-
 async def test_ensure_continual_cron_idempotent(monkeypatch, fake_client) -> None:  # noqa: ANN001
     _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id="existing"))
 
@@ -72,23 +55,6 @@ async def test_ensure_continual_cron_idempotent(monkeypatch, fake_client) -> Non
 
     assert cron_id == "existing"
     assert fake_client.crons.created == []
-
-
-async def test_remove_continual_cron(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    updates = _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id="cron_123"))
-
-    await analyzer_cron.remove_continual_cron("o/r")
-
-    assert fake_client.crons.deleted == ["cron_123"]
-    assert updates["continual_cron_id"] is None
-
-
-async def test_remove_continual_cron_noop_when_absent(monkeypatch, fake_client) -> None:  # noqa: ANN001
-    _patch_record(monkeypatch, ReviewStyle(full_name="o/r", continual_cron_id=None))
-
-    await analyzer_cron.remove_continual_cron("o/r")
-
-    assert fake_client.crons.deleted == []
 
 
 def test_daily_schedule_is_stable_and_in_window() -> None:

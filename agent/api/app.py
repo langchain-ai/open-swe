@@ -37,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.schedules.store import migrate_automation_workspaces
     from agent.transcript import listener as transcript_listener
     from agent.users import User
     from agent.users.import_concierge_mode import import_concierge_mode
@@ -70,6 +71,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: opted-in people get a thread per DM message until
         # an import succeeds.
         logger.exception("Importing concierge mode from the LangGraph Store failed")
+    try:
+        # Automations used to run in their repository's workspace; this moves
+        # the ones saved without a workspace to `default` and is a no-op once
+        # every one carries a workspace.
+        moved_automations = await migrate_automation_workspaces()
+    except Exception:  # noqa: BLE001
+        # Startup continues: an automation without a workspace still launches
+        # in `default` until the migration succeeds.
+        logger.exception("Moving automations without a workspace to default failed")
+    else:
+        logger.info(
+            "Moved automations without a workspace to default",
+            extra={"moved_automations": moved_automations},
+        )
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -110,15 +125,14 @@ def create_app() -> FastAPI:
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
-    if allowed_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[*allowed_origins, "open-swe://app"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
     add_trace_resource_names(app)
     add_request_ids(app)
     app.include_router(dashboard_router)
