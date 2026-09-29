@@ -11,10 +11,10 @@ from pydantic import BaseModel, ValidationError
 
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import CreateResponseRequest, InputItem
-from agent.sandboxes.lifecycle import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.sandboxes.tool_access import (
     OPENAI_API_KEY_PLACEHOLDER,
     SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
     TOOLS_HEADER,
     authenticate_tool_access,
 )

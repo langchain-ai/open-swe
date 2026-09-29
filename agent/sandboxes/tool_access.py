@@ -24,6 +24,7 @@ TOOLS_AUDIENCE = "open-swe-sandbox-tools"
 OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
 OPENAI_API_KEY_PLACEHOLDER = "open-swe-sandbox"
 SANDBOX_HOST_THREAD_KEY = "sandbox_host_thread_id"
+SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 class ToolAccess(BaseModel):

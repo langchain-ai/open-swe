@@ -33,6 +33,7 @@ from agent.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
+from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -48,8 +49,6 @@ from agent.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 client = get_client()
-
-SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 def _owner_login(metadata: dict[str, Any]) -> str | None:
