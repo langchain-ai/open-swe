@@ -49,6 +49,13 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
+        "id": "openai:gpt-6.1-sol",
+        "label": "GPT-6.1 Sol",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+    },
+    {
         "id": "openai:gpt-6-sol",
         "label": "GPT-6 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
@@ -139,6 +146,7 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
 }
 CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-6-astra": 272_000,
+    "openai:gpt-6.1-sol": 272_000,
     "openai:gpt-6-sol": 272_000,
     "openai:gpt-6-luna": 272_000,
 }
