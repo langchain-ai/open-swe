@@ -93,6 +93,7 @@ class HumanReviewRequest(Base):
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
     slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
+    broadcast_channel_id: Mapped[str] = mapped_column(server_default="", default="")
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     participants: Mapped[list[HumanReviewParticipant]] = relationship(
         default_factory=list,

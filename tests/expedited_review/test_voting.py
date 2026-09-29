@@ -322,3 +322,27 @@ async def test_only_one_open_approval_per_pull_request(open_approval: OpenApprov
     with pytest.raises(IntegrityError):
         await duplicate.save()
     assert await HumanReviewRequest.active_for("lc", "repo", 7) is not None
+
+
+async def test_broadcast_to_configured_review_channel(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval()
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        assert row is not None
+        row.broadcast_channel_id = "C_REVIEW"
+    approval = await _stored(approval)
+    monkeypatch.setattr(lifecycle, "_broadcast_channel", AsyncMock(return_value="#review"))
+    monkeypatch.setattr(lifecycle, "render", AsyncMock(return_value=("card", [])))
+    post = AsyncMock(return_value=("3.0", None))
+    delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(lifecycle, "delete_slack_message", delete)
+
+    assert await lifecycle.broadcast_card(approval)
+    post.assert_awaited_once_with("C_REVIEW", "card", blocks=[])
+    delete.assert_awaited_once_with("C1", "2.0")
+    stored = await _stored(approval)
+    assert stored.slack_channel_id == "C_REVIEW"
+    assert stored.slack_message_ts == stored.slack_thread_ts == "3.0"
+    assert await lifecycle._broadcast_channel(stored) is None

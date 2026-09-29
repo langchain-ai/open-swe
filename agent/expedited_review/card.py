@@ -40,10 +40,10 @@ def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
-    return [
-        section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}"),
-        context(f"Author {author}"),
-    ]
+    blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
+    if approval.tldr:
+        blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
+    return [*blocks, context(f"Author {author}")]
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:

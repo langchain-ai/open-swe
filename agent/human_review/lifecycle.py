@@ -30,6 +30,7 @@ from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
     post_slack_thread_reply_with_ts,
+    post_slack_top_level_message_with_ts,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
@@ -168,7 +169,12 @@ async def _broadcast_channel(approval: HumanReviewRequest) -> str | None:
     """``#name`` of the channel the card could be broadcast to; ``None`` outside a thread."""
     if not approval.slack_thread_ts or is_code_channel_session(approval.slack_thread_ts):
         return None
-    channel = await SlackChannel.load(approval.slack_channel_id)
+    if (
+        approval.broadcast_channel_id == approval.slack_channel_id
+        and approval.slack_message_ts == approval.slack_thread_ts
+    ):
+        return None
+    channel = await SlackChannel.load(approval.broadcast_channel_id or approval.slack_channel_id)
     return f"#{channel.name}" if channel is not None and channel.name else None
 
 
@@ -272,10 +278,36 @@ async def _repost(
 
 
 async def broadcast_card(approval: HumanReviewRequest) -> bool:
-    """Send the open card to the channel as well as its thread."""
+    """Send the open card to the configured review channel, or broadcast in place."""
     if approval.slack_broadcast or await _broadcast_channel(approval) is None:
         return False
-    return await _repost(approval, broadcast=True)
+    target = approval.broadcast_channel_id
+    if not target or target == approval.slack_channel_id:
+        return await _repost(approval, broadcast=True)
+    old_channel, old_ts = approval.slack_channel_id, approval.slack_message_ts
+    text, blocks = await render(approval, None)
+    message_ts, error = await post_slack_top_level_message_with_ts(
+        target, text, blocks=block_payload(blocks)
+    )
+    if not message_ts:
+        logger.warning(
+            "Failed to post expedited review in review channel",
+            extra={"request_id": str(approval.id), "slack_error": error},
+        )
+        return False
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        kept = row is not None and row.state == "open" and row.slack_message_ts == old_ts
+        if kept:
+            row.slack_channel_id = target
+            row.slack_thread_ts = message_ts
+            row.slack_message_ts = message_ts
+            row.slack_broadcast = False
+    if kept:
+        if not await delete_slack_message(old_channel, old_ts):
+            logger.warning("Left a stray Slack card", extra={"slack_message_ts": old_ts})
+    else:
+        await delete_slack_message(target, message_ts)
+    return kept
 
 
 async def notify_agent(request: HumanReviewRequest, prompt: str) -> bool:
