@@ -14,8 +14,10 @@ def upgrade() -> None:
         CREATE TABLE event_subscription (
             id uuid PRIMARY KEY,
             thread_id text NOT NULL,
-            source text NOT NULL CHECK (source IN ('github')),
-            pull_request_id uuid NOT NULL REFERENCES pull_request (id) ON DELETE CASCADE,
+            workspace_id uuid NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
+            sources text[] NOT NULL DEFAULT '{}',
+            repository_id uuid REFERENCES repository (id) ON DELETE CASCADE,
+            pull_request_id uuid REFERENCES pull_request (id) ON DELETE CASCADE,
             event_types text[] NOT NULL DEFAULT '{}',
             actions text[] NOT NULL DEFAULT '{}',
             multitask_strategy text NOT NULL
@@ -30,26 +32,56 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX event_subscription_pull_request_idx ON event_subscription (pull_request_id)"
-    )
+    op.execute("CREATE INDEX event_subscription_workspace_idx ON event_subscription (workspace_id)")
     op.execute("CREATE INDEX event_subscription_thread_idx ON event_subscription (thread_id)")
+    op.execute(
+        """
+        CREATE TABLE event_match (
+            id uuid PRIMARY KEY,
+            thread_id text NOT NULL,
+            subscription_id uuid NOT NULL,
+            source text NOT NULL,
+            delivery_id text NOT NULL,
+            content text NOT NULL,
+            run_config jsonb NOT NULL,
+            matched_at timestamptz NOT NULL DEFAULT clock_timestamp()
+        )
+        """
+    )
+    op.execute("CREATE INDEX event_match_thread_idx ON event_match (thread_id, matched_at)")
+    op.execute(
+        "CREATE UNIQUE INDEX event_match_delivery_idx ON event_match "
+        "(thread_id, source, delivery_id) WHERE delivery_id <> ''"
+    )
     for statement in (
         "COMMENT ON TABLE event_subscription IS 'An agent thread listening for event_log rows; "
-        "each matching row starts a run on the thread.'",
+        "each matching row is recorded in event_match for the thread.'",
+        "COMMENT ON TABLE event_match IS 'Events owed to a thread. A match is delivered once a "
+        "message in the thread state carries its id; older than two days are dropped.'",
+        "COMMENT ON COLUMN event_match.subscription_id IS 'The event_subscription that matched; "
+        "no foreign key, since a one-shot is deleted as it matches.'",
+        "COMMENT ON COLUMN event_match.content IS 'The wake message, rendered at match time.'",
+        "COMMENT ON COLUMN event_subscription.workspace_id IS 'Matches event_log rows with this "
+        "workspace_id: the subscribing thread''s workspace.'",
+        "COMMENT ON COLUMN event_subscription.sources IS 'event_log.source values to match; "
+        "empty matches every source.'",
+        "COMMENT ON COLUMN event_subscription.repository_id IS 'When set, only rows for this "
+        "repository match.'",
+        "COMMENT ON COLUMN event_subscription.pull_request_id IS 'When set, only rows for this "
+        "pull request match.'",
         "COMMENT ON COLUMN event_subscription.event_types IS 'event_log.event_type values to "
         "match; empty matches every type.'",
         "COMMENT ON COLUMN event_subscription.actions IS 'Payload action values to match, e.g. "
         "completed or submitted; empty matches every action.'",
         "COMMENT ON COLUMN event_subscription.run_config IS 'The configurable each woken run "
         "starts with.'",
-        "COMMENT ON COLUMN event_subscription.one_shot IS 'Deleted after its first successful "
-        "wake.'",
-        "COMMENT ON COLUMN event_subscription.trigger_count IS 'Runs this subscription has "
-        "started.'",
+        "COMMENT ON COLUMN event_subscription.one_shot IS 'Deleted after its first match.'",
+        "COMMENT ON COLUMN event_subscription.trigger_count IS 'Events this subscription has "
+        "matched.'",
     ):
         op.execute(statement)
 
 
 def downgrade() -> None:
+    op.execute("DROP TABLE event_match")
     op.execute("DROP TABLE event_subscription")

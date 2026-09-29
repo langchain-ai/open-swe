@@ -53,7 +53,8 @@ _INSERT = text(
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
     LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
-    RETURNING source, event_type, delivery_id, received_at, user_id, pull_request_id
+    RETURNING source, event_type, delivery_id, received_at,
+        user_id, workspace_id, repository_id, pull_request_id
     """
 )
 
@@ -77,6 +78,8 @@ class LoggedEvent(BaseModel):
     delivery_id: str
     received_at: datetime
     user_id: UUID | None
+    workspace_id: UUID | None
+    repository_id: UUID | None
     pull_request_id: UUID | None
     payload: JsonValue
 
@@ -194,10 +197,12 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-    ) -> LoggedEvent | None:
-        """Never raises: a delivery that cannot be logged is still handled."""
+    ) -> None:
+        """Log, then wake subscribed threads. Never raises: the delivery is still handled."""
+        from agent.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+
         if not configured():
-            return None
+            return
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
@@ -223,8 +228,8 @@ class EventLog:
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
-            return None
-        return LoggedEvent.model_validate({**row, "payload": payload})
+            return
+        await EventSubscription.deliver(LoggedEvent.model_validate({**row, "payload": payload}))
 
     @classmethod
     async def kinds(cls, since: datetime) -> list[EventKind]:

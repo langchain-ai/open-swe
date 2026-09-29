@@ -1,100 +1,210 @@
-"""Agent threads listening for event log rows; each match starts a run on the thread."""
+"""Agent threads listening for event log rows in their workspace."""
 
 import logging
 from datetime import datetime
-from typing import Literal, Self
+from typing import Self
 from uuid import UUID, uuid7
 
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 from sqlalchemy import ColumnElement, ForeignKey, Text, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.dispatch import create_durable_run
 from agent.github.comments import fence_github_comment_body
 from agent.github.org_membership import INTERNAL_BOT_LOGINS
 from agent.github.pull_requests import PullRequest
-from agent.input_messages import build_run_input
+from agent.github.repositories import Repository
 from agent.prompts import prompt
-from agent.webhooks.event_log import LoggedEvent
+from agent.webhooks.event_log import LoggedEvent, WebhookSource
+from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-type MultitaskStrategy = Literal["enqueue", "interrupt"]
-
-_OWN_BOT_LOGINS = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
-_TRUSTED_BOT_LOGINS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
+_OWN_GITHUB_LOGINS = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+_TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
 _MAX_BODY_CHARS = 8_000
-_SENDER_ID = "system:event-subscription"
 
 
-class _Account(BaseModel):
+class _GitHubAccount(BaseModel):
     login: str = ""
 
 
-class _Commented(BaseModel):
+class _GitHubRepository(BaseModel):
+    full_name: str = ""
+
+
+class _GitHubText(BaseModel):
     body: str | None = None
     html_url: str = ""
     state: str = ""
 
 
-class _Check(BaseModel):
+class _GitHubCheck(BaseModel):
     name: str = ""
     status: str = ""
     conclusion: str | None = None
     html_url: str | None = None
 
 
-class _GitHubEvent(BaseModel):
+class _GitHubDelivery(BaseModel):
     action: str = ""
-    sender: _Account | None = None
-    comment: _Commented | None = None
-    review: _Commented | None = None
-    check_run: _Check | None = None
-    check_suite: _Check | None = None
-    workflow_run: _Check | None = None
+    sender: _GitHubAccount | None = None
+    repository: _GitHubRepository | None = None
+    pull_request: _GitHubText | None = None
+    issue: _GitHubText | None = None
+    comment: _GitHubText | None = None
+    review: _GitHubText | None = None
+    check_run: _GitHubCheck | None = None
+    check_suite: _GitHubCheck | None = None
+    workflow_run: _GitHubCheck | None = None
+
+
+class _SlackMessage(BaseModel):
+    user: JsonValue = ""
+    text: JsonValue = ""
+    channel: JsonValue = ""
 
     @property
-    def sender_login(self) -> str:
-        return self.sender.login.lower() if self.sender else ""
+    def user_id(self) -> str:
+        return self.user if isinstance(self.user, str) else ""
 
     @property
-    def body(self) -> str:
-        commented = self.comment or self.review
-        return (commented.body or "") if commented else ""
+    def channel_id(self) -> str:
+        return self.channel if isinstance(self.channel, str) else ""
 
     @property
-    def link(self) -> str:
-        if commented := self.comment or self.review:
-            return commented.html_url
-        return (check.html_url or "") if (check := self.check) else ""
+    def message_text(self) -> str:
+        return self.text if isinstance(self.text, str) else ""
 
-    @property
-    def status(self) -> str:
-        if check := self.check:
-            return " ".join(part for part in (check.name, check.conclusion or check.status) if part)
-        return self.review.state if self.review else ""
 
-    @property
-    def check(self) -> _Check | None:
-        return self.check_run or self.workflow_run or self.check_suite
+class _SlackDelivery(BaseModel):
+    event: _SlackMessage | None = None
+    user_id: str = ""
+    channel_id: str = ""
+    text: str = ""
+
+
+class _LinearActor(BaseModel):
+    name: str = ""
+
+
+class _LinearData(BaseModel):
+    title: str = ""
+    body: str = ""
+    bot_actor: JsonValue = Field(default=None, alias="botActor")
+
+
+class _LinearDelivery(BaseModel):
+    action: str = ""
+    url: str = ""
+    actor: _LinearActor | None = None
+    data: _LinearData | None = None
+
+
+class EventSummary(BaseModel):
+    """What a wake message says about one delivery, whatever its source."""
+
+    source: WebhookSource
+    event_type: str
+    action: str = ""
+    target: str = ""
+    sender: str = ""
+    link: str = ""
+    status: str = ""
+    body: str = ""
+    trusted: bool = False
+    from_open_swe: bool = False
+
+    @classmethod
+    def of(cls, event: LoggedEvent) -> Self:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if event.source == "github":
+            return cls._github(event, _GitHubDelivery.model_validate(payload))
+        if event.source == "slack":
+            return cls._slack(event, _SlackDelivery.model_validate(payload))
+        return cls._linear(event, _LinearDelivery.model_validate(payload))
+
+    @classmethod
+    def _github(cls, event: LoggedEvent, delivery: _GitHubDelivery) -> Self:
+        sender = delivery.sender.login.lower() if delivery.sender else ""
+        commented = delivery.comment or delivery.review
+        opened = delivery.pull_request or delivery.issue
+        check = delivery.check_run or delivery.workflow_run or delivery.check_suite
+        body = commented.body if commented else None
+        if body is None and opened and delivery.action == "opened":
+            body = opened.body
+        if check:
+            status = " ".join(p for p in (check.name, check.conclusion or check.status) if p)
+            link = check.html_url or ""
+        else:
+            status = delivery.review.state if delivery.review else ""
+            link = commented.html_url if commented else ""
+        return cls(
+            source="github",
+            event_type=event.event_type,
+            action=delivery.action,
+            target=(opened.html_url if opened else "")
+            or (delivery.repository.full_name if delivery.repository else ""),
+            sender=f"@{sender}" if sender else "",
+            link=link,
+            status=status,
+            body=body or "",
+            trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
+            from_open_swe=sender in _OWN_GITHUB_LOGINS and event.event_type not in _CI_EVENT_TYPES,
+        )
+
+    @classmethod
+    def _slack(cls, event: LoggedEvent, delivery: _SlackDelivery) -> Self:
+        message = delivery.event or _SlackMessage(
+            user=delivery.user_id, text=delivery.text, channel=delivery.channel_id
+        )
+        own_user = ENV.SLACK_BOT_USER_ID.get()
+        return cls(
+            source="slack",
+            event_type=event.event_type,
+            target=f"<#{message.channel_id}>" if message.channel_id else "",
+            sender=f"<@{message.user_id}>" if message.user_id else "",
+            body=message.message_text,
+            trusted=event.user_id is not None,
+            from_open_swe=bool(own_user) and message.user_id == own_user,
+        )
+
+    @classmethod
+    def _linear(cls, event: LoggedEvent, delivery: _LinearDelivery) -> Self:
+        data = delivery.data or _LinearData()
+        return cls(
+            source="linear",
+            event_type=event.event_type,
+            action=delivery.action,
+            target=delivery.url,
+            sender=delivery.actor.name if delivery.actor else "",
+            status=data.title,
+            body=data.body,
+            trusted=event.user_id is not None,
+            from_open_swe=bool(data.bot_actor),
+        )
 
 
 class EventSubscription(Base):
     __tablename__ = "event_subscription"
 
     thread_id: Mapped[str]
-    pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id"))
+    workspace_id: Mapped[UUID]
     multitask_strategy: Mapped[MultitaskStrategy] = mapped_column(Text)
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     expires_at: Mapped[datetime]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
-    source: Mapped[Literal["github"]] = mapped_column(Text, default="github")
+    sources: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
+    repository_id: Mapped[UUID | None] = mapped_column(ForeignKey("repository.id"), default=None)
+    pull_request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pull_request.id"), default=None
+    )
     event_types: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
     actions: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
     instructions: Mapped[str] = mapped_column(default="")
@@ -102,7 +212,14 @@ class EventSubscription(Base):
     trigger_count: Mapped[int] = mapped_column(server_default="0", init=False)
     last_triggered_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    pull_request: Mapped[PullRequest] = relationship(init=False, lazy="joined")
+    repository: Mapped[Repository | None] = relationship(init=False, lazy="joined")
+    pull_request: Mapped[PullRequest | None] = relationship(init=False, lazy="joined")
+
+    @property
+    def target(self) -> str:
+        if self.pull_request:
+            return self.pull_request.url
+        return self.repository.full_name if self.repository else "workspace"
 
     async def create(self) -> Self:
         cls = type(self)
@@ -140,18 +257,18 @@ class EventSubscription(Base):
     @classmethod
     async def deliver(cls, event: LoggedEvent) -> None:
         """Wake every thread listening for ``event``. Never raises."""
-        if event.pull_request_id is None:
+        if event.workspace_id is None:
             return
         try:
-            summary = _GitHubEvent.model_validate(event.payload)
+            summary = EventSummary.of(event)
         except ValidationError:
             logger.warning(
-                "Event payload is not a GitHub delivery",
-                extra={"event_delivery_id": event.delivery_id},
+                "Event payload does not have its source's shape",
+                extra={"webhook_source": event.source, "event_delivery_id": event.delivery_id},
                 exc_info=True,
             )
             return
-        if summary.sender_login in _OWN_BOT_LOGINS and event.event_type not in _CI_EVENT_TYPES:
+        if summary.from_open_swe:
             return
         try:
             subscriptions = await cls._matching(event, summary.action)
@@ -162,28 +279,69 @@ class EventSubscription(Base):
                 exc_info=True,
             )
             return
+        strategies: dict[str, MultitaskStrategy] = {}
         for subscription in subscriptions:
-            extra = {
-                "event_subscription_id": str(subscription.id),
-                "agent_thread_id": subscription.thread_id,
-                "event_delivery_id": event.delivery_id,
-            }
             try:
-                await subscription.wake(event, summary)
-            except NotFoundError:
-                logger.info("Event subscription thread is gone", extra=extra)
-                await subscription.delete()
+                if not await subscription.match(event, summary):
+                    continue
             except Exception:  # noqa: BLE001
-                logger.warning("Waking an event subscription failed", extra=extra, exc_info=True)
+                logger.warning(
+                    "Recording an event match failed",
+                    extra={
+                        "event_subscription_id": str(subscription.id),
+                        "event_delivery_id": event.delivery_id,
+                    },
+                    exc_info=True,
+                )
+                continue
+            if strategies.get(subscription.thread_id) != "interrupt":
+                strategies[subscription.thread_id] = subscription.multitask_strategy
+        for thread_id, strategy in strategies.items():
+            await cls.deliver_to(thread_id, strategy)
+
+    @classmethod
+    async def deliver_to(cls, thread_id: str, strategy: MultitaskStrategy) -> None:
+        """Start a run for what ``thread_id`` is owed, when one is needed. Never raises."""
+        if not postgres.configured():
+            return
+        try:
+            await EventMatch.deliver(thread_id, strategy)
+        except NotFoundError:
+            logger.info("Event subscription thread is gone", extra={"agent_thread_id": thread_id})
+            await cls.forget(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Delivering event matches failed",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+
+    @classmethod
+    async def forget(cls, thread_id: str) -> None:
+        try:
+            async with postgres.session() as session:
+                await session.execute(delete(cls).where(cls.thread_id == thread_id))
+            await EventMatch.forget(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Deleting a gone thread's event subscriptions failed",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
 
     @classmethod
     async def _matching(cls, event: LoggedEvent, action: str) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls).where(
-                    cls.source == event.source,
-                    cls.pull_request_id == event.pull_request_id,
+                    cls.workspace_id == event.workspace_id,
                     ~cls._expired(),
+                    or_(func.cardinality(cls.sources) == 0, cls.sources.contains([event.source])),
+                    or_(cls.repository_id.is_(None), cls.repository_id == event.repository_id),
+                    or_(
+                        cls.pull_request_id.is_(None),
+                        cls.pull_request_id == event.pull_request_id,
+                    ),
                     or_(
                         func.cardinality(cls.event_types) == 0,
                         cls.event_types.contains([event.event_type]),
@@ -193,48 +351,35 @@ class EventSubscription(Base):
             )
             return list(rows.unique())
 
-    async def wake(self, event: LoggedEvent, summary: _GitHubEvent) -> None:
+    async def match(self, event: LoggedEvent, summary: EventSummary) -> bool:
+        """Record ``event`` as owed to this thread; ``False`` when nothing new is owed."""
         if not await self._claim():
-            return
-        registered = event.user_id is not None or summary.sender_login in _TRUSTED_BOT_LOGINS
+            return False
+        body = summary.body[:_MAX_BODY_CHARS]
         content = prompt(
             "runs/event-subscription",
-            event_type=event.event_type,
-            action=summary.action,
-            sender=summary.sender_login,
-            pr_url=self.pull_request.url,
-            link=summary.link,
-            status=summary.status,
-            body=fence_github_comment_body(summary.body[:_MAX_BODY_CHARS], registered=registered)
-            if summary.body
-            else "",
+            summary=summary,
+            body=fence_github_comment_body(body, registered=summary.trusted) if body else "",
             instructions=self.instructions,
             subscription_id=str(self.id),
             one_shot=self.one_shot,
         )
         try:
-            await create_durable_run(
-                self.thread_id,
-                "agent",
-                input=build_run_input(
-                    content,
-                    {"sender_id": _SENDER_ID, "surface": "github", "kind": "system"},
-                    systems=[
-                        {"id": _SENDER_ID, "display_name": "Event listener", "platform": "github"}
-                    ],
-                ),
-                config={"configurable": self.run_config},
-                metadata={"kind": "event_subscription", "event_subscription_id": str(self.id)},
-                source="github",
-                thread_title=None,
-                multitask_strategy=self.multitask_strategy,
-                if_not_exists="reject",
-            )
+            recorded = await EventMatch(
+                thread_id=self.thread_id,
+                subscription_id=self.id,
+                source=event.source,
+                delivery_id=event.delivery_id,
+                content=content,
+                run_config=self.run_config,
+            ).record()
         except Exception:
             await self._unclaim()
             raise
-        if self.one_shot or (event.event_type == "pull_request" and summary.action == "closed"):
+        pull_request_closed = event.event_type == "pull_request" and summary.action == "closed"
+        if self.one_shot or (self.pull_request_id is not None and pull_request_closed):
             await self.delete()
+        return recorded
 
     async def delete(self) -> None:
         async with postgres.session() as session:

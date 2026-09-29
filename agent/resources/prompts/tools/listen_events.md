@@ -1,16 +1,22 @@
-Listen for events and have each matching one start a run on this thread.
+Listen for inbound events in this thread's workspace and have each matching one delivered to this thread.
 
-Only GitHub pull request events are supported for now: pull request updates, reviews, review comments, PR comments, and CI results (`check_run`, `check_suite`, `workflow_run`). Use `list_event_types` to see which event types and actions actually arrive. A subscription ends when it delivers the pull request's `closed` event, after its first wake when `one_shot` is set, when it expires, or when you cancel it. Events Open SWE itself caused, other than CI results, never wake the thread.
+Events come from GitHub (repositories bound to the workspace), Slack (channels bound to the workspace), and Linear. Use `list_event_types` to see which sources, event types, and actions actually arrive. Events Open SWE itself caused never match, except GitHub CI results.
 
-Prefer narrow filters: every matching event starts a run. For CI, `event_types=["check_suite"], actions=["completed"]` gives one wake per finished suite instead of one per check.
+Every matching event is delivered exactly once, oldest first, as a message from the event listener. None is lost when the thread is busy or when a run is interrupted: if a run is stopped before an event reached it, the next run on this thread receives that event before anything newer. A subscription ends after its first match when `one_shot` is set, after it delivers a subscribed pull request's `closed` event, when it expires, or when you cancel it.
+
+Prefer narrow filters: each matching event costs a model turn. For CI, `event_types=["check_suite"], actions=["completed"]` gives one event per finished suite instead of one per check.
 
 Args:
-    action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions with how often each has triggered; `cancel` removes the one named by `subscription_id`.
-    pr_url: The GitHub pull request URL. Required for `subscribe`.
-    subscription_id: The subscription to cancel. Required for `cancel`.
-    event_types: GitHub event names to match, e.g. `pull_request_review`, `issue_comment`, `check_suite`. Empty matches every type.
-    actions: Payload `action` values to match, e.g. `submitted`, `created`, `completed`. Empty matches every action.
-    multitask_strategy: `enqueue` runs each event after the current run finishes; `interrupt` stops the current run and handles the event immediately.
-    one_shot: End the subscription after the first event it delivers.
-    instructions: What to do when woken, repeated in every wake message.
+    action: `subscribe` creates a subscription and returns its `subscription_id`; `list` shows this thread's outstanding subscriptions, each with `trigger_count` (events matched) and `last_triggered_at`; `cancel` removes the one named by `subscription_id`.
+    sources: `github`, `slack`, and/or `linear`. Empty matches every source.
+    repo: A GitHub repository (`owner/name`) of this workspace; only its events match.
+    pr_url: A GitHub pull request URL; only that pull request's events match (reviews, comments, pushes, CI).
+    event_types: Event names to match, e.g. GitHub `pull_request_review`, `issue_comment`, `check_suite`, `issues`; Slack `message`, `reaction_added`. Empty matches every type. `subscribe` needs at least one of `event_types`, `repo`, or `pr_url`.
+    actions: Payload `action` values to match, e.g. `submitted`, `created`, `completed`, `opened`. Empty matches every action.
+    when_busy: What happens when a matching event arrives while this thread is already running, including the run that is subscribing right now.
+        `wait` (default): nothing is interrupted. The event is added to the running thread just before its next model call, so you see it within one step of your current work; if the run is already finishing, a new run starts with it right after. Use this for almost everything: review comments, CI results, new issues.
+        `interrupt`: the current run is stopped immediately and a new run starts with the event. Work already completed in the stopped run is kept; the step in progress is abandoned, so a tool call that was running returns as cancelled and its sandbox command is killed. Events that were waiting are delivered first, then this one. Use it only when the event makes the current work pointless, for example the pull request you are fixing was closed.
+    one_shot: End the subscription after the first event it matches.
+    instructions: What to do when an event arrives; repeated with every event from this subscription.
     expires_in_hours: How long to listen, 1 to 336 hours. Defaults to 168 (7 days).
+    subscription_id: The subscription to cancel. Required for `cancel`.

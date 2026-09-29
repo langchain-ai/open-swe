@@ -116,6 +116,7 @@ from agent.middleware import (
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
+    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -1635,6 +1636,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     guard_middleware=_subagent_guard_middleware(local_run),
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
+                        deliver_event_matches_before_model.name,
                         *((model_selection.name,) if model_selection else ()),
                     ),
                 ),
@@ -1700,7 +1702,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
                     refresh_github_proxy_before_model,
-                    *([] if stop_summary_mode else [check_message_queue_before_model]),
+                    *(
+                        []
+                        if stop_summary_mode
+                        else [check_message_queue_before_model, deliver_event_matches_before_model]
+                    ),
                     TimeoutWrapupMiddleware(),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),

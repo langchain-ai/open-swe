@@ -1,9 +1,9 @@
-A GitHub `{{ event_type }}{% if action %}.{{ action }}{% endif %}` event arrived on {{ pr_url }}{% if sender %} from @{{ sender }}{% endif %}.
-{% if status %}
-Status: {{ status }}
+A {{ summary.source }} `{{ summary.event_type }}{% if summary.action %}.{{ summary.action }}{% endif %}` event arrived{% if summary.target %} on {{ summary.target }}{% endif %}{% if summary.sender %} from {{ summary.sender }}{% endif %}.
+{% if summary.status %}
+Status: {{ summary.status }}
 {% endif %}
-{% if link %}
-Link: {{ link }}
+{% if summary.link %}
+Link: {{ summary.link }}
 {% endif %}
 {% if body %}
 
@@ -16,8 +16,8 @@ When you subscribed you asked to be told:
 {% endif %}
 
 {% if one_shot %}
-This run was started by your one-shot `listen_events` subscription `{{ subscription_id }}`, which has now ended.
+This event came from your one-shot `listen_events` subscription `{{ subscription_id }}`, which has now ended.
 {% else %}
-This run was started by your `listen_events` subscription `{{ subscription_id }}`. Cancel it with `listen_events(action="cancel", subscription_id="{{ subscription_id }}")` once you no longer need these events.
+This event came from your `listen_events` subscription `{{ subscription_id }}`. Cancel it with `listen_events(action="cancel", subscription_id="{{ subscription_id }}")` once you no longer need these events.
 {% endif %}
-Use `gh` for anything the event does not include.
+Use the source's CLI or tools for anything the event does not include.
