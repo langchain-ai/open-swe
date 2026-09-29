@@ -10,6 +10,8 @@ class UserPreferences(BaseModel):
     concierge_mode: bool = False
     # Sandboxes created for this person's threads suspend RAM on idle stop and resume warm.
     preserve_sandbox_memory: bool = False
+    # This person may ask for a human review in Slack, from the dashboard or through the agent.
+    human_review_requests: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
     experimental_act_as_approval: bool = False
     # Open SWE acts as this person in shared threads without asking first.
@@ -19,6 +21,9 @@ class UserPreferences(BaseModel):
 class UserPreferencesPatch(BaseModel):
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    human_review_requests: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     # A consent control, so never agent-manageable.

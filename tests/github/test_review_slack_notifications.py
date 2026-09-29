@@ -39,8 +39,19 @@ def review_notice(monkeypatch: pytest.MonkeyPatch, fake_store) -> tuple[MagicMoc
 
 
 @pytest.mark.parametrize("body", ["", "Please fix this before merging."])
+@pytest.mark.parametrize(
+    ("state", "suffix"),
+    [
+        ("approved", ": *Approved*."),
+        ("changes_requested", ": *Changes requested*."),
+        ("commented", ": *Comments left*."),
+        ("APPROVED", ": *Approved*."),
+        ("unknown", "."),
+        (None, "."),
+    ],
+)
 async def test_review_wakeup_posts_one_linked_notice(
-    monkeypatch: pytest.MonkeyPatch, review_notice, body: str
+    monkeypatch: pytest.MonkeyPatch, review_notice, body: str, state: str | None, suffix: str
 ) -> None:
     client, post = review_notice
     monkeypatch.setattr(common, "get_client", lambda **kwargs: client)
@@ -80,7 +91,12 @@ async def test_review_wakeup_posts_one_linked_notice(
     payload = {
         "action": "submitted",
         "sender": {"login": "octo", "id": 1},
-        "review": {"body": body, "user": {"login": "octo"}, "submitted_at": "2026-01-01T00:00:00Z"},
+        "review": {
+            "body": body,
+            "user": {"login": "octo"},
+            "submitted_at": "2026-01-01T00:00:00Z",
+            **({"state": state} if state is not None else {}),
+        },
     }
 
     async def deliver() -> None:
@@ -106,7 +122,7 @@ async def test_review_wakeup_posts_one_linked_notice(
     post.assert_awaited_once_with(
         "C123",
         "1700000000.123456",
-        "@octo <https://github.com/o/r/pull/7#pullrequestreview-42|submitted a review>.",
+        f"@octo <https://github.com/o/r/pull/7#pullrequestreview-42|submitted a review on o/r#7>{suffix}",
         agent_thread_id="agent-thread",
         unfurl_links=False,
         unfurl_media=False,
@@ -120,7 +136,7 @@ async def test_review_wakeup_posts_one_linked_notice(
         await asyncio.gather(deliver(), deliver())
         assert post.await_count == index + 1
         assert post.call_args.args[2] == (
-            "@octo <https://github.com/o/r/pull/7#pullrequestreview-42|edited a review>."
+            f"@octo <https://github.com/o/r/pull/7#pullrequestreview-42|edited a review on o/r#7>{suffix}"
         )
 
 
@@ -136,6 +152,7 @@ async def test_reviews_do_not_create_slack_threads(review_notice, detached: bool
     await notifications.notify_slack_review(
         "agent-thread",
         reviewer="octo",
+        pr_label="o/r#7",
         review_url="https://github.com/o/r/pull/7#pullrequestreview-42",
     )
     post.assert_not_awaited()
@@ -144,17 +161,29 @@ async def test_reviews_do_not_create_slack_threads(review_notice, detached: bool
 async def test_distinct_reviews_and_edits_follow_current_slack_location(review_notice) -> None:
     client, post = review_notice
     url = "https://github.com/o/r/pull/7#pullrequestreview-42"
-    await notifications.notify_slack_review("agent-thread", reviewer="octo", review_url=url)
+    await notifications.notify_slack_review(
+        "agent-thread", reviewer="octo", pr_label="o/r#7", review_url=url
+    )
     client.threads.get.return_value["metadata"]["source_context"]["slack_thread"]["channel_id"] = (
         "C456"
     )
     for _ in range(2):
         await notifications.notify_slack_review(
-            "agent-thread", reviewer="octo", review_url=url, edited_body="Updated review"
+            "agent-thread",
+            reviewer="octo",
+            pr_label="o/r#7",
+            review_url=url,
+            edited_body="Updated review",
         )
     assert post.await_count == 2
-    assert post.call_args.args == ("C456", "1700000000.123456", f"@octo <{url}|edited a review>.")
-    await notifications.notify_slack_review("agent-thread", reviewer="octo", review_url=url + "1")
+    assert post.call_args.args == (
+        "C456",
+        "1700000000.123456",
+        f"@octo <{url}|edited a review on o/r#7>.",
+    )
+    await notifications.notify_slack_review(
+        "agent-thread", reviewer="octo", pr_label="o/r#7", review_url=url + "1"
+    )
     assert post.await_count == 3
 
 
@@ -179,6 +208,7 @@ async def test_review_rechecks_destination_after_concurrent_move(
     await notifications.notify_slack_review(
         "agent-thread",
         reviewer="octo",
+        pr_label="o/r#7",
         review_url="https://github.com/o/r/pull/7#pullrequestreview-42",
     )
     if detached:
@@ -201,6 +231,7 @@ async def test_slack_failures_are_logged_without_retrying_uncertain_delivery(
         await notifications.notify_slack_review(
             "agent-thread",
             reviewer="octo",
+            pr_label="o/r#7",
             review_url="https://github.com/o/r/pull/7#pullrequestreview-42",
         )
     post.assert_awaited_once()

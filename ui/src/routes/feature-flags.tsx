@@ -4,6 +4,7 @@ import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ActAsApprovalPreference } from "@/features/settings/components/ActAsApprovalPreference"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
+import { HumanReviewPreference } from "@/features/settings/components/HumanReviewPreference"
 import { SandboxMemoryPreference } from "@/features/settings/components/SandboxMemoryPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useFeatureFlagsPanel } from "@/lib/featureFlags"
@@ -42,6 +43,7 @@ function FeatureFlagsPage() {
       <SettingsSection title="Experiments">
         <AssistantUiPreference />
         <SandboxMemoryPreference />
+        <HumanReviewPreference />
         <ActAsApprovalPreference />
       </SettingsSection>
     </AppShell>

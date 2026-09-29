@@ -369,6 +369,20 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
+async def _human_review_requests_enabled(login: str | None) -> bool:
+    if not login:
+        return False
+    try:
+        return (await User.preferences_for_login(login)).human_review_requests
+    except Exception:
+        logger.warning(
+            "Could not load the human review preference; leaving the tool out",
+            extra={"profile_login": login},
+            exc_info=True,
+        )
+        return False
+
+
 async def _user_for_login(login: str) -> User | None:
     """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
     try:
@@ -1503,6 +1517,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             for tool in static_tools
             if tool not in (request_human_review, assign_human_reviewer)
         ]
+    elif not await _human_review_requests_enabled(profile_login):
+        static_tools = [tool for tool in static_tools if tool is not request_human_review]
     if (
         local_run
         or not ENV.SLACK_BOT_TOKEN.get()

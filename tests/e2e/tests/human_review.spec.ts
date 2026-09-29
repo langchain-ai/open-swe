@@ -268,13 +268,21 @@ test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
     await grantWrite(request);
+    await control(request, "/control/user-preferences", {
+      login: ALICE.login,
+      preferences: { human_review_requests: true },
+    });
   });
 
   // Preferences live on the users row, which a reset keeps.
   test.afterEach(async ({ request }) => {
-    await control(request, "/control/concierge-mode", {
+    await control(request, "/control/user-preferences", {
+      login: ALICE.login,
+      preferences: { human_review_requests: false },
+    });
+    await control(request, "/control/user-preferences", {
       login: BOB.login,
-      enabled: false,
+      preferences: { concierge_mode: false },
     });
   });
 
@@ -502,9 +510,9 @@ test.describe("Human review in Slack", () => {
     await setReviewChannel(request);
 
     // Bob keeps his bot DM as one concierge conversation, which already exists.
-    await control(request, "/control/concierge-mode", {
+    await control(request, "/control/user-preferences", {
       login: BOB.login,
-      enabled: true,
+      preferences: { concierge_mode: true },
     });
     const dm = (await control(request, "/mock/slack/send", {
       channel: "D_BOB",
