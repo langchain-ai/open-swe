@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, NotRequired, TypedDict
 
+from deepagents.middleware.skills import disclosed_skill_tool_names
 from langchain.agents.middleware.types import (
     AgentState,
     ModelRequest,
@@ -21,6 +22,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from agent.mcp import match_skill_tools
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
 
@@ -197,9 +199,13 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return bool(self._groups)
 
     async def catalog_tools(self) -> list[BaseTool]:
-        """Resolve the connected tools for authenticated sandbox discovery."""
+        """Build every integration group and return all of its tools."""
         await self._build(list(self._group_of))
         return [tool for name in self._group_of if (tool := self._tool(name)) is not None]
+
+    async def resolve_skill_tools(self, name: str, runtime: Runtime) -> list[BaseTool]:  # noqa: ARG002
+        """Resolve one skill ``include_tools`` entry to integration tools"""
+        return match_skill_tools(name, await self.catalog_tools())
 
     async def _resolve(self, group: str) -> dict[str, BaseTool]:
         resolved = self._resolved.setdefault(group, _Resolved())
@@ -276,7 +282,9 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         name = request.tool_call["name"]
         if name not in self._group_of:
             return await handler(request)
-        if name not in self._loaded_names(request.state):
+        if name not in self._loaded_names(request.state) and name not in (
+            disclosed_skill_tool_names(request.state)
+        ):
             return ToolMessage(
                 content=(
                     f"Load {name} with load_integration_tools before calling it."

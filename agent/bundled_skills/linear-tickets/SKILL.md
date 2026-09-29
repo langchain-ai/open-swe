@@ -1,6 +1,8 @@
 ---
 name: linear-tickets
 description: Create or update high-quality Linear tickets while preserving the originating report, diagnostic links, attachments, and reporter/requester attribution. Read this whenever someone asks to create, recreate, or update a Linear issue.
+metadata:
+  include_tools: linear
 ---
 
 # Linear tickets

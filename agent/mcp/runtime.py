@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -37,6 +37,9 @@ type CatalogOutcome = Literal["hit", "stale", "miss", "expired", "failed"]
 
 _CATALOG_TTL = timedelta(minutes=10)
 _CATALOG_MAX_AGE = timedelta(hours=24)
+
+_TOOL_NAME_KEY = "mcp_tool_name"
+_CONNECTION_KEY = "mcp_connection"
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,31 @@ def _tool_name(connection_name: str, tool_name: str) -> str:
     return f"{safe[:53]}_{suffix}"
 
 
+def match_skill_tools(name: str, tools: Sequence[BaseTool]) -> list[BaseTool]:
+    """Return the tools a skill's ``include_tools`` entry names, in the order given.
+
+    ``connection:tool`` names one MCP tool by its connection and raw MCP name. A name
+    without ``:`` names every tool on that connection, and any tool of exactly that
+    name, such as a built-in Notion tool.
+    """
+    connection, separator, mcp_tool_name = name.partition(":")
+    if separator:
+        return [
+            tool
+            for tool in tools
+            if _mcp_metadata(tool, _CONNECTION_KEY) == connection
+            and _mcp_metadata(tool, _TOOL_NAME_KEY) == mcp_tool_name
+        ]
+    return [
+        tool for tool in tools if tool.name == name or _mcp_metadata(tool, _CONNECTION_KEY) == name
+    ]
+
+
+def _mcp_metadata(tool: BaseTool, key: str) -> str | None:
+    value = (tool.metadata or {}).get(key)
+    return value if isinstance(value, str) else None
+
+
 def _wrap_tool(
     name: str,
     url: str,
@@ -209,7 +237,7 @@ def _wrap_tool(
         args_schema=definition.inputSchema,
         response_format="content_and_artifact",
         handle_tool_error=True,
-        metadata={"mcp_tool_name": definition.name},
+        metadata={_TOOL_NAME_KEY: definition.name, _CONNECTION_KEY: name},
     )
 
 
