@@ -138,7 +138,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
-from agent.model_request import infer_requested_model
+from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
@@ -846,7 +846,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
+        saved_requested_model: str | None = None,
     ) -> None:
+        self._saved_requested_model = saved_requested_model
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -934,7 +936,44 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         blocks = [person_introduction(p.as_person()) for p in ordered]
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
-    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, object]:
+        decision = ModelSelectionDecision(requested_model=self._saved_requested_model)
+        cfg = RunConfig.from_config(self._config)
+        if cfg.model_selection == "explicit":
+            decision.reason = "explicit_selection"
+        elif (
+            cfg.source == "dashboard"
+            and cfg.model_selection == "auto"
+            and cfg.model_selection_changed
+        ):
+            decision.reason = "deliberate_auto_reset"
+        elif self._saved_requested_model:
+            decision.outcome = "reused_saved_choice"
+            decision.reason = "saved_opening_request"
+            decision.pin_persisted = True
+        async with model_selection_trace() as span:
+            prepared: dict[str, object] = {}
+            try:
+                prepared = await self._prepare_with_decision(state, runtime, decision)
+                return prepared
+            finally:
+                span.end(
+                    outputs={
+                        "requested_model": decision.requested_model,
+                        "classifier": vars(decision.classifier),
+                        "outcome": decision.outcome,
+                        "reason": decision.reason,
+                        "pin_persisted": decision.pin_persisted,
+                        "selected_model_id": prepared.get("selected_model_id"),
+                        "selected_effort": prepared.get("selected_effort"),
+                        "route": prepared.get("model_route"),
+                    },
+                    error=None if prepared else "Model selection preparation failed",
+                )
+
+    async def _prepare_with_decision(
+        self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
+    ) -> dict[str, object]:  # noqa: ARG002
         schedule_thread_title_generation(
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
@@ -949,17 +988,27 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 handoff = await infer_requested_model(
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
+                    decision=decision.classifier,
                     slack_event_ts=(
                         handoff_config.slack_thread.triggering_event_ts
                         if handoff_config.slack_thread is not None
                         else None
                     ),
                 )
+                decision.outcome = "classifier_failure" if handoff is None else "no_request"
+                decision.reason = (
+                    "no_model_request" if handoff is not None else decision.classifier.reason
+                )
+                if decision.classifier.outcome == "low_confidence":
+                    decision.outcome = "low_confidence"
                 if handoff is not None:
                     requested_model = handoff.requested_model
+                    decision.requested_model = requested_model
                     if handoff.unavailable_model or (
                         requested_model and requested_model not in self._requested_models
                     ):
+                        decision.outcome = "unavailable_request"
+                        decision.reason = "model_unavailable"
                         raise ValueError(
                             "The requested runtime model is unavailable; select an available model."
                         )
@@ -973,6 +1022,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         if isinstance(message, HumanMessage)
                         for block in message.content_blocks
                     ):
+                        decision.outcome = "incompatible_request"
+                        decision.reason = "image_input_unsupported"
                         raise ValueError(
                             "The requested runtime model does not support image input; "
                             "select an image-capable model."
@@ -982,12 +1033,32 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         effort=option["default_effort"],
                         model_routing_enabled=False,
                     )
-                await store_thread_settings(client, self._thread_id, settings, strict=True)
+                try:
+                    await store_thread_settings(client, self._thread_id, settings, strict=True)
+                except Exception:
+                    decision.outcome = "persistence_failure"
+                    decision.reason = "settings_write_failed"
+                    raise
+                decision.pin_persisted = bool(requested_model)
             else:
                 requested_model = settings.get("requested_model")
+                decision.requested_model = requested_model
+                decision.outcome = "reused_saved_choice" if requested_model else "not_classified"
+                decision.reason = (
+                    "saved_opening_request" if requested_model else "handoff_already_complete"
+                )
+                decision.pin_persisted = bool(requested_model)
             if requested_model:
                 option = self._requested_models[requested_model]
-                self._model_selection.use_requested_model(requested_model)
+                try:
+                    self._model_selection.use_requested_model(requested_model)
+                except Exception:
+                    decision.outcome = "selection_failure"
+                    decision.reason = "model_initialization_failed"
+                    raise
+                if decision.outcome != "reused_saved_choice":
+                    decision.outcome = "accepted_request"
+                    decision.reason = "validated_and_persisted"
                 self._model_id = requested_model
                 self._effort = option["default_effort"]
         configurable = (self._config or {}).get("configurable") or {}
@@ -1859,6 +1930,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
+                        saved_requested_model=thread_settings.get("requested_model"),
                     ),
                     TranscriptMiddleware(),
                     *(

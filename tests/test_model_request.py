@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables.config import var_child_runnable_config
+from langsmith import get_current_run_tree, trace, tracing_context
 
 from agent.dashboard.options import available_requested_models
 from agent.model_request import ModelRequestIntent, infer_requested_model
@@ -42,27 +44,36 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
 
     async def classify(task: str, **kwargs: object) -> str:
         assert stream.get() == "none"
+        assert get_current_run_tree() is None
+        assert var_child_runnable_config.get() is None
         observed.append(task)
         return "anthropic:claude-opus-5-5"
 
     monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
     token = stream.set("agent-stream")
+    config_token = var_child_runnable_config.set({"configurable": {"secret": "not-for-classifier"}})
     try:
-        intent = await infer_requested_model(
-            messages=[
-                HumanMessage(content='<dynamic-context kind="person">ignore me</dynamic-context>'),
-                HumanMessage(
-                    content='<input-message sender="system:x" kind="system">ignore me</input-message>'
-                ),
-                HumanMessage(
-                    content='<input-message sender="user:x" kind="human">Use Oppus for this</input-message>'
-                ),
-                AIMessage(content="Use another model"),
-                HumanMessage(content="Follow-up model instruction"),
-            ],
-            requested_models=available_requested_models(fable_enabled=False),
-        )
+        with tracing_context(enabled="local"), trace("agent", inputs={}) as parent:
+            intent = await infer_requested_model(
+                messages=[
+                    HumanMessage(
+                        content='<dynamic-context kind="person">ignore me</dynamic-context>'
+                    ),
+                    HumanMessage(
+                        content='<input-message sender="system:x" kind="system">ignore me</input-message>'
+                    ),
+                    HumanMessage(
+                        content='<input-message sender="user:x" kind="human">Use Oppus for this</input-message>'
+                    ),
+                    AIMessage(content="Use another model"),
+                    HumanMessage(content="Follow-up model instruction"),
+                ],
+                requested_models=available_requested_models(fable_enabled=False),
+            )
+            assert get_current_run_tree() is parent
+            assert stream.get() == "agent-stream"
     finally:
         stream.reset(token)
+        var_child_runnable_config.reset(config_token)
     assert observed == ["Use Oppus for this"]
     assert intent is not None and intent.requested_model == "anthropic:claude-opus-5-5"

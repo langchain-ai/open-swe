@@ -1,14 +1,18 @@
 import asyncio
 import contextvars
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage
+from langsmith import get_current_run_tree, trace, tracing_context
+from langsmith.run_trees import RunTree
 
 from agent.dashboard.options import ModelOption
 from agent.input_messages import input_message_text, input_message_timestamps, message_sender_id
 from agent.prompts import prompt
-from agent.utils.jev import select_jev_choice
+from agent.utils.jev import JevDecision, select_jev_choice
 
 MAX_MODEL_REQUEST_CHARS = 8_000
 
@@ -17,6 +21,42 @@ MAX_MODEL_REQUEST_CHARS = 8_000
 class ModelRequestIntent:
     requested_model: str | None = None
     unavailable_model: bool = False
+
+
+@dataclass
+class ModelSelectionDecision:
+    classifier: JevDecision = field(default_factory=JevDecision)
+    requested_model: str | None = None
+    outcome: Literal[
+        "not_classified",
+        "no_request",
+        "accepted_request",
+        "unavailable_request",
+        "incompatible_request",
+        "low_confidence",
+        "classifier_failure",
+        "reused_saved_choice",
+        "selection_failure",
+        "persistence_failure",
+    ] = "not_classified"
+    reason: str = "opening_classification_not_enabled"
+    pin_persisted: bool = False
+
+
+@asynccontextmanager
+async def model_selection_trace() -> AsyncIterator[RunTree]:
+    parent = get_current_run_tree() or RunTree.from_runnable_config(None)
+    safe_parent = (
+        parent.model_copy(update={"extra": {"metadata": {}}, "tags": []}) if parent else None
+    )
+    with tracing_context(parent=safe_parent or False, metadata={}, tags=[]):
+        async with trace(
+            "Model selection decision",
+            parent=safe_parent,
+            inputs={},
+            exceptions_to_handle=(BaseException,),
+        ) as span:
+            yield span
 
 
 def original_human_task(
@@ -40,6 +80,7 @@ async def infer_requested_model(
     messages: Sequence[BaseMessage],
     requested_models: Mapping[str, ModelOption],
     slack_event_ts: str | None = None,
+    decision: JevDecision | None = None,
 ) -> ModelRequestIntent | None:
     task = original_human_task(messages, slack_event_ts=slack_event_ts)
     if not task:
@@ -58,6 +99,7 @@ async def infer_requested_model(
             question="runtime_model",
             instructions=prompt("model-request/instructions"),
             criteria=criteria,
+            decision=decision,
         ),
         context=contextvars.Context(),
     )

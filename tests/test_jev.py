@@ -5,7 +5,7 @@ from collections.abc import Callable, Coroutine
 import httpx2
 import pytest
 
-from agent.utils.jev import select_jev_choice
+from agent.utils.jev import JevDecision, select_jev_choice
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]
@@ -38,12 +38,13 @@ def transport(
     return install
 
 
-async def classify() -> str | None:
+async def classify(decision: JevDecision | None = None) -> str | None:
     return await select_jev_choice(
         "Fix the bug",
         question="route",
         instructions="Choose a route",
         criteria={"fast": "Small task"},
+        decision=decision,
     )
 
 
@@ -80,7 +81,20 @@ async def test_classification_accepts_only_confident_valid_answers(
         )
 
     transport(handle)
-    assert await classify() == expected
+    decision = JevDecision()
+    assert await classify(decision) == expected
+    valid_response = status == 200 and 0 <= confidence <= 1
+    assert decision.choice == (choice if valid_response and choice == "fast" else None)
+    assert decision.confidence == (confidence if valid_response else None)
+    assert decision.outcome == (
+        "accepted"
+        if expected
+        else "low_confidence"
+        if valid_response and confidence < 0.6
+        else "classifier_failure"
+    )
+    if not valid_response or choice == "unknown":
+        assert decision.reason == ("classifier_error" if not valid_response else "invalid_choice")
 
 
 async def test_missing_credentials_skips_classification(
@@ -92,7 +106,9 @@ async def test_missing_credentials_skips_classification(
         pytest.fail("Classification must not send a request without credentials")
 
     transport(handle)
-    assert await classify() is None
+    decision = JevDecision()
+    assert await classify(decision) is None
+    assert decision == JevDecision(outcome="classifier_failure", reason="missing_credentials")
 
 
 async def test_classifier_deadline_cancels_stalled_request(
@@ -109,5 +125,7 @@ async def test_classifier_deadline_cancels_stalled_request(
         raise AssertionError("Request should have been cancelled")
 
     transport(handle)
-    assert await asyncio.wait_for(classify(), timeout=1) is None
+    decision = JevDecision()
+    assert await asyncio.wait_for(classify(decision), timeout=1) is None
+    assert decision.outcome == "classifier_failure"
     assert cancelled.is_set()
