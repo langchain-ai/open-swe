@@ -109,7 +109,7 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if request is None or request.kind != "standard":
+    if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
     thread_id = RunConfig.from_config(get_config()).thread_id
     # Only the thread woken to pick a reviewer may pick one.

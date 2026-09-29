@@ -6,6 +6,7 @@ just acted, a GitHub event arrived, or one of the request's deadlines passed.
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -223,7 +224,7 @@ async def render(request: HumanReviewRequest, outcome: str | None) -> tuple[str,
 
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
-    if not request.slack_channel_id or not request.slack_message_ts:
+    if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
         return
     text, blocks = await render(request, outcome)
     ok, error = await update_slack_message(
@@ -241,7 +242,7 @@ async def _repost(
 ) -> bool:
     """Replace a thread card with a fresh reply, sent to the channel if ``broadcast``."""
     location = request.slack_location
-    if location is None or not request.slack_message_ts:
+    if not request.has_card or location is None or not request.slack_message_ts:
         return False
     old_ts = request.slack_message_ts
     request.slack_broadcast = broadcast
@@ -360,7 +361,7 @@ async def refresh_card_in_thread(
 async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
     """Delete older cards for ``approval``'s PR, so its thread only ever shows one."""
     for stale in await HumanReviewRequest.superseded_on_slack(approval.pull_request_id):
-        if stale.id == approval.id:
+        if stale.id == approval.id or not stale.has_card:
             continue
         if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
             continue
@@ -369,18 +370,30 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
                 row.slack_message_ts = ""
 
 
-async def mark_merged(request: HumanReviewRequest) -> None:
-    updated = await retire(request, "merged", "merged")
-    if updated is None:
-        return
-    location = updated.slack_location or (
-        (updated.slack_channel_id, updated.slack_message_ts)
-        if updated.slack_channel_id and updated.slack_message_ts
+async def _react(request: HumanReviewRequest, emoji: str, fallback: str) -> None:
+    """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+    location = request.slack_location or (
+        (request.slack_channel_id, request.slack_message_ts)
+        if request.slack_channel_id and request.slack_message_ts
         else None
     )
-    if location is not None:
-        if not await add_slack_reaction(location[0], location[1], "merged"):
-            await add_slack_reaction(location[0], location[1], "white_check_mark")
+    if location is not None and not await add_slack_reaction(location[0], location[1], emoji):
+        await add_slack_reaction(location[0], location[1], fallback)
+
+
+async def mark_merged(request: HumanReviewRequest) -> None:
+    updated = await retire(request, "merged", "merged")
+    if updated is not None:
+        await _react(updated, "merged", "white_check_mark")
+
+
+async def mark_approved(request: HumanReviewRequest) -> None:
+    """React to a posted request's message the first time its pull request is approved."""
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None or row.state != "open" or row.approved_at is not None:
+            return
+        row.approved_at = datetime.now(UTC)
+    await _react(request, "approved", "+1")
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:

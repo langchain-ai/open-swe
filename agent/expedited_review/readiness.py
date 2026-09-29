@@ -60,6 +60,19 @@ class PullRequestSnapshot:
     allowed_merge_methods: list[str] = field(default_factory=list)
     approved_review_ids: frozenset[int] = frozenset()
 
+    @property
+    def green(self) -> bool:
+        """Open, not a draft, conflict-free, and every check passed with none still to report."""
+        return (
+            self.state == "open"
+            and not self.merged
+            and not self.draft
+            and self.mergeable is not False
+            and self.mergeable_state != "dirty"
+            and self.check_state == "success"
+            and not self.unreported_required_checks
+        )
+
 
 class _ReviewState(BaseModel):
     id: int | None = None
