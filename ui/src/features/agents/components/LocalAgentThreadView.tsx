@@ -29,6 +29,7 @@ import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
@@ -491,6 +492,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
+            <ThreadPullRequests pullRequests={pr ? [pr] : []} compact />
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {terminalContexts.map((text, index) => (
