@@ -79,6 +79,12 @@ class Origin:
     slack_channel_id: str = ""
     slack_thread_ts: str = ""
 
+    def asked(self, request: HumanReviewRequest) -> bool:
+        """Whether ``request`` came from this thread or this person."""
+        if self.thread_id and request.thread_id == self.thread_id:
+            return True
+        return self.requester is not None and request.requested_by_user_id == self.requester.id
+
 
 def _failure(error: str) -> RequestResult:
     return RequestResult(success=False, error=error)
@@ -185,7 +191,7 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
 
 
 async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
-    """The thread that asked replaces its own card's summary."""
+    """Whoever asked replaces their own card's summary."""
     if tldr == active.tldr:
         return await _existing(active)
     async with HumanReviewRequest.locked(active.id) as (_, row):
@@ -223,12 +229,7 @@ async def request_review(
 
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
-        if (
-            active.kind == "standard"
-            and inline_summary is not None
-            and origin.thread_id
-            and active.thread_id == origin.thread_id
-        ):
+        if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 

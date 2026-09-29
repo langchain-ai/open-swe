@@ -335,15 +335,15 @@ async def reopen(request: HumanReviewRequest) -> None:
 
 async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Outcome:
     """Anyone who can see the card may take it down; it needs no GitHub link or access."""
-    if await retire(request, "cancelled", f"dismissed by <@{slack_user_id}>") is None:
+    if not await dismiss_by(request, f"<@{slack_user_id}>", ""):
         return Outcome("This review request is already closed.")
     return Outcome("Dismissed.")
 
 
-async def dismiss_by_agent(request: HumanReviewRequest, reason: str) -> bool:
-    """The agent takes the card down, as a Dismiss click would; ``False`` if already closed."""
+async def dismiss_by(request: HumanReviewRequest, by: str, reason: str) -> bool:
+    """Take the card down for ``by``, as a Dismiss click would; ``False`` if already closed."""
     detail = f": {escape(reason.strip())}" if reason.strip() else ""
-    return await retire(request, "cancelled", f"dismissed by Open SWE{detail}") is not None
+    return await retire(request, "cancelled", f"dismissed by {by}{detail}") is not None
 
 
 async def refresh_card_in_thread(

@@ -682,4 +682,52 @@ test.describe("Human review in Slack", () => {
       "Review request: dismissed by Open SWE: posted with the wrong summary",
     );
   });
+
+  test("the oswe MCP tools' endpoints post a card with their summary, re-summarize it, and dismiss it", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+    await loginAs(page, ALICE);
+    await setReviewChannel(request);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Tidy the greeting",
+      author: "octocat",
+      body: "Ends every greeting with one exclamation mark.",
+      check_runs: GREEN,
+    });
+    const url = `/dashboard/api/repos/${REPO.owner}/${REPO.repo}/pulls/${seeded.number}/human-review`;
+
+    const asked = await page.request.post(url, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { inline_summary: TLDR },
+    });
+    expect(asked.status()).toBe(200);
+    const posted = await latestRequest(request);
+    expect(posted.tldr).toBe(TLDR);
+    expect(cardText(await reviewCard(request, posted))).toContain(TLDR);
+
+    const again = await page.request.post(url, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { inline_summary: CORRECTED_TLDR },
+    });
+    expect(await again.json()).toMatchObject({
+      reused: true,
+      summary_updated: true,
+    });
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      CORRECTED_TLDR,
+    );
+
+    const dismissed = await page.request.post(`${url}/dismiss`, {
+      headers: SAME_ORIGIN_HEADERS,
+      data: { reason: "wrong channel" },
+    });
+    expect(await dismissed.json()).toEqual({ request_id: posted.id });
+    expect((await latestRequest(request)).state).toBe("cancelled");
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      `Review request: dismissed by <@${ALICE.slack}>: wrong channel`,
+    );
+  });
 });

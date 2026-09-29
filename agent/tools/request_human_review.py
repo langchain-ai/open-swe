@@ -8,7 +8,7 @@ from langgraph.config import get_config
 
 from agent.dashboard import repo_access
 from agent.github.token import resolve_github_token
-from agent.human_review.lifecycle import dismiss_by_agent
+from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, assign, request_review
 from agent.run_config import RunConfig
@@ -95,7 +95,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
         return _failure("No executable agent thread is available")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    if not await dismiss_by_agent(request, reason):
+    if not await dismiss_by(request, "Open SWE", reason):
         return _failure("This review request is already closed.")
     return {
         "success": True,
