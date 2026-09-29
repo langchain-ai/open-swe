@@ -1,6 +1,7 @@
 """Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
 
 import logging
+from datetime import timedelta
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_PATH = ".open-swe/settings.json"
 SETTINGS_MAX_CHARS = 10_000
+SETTINGS_FRESH_FOR = timedelta(minutes=5)
+SETTINGS_MAX_AGE = timedelta(hours=24)
 
 
 async def fetch_repo_file(
@@ -84,3 +87,17 @@ class RepoSettings(BaseModel):
                 exc_info=True,
             )
             return cls()
+
+    @classmethod
+    async def cached(cls, owner: str, repo: str, *, token: str | None) -> RepoSettings:
+        """The default branch's settings, served stale while they revalidate."""
+        from langgraph_api.cache import swr
+
+        async def load() -> RepoSettings:
+            return await cls.fetch(owner, repo, token=token)
+
+        key = f"repo-settings:{owner}/{repo}".lower()
+        result = await swr(
+            key, load, fresh_for=SETTINGS_FRESH_FOR, max_age=SETTINGS_MAX_AGE, model=cls
+        )
+        return result.value

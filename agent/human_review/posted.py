@@ -34,7 +34,7 @@ def linked_pull_request(text: str) -> GitHubPrRef | None:
 
 
 async def _is_review_channel(pr_ref: GitHubPrRef, channel_id: str, token: str) -> bool:
-    configured = (await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token)).review_channel
+    configured = (await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)).review_channel
     if not configured.strip():
         return False
     channel = await SlackChannel.resolve(configured)
