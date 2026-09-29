@@ -57,6 +57,7 @@ from agent.runtime import (
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.slack.code_channels import set_view
 from agent.tools.approve_pull_request import approve_pull_request
+from agent.tools.code_channel_set_view import code_channel_set_view
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
 from agent.tools.record_author_feedback import record_author_feedback
 from agent.tools.review_reply import review_reply
@@ -246,6 +247,7 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
                 finish_walkthrough,
                 end_walkthrough,
                 review_reply,
+                code_channel_set_view,
                 *closing_tools,
             ]
         ),
