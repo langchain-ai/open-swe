@@ -19,7 +19,7 @@ def _authorized(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _update(approval: bool | None) -> ProfileUpdate:
     return ProfileUpdate(
-        default_model="openai:gpt-6-sol",
+        default_model="openai:gpt-6.1-sol",
         reasoning_effort="high",
         experimental_act_as_approval=approval,
     )
