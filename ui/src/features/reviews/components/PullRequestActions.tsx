@@ -63,6 +63,11 @@ export function PullRequestActions({
             {canAttemptMerge(pr) && (
               <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />
             )}
+            {pr.missingChecks.length > 0 && (
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                Merge blocked: {pr.missingChecks.join(", ")} never reported
+              </span>
+            )}
             <ClosePullRequest pr={pr} onClosed={() => onSettled("closed")} />
           </>
         )}

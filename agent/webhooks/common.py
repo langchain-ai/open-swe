@@ -1056,8 +1056,8 @@ async def trigger_or_queue_run(
     repo_config: dict[str, str],
     pr_number: int,
     token_repositories: Sequence[str] | None = None,
-) -> None:
-    """Create a new agent run or queue the message if the thread is busy.
+) -> bool:
+    """Return whether a new agent run was created or queued for a busy thread.
 
     ``token_repositories`` is recorded if this creates the thread; a thread that
     must be narrowed but could not record it is not started.
@@ -1084,7 +1084,7 @@ async def trigger_or_queue_run(
             "Not starting a GitHub run whose token scope could not be recorded",
             extra={"agent_thread_id": thread_id},
         )
-        return
+        return False
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
@@ -1104,6 +1104,7 @@ async def trigger_or_queue_run(
         metadata=AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+    return True
 
 
 async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:

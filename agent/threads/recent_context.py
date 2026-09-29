@@ -15,7 +15,7 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.github.comments import format_github_comment_body_for_prompt
+from agent.github.comments import sanitize_github_comment_body
 from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.threads.summary import (
@@ -251,7 +251,7 @@ def _render_entries(entries: list[RecentThreadContext]) -> str:
                 f"   Thread: {entry.thread_id}",
             ]
         )
-        lines.append(format_github_comment_body_for_prompt("", body, trusted=()))
+        lines.append(sanitize_github_comment_body(body))
     return prompt("system/recent-thread-context", entries="\n".join(lines))
 
 

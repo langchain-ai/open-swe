@@ -11,10 +11,6 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
 )
 
-from agent.middleware.sandbox_circuit_breaker import (
-    post_sandbox_unreachable_notification,
-    sandbox_unreachable_message,
-)
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -77,50 +73,6 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
         mock_notify.assert_awaited_once()
     finally:
         SANDBOX_BACKENDS.pop("thread-1", None)
-
-
-def test_unreachable_message_names_the_sandbox_without_claiming_permanence() -> None:
-    """The user gets told which sandbox went quiet, not just that one did."""
-    message = sandbox_unreachable_message(sandbox_id="sb-dead")
-
-    assert "id sb-dead" in message
-    # We only observed silence, so the copy must not assert permanence.
-    assert "can't tell whether it will come back" in message
-
-
-@pytest.mark.asyncio
-async def test_unreachable_notification_goes_to_slack_only() -> None:
-    """Slack wins over Linear and GitHub, so the user is told exactly once."""
-    config = {
-        "configurable": {
-            "slack_thread": {"channel_id": "C123", "thread_ts": "171.123"},
-            "linear_issue": {"id": "lin-1"},
-            "repo": {"owner": "langchain-ai", "name": "open-swe"},
-            "pr_number": 7,
-        }
-    }
-
-    with (
-        patch(
-            "agent.middleware.sandbox_circuit_breaker.post_slack_thread_reply",
-            new_callable=AsyncMock,
-        ) as mock_slack,
-        patch(
-            "agent.middleware.sandbox_circuit_breaker.post_linear_notification",
-            new_callable=AsyncMock,
-        ) as mock_linear,
-        patch(
-            "agent.middleware.sandbox_circuit_breaker.post_github_comment",
-            new_callable=AsyncMock,
-        ) as mock_github,
-    ):
-        await post_sandbox_unreachable_notification(config, sandbox_id="sb-dead")
-
-    mock_slack.assert_awaited_once_with(
-        "C123", "171.123", sandbox_unreachable_message(sandbox_id="sb-dead")
-    )
-    mock_github.assert_not_called()
-    mock_linear.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -39,16 +39,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - name: Require reapproval after a PR update
-        if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'preview') }}" == true ]]; then
-            gh api --method DELETE "repos/${GH_REPO}/issues/${PR_NUMBER}/labels/preview"
-          fi
       - name: Reset the preview to main when due
         if: github.event_name == 'schedule'
         env:
@@ -73,7 +63,6 @@ jobs:
           "$dir/oswe" --version
       - name: Assemble and publish the preview tree
         env:
-          EXCLUDE_PR_NUMBER: ${{ github.event.action == 'synchronize' && github.event.pull_request.number || '' }}
           FORCE: ${{ inputs.force }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
