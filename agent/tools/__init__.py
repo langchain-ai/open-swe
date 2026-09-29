@@ -11,6 +11,7 @@ _TOOL_MODULES = {
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
+    "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
@@ -81,6 +82,7 @@ __all__ = [
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
+    "dismiss_human_review_request",
     "expedite_pr_approval",
     "expose_port",
     "fetch_review_diff",
@@ -188,7 +190,11 @@ if TYPE_CHECKING:
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
-    from agent.tools.request_human_review import assign_human_reviewer, request_human_review
+    from agent.tools.request_human_review import (
+        assign_human_reviewer,
+        dismiss_human_review_request,
+        request_human_review,
+    )
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions

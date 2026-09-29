@@ -78,6 +78,8 @@ HUMAN_REVIEW_HERE_MARKER = "E2E_HUMAN_REVIEW_HERE"
 HUMAN_REVIEW_SUMMARY = "Makes the greeting punctuation consistent and covers it with a test."
 HUMAN_REVIEW_RESUMMARIZE_MARKER = "E2E_HUMAN_REVIEW_RESUMMARIZE"
 HUMAN_REVIEW_CORRECTED_SUMMARY = "Ends every greeting with one exclamation mark, with a test."
+HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
+HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 
@@ -537,6 +539,23 @@ def _human_review_resummarize_step(messages: list[BaseMessage]) -> AIMessage:
                     "inline_summary": HUMAN_REVIEW_CORRECTED_SUMMARY,
                 },
                 "id": f"call-human-review-resummarize-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
+    """Take down the review request this thread posted."""
+    humans = _script_humans(messages)
+    text = _text(humans[0].content) if humans else ""
+    return AIMessage(
+        content="Dismissing the review request.",
+        tool_calls=[
+            {
+                "name": "dismiss_human_review_request",
+                "args": {"pr_url": _pr_url_in(text), "reason": HUMAN_REVIEW_DISMISS_REASON},
+                "id": f"call-human-review-dismiss-{len(messages)}",
             }
         ],
         response_metadata={"model_name": "fake-scripted-model"},
@@ -1153,6 +1172,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-human-review-resummarize-reply",
         ),
     ),
+    "human_review_dismiss": (
+        _dynamic_step(_human_review_dismiss_step),
+        _tool_step(
+            "Confirming the dismissal.",
+            "slack_reply",
+            {"message": "Took the review request down."},
+            "call-human-review-dismiss-reply",
+        ),
+    ),
     "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
@@ -1392,6 +1420,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
     ScriptRule("human_review_assign", lambda ctx: _UNCLAIMED_MARKER in ctx.last_text),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",
         lambda ctx: HUMAN_REVIEW_RESUMMARIZE_MARKER in ctx.last_text,

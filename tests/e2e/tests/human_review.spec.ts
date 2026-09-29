@@ -640,4 +640,46 @@ test.describe("Human review in Slack", () => {
       .toBe(true);
     expect((await latestRequest(request)).state).toBe("merged");
   });
+
+  test("the agent dismisses the review request its thread posted", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await setReviewChannel(request);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Tidy the greeting",
+      author: "octocat",
+      body: "Ends every greeting with one exclamation mark.",
+      check_runs: GREEN,
+    });
+    const pr = await pull(request, seeded.number);
+    const asked = (await control(request, "/mock/slack/send", {
+      text: `<@U0BOT> get ${pr.url} reviewed by a human E2E_HUMAN_REVIEW`,
+      mention_bot: true,
+    })) as { thread_ts: string };
+    await expect
+      .poll(
+        async () =>
+          (await reviewRequests(request)).at(-1)?.slack_message_ts ?? "",
+        { timeout: 90_000 },
+      )
+      .not.toBe("");
+    const posted = await latestRequest(request);
+
+    await control(request, "/mock/slack/send", {
+      thread_ts: asked.thread_ts,
+      text: "<@U0BOT> take that review request down E2E_HUMAN_REVIEW_DISMISS",
+      mention_bot: true,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).state, {
+        timeout: 60_000,
+      })
+      .toBe("cancelled");
+    expect(cardText(await reviewCard(request, posted))).toContain(
+      "Review request: dismissed by Open SWE: posted with the wrong summary",
+    );
+  });
 });

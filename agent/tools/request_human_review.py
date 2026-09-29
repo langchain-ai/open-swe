@@ -1,4 +1,4 @@
-"""Tools that ask people in Slack to review a pull request, and assign one when nobody signs up."""
+"""Tools that ask people in Slack to review a pull request, assign a reviewer, or dismiss the ask."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -8,6 +8,7 @@ from langgraph.config import get_config
 
 from agent.dashboard import repo_access
 from agent.github.token import resolve_github_token
+from agent.human_review.lifecycle import dismiss_by_agent
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, assign, request_review
 from agent.run_config import RunConfig
@@ -78,6 +79,27 @@ async def request_human_review(
         "slack_channel_id": result.channel,
         "next": f"{posted} People sign up from the card and it merges on its own once they "
         "approve. You are woken if nobody signs up. Do not announce or link the card; do not poll.",
+    }
+
+
+async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[str, Any]:
+    """Implement the `dismiss_human_review_request` tool."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return _failure("pr_url must be a canonical GitHub pull request URL")
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if request is None:
+        return _failure("This pull request has no open review request to dismiss.")
+    thread_id = RunConfig.from_config(get_config()).thread_id
+    if not thread_id:
+        return _failure("No executable agent thread is available")
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
+    if not await dismiss_by_agent(request, reason):
+        return _failure("This review request is already closed.")
+    return {
+        "success": True,
+        "next": "The card is marked dismissed. Call request_human_review to post a new one.",
     }
 
 

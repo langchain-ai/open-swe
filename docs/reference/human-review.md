@@ -46,6 +46,8 @@ the repository sets none.
 - Calling `request_human_review` again from the thread that asked replaces the open
   card's summary with the new `inline_summary`; from anywhere else it returns the
   existing card unchanged.
+- The agent can take a request down with `dismiss_human_review_request`, the same as
+  the card's Dismiss button; the card reads "dismissed by Open SWE" and any reason.
 
 ## Reviewers
 
