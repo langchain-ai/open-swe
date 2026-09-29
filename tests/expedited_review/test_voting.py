@@ -1,5 +1,6 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -85,7 +86,11 @@ class _FakeSlack:
 @pytest.fixture
 def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     fake = _FakeSlack()
-    monkeypatch.setattr(lifecycle, "_broadcast_channel", AsyncMock(return_value="#eng"))
+    monkeypatch.setattr(
+        lifecycle, "own_choices", AsyncMock(return_value=[{"id": "C1", "name": "eng"}])
+    )
+    monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
+    monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://t"))
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
     monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
@@ -288,7 +293,7 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_closes(
 
     stored = await _stored(approval)
     assert sent.message == "Sent to the channel."
-    assert "already in the channel" in again.message
+    assert "already sent to a channel" in again.message
     assert slack.broadcasts == [True, False]
     assert slack.deleted == ["2.0", "3.0"]
     assert stored.state == "cancelled"
@@ -311,6 +316,37 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
     assert stored.approved
     assert not stored.slack_broadcast
     assert stored.slack_message_ts == "4.0"
+
+
+class _OtherChannel:
+    id = "C_OTHER"
+
+    async def post(self, text: str, *, blocks: object = None) -> tuple[str, None]:
+        return "9.0", None
+
+
+async def test_a_copied_card_leaves_the_other_channel_once_it_closes_and_is_offered_again(
+    harness: _Harness,
+    open_approval: OpenApproval,
+    slack: _FakeSlack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
+    approval = await open_approval()
+    grace = await User.for_person({"id": "slack:U_GRACE", "platform": "slack"})
+
+    sent = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
+    again = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
+    await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
+
+    stored = await _stored(approval)
+    assert sent.message == "Sent to <#C_OTHER>."
+    assert "already sent to a channel" in again.message
+    assert slack.deleted == ["9.0"]
+    assert stored.slack_copy is None
+    assert await HumanReviewRequest.copy_channels_for_author(
+        "ADA", since=datetime.now(UTC) - timedelta(days=1)
+    ) == ["C_OTHER"]
 
 
 async def test_only_one_open_approval_per_pull_request(open_approval: OpenApproval) -> None:

@@ -14,10 +14,10 @@ handle.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Literal, Self
+from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, select
+from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -34,6 +34,11 @@ RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``approve`` and ``reject`` are Slack votes on an expedited card; ``review`` is a
 # person signed up to review a standard request on GitHub.
 ParticipantDecision = Literal["approve", "reject", "review"]
+
+
+class ChannelChoice(TypedDict):
+    id: str
+    name: str
 
 
 def slack_mention(user: User | None, fallback_login: str) -> str:
@@ -93,6 +98,12 @@ class HumanReviewRequest(Base):
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
     slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
+    # Channels the card offers to be sent to, its own first; fixed when it is posted.
+    slack_channel_choices: Mapped[list[ChannelChoice]] = mapped_column(JSONB, default_factory=list)
+    # A top-level copy in another channel. The channel stays after the copy is deleted,
+    # so the author's later cards offer it again.
+    slack_copy_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_copy_ts: Mapped[str] = mapped_column(server_default="", default="")
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     participants: Mapped[list[HumanReviewParticipant]] = relationship(
         default_factory=list,
@@ -237,6 +248,34 @@ class HumanReviewRequest(Base):
                 .order_by(cls.created_at, cls.id)
             )
             return list(rows)
+
+    @classmethod
+    async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
+        """Channels other than their thread's that ``login``'s cards were sent to, newest first."""
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls.slack_copy_channel_id, func.max(cls.created_at).label("used_at"))
+                .join(cls.pull_request)
+                .where(
+                    func.lower(PullRequest.author) == login.lower(),
+                    cls.slack_copy_channel_id != "",
+                    cls.created_at >= since,
+                )
+                .group_by(cls.slack_copy_channel_id)
+                .order_by(desc("used_at"))
+            )
+            return [channel_id for channel_id, _ in rows]
+
+    @property
+    def slack_copy(self) -> tuple[str, str] | None:
+        if self.slack_copy_channel_id and self.slack_copy_ts:
+            return self.slack_copy_channel_id, self.slack_copy_ts
+        return None
+
+    @property
+    def sent_elsewhere(self) -> bool:
+        """Also in a channel, not only its thread; a card is sent at most once."""
+        return self.slack_broadcast or self.slack_copy is not None
 
     async def save(self) -> Self:
         cls = type(self)

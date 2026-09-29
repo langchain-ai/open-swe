@@ -34,9 +34,11 @@ async def answer_click(
             channel_id, slack_user_id, "That review request no longer exists.", thread_ts
         )
         return
+    # A card's copy in another channel shares its thread's lock.
+    lock_channel, lock_ts = request.slack_location or (channel_id, thread_ts)
     try:
         async with slack_thread_mutation_lock(
-            langgraph_client(), channel_id, thread_ts, purpose=f"human-review:{request_id}"
+            langgraph_client(), lock_channel, lock_ts, purpose=f"human-review:{request_id}"
         ):
             outcome = await handle(request)
     except Exception:

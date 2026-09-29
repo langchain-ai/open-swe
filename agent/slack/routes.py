@@ -742,6 +742,15 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if (
+        interaction.type == "view_submission"
+        and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
+    ):
+        return expedited_review.handle_picker_submission(interaction, background_tasks)
+    if interaction.type == "block_actions" and any(
+        action.action_id == expedited_review.CHANNEL_SELECT_ACTION for action in interaction.actions
+    ):
+        return await expedited_review.handle_channel_select(interaction)
     if interaction.type == "block_actions":
         feedback_action = next(
             (action for action in interaction.actions if action.action_id == FEEDBACK_ACTION), None
