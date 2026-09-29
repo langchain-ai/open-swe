@@ -746,7 +746,7 @@ async def _link_interaction_authors(session: AsyncSession, rows: list[FindingRow
             interaction.author_user_id = user_ids.get(interaction.author.lower())
 
 
-def _rows_query(*pull_request_ids: UUID) -> Select[tuple[FindingRow]]:
+def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     return (
         select(FindingRow)
         .where(FindingRow.pull_request_id.in_(pull_request_ids))
