@@ -28,6 +28,7 @@ from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
+    canonical_model_pair,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -113,6 +114,9 @@ class ProfileUpdate(BaseModel):
 
 
 def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, str | None]:
+    canonical = canonical_model_pair(model, effort)
+    if canonical is not None:
+        return canonical
     if model in SUPPORTED_MODEL_IDS or effort is None:
         return model, effort
     fallback = provider_fallback_pair(model, effort)

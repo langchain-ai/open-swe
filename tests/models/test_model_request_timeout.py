@@ -22,10 +22,12 @@ def _make_model(model_id: str, **kwargs: Any) -> dict[str, Any]:
     return captured
 
 
-def test_openai_gets_codex_context_window_profile_override() -> None:
+def test_openai_gets_models_dev_context_window() -> None:
+    from agent.model_catalog import CATALOG
+
     captured = _make_model("openai:gpt-6.1-sol")
     profile = captured["profile"]
-    assert profile["max_input_tokens"] == 272_000
+    assert profile["max_input_tokens"] == CATALOG["openai:gpt-6.1-sol"].limit.input
     assert profile["tool_calling"] is True
 
 

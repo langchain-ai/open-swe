@@ -32,7 +32,7 @@ _TIMEOUT_PROVIDER_PREFIXES = (
 )
 
 
-OpenAIReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+OpenAIReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 # OpenAI's Responses API only returns human-readable reasoning text when a
 # summary is requested; without it, reasoning happens silently (billed in
 # output tokens) and the reasoning content block arrives empty.
@@ -200,6 +200,8 @@ def openai_reasoning_for(
     effort = profile_effort or default_effort or DEFAULT_LLM_REASONING.get("effort")
     if effort == "none":
         return {"effort": "none"}
+    if effort == "minimal":
+        return {"effort": "minimal", "summary": "auto"}
     if effort == "low":
         return {"effort": "low", "summary": "auto"}
     if effort == "medium":
@@ -273,13 +275,22 @@ def provider_model_kwargs(
     openai_reasoning_default: OpenAIReasoning | None = None,
 ) -> ModelKwargs:
     """Build provider-specific kwargs for ``make_model`` from a model id and effort."""
+    from agent.model_catalog import CATALOG
+
+    catalog_model = CATALOG.get(model_id)
+    if catalog_model is not None:
+        max_tokens = min(max_tokens, catalog_model.limit.output)
+        efforts = catalog_model.efforts()
+        if profile_effort not in efforts:
+            profile_effort = "medium" if "medium" in efforts else efforts[0]
     kwargs: ModelKwargs = {"max_tokens": max_tokens}
     if model_id.startswith("openai:"):
-        reasoning = openai_reasoning_for(profile_effort)
-        if reasoning is not None:
-            kwargs["reasoning"] = reasoning
-        elif openai_reasoning_default is not None:
-            kwargs["reasoning"] = openai_reasoning_default
+        if catalog_model is None or catalog_model.reasoning:
+            reasoning = openai_reasoning_for(profile_effort)
+            if reasoning is not None:
+                kwargs["reasoning"] = reasoning
+            elif openai_reasoning_default is not None:
+                kwargs["reasoning"] = openai_reasoning_default
     elif model_id.startswith("anthropic:"):
         thinking = anthropic_thinking_for(profile_effort)
         if thinking is not None:

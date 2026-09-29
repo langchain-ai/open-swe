@@ -47,6 +47,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     pin_single_event_loop()
     validate_github_login_allowlist()
     validate_sandbox_startup_config()
+    from agent.model_catalog import refresh_catalog
+
+    await refresh_catalog()
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()

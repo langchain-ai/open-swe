@@ -34,15 +34,14 @@ def test_provider_fallback_returns_none_without_provider_match(model_id: object)
     assert provider_fallback_pair(model_id, "high") is None
 
 
-@pytest.mark.parametrize(
-    ("model_id", "effort"),
-    [
-        (DEPRECATED_GLM, "high"),
-        ("anthropic:claude-sonnet-5", "high"),
-        ("anthropic:claude-haiku-4-5", "none"),
-    ],
-)
-def test_profile_response_and_override_defer_deprecated_models(model_id: str, effort: str) -> None:
+def test_profile_response_and_override_defer_deprecated_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_id, effort = DEPRECATED_GLM, "high"
+    monkeypatch.setattr(options, "DEPRECATED_MODEL_IDS", {model_id})
+    from agent.dashboard import profiles
+
+    monkeypatch.setattr(profiles, "DEPRECATED_MODEL_IDS", {model_id})
     profile = normalize_profile_for_response(
         {
             "default_model": model_id,

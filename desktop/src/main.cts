@@ -1029,6 +1029,7 @@ async function proxyBackendRequest(request) {
   headers.delete("host");
   headers.set("accept-encoding", "identity");
   headers.set("origin", APP_ORIGIN);
+  headers.set("x-open-swe-model-catalog", "1");
   const targetUrl = backendRequestUrl(backendUrl, request.url);
   const cookies = await session.defaultSession.cookies.get({ url: targetUrl });
   if (cookies.length) {

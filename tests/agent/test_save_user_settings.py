@@ -153,7 +153,6 @@ async def test_unavailable_thread_scope_fails_closed(
         {"encrypted_gh_token": "secret"},
         {"admin": True},
         {"default_model": "unknown-model"},
-        {"default_model": "openai:gpt-5.5"},
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},

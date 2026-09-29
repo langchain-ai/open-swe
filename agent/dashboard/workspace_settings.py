@@ -439,6 +439,9 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
+    from agent.model_catalog import refresh_catalog
+
+    await refresh_catalog()
     defaults = _default_settings()
     slug = resolve_settings_workspace(workspace)
     try:
