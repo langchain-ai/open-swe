@@ -19,8 +19,7 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
-from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langgraph.types import Command
 
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
@@ -222,12 +221,6 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         if group is None:
             return None
         return self._resolved.get(group, _Resolved()).tools.get(name)
-
-    async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        if state.get("_deepagents_forked_context"):
-            return {}
-        loaded = [name for name in _anchors(state.get("messages", [])) if name in self._group_of]
-        return {"loaded_integration_tools": Overwrite(sorted(loaded))}
 
     async def awrap_model_call(
         self,

@@ -2,7 +2,6 @@ import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
@@ -12,11 +11,10 @@ from langchain_core.runnables import RunnableBinding
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import ChatOpenAI
 from langchain_openai.chatgpt_oauth import _ChatGPTToken  # noqa: PLC2701
-from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langgraph.types import Command
 from pydantic import SecretStr
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, DynamicToolState, IntegrationGroup
+from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
@@ -128,13 +126,6 @@ class _Thread:
             self.messages.extend(update["messages"])
             loaded.update(update.get("loaded_integration_tools", []))
         self.loaded = sorted(loaded)
-
-    async def new_run(self, prompt: str) -> None:
-        state = cast(DynamicToolState, {"messages": self.messages})
-        update = await self.middleware.abefore_agent(state, cast(Runtime, MagicMock()))
-        reset = update["loaded_integration_tools"]
-        self.loaded = list(reset.value) if isinstance(reset, Overwrite) else reset
-        self.messages.append(HumanMessage(prompt))
 
 
 _SYSTEM_PROMPT = "You are Open SWE."
@@ -249,17 +240,6 @@ async def test_a_tool_loaded_as_a_follow_up_arrives_is_added_after_the_follow_up
         "ai",
         "tool",
     ]
-
-
-async def test_a_tool_loaded_in_an_earlier_run_stays_loaded_at_its_load() -> None:
-    thread = _Thread(_notion(), _opus())
-    await thread.tool_turn(["notion-search"])
-    thread.messages.append(AIMessage("Found it."))
-
-    await thread.new_run("Now update it.")
-    request = await thread.model_call()
-
-    assert _shape(request.messages) == ["human", "ai", "tool", "+notion-search", "ai", "human"]
 
 
 async def test_a_loaded_tool_without_a_visible_load_result_goes_to_tools() -> None:
@@ -419,16 +399,3 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     message = cast(dict[str, Any], command.update)["messages"][0]
     assert message.status == "error"
     assert "unavailable right now" in message.content
-
-
-async def test_fork_preserves_loaded_integration_schemas() -> None:
-    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    state = cast(
-        DynamicToolState,
-        {
-            "messages": [],
-            "_deepagents_forked_context": True,
-            "loaded_integration_tools": ["notion-search"],
-        },
-    )
-    assert await middleware.abefore_agent(state, cast(Runtime, MagicMock())) == {}
