@@ -166,6 +166,7 @@ from agent.threads.recent_context import RecentContextAudience, recent_thread_co
 from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
+    assign_human_reviewer,
     background_execute,
     background_task,
     configure_repository,
@@ -198,6 +199,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_human_review,
     request_pr_review,
     save_organization_skill,
     save_plan,
@@ -480,6 +482,8 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
+        "request_human_review",
+        "assign_human_reviewer",
         "manage_baby_sit",
         "manage_thread",
         "link_pull_request",
@@ -1439,6 +1443,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,
+        request_human_review,
+        assign_human_reviewer,
         notify_automation_channel,
         open_pull_request,
         link_pull_request,
@@ -1490,6 +1496,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
+        ]
+    if local_run or not ENV.SLACK_BOT_TOKEN.get():
+        static_tools = [
+            tool
+            for tool in static_tools
+            if tool not in (request_human_review, assign_human_reviewer)
         ]
     if (
         local_run

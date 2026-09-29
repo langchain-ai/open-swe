@@ -90,6 +90,7 @@ class ButtonElement(TypedDict):
     text: PlainText
     action_id: str
     value: NotRequired[str]
+    url: NotRequired[str]
     style: NotRequired[ButtonStyle]
 
 
@@ -214,7 +215,12 @@ def divider() -> DividerBlock:
 
 
 def button(
-    text: str, *, action_id: str, value: str | None = None, style: ButtonStyle | None = None
+    text: str,
+    *,
+    action_id: str,
+    value: str | None = None,
+    url: str | None = None,
+    style: ButtonStyle | None = None,
 ) -> ButtonElement:
     element: ButtonElement = {
         "type": "button",
@@ -223,6 +229,8 @@ def button(
     }
     if value is not None:
         element["value"] = value
+    if url is not None:
+        element["url"] = url
     if style is not None:
         element["style"] = style
     return element

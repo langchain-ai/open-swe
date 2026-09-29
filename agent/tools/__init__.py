@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
+    "assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -39,6 +40,7 @@ _TOOL_MODULES = {
     "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
+    "request_human_review": ".request_human_review",
     "request_pr_review": "agent.slack.tools.request_pr_review",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
@@ -72,6 +74,7 @@ _TOOL_MODULES = {
 
 __all__ = [
     "add_finding",
+    "assign_human_reviewer",
     "background_execute",
     "background_task",
     "create_automation",
@@ -107,6 +110,7 @@ __all__ = [
     "refresh_workspace_start",
     "configure_repository",
     "report_platform_issue",
+    "request_human_review",
     "request_pr_review",
     "reply_to_finding_thread",
     "resolve_finding_thread",
@@ -184,6 +188,7 @@ if TYPE_CHECKING:
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
+    from agent.tools.request_human_review import assign_human_reviewer, request_human_review
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
