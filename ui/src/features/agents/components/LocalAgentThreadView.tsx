@@ -50,6 +50,7 @@ import {
   useLocalRepoRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
+  useLocalThreadPr,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
@@ -223,6 +224,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const repository =
     branchDiff.data?.repository ?? checkpointDiff.data?.repository
   const pr = repository?.pr ?? null
+  // The composer's PR link reads this lightweight lookup, not the panel's
+  // diff, so the row still shows while the panel is collapsed.
+  const composerPrQuery = useLocalThreadPr(sessionId)
+  const composerPr = pr ?? composerPrQuery.data ?? null
   const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
@@ -492,7 +497,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
-            <ThreadPullRequests pullRequests={pr ? [pr] : []} compact />
+            <ThreadPullRequests
+              pullRequests={composerPr ? [composerPr] : []}
+              compact
+            />
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {terminalContexts.map((text, index) => (

@@ -882,6 +882,19 @@ function configureDesktopIpc() {
       return { status: "error", files: [], truncated: false };
     }
   });
+  /** The checked-out branch's pull request, for the composer PR link. */
+  ipcMain.handle("desktop:get-local-pr", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await diffThread(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return null;
+    try {
+      const { pr } = await repositoryMetadata(thread.checkpoint.repo);
+      return pr;
+    } catch {
+      return null;
+    }
+  });
 }
 
 function profileConfigPath() {
