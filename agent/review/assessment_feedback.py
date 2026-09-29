@@ -1,5 +1,6 @@
 """Published assessments and each reviewer's explicit feedback."""
 
+import logging
 from typing import Literal
 
 from fastapi import HTTPException
@@ -8,6 +9,9 @@ from pydantic import BaseModel, Field
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.review.publish import ReviewAssessment
 from agent.store import TypedStore, now_iso
+from agent.utils.langsmith import create_langsmith_feedback
+
+logger = logging.getLogger(__name__)
 
 
 class PublishedAssessment(ReviewAssessment):
@@ -17,6 +21,7 @@ class PublishedAssessment(ReviewAssessment):
     pr_number: int
     approved: bool = False
     dry_run: bool = False
+    run_id: str | None = None
 
 
 class FeedbackSubmission(BaseModel):
@@ -66,4 +71,29 @@ async def save_feedback(
         updated_at=now_iso(),
     )
     await feedback_store(review_id).put(feedback.login, feedback)
+    assessment = await ASSESSMENTS.get(str(review_id))
+    if assessment and assessment.run_id:
+        try:
+            saved = await create_langsmith_feedback(
+                assessment.run_id,
+                f"review_assessment:{review_id}:{feedback.login}",
+                score=1.0 if feedback.rating == "helpful" else 0.0,
+                comment=feedback.comment or None,
+                source_info={
+                    "source": "review_assessment",
+                    "review_id": review_id,
+                    "user_login": feedback.login,
+                    "owner": owner,
+                    "repo": repo,
+                    "pr_number": pr_number,
+                },
+            )
+            if not saved:
+                logger.warning(
+                    "Review assessment trace feedback was not saved", extra={"review_id": review_id}
+                )
+        except Exception:
+            logger.exception(
+                "Failed to save review assessment trace feedback", extra={"review_id": review_id}
+            )
     return feedback

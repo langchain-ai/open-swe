@@ -556,6 +556,12 @@ async def _publish_review_async(
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
         try:
+            if langgraph_run_id is None:
+                current_run_id = (await get_thread_metadata(thread_id)).get(
+                    "current_reviewer_run_id"
+                )
+                if isinstance(current_run_id, str) and current_run_id:
+                    langgraph_run_id = current_run_id
             await ASSESSMENTS.put(
                 str(review_id),
                 PublishedAssessment(
@@ -566,6 +572,7 @@ async def _publish_review_async(
                     pr_number=pr_number,
                     approved=approved,
                     dry_run=dry_run,
+                    run_id=langgraph_run_id,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
