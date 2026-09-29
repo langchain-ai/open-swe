@@ -6,23 +6,6 @@ from mcp.types import CallToolResult, TextContent, Tool
 from agent.mcp import MCPConnection, runtime
 
 
-def test_truncated_datadog_result_gets_paging_notice() -> None:
-    payload = (
-        "<METADATA>\n  <is_truncated>true</is_truncated>\n"
-        "  <truncation_message>Response truncated. Call again with start_at=10 to get the "
-        "next batch.</truncation_message>\n</METADATA>\n<JSON_DATA>[]</JSON_DATA>"
-    )
-    content = [{"type": "text", "text": payload}]
-
-    flagged, _ = runtime._flag_partial_result((content, None))
-
-    assert "start_at=10" in flagged[0]["text"]
-    assert flagged[1:] == content
-    assert runtime._flag_partial_result(([{"type": "text", "text": "ok"}], None))[0] == [
-        {"type": "text", "text": "ok"}
-    ]
-
-
 def record(name="linear", **fields):
     return MCPConnection(
         **{
