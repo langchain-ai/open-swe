@@ -1,5 +1,6 @@
 """The subset of the OpenAI Responses wire format this endpoint speaks."""
 
+import json
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -9,6 +10,7 @@ from agent.dashboard.options import DEFAULT_MODEL_EFFORT, normalize_model_choice
 DEFAULT_MODEL = "open-swe"
 SERVER_LABEL = "open-swe"
 TOOL_NAME_PREFIX = "oswe_"
+_QUERY_CHARS = 200
 
 type Role = Literal["user", "assistant", "system", "developer"]
 type ResponseStatus = Literal[
@@ -31,6 +33,8 @@ type StreamEventType = Literal[
     "response.mcp_call.in_progress",
     "response.mcp_call.completed",
     "response.mcp_call.failed",
+    "response.web_search_call.in_progress",
+    "response.web_search_call.completed",
 ]
 
 
@@ -132,7 +136,34 @@ class McpCallItem(BaseModel):
     error: str | None = None
 
 
-type OutputItem = Annotated[MessageItem | McpCallItem, Field(discriminator="type")]
+class WebSearchAction(BaseModel):
+    type: Literal["search"] = "search"
+    query: str
+
+
+class WebSearchCallItem(BaseModel):
+    """A tool call shown to clients such as Codex that render no server tool but web search."""
+
+    type: Literal["web_search_call"] = "web_search_call"
+    id: str
+    status: McpCallStatus = "in_progress"
+    action: WebSearchAction
+
+    @classmethod
+    def for_call(
+        cls, item_id: str, name: str, arguments: dict[str, JsonValue]
+    ) -> WebSearchCallItem:
+        values = list(arguments.values())
+        detail = (
+            values[0] if len(values) == 1 and isinstance(values[0], str) else json.dumps(arguments)
+        )
+        query = " ".join(f"{TOOL_NAME_PREFIX}{name}: {detail}".split())
+        return cls(id=item_id, action=WebSearchAction(query=query[:_QUERY_CHARS]))
+
+
+type OutputItem = Annotated[
+    MessageItem | McpCallItem | WebSearchCallItem, Field(discriminator="type")
+]
 
 
 class InputTokensDetails(BaseModel):

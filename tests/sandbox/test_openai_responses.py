@@ -17,6 +17,7 @@ from agent.openai_responses.models import (
     McpCallItem,
     MessageItem,
     Response,
+    WebSearchCallItem,
 )
 from agent.openai_responses.projection import ResponseProjection
 from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY
@@ -60,7 +61,7 @@ async def test_projection_streams_text_and_executed_tool_calls() -> None:
         model="open-swe",
         conversation=ConversationRef(id=THREAD),
     )
-    projection = ResponseProjection(response, ids)
+    projection = ResponseProjection(response, ids, mirror_web_search=True)
     bodies: list[BaseModel] = [
         MessageAppended(turn_id=turn, message_id="early", text="before the run"),
         TurnStarted(turn_id=turn, run_id=RUN),
@@ -79,8 +80,10 @@ async def test_projection_streams_text_and_executed_tool_calls() -> None:
         events.extend(await projection.apply(stored(version, body)))
 
     assert response.status == "completed"
-    message, tool = response.output
+    message, tool, search = response.output
     assert isinstance(message, MessageItem) and isinstance(tool, McpCallItem)
+    assert isinstance(search, WebSearchCallItem)
+    assert (search.action.query, search.status) == ("oswe_execute: ls", "completed")
     assert (message.content[0].text, message.status) == ("Hello", "completed")
     assert (tool.name, tool.arguments, tool.output, tool.status) == (
         "oswe_execute",

@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal
 
-type ItemKind = Literal["msg", "mcp"]
+type ItemKind = Literal["msg", "mcp", "ws"]
 
 _UUID_HEX = 32
 _SUFFIX_HEX = 16
@@ -23,7 +23,7 @@ class OpenSweId:
     @classmethod
     def parse(cls, value: str) -> OpenSweId | None:
         prefix, _, body = value.partition("_")
-        if prefix not in {"resp", "msg", "mcp"} or len(body) < _UUID_HEX:
+        if prefix not in {"resp", "msg", "mcp", "ws"} or len(body) < _UUID_HEX:
             return None
         try:
             thread_id = str(uuid.UUID(hex=body[:_UUID_HEX]))

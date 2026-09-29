@@ -51,6 +51,12 @@ def _body(response: Response) -> JSONResponse:
     return JSONResponse(response.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
 
 
+def _projection(request: Request, response: Response, ids: OpenSweId) -> ResponseProjection:
+    # Codex drops ``mcp_call`` items; ``web_search_call`` is the one server tool it renders.
+    codex = request.headers.get("originator", "").startswith("codex")
+    return ResponseProjection(response, ids, mirror_web_search=codex)
+
+
 def _stream(run: ResponseRun) -> StreamingResponse:
     return StreamingResponse(run.sse(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
@@ -63,7 +69,7 @@ async def list_models(_: Caller) -> ModelList:
 
 @router.post("/responses", response_model=None)
 async def create_response(
-    body: CreateResponseRequest, caller: Caller
+    body: CreateResponseRequest, caller: Caller, request: Request
 ) -> JSONResponse | StreamingResponse:
     continuation = await caller.resolve(body)
     prompt = InputItem.render(continuation.items)
@@ -84,7 +90,7 @@ async def create_response(
         background=body.background,
         metadata=body.metadata or {},
     )
-    run = ResponseRun(ids, ResponseProjection(response, ids), after)
+    run = ResponseRun(ids, _projection(request, response, ids), after)
     if body.background:
         return _body(response)
     if body.stream:
@@ -92,7 +98,7 @@ async def create_response(
     return _body(await run.result())
 
 
-async def _existing_run(caller: SandboxCaller, response_id: str) -> ResponseRun:
+async def _existing_run(caller: SandboxCaller, request: Request, response_id: str) -> ResponseRun:
     ids = OpenSweId.parse(response_id)
     if ids is None or ids.run_id is None:
         raise HTTPException(404, "Response not found")
@@ -114,22 +120,22 @@ async def _existing_run(caller: SandboxCaller, response_id: str) -> ResponseRun:
         model=model if isinstance(model, str) else DEFAULT_MODEL,
         conversation=ConversationRef(id=ids.thread_id),
     )
-    return ResponseRun(ids, ResponseProjection(response, ids), after)
+    return ResponseRun(ids, _projection(request, response, ids), after)
 
 
 @router.get("/responses/{response_id}", response_model=None)
 async def get_response(
-    response_id: str, caller: Caller, stream: bool = False
+    response_id: str, caller: Caller, request: Request, stream: bool = False
 ) -> JSONResponse | StreamingResponse:
-    run = await _existing_run(caller, response_id)
+    run = await _existing_run(caller, request, response_id)
     if stream:
         return _stream(run)
     return _body(await run.snapshot())
 
 
 @router.post("/responses/{response_id}/cancel")
-async def cancel_response(response_id: str, caller: Caller) -> JSONResponse:
-    run = await _existing_run(caller, response_id)
+async def cancel_response(response_id: str, caller: Caller, request: Request) -> JSONResponse:
+    run = await _existing_run(caller, request, response_id)
     await langgraph_client().runs.cancel(run.thread_id, str(run.ids.run_id), wait=False)
     response = await run.snapshot()
     if not run.projection.done:
