@@ -473,16 +473,22 @@ class DiffImageRenderer:
             )
 
         x = marker_x + self._char_width * 2
-        for span in row.spans:
-            font = self._fonts.pick(bold=span.bold, italic=span.italic)
-            width = font.getlength(span.text)
-            if span.changed:
-                draw.rectangle(
-                    (x, y, x + max(width, 1) - 1, y + metrics.line_height - 1),
-                    fill=theme.add_highlight if row.kind == "add" else theme.remove_highlight,
-                )
-            draw.text((x, text_y), span.text, font=font, fill=span.color)
-            x += width
+        for (color, bold, italic), group in groupby(
+            row.spans, key=lambda span: (span.color, span.bold, span.italic)
+        ):
+            font = self._fonts.pick(bold=bold, italic=italic)
+            text = ""
+            for span in group:
+                start = font.getlength(text)
+                text += span.text
+                stop = font.getlength(text)
+                if span.changed:
+                    draw.rectangle(
+                        (x + start, y, x + max(stop, start + 1) - 1, y + metrics.line_height - 1),
+                        fill=theme.add_highlight if row.kind == "add" else theme.remove_highlight,
+                    )
+            draw.text((x, text_y), text, font=font, fill=color)
+            x += font.getlength(text)
 
 
 def render_diff_png(files: list[ChangedFile]) -> bytes:

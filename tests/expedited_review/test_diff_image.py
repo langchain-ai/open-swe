@@ -1,13 +1,15 @@
+from dataclasses import replace
 from io import BytesIO
 
 import pytest
-from PIL import Image, ImageColor
+from PIL import Image, ImageColor, ImageDraw
 
 from agent.expedited_review.diff_image import (
     DiffFile,
     DiffImageRenderer,
     DiffTheme,
     Highlighter,
+    Span,
     render_diff_png,
 )
 from agent.expedited_review.eligibility import ChangedFile
@@ -145,6 +147,29 @@ def test_zero_width_changes_still_render(character: str) -> None:
     )
     with Image.open(BytesIO(render_diff_png([file]))) as image:
         assert image.format == "PNG"
+
+
+@pytest.mark.parametrize("suffix", ["\u0301", "\u0300", "\u0301\u0327"])
+def test_highlight_boundaries_preserve_combining_mark_glyphs(suffix: str) -> None:
+    theme = DiffTheme(add_highlight="#12261e", remove_highlight="#25171c")
+    renderer = DiffImageRenderer(theme)
+    file = ChangedFile(
+        filename="example.unknown",
+        additions=1,
+        deletions=1,
+        patch=f"@@ -1 +1 @@\n-cafe\u0302 tail\n+cafe{suffix} tail",
+    )
+    for row in renderer._flow(DiffFile.parse(file)):
+        if row.kind not in ("add", "remove"):
+            continue
+        assert any(span.changed for span in row.spans)
+        text = "".join(span.text for span in row.spans)
+        whole = replace(row, spans=[Span(text, theme.text)])
+        actual = Image.new("RGB", (600, 36), theme.background)
+        expected = Image.new("RGB", actual.size, theme.background)
+        renderer._draw_row(ImageDraw.Draw(actual), row, 0, 0, 599, 60, 1)
+        renderer._draw_row(ImageDraw.Draw(expected), whole, 0, 0, 599, 60, 1)
+        assert actual.tobytes() == expected.tobytes()
 
 
 def test_png_paints_intraline_backgrounds_only_for_replacements() -> None:
