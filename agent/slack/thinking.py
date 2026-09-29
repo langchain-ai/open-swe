@@ -323,25 +323,31 @@ async def stream_slack_thinking_steps(
         for _ in range(_MAX_SUBSCRIPTIONS):
             done = False
             async with client.threads.stream(thread_id, assistant_id=assistant_id) as thread_stream:
-                async for event in thread_stream.subscribe(["lifecycle", "tools"]):
-                    lifecycle = root_lifecycle(event)
-                    if lifecycle is not None and lifecycle[0] == run_id:
-                        if lifecycle[1] == "running":
-                            active = True
-                        elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
-                            status = "success" if lifecycle[1] == "completed" else lifecycle[1]
-                            done = True
-                            break
-                    if active:
-                        stream.consume(event)
-                        if await stream.moved_away():
-                            status = "moved"
-                            done = True
-                            break
-                        await stream.flush()
+                # The SDK ends every subscription when any run on the thread ends, such
+                # as the one this run queued behind; the open stream resumes on a new one.
+                received = True
+                while received and not done:
+                    received = False
+                    async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                        received = True
+                        lifecycle = root_lifecycle(event)
+                        if lifecycle is not None and lifecycle[0] == run_id:
+                            if lifecycle[1] == "running":
+                                active = True
+                            elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                                status = "success" if lifecycle[1] == "completed" else lifecycle[1]
+                                done = True
+                                break
+                        if active:
+                            stream.consume(event)
+                            if await stream.moved_away():
+                                status = "moved"
+                                done = True
+                                break
+                            await stream.flush()
             if done:
                 break
-            # The thread stream closes while nothing runs, as when a queued run has not started.
+            # A subscription that got nothing means the stream itself closed.
             run_status = await _run_status(client, thread_id, run_id)
             if run_status not in _UNFINISHED_RUN_STATUSES:
                 status = "success" if run_status == "success" else run_status or "error"

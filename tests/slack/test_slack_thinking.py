@@ -99,12 +99,15 @@ async def test_streams_sanitized_tool_steps(monkeypatch) -> None:
     assert final_chunks[-1]["output"] == "Completed"
 
 
-async def test_a_run_that_starts_after_the_stream_closes_still_completes(monkeypatch) -> None:
+async def test_a_run_queued_behind_another_is_followed_to_its_end(monkeypatch) -> None:
+    earlier_run_ended = _event("lifecycle", {"event": "completed"})
+    earlier_run_ended["event_id"] = "synth:run-0:lc||completed"
     running = _event("lifecycle", {"event": "running"})
     completed = _event("lifecycle", {"event": "completed"})
     running["event_id"] = "synth:run-1:lc||running"
     completed["event_id"] = "synth:run-1:lc||completed"
-    subscriptions = [[], [running, completed]]
+    # The SDK ends a subscription at the earlier run's end; the next one sees this run.
+    subscriptions = [[earlier_run_ended], [running, completed]]
 
     class ThreadStream:
         async def __aenter__(self):
@@ -122,11 +125,15 @@ async def test_a_run_that_starts_after_the_stream_closes_still_completes(monkeyp
 
             return iterator()
 
+    streams: list[ThreadStream] = []
+
+    def open_stream(*_args, **_kwargs) -> ThreadStream:
+        streams.append(ThreadStream())
+        return streams[-1]
+
     client = AsyncMock()
-    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
-    client.runs.get = AsyncMock(return_value={"status": "pending"})
+    client.threads.stream = open_stream
     stop = AsyncMock()
-    monkeypatch.setattr(slack_thinking, "_RESUBSCRIBE_SECONDS", 0.0)
     monkeypatch.setattr(slack_thinking, "start_slack_stream", AsyncMock(return_value="2.0"))
     monkeypatch.setattr(slack_thinking, "append_slack_stream", AsyncMock())
     monkeypatch.setattr(slack_thinking, "stop_slack_stream", stop)
@@ -145,6 +152,8 @@ async def test_a_run_that_starts_after_the_stream_closes_still_completes(monkeyp
     assert stop.await_args is not None
     assert stop.await_args.args[2][-1]["status"] == "complete"
     assert "Interrupted" not in str(stop.await_args.args[2])
+    assert len(streams) == 1
+    client.runs.get.assert_not_awaited()
 
 
 async def test_stop_sends_pending_updates_despite_append_backoff(monkeypatch) -> None:
