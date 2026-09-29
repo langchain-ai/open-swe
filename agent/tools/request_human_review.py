@@ -66,11 +66,12 @@ async def request_human_review(
     result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
     if not result.success:
         return _failure(result.error)
-    posted = (
-        "This pull request already has an open review request; no new card was posted."
-        if result.reused
-        else "The review card is posted."
-    )
+    if result.summary_updated:
+        posted = "The open review card now shows your new inline_summary."
+    elif result.reused:
+        posted = "This pull request already has an open review request; no new card was posted."
+    else:
+        posted = "The review card is posted."
     return {
         "success": True,
         "request_id": result.request_id,

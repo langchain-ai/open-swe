@@ -22,6 +22,8 @@ const ALICE = { login: "alice", email: "alice@example.com", slack: "U_ALICE" };
 const BOB = { login: "bob", email: "bob@example.com", slack: "U_BOB" };
 const TLDR =
   "Makes the greeting punctuation consistent and covers it with a test.";
+const CORRECTED_TLDR =
+  "Ends every greeting with one exclamation mark, with a test.";
 const GREEN = [
   {
     id: 7001,
@@ -342,6 +344,22 @@ test.describe("Human review in Slack", () => {
       `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
     );
     await shootCard(page, "open");
+
+    // Asked in the same thread, the agent corrects the card's summary in place.
+    await control(request, "/mock/slack/send", {
+      thread_ts: asked.thread_ts,
+      text: `<@U0BOT> that summary is wrong, fix it E2E_HUMAN_REVIEW_RESUMMARIZE`,
+      mention_bot: true,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).tldr, {
+        timeout: 60_000,
+      })
+      .toBe(CORRECTED_TLDR);
+    expect(await reviewRequests(request)).toHaveLength(1);
+    await expect
+      .poll(async () => cardText(await reviewCard(request, posted)))
+      .toContain(CORRECTED_TLDR);
 
     // 2. Alice and Bob both sign up; each becomes a requested reviewer on GitHub.
     await click(request, posted, "I'll review", ALICE.slack);

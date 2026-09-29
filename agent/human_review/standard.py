@@ -66,6 +66,7 @@ class RequestResult(BaseModel):
     channel: str = ""
     permalink: str = ""
     reused: bool = False
+    summary_updated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +184,23 @@ async def _existing(active: HumanReviewRequest) -> RequestResult:
     )
 
 
+async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
+    """The thread that asked replaces its own card's summary."""
+    if tldr == active.tldr:
+        return await _existing(active)
+    async with HumanReviewRequest.locked(active.id) as (_, row):
+        if row is None or row.state != "open":
+            return _failure("This review request closed before its summary could change.")
+        row.tldr = tldr
+    current = await HumanReviewRequest.get(active.id)
+    if current is None:
+        return _failure("This review request vanished.")
+    await refresh_card(current)
+    result = await _existing(current)
+    result.summary_updated = True
+    return result
+
+
 async def request_review(
     pr_ref: GitHubPrRef, origin: Origin, *, channel: str = "", inline_summary: str | None = None
 ) -> RequestResult:
@@ -205,6 +223,13 @@ async def request_review(
 
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
+        if (
+            active.kind == "standard"
+            and inline_summary is not None
+            and origin.thread_id
+            and active.thread_id == origin.thread_id
+        ):
+            return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
     target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
