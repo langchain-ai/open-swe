@@ -251,28 +251,15 @@ async def test_a_tool_loaded_as_a_follow_up_arrives_is_added_after_the_follow_up
     ]
 
 
-async def test_a_tool_loaded_again_in_a_later_run_is_added_at_the_new_load() -> None:
+async def test_a_tool_loaded_in_an_earlier_run_stays_loaded_at_its_load() -> None:
     thread = _Thread(_notion(), _opus())
     await thread.tool_turn(["notion-search"])
     thread.messages.append(AIMessage("Found it."))
 
     await thread.new_run("Now update it.")
-    before_reload = await thread.model_call()
-    await thread.tool_turn(["notion-search"])
-    after_reload = await thread.model_call()
+    request = await thread.model_call()
 
-    assert _offered(before_reload) == ["execute"]
-    assert _shape(before_reload.messages) == ["human", "ai", "tool", "ai", "human"]
-    assert _shape(after_reload.messages) == [
-        "human",
-        "ai",
-        "tool",
-        "ai",
-        "human",
-        "ai",
-        "tool",
-        "+notion-search",
-    ]
+    assert _shape(request.messages) == ["human", "ai", "tool", "+notion-search", "ai", "human"]
 
 
 async def test_a_loaded_tool_without_a_visible_load_result_goes_to_tools() -> None:
