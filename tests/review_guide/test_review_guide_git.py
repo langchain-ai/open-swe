@@ -166,6 +166,48 @@ def test_approved_lines_stay_approved_after_a_rebase(repo: Path) -> None:
     ]
 
 
+def test_a_pr_update_keeps_an_unchanged_chunk_on_screen_and_drops_a_changed_one(
+    repo: Path,
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(
+        repo,
+        {"cli.py": "import sys\nprint(1)\n", "core.py": "import os\n\ndef a():\n    return 10\n"},
+        "f",
+    )
+    changes = _changes(repo, base, head)
+    pool = unseen(changes, Counter())
+    walk = Walk.start(head, changes)
+    walk.add_other(claim([FileRanges(path="cli.py", added=[(1, 1)])], walk.left(pool), changes))
+    walk.groups.append(
+        Group(
+            title="Print one",
+            lines=claim([FileRanges(path="cli.py", added=[(2, 2)])], walk.left(pool), changes),
+            status="shown",
+        )
+    )
+    walk.groups.append(
+        Group(
+            title="Return 10",
+            lines=claim([FileRanges(path="core.py", added=[(4, 4)])], walk.left(pool), changes),
+            status="skipped",
+        )
+    )
+
+    new_head = _commit(
+        repo,
+        {"cli.py": "import sys\n\nprint(1)\n", "core.py": "import os\n\ndef a():\n    return 11\n"},
+        "moved",
+    )
+    moved, gone = walk.moved_to(new_head, _changes(repo, base, new_head))
+
+    assert [(g.title, [r.lineno for r in g.lines]) for g in moved.groups] == [("Print one", [3])]
+    assert moved.on_screen() is not None
+    assert [g.title for g in gone] == ["Return 10"]
+    assert [(r.path, r.lineno) for r in moved.other] == [("cli.py", 1)]
+
+
 async def test_messages_quote_through_helpers_and_cannot_escape_the_sandbox() -> None:
     async def read_head(path: str) -> str:
         return "one\ntwo\nthree\n" if path == "a.py" else ""

@@ -1,7 +1,16 @@
-The pull request moved to head `{{ head_sha }}`, so the walkthrough starts over on it: nothing is on screen, in Other or skipped any more. Lines the reader already approved stay approved and never come back.
+The pull request changed since your last turn, and the walkthrough was paused until the reader's message above. It is now at head `{{ head_sha }}`.
 
-Still to review:
+Everything was carried over by content: lines the reader approved stay approved, and lines on screen, in Other or skipped keep their place if they are unchanged.
+{% if on_screen %}
+“{{ on_screen }}” is still on screen, unchanged.
+{% else %}
+Nothing is on screen: whatever was there changed.
+{% endif %}
+
+Still left:
 
 ```
-{{ unseen or "nothing" }}
+{{ left or "nothing" }}
 ```
+
+Tell the reader in one or two sentences what changed, then do what their message asks.

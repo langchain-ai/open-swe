@@ -52,7 +52,10 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("hello", "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("hello", "final") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert lock_held is False
 
 
@@ -86,7 +89,10 @@ async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", active_thread)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("threaded", "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("threaded", "final") == {
+        "success": True,
+        "message_ts": "10.000",
+    }
 
 
 @pytest.mark.parametrize("slack_error", ["channel_not_found", "not_in_channel"])
@@ -132,7 +138,8 @@ async def test_only_final_reply_has_feedback_for_its_run(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     assert await slack_reply_tool.slack_reply("Answer", response_type, options=options) == {
-        "success": True
+        "success": True,
+        "message_ts": "2.0",
     }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
@@ -165,7 +172,10 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     post = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {"success": True}
+    assert await slack_reply_tool.slack_reply("x" * 12001, "final") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
     assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
@@ -181,7 +191,10 @@ async def test_slack_reply_keeps_code_highlighted_over_native_limit(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    assert await slack_reply_tool.slack_reply(message, "progress") == {"success": True}
+    assert await slack_reply_tool.slack_reply(message, "progress") == {
+        "success": True,
+        "message_ts": "2.0",
+    }
     assert post.await_args.args[2].startswith("*Heading*\n")
     blocks = post.await_args.kwargs["blocks"]
     [code] = [block for block in blocks if block["type"] == "rich_text"]

@@ -1,7 +1,8 @@
-"""Open a review guide code channel for a pull request, and wake it when the PR moves.
+"""Open a review guide code channel for a pull request, and pause it when the PR moves.
 
-A closed guide is never woken: the guide ended it, or Slack archived its
-channel. Only the reader's own message reopens it.
+A pull request update never starts a run: the guide posts a pause note and
+waits for the reader. A closed guide is not even paused: the guide ended it, or
+Slack archived its channel. Only the reader's own message reopens it.
 """
 
 import logging
@@ -19,6 +20,7 @@ from agent.input_messages import build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
 from agent.review_guide.github import fetch_head
+from agent.review_guide.messages import pause, refresh_progress
 from agent.review_guide.sessions import ASSISTANT_ID, GuideMode, ReviewGuideSession
 from agent.slack.channels import SlackChannel
 from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel, slack_user_ids
@@ -149,12 +151,14 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             dashboard_url=dashboard_thread_url(thread_id) or "",
         ),
     )
+    session = await ReviewGuideSession.get(thread_id)
+    if session is not None:
+        await refresh_progress(session, stage="starting")
     await dispatch_guide_run(
         thread_id,
         location,
         prompt("review-guide/kickoff", pr_number=start.number),
         workspace_slug=start.workspace_slug,
-        mark_processing=True,
     )
     return StartedGuide(thread_id=thread_id, channel_id=channel_id)
 
@@ -210,18 +214,9 @@ async def _fork_builder(
 
 
 async def dispatch_guide_run(
-    thread_id: str,
-    location: SlackThreadRef,
-    text: str,
-    *,
-    workspace_slug: str | None,
-    mark_processing: bool = False,
+    thread_id: str, location: SlackThreadRef, text: str, *, workspace_slug: str | None
 ) -> None:
-    """Run the guide on a system turn: no person triggered it, so it cannot approve.
-
-    Only the kickoff marks the session processing; a status change on any other
-    system turn would reopen a session the reader closed.
-    """
+    """Kick the guide off: no person triggered this turn, so it cannot approve."""
     configurable: dict[str, object] = {
         "thread_id": thread_id,
         "slack_thread": location.dump(),
@@ -229,7 +224,7 @@ async def dispatch_guide_run(
     }
     if workspace_slug:
         configurable["workspace"] = workspace_slug
-    if mark_processing and location.channel_id:
+    if location.channel_id:
         await set_session_status(location.channel_id, "processing")
     await create_durable_run(
         thread_id,
@@ -267,10 +262,13 @@ async def close_guide_for_channel(channel_id: str) -> None:
 
 
 async def notify_pr_updated(payload: dict[str, object]) -> None:
-    """Wake every guide on a pull request that just moved so it shows the new code."""
+    """Pause every open guide on a pull request that just moved, until its reader goes on.
+
+    No run starts: the guide picks the new head up on the reader's next message.
+    """
     event = PullRequestEvent.parse(payload)
     identity = event.identity if event else None
-    if identity is None:
+    if event is None or identity is None:
         return
     owner, repo, number = identity
     for session in await ReviewGuideSession.for_pull_request(owner, repo, number):
@@ -279,18 +277,11 @@ async def notify_pr_updated(payload: dict[str, object]) -> None:
         if await channel_archived(session.slack_channel_id):
             await session.set_closed(True)
             continue
-        location = SlackThreadRef(
-            channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS
-        )
         try:
-            await dispatch_guide_run(
-                session.thread_id,
-                location,
-                prompt("review-guide/pr-updated"),
-                workspace_slug=session.workspace_slug,
-            )
+            await pause(session, event.pull_request.head_sha)
+            await refresh_progress(session, session.walk, stage="paused")
         except Exception:
             logger.exception(
-                "Could not wake a review guide for an updated pull request",
+                "Could not pause a review guide for an updated pull request",
                 extra={"agent_thread_id": session.thread_id, "pr_number": number},
             )

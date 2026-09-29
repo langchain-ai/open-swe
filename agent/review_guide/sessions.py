@@ -51,6 +51,8 @@ class ReviewGuideSession(Base):
     workspace_slug: Mapped[str | None] = mapped_column(default=None)
     mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
     walk_json: Mapped[JsonObject | None] = mapped_column("walkthrough", JSONB, default=None)
+    summary_message_ts: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    paused_message_ts: Mapped[str] = mapped_column(server_default="", default="", init=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     closed_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     pull_request: Mapped[PullRequest] = relationship(init=False)
@@ -80,6 +82,27 @@ class ReviewGuideSession(Base):
                 .options(selectinload(cls.pull_request))
                 .where(cls.slack_channel_id == channel_id)
             )
+
+    async def save_summary_message(self, message_ts: str) -> None:
+        self.summary_message_ts = message_ts
+        async with postgres.session() as session:
+            await session.execute(
+                update(ReviewGuideSession)
+                .where(ReviewGuideSession.thread_id == self.thread_id)
+                .values(summary_message_ts=message_ts)
+            )
+            await session.commit()
+
+    async def save_pause(self, message_ts: str) -> None:
+        """Record the note that paused the walkthrough; an empty ``message_ts`` resumes it."""
+        self.paused_message_ts = message_ts
+        async with postgres.session() as session:
+            await session.execute(
+                update(ReviewGuideSession)
+                .where(ReviewGuideSession.thread_id == self.thread_id)
+                .values(paused_message_ts=message_ts)
+            )
+            await session.commit()
 
     @property
     def walk(self) -> Walk | None:

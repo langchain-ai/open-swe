@@ -8,6 +8,7 @@ from agent.review_guide.buttons import APPROVE, LOOKS_GOOD, MARK_READY
 from agent.review_guide.context import GuideContext, GuideUnavailableError
 from agent.review_guide.diff import ChangedLine, FileChange
 from agent.review_guide.github import fetch_head
+from agent.review_guide.messages import Stage, refresh_progress, retire
 from agent.review_guide.render import RenderError, fenced
 from agent.review_guide.walk import (
     FileRanges,
@@ -19,10 +20,14 @@ from agent.review_guide.walk import (
     other_stat,
 )
 from agent.review_guide.walk import summary as left_summary
+from agent.run_config import RunConfig
 from agent.slack.code_channels import archive_code_channel, set_session_status_result
 from agent.slack.tools.reply import slack_reply
 
 MAX_CHANGE_ROWS = 2_000
+_ONE_PER_TURN = (
+    "you already put something on screen this turn; end your turn and wait for the reader"
+)
 
 
 @dataclass
@@ -44,11 +49,28 @@ class _State:
     def left(self) -> list[ChangedLine]:
         return self.walk.left(self.unseen)
 
+    @property
+    def channel_id(self) -> str:
+        return self.ctx.session.slack_channel_id
+
     def status(self) -> str:
         return left_summary(self.left) if self.left else "nothing left but Other"
 
-    async def save(self) -> None:
+    def shown_this_turn(self) -> bool:
+        run_id = RunConfig.from_runtime().run_id or ""
+        return bool(run_id) and self.walk.shown_by_run == run_id
+
+    def mark_shown_this_turn(self) -> None:
+        self.walk.shown_by_run = RunConfig.from_runtime().run_id or ""
+
+    async def save(self, stage: Stage | None = None) -> None:
         await self.ctx.session.save_walk(self.walk)
+        if stage is not None:
+            await refresh_progress(self.ctx.session, self.walk, self.unseen, stage=stage)
+
+    async def retire(self, group: Group | None, note: str) -> None:
+        if group is not None:
+            await retire(self.channel_id, group.message_ts, group.message_text, note)
 
     def keys(self, refs: list[LineRef]) -> Counter[str]:
         wanted = set(refs)
@@ -93,9 +115,11 @@ async def show_chunk(
     """Implement the `show_chunk` tool."""
     try:
         state = await _State.load()
-        state.walk.withdraw()
+        if state.shown_this_turn():
+            return {"success": False, "error": _ONE_PER_TURN}
+        replaced = state.walk.withdraw()
         moved = claim(other, state.left, state.changes) if other else []
-        state.walk.other += moved
+        state.walk.add_other(moved)
         lines = claim(show, state.left, state.changes)
         prose = await state.ctx.renderer().render(explanation)
         code = await state.ctx.render(lines)
@@ -108,11 +132,15 @@ async def show_chunk(
         if state.left
         else "_Only Other is left after this_"
     )
-    posted = await slack_reply(
-        f"*{chunk.title}*\n{prose}\n\n{code}\n{footer}", "progress", options=[LOOKS_GOOD]
-    )
+    text = f"*{chunk.title}*\n{prose}\n\n{code}\n{footer}"
+    posted = await slack_reply(text, "progress", options=[LOOKS_GOOD])
     if posted["success"] is not True:
         return posted
+    chunk.message_ts = str(posted["message_ts"] or "")
+    chunk.message_text = text
+    chunk.run_id = RunConfig.from_runtime().run_id or ""
+    state.mark_shown_this_turn()
+    await state.retire(replaced, "Replaced by another chunk")
     await state.save()
     return {"success": True, "shown_lines": len(lines), "moved_to_other": len(moved)}
 
@@ -127,7 +155,7 @@ async def move_to_other(files: list[FileRanges], back: bool = False) -> dict[str
             refs = set(claim(files, pool, state.changes))
             state.walk.other = [ref for ref in state.walk.other if ref not in refs]
         else:
-            state.walk.other += claim(files, state.left, state.changes)
+            state.walk.add_other(claim(files, state.left, state.changes))
     except (GuideUnavailableError, RangeError) as exc:
         return {"success": False, "error": str(exc)}
     await state.save()
@@ -145,13 +173,20 @@ async def approve_review_chunk() -> dict[str, Any]:
         await state.ctx.session.mark_seen(state.keys(chunk.lines))
         chunk.status = "approved"
         approved = chunk.title
+        await state.retire(chunk, "✓ Looks good")
     elif state.walk.other_status == "shown":
         await state.ctx.session.mark_seen(state.keys(state.walk.other))
         state.walk.other_status = "approved"
         approved = "Other"
+        await retire(
+            state.channel_id,
+            state.walk.other_message_ts,
+            state.walk.other_message_text,
+            "✓ Looks good",
+        )
     else:
         return {"success": False, "error": "nothing is on screen to approve"}
-    await state.save()
+    await state.save("walking")
     if state.left:
         following = "show_chunk"
     elif state.walk.has_other and state.walk.other_status == "open":
@@ -167,7 +202,7 @@ async def skip_changes(
     """Implement the `skip_changes` tool."""
     try:
         state = await _State.load()
-        state.walk.withdraw()
+        replaced = state.walk.withdraw()
         lines = (
             claim(files, state.left, state.changes)
             if files
@@ -181,7 +216,8 @@ async def skip_changes(
         )
     if include_other and state.walk.other_status in ("open", "shown"):
         state.walk.other_status = "skipped"
-    await state.save()
+    await state.retire(replaced, "Skipped")
+    await state.save("walking")
     return {"success": True, "skipped_lines": len(lines), "left": state.status()}
 
 
@@ -192,6 +228,8 @@ async def show_other(description: str) -> dict[str, Any]:
         prose = await state.ctx.renderer().render(description)
     except (GuideUnavailableError, RenderError) as exc:
         return {"success": False, "error": str(exc)}
+    if state.shown_this_turn():
+        return {"success": False, "error": _ONE_PER_TURN}
     if state.left or state.walk.on_screen() is not None:
         return {
             "success": False,
@@ -205,6 +243,9 @@ async def show_other(description: str) -> dict[str, Any]:
     posted = await slack_reply(text, "progress", options=[LOOKS_GOOD])
     if posted["success"] is True:
         state.walk.other_status = "shown"
+        state.walk.other_message_ts = str(posted["message_ts"] or "")
+        state.walk.other_message_text = text
+        state.mark_shown_this_turn()
         await state.save()
     return posted
 
@@ -232,23 +273,26 @@ async def finish_walkthrough(summary: str) -> dict[str, Any]:
         head = await fetch_head(pr.owner, pr.repo, pr.number)
         if head is not None and head.draft:
             options.append(MARK_READY)
-    return await slack_reply(
+    posted = await slack_reply(
         f"{prose}\n\n_{state.walk.coverage()}_", "progress", options=options or None
     )
+    await state.save("finished")
+    return posted
 
 
 async def end_walkthrough(message: str) -> dict[str, Any]:
     """Implement the `end_walkthrough` tool."""
     try:
-        ctx = await GuideContext.current()
-        prose = await ctx.renderer().render(message)
+        state = await _State.load()
+        prose = await state.ctx.renderer().render(message)
     except (GuideUnavailableError, RenderError) as exc:
         return {"success": False, "error": str(exc)}
     posted = await slack_reply(prose, "progress")
-    await ctx.session.set_closed(True)
-    channel_id = ctx.session.slack_channel_id
-    _, status_error = await set_session_status_result(channel_id, "closed")
-    archived, archive_error = await archive_code_channel(channel_id)
+    await state.retire(state.walk.withdraw(), "The walkthrough ended")
+    await state.save("ended")
+    await state.ctx.session.set_closed(True)
+    _, status_error = await set_session_status_result(state.channel_id, "closed")
+    archived, archive_error = await archive_code_channel(state.channel_id)
     warnings = [
         f"could not {what}: {error}"
         for what, error in (

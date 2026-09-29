@@ -44,6 +44,7 @@ from agent.review_guide import git
 from agent.review_guide.context import guide_repo_dir
 from agent.review_guide.diff import parse, unseen
 from agent.review_guide.github import fetch_head
+from agent.review_guide.messages import resume, retire
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -55,7 +56,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
-from agent.slack.code_channels import set_view
+from agent.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
 from agent.tools.approve_pull_request import approve_pull_request
 from agent.tools.code_channel_set_view import code_channel_set_view
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
@@ -71,6 +72,7 @@ from agent.tools.review_walkthrough import (
     show_other,
     skip_changes,
 )
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -155,19 +157,39 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
                     "Could not attach the pull request diff to a review guide channel",
                     extra={"agent_thread_id": self._thread_id, "slack_error": view_error},
                 )
+        # Refreshed every run so channels opened before a link was added still get it.
+        await set_context_bar(
+            session.slack_channel_id,
+            repo_context_bar_items(
+                {"owner": pr.owner, "name": pr.repo},
+                pr_url=pr.url,
+                dashboard_url=dashboard_thread_url(self._thread_id) or "",
+            ),
+        )
+        await resume(session)
         walk = session.walk
         if walk is None or walk.head_sha == head.head.sha:
             return updates
         changes = parse(await git.pr_diff(backend, repo_dir))
-        left = unseen(changes, await session.seen_lines())
-        await session.save_walk(None)
+        moved, gone = walk.moved_to(head.head.sha, changes)
+        await session.save_walk(moved)
+        for group in gone:
+            if group.status == "shown":
+                await retire(
+                    session.slack_channel_id,
+                    group.message_ts,
+                    group.message_text,
+                    "The pull request changed these lines",
+                )
+        left = moved.left(unseen(changes, await session.seen_lines()))
+        on_screen = moved.on_screen()
         logger.info(
-            "Review guide walkthrough restarted for a newer head",
+            "Review guide walkthrough carried to a newer head",
             extra={
                 "agent_thread_id": self._thread_id,
                 "pr_number": pr.number,
                 "guide_head_sha": head.head.sha,
-                "guide_unseen_lines": len(left),
+                "guide_left_lines": len(left),
             },
         )
         updates["messages"] = [
@@ -175,7 +197,8 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
                 content=prompt(
                     "review-guide/pr-moved",
                     head_sha=head.head.sha,
-                    unseen="\n".join(
+                    on_screen=on_screen.title if on_screen else "",
+                    left="\n".join(
                         change.stat([line for line in left if line.path == change.path])
                         for change in changes
                         if any(line.path == change.path for line in left)

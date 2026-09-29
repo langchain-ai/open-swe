@@ -27,10 +27,16 @@ class LineRef(BaseModel, frozen=True):
     path: str
     sign: Sign
     lineno: int
+    # Kept so the walkthrough can follow a line to a new head by content.
+    text: str = ""
 
     @classmethod
     def of(cls, line: ChangedLine) -> Self:
-        return cls(path=line.path, sign=line.sign, lineno=line.lineno)
+        return cls(path=line.path, sign=line.sign, lineno=line.lineno, text=line.text)
+
+    @property
+    def content(self) -> tuple[str, str, str]:
+        return self.path, self.sign, self.text
 
 
 class FileRanges(BaseModel):
@@ -48,6 +54,10 @@ class Group(BaseModel):
     lines: list[LineRef]
     status: GroupStatus
     reason: str = ""
+    # The Slack message showing the chunk, kept to take its button away once it is settled.
+    message_ts: str = ""
+    message_text: str = ""
+    run_id: str = ""
 
 
 class Walk(BaseModel):
@@ -57,10 +67,53 @@ class Walk(BaseModel):
     # Binary, mode-only and empty-file changes: nothing to show, so always Other.
     other_files: list[str] = []
     other_status: OtherStatus = "open"
+    other_message_ts: str = ""
+    other_message_text: str = ""
+    # The run that last put something on screen: one chunk per turn, then the reader.
+    shown_by_run: str = ""
 
     @classmethod
     def start(cls, head_sha: str, changes: list[FileChange]) -> Self:
         return cls(head_sha=head_sha, other_files=[c.path for c in changes if c.textless])
+
+    def moved_to(self, head_sha: str, changes: list[FileChange]) -> tuple[Self, list[Group]]:
+        """This walkthrough on a new head, following every line by content.
+
+        A chunk on screen stays only if all of its lines are still there; any
+        other group, and Other, keeps whatever lines survive. Returns the new
+        walkthrough and the groups that are gone.
+        """
+        pool: dict[tuple[str, str, str], list[LineRef]] = {}
+        for change in changes:
+            for line in change.lines:
+                ref = LineRef.of(line)
+                pool.setdefault(ref.content, []).append(ref)
+
+        def take(refs: list[LineRef], *, whole: bool) -> list[LineRef]:
+            picked: list[LineRef] = []
+            for ref in refs:
+                bucket = pool.get(ref.content)
+                if bucket:
+                    picked.append(bucket.pop(0))
+                elif whole:
+                    for back in reversed(picked):
+                        pool[back.content].insert(0, back)
+                    return []
+            return picked
+
+        moved = type(self).start(head_sha, changes)
+        gone: list[Group] = []
+        for group in self.groups:
+            lines = take(group.lines, whole=group.status == "shown")
+            if lines:
+                moved.groups.append(group.model_copy(update={"lines": lines}))
+            else:
+                gone.append(group)
+        moved.other = take(self.other, whole=False)
+        moved.other_status = self.other_status
+        moved.other_message_ts = self.other_message_ts
+        moved.other_message_text = self.other_message_text
+        return moved, gone
 
     @property
     def has_other(self) -> bool:
@@ -74,9 +127,18 @@ class Walk(BaseModel):
         taken = set(self.other) | {ref for g in self.groups for ref in g.lines}
         return [line for line in unseen if LineRef.of(line) not in taken]
 
-    def withdraw(self) -> None:
-        """Put an unapproved chunk back, so its lines are left again."""
+    def withdraw(self) -> Group | None:
+        """Put an unapproved chunk back, so its lines are left again; returns it."""
+        current = self.on_screen()
         self.groups = [g for g in self.groups if g.status != "shown"]
+        return current
+
+    def add_other(self, refs: list[LineRef]) -> None:
+        """New lines in Other need the reader's look again, even if Other was approved."""
+        if refs:
+            self.other += refs
+            if self.other_status == "approved":
+                self.other_status = "open"
 
     def unfinished(self, unseen: list[ChangedLine]) -> list[str]:
         """What still stands between the reader and the end of the walkthrough."""
