@@ -170,17 +170,19 @@ export function WorkspaceSandboxSection({
             {refreshing ? "Rebuilding…" : "Rebuild image"}
           </Button>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!dirty || save.isPending}
-              onClick={() => {
-                setSetupScript(record.setup_script ?? "")
-                setUpdateScript(record.update_script ?? "")
-              }}
-            >
-              Cancel
-            </Button>
+            {dirty && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => {
+                  setSetupScript(record.setup_script ?? "")
+                  setUpdateScript(record.update_script ?? "")
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="sm"
               disabled={!dirty || save.isPending}
