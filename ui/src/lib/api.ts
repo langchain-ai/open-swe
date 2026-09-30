@@ -1186,7 +1186,6 @@ export interface ReviewerEvalConfig {
   reasoning_effort: string
   score_mode: ReviewerEvalScoreMode
   severity_threshold: ReviewerEvalSeverity
-  cap: number
 }
 
 export interface ReviewerEvalProgress {

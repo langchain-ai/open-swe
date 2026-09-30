@@ -44,7 +44,6 @@ async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() ->
             head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
-            cap=None,
             is_re_review=False,
             assessment=_assessment(),
             state={"review_approval_policy": "Docs only"},
@@ -267,7 +266,6 @@ async def test_publish_review_skips_findings_already_published() -> None:
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -325,7 +323,6 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
                 head_sha="a" * 40,
                 token="t",
                 severity_threshold="medium",
-                cap=15,
                 is_re_review=False,
                 assessment=_assessment("a" * 40) if assessment_mode else None,
                 state={"review_approval_policy": "Docs only"},
@@ -427,7 +424,6 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings(
                 head_sha="newsha",
                 token="t",
                 severity_threshold="medium",
-                cap=15,
                 is_re_review=True,
             )
 
@@ -498,7 +494,6 @@ async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
             head_sha="newsha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=True,
         )
 
@@ -543,7 +538,6 @@ async def test_publish_review_dedup_keys_off_durable_last_reviewed_sha() -> None
             head_sha="newsha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -618,7 +612,6 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
             head_sha="newsha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=True,
         )
 
@@ -688,7 +681,6 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -738,7 +730,6 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
             head_sha="newsha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=True,
         )
 
@@ -794,7 +785,6 @@ async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body()
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -872,7 +862,6 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
             head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
             assessment=_assessment(),
             state={"review_approval_policy": "Docs only"},
@@ -944,7 +933,6 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -1003,7 +991,6 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
@@ -1096,7 +1083,6 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
-            cap=None,
             is_re_review=False,
             assessment=_assessment(),
             state={"review_approval_policy": prepared_policy},
@@ -1205,7 +1191,6 @@ async def test_approval_publication_handles_github_rejections(
             head_sha="a" * 40,
             token="t",
             severity_threshold="medium",
-            cap=None,
             is_re_review=False,
             assessment=_assessment(),
             state={"review_approval_policy": "Docs only"},
@@ -1302,7 +1287,6 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
             head_sha="sha",
             token="t",
             severity_threshold="medium",
-            cap=15,
             is_re_review=False,
         )
 
