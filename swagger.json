@@ -1100,6 +1100,52 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanReviewDismissBody": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "HumanReviewDismissBody",
+        "type": "object"
+      },
+      "HumanReviewDismissResult": {
+        "properties": {
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "HumanReviewDismissResult",
+        "type": "object"
+      },
+      "HumanReviewRequestBody": {
+        "properties": {
+          "channel": {
+            "default": "",
+            "title": "Channel",
+            "type": "string"
+          },
+          "inline_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inline Summary"
+          }
+        },
+        "title": "HumanReviewRequestBody",
+        "type": "object"
+      },
       "IncidentCommandBody": {
         "additionalProperties": false,
         "properties": {
@@ -2390,6 +2436,17 @@
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
           },
+          "review_channel_watch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Watch"
+          },
           "review_draft_prs": {
             "anyOf": [
               {
@@ -2973,6 +3030,11 @@
           },
           "success": {
             "title": "Success",
+            "type": "boolean"
+          },
+          "summary_updated": {
+            "default": false,
+            "title": "Summary Updated",
             "type": "boolean"
           }
         },
@@ -9543,6 +9605,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HumanReviewRequestBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -9571,6 +9650,90 @@
           }
         ],
         "summary": "Api Request Human Review",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss": {
+      "post": {
+        "description": "Take down a pull request's open review request, as its card's Dismiss button does.",
+        "operationId": "api_dismiss_human_review_request_dashboard_api_repos__owner___repo__pulls__number__human_review_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HumanReviewDismissBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanReviewDismissResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Dismiss Human Review Request",
         "tags": [
           "dashboard",
           "human-review"

@@ -95,7 +95,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, the repositories it prefers, and its Slack channels. A repository is preferred by, and a Slack channel belongs to, exactly one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -113,14 +113,16 @@ function GeneralSection({
           </p>
         )}
         <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(draftFromWorkspace(record))}
-          >
-            Cancel
-          </Button>
+          {dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setDraft(draftFromWorkspace(record))}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={!dirty || saving || !draft.name.trim()}
@@ -255,7 +257,7 @@ export function WorkspaceSettingsPanel({
             >
               <CircleNotchIcon
                 aria-hidden="true"
-                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
                 ? "Rebuilding sandbox image…"

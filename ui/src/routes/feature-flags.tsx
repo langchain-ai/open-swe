@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -7,9 +7,6 @@ import { AssistantUiPreference } from "@/features/settings/components/AssistantU
 import { HumanReviewPreference } from "@/features/settings/components/HumanReviewPreference"
 import { SandboxMemoryPreference } from "@/features/settings/components/SandboxMemoryPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { useFeatureFlagsPanel } from "@/lib/featureFlags"
-import { useShortcutLabel } from "@/lib/hotkeys"
-import { useIsHydrated } from "@/lib/hydration"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
@@ -20,9 +17,6 @@ export const Route = createFileRoute("/feature-flags")({
 
 function FeatureFlagsPage() {
   const session = useSession()
-  const visible = useFeatureFlagsPanel()
-  const hydrated = useIsHydrated()
-  const paletteShortcut = useShortcutLabel("mod+k")
 
   if (session.isLoading) {
     return (
@@ -32,13 +26,12 @@ function FeatureFlagsPage() {
     )
   }
   if (!session.data) return <RequireLogin />
-  if (hydrated && !visible) return <Navigate to="/my-settings" replace />
 
   return (
     <AppShell
       user={session.data}
       title="Feature Flags"
-      description={`Experimental features under test. Toggle this tab from the command palette (${paletteShortcut}).`}
+      description="Experimental features under test."
     >
       <SettingsSection title="Experiments">
         <AssistantUiPreference />

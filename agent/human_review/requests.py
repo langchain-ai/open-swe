@@ -4,7 +4,10 @@ A request has a kind. An ``expedited`` request is a vote on what its card showed
 a tiny pull request: it pins the head SHA the card was posted for and a fingerprint
 of the diff it drew, and one approval from someone other than the author completes
 it. A ``standard`` request is a card in the repository's review channel that people
-sign up to review on GitHub; it merges once they approve.
+sign up to review on GitHub; it merges once they approve. A ``posted`` request is
+someone's own message linking the pull request in its review channel: Open SWE never
+edits it, only reacts to it when the pull request is approved or merged, and never
+merges.
 
 One request per pull request may be ``open`` at a time, whatever its kind; a partial
 unique index enforces that. A participant is a ``users.id``, never a GitHub or Slack
@@ -29,7 +32,7 @@ from agent.github.repositories import Repository
 from agent.users import User
 from agent.utils.json_types import JsonObject
 
-RequestKind = Literal["expedited", "standard"]
+RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``approve`` and ``reject`` are Slack votes on an expedited card; ``review`` is a
 # person signed up to review a standard request on GitHub.
@@ -94,6 +97,10 @@ class HumanReviewRequest(Base):
     # The posted card is a thread reply also sent to the channel.
     slack_broadcast: Mapped[bool] = mapped_column(server_default="false", default=False)
     run_config: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
+    # A posted request's approved reaction went on at this time.
+    approved_at: Mapped[datetime | None] = mapped_column(default=None)
+    # When a posted request's pull request last turned green; ``None`` while it is not.
+    ready_since: Mapped[datetime | None] = mapped_column(default=None)
     participants: Mapped[list[HumanReviewParticipant]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -109,6 +116,11 @@ class HumanReviewRequest(Base):
     @property
     def active(self) -> bool:
         return self.state == "open"
+
+    @property
+    def has_card(self) -> bool:
+        """Whether the Slack message is Open SWE's card rather than someone's own post."""
+        return self.kind != "posted"
 
     @property
     def approvals(self) -> list[HumanReviewParticipant]:
@@ -185,7 +197,9 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
-    async def open_in_repository(cls, owner: str, repo: str, *, kind: RequestKind) -> list[Self]:
+    async def open_in_repository(
+        cls, owner: str, repo: str, *, kinds: tuple[RequestKind, ...]
+    ) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
                 cls._loaded(select(cls))
@@ -193,7 +207,7 @@ class HumanReviewRequest(Base):
                 .join(PullRequest.repository)
                 .where(
                     Repository.key == f"{owner}/{repo}".lower(),
-                    cls.kind == kind,
+                    cls.kind.in_(kinds),
                     cls.state == "open",
                 )
             )

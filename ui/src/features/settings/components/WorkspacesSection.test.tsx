@@ -270,9 +270,13 @@ describe("WorkspacesSection", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Add workspace" })
     )
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add workspace" }))
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
     const repositoryHelp = screen.getByRole("button", {
       name: "About workspace repositories",
     })

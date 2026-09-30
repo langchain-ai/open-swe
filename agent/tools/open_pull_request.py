@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import posixpath
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -36,6 +38,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -1216,3 +1219,81 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
             record_opening=False,
         )
     return {"success": True, "url": pr.get("html_url"), "number": ref.number}
+
+
+UPLOADS_URL = "https://uploads.github.com/user-attachments/assets"
+MAX_BYTES = 10 * 1024 * 1024
+ATTACHMENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+
+def _upload_failure(error: str) -> dict[str, object]:
+    return {"success": False, "error": error}
+
+
+async def _read_attachment(file_path: str) -> tuple[str, bytes]:
+    backend, path, _ = await resolve_sandbox_file(file_path)
+    downloads = await backend.adownload_files([path])
+    content = downloads[0].content if downloads else None
+    if not content:
+        raise ValueError("file_path must identify a non-empty file")
+    if len(content) > MAX_BYTES:
+        raise ValueError("file exceeds the 10 MB attachment limit")
+    return path, content
+
+
+async def _upload_attachment(
+    owner: str, repo: str, name: str, content_type: str, content: bytes
+) -> str:
+    token, _kind = await _resolve_pr_author_token()
+    if not token:
+        raise ValueError("no GitHub token is available for this thread")
+    async with httpx2.AsyncClient(timeout=60.0) as client:
+        if await private_credential_login() is None and not await _workspace_has_repository(
+            client, owner, repo
+        ):
+            raise ValueError(f"{owner}/{repo} is not in the workspace GitHub App installation")
+        repo_resp = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token)
+        )
+        if repo_resp.status_code != 200:
+            raise ValueError(f"GitHub returned {repo_resp.status_code} for {owner}/{repo}")
+        resp = await client.post(
+            UPLOADS_URL,
+            params={
+                "name": name,
+                "content_type": content_type,
+                "repository_id": repo_resp.json()["id"],
+            },
+            headers={**_auth_headers(token), "Content-Type": "application/octet-stream"},
+            content=content,
+        )
+    if resp.status_code not in (200, 201):
+        raise ValueError(f"GitHub upload returned {resp.status_code}: {resp.text[:500]}")
+    return resp.json()["url"]
+
+
+async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[str, object]:
+    """Implement the `upload_pr_attachment` tool."""
+    content_type = ATTACHMENT_TYPES.get(posixpath.splitext(file_path)[1].lower())
+    if content_type is None:
+        return _upload_failure("unsupported file type")
+    try:
+        path, content = await _read_attachment(file_path)
+        name = posixpath.basename(path)
+        url = await _upload_attachment(owner, repo, name, content_type, content)
+    except ValueError as exc:
+        logger.warning("PR attachment upload failed", extra={"error": str(exc)})
+        return _upload_failure(str(exc))
+    alt = re.sub(r"[\\\[\]\r\n]", " ", posixpath.splitext(name)[0])
+    markdown = url if content_type.startswith("video/") else f"![{alt}]({url})"
+    return {"success": True, "url": url, "markdown": markdown}
