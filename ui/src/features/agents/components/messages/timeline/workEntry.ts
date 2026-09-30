@@ -221,6 +221,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "slack":
     case "linear":
       return "Sending update"
+    case "service-connection":
+      return "Offering connection"
     case "other":
       return describeWorkEntry(chunk).heading
   }

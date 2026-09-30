@@ -44,6 +44,7 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "agent.slack.tools.request_pr_review",
+    "request_service_connection": ".request_service_connection",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -117,6 +118,7 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
+    "request_service_connection",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -204,6 +206,7 @@ if TYPE_CHECKING:
         dismiss_human_review_request,
         request_human_review,
     )
+    from agent.tools.request_service_connection import request_service_connection
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
