@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agent.dashboard.options import SUPPORTED_MODEL_IDS
+from agent.openai_responses.client_tools import ClientToolSpec
 from agent.openai_responses.conversations import SandboxCaller
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import (
@@ -26,6 +27,7 @@ from agent.openai_responses.models import (
 )
 from agent.openai_responses.projection import ResponseProjection
 from agent.openai_responses.stream import ResponseRun
+from agent.run_config import RunConfig
 from agent.sandboxes.tool_access import OPENAI_PATH
 from agent.transcript.snapshot import load_head, load_run_start
 from agent.utils.json_types import run_metadata
@@ -51,10 +53,17 @@ def _body(response: Response) -> JSONResponse:
     return JSONResponse(response.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
 
 
-def _projection(request: Request, response: Response, ids: OpenSweId) -> ResponseProjection:
+def _projection(
+    request: Request, response: Response, ids: OpenSweId, client_tools: list[ClientToolSpec]
+) -> ResponseProjection:
     # Codex drops ``mcp_call`` items; ``web_search_call`` is the one server tool it renders.
     codex = request.headers.get("originator", "").startswith("codex")
-    return ResponseProjection(response, ids, web_search_tools=codex)
+    return ResponseProjection(
+        response,
+        ids,
+        web_search_tools=codex,
+        client_tools={spec.name: spec.kind for spec in client_tools},
+    )
 
 
 def _stream(run: ResponseRun) -> StreamingResponse:
@@ -73,13 +82,22 @@ async def create_response(
 ) -> JSONResponse | StreamingResponse:
     continuation = await caller.resolve(body)
     prompt = InputItem.render(continuation.items)
-    if not prompt:
-        raise HTTPException(400, "input has no new user message")
+    tool_results = [result for item in continuation.items if (result := item.tool_result())]
+    if not prompt and not (tool_results and continuation.thread_id):
+        raise HTTPException(400, "input has no new user message or tool output")
     model = body.agent_model()
+    client_tools = body.client_tools()
     await caller.require_capacity(continuation.thread_id)
     thread_id = continuation.thread_id or await caller.create_guest_thread(prompt, model)
     after = await load_head(thread_id) or 0
-    ids = OpenSweId(thread_id, await caller.start_run(thread_id, prompt, model))
+    run_id = await caller.start_run(
+        thread_id,
+        prompt=prompt,
+        tool_results=tool_results,
+        model=model,
+        client_tools=client_tools,
+    )
+    ids = OpenSweId(thread_id, run_id)
     response = Response(
         id=ids.response_id(),
         created_at=int(time.time()),
@@ -90,7 +108,7 @@ async def create_response(
         background=body.background,
         metadata=body.metadata or {},
     )
-    run = ResponseRun(ids, _projection(request, response, ids), after)
+    run = ResponseRun(ids, _projection(request, response, ids, client_tools), after)
     if body.background:
         return _body(response)
     if body.stream:
@@ -120,7 +138,8 @@ async def _existing_run(caller: SandboxCaller, request: Request, response_id: st
         model=model if isinstance(model, str) else DEFAULT_MODEL,
         conversation=ConversationRef(id=ids.thread_id),
     )
-    return ResponseRun(ids, _projection(request, response, ids), after)
+    client_tools = RunConfig.parse(run["kwargs"]["config"]["configurable"]).client_tools
+    return ResponseRun(ids, _projection(request, response, ids, client_tools), after)
 
 
 @router.get("/responses/{response_id}", response_model=None)

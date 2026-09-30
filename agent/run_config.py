@@ -26,10 +26,11 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.invocation import resolve_invocation_id
+from agent.openai_responses.client_tools import ClientToolSpec
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ class RunConfig(BaseModel):
     prepare_run_id: str | None = None
     invocation_started_at: str | None = None
     offload_conversation: bool = False
+    client_tools: list[ClientToolSpec] = Field(default_factory=list)
     source: str | None = None
     task: str | None = None
     environment: str | None = None

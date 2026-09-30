@@ -999,6 +999,13 @@
             "default": false,
             "title": "Stream",
             "type": "boolean"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/RequestTool"
+            },
+            "title": "Tools",
+            "type": "array"
           }
         },
         "required": [
@@ -1334,6 +1341,17 @@
       },
       "InputItem": {
         "properties": {
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
           "content": {
             "anyOf": [
               {
@@ -1361,6 +1379,23 @@
               }
             ],
             "title": "Id"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InputContentPart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
           },
           "role": {
             "anyOf": [
@@ -3261,6 +3296,69 @@
           "success"
         ],
         "title": "RequestResult",
+        "type": "object"
+      },
+      "RequestTool": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "RequestTool",
         "type": "object"
       },
       "ResolveReviewThreads": {

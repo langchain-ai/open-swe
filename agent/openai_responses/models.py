@@ -6,11 +6,13 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agent.dashboard.options import DEFAULT_MODEL_EFFORT, normalize_model_choice
+from agent.openai_responses.client_tools import CUSTOM_TOOL_PARAMETERS, ClientToolSpec
 
 DEFAULT_MODEL = "open-swe"
 SERVER_LABEL = "open-swe"
 TOOL_NAME_PREFIX = "oswe_"
 _QUERY_CHARS = 200
+_TOOL_OUTPUT_TYPES = frozenset({"function_call_output", "custom_tool_call_output"})
 
 type Role = Literal["user", "assistant", "system", "developer"]
 type ResponseStatus = Literal[
@@ -35,6 +37,8 @@ type StreamEventType = Literal[
     "response.mcp_call.failed",
     "response.web_search_call.in_progress",
     "response.web_search_call.completed",
+    "response.function_call_arguments.done",
+    "response.custom_tool_call_input.done",
 ]
 
 
@@ -52,11 +56,28 @@ class InputItem(_Lenient):
     id: str | None = None
     role: Role | None = None
     content: str | list[InputContentPart] | None = None
+    call_id: str | None = None
+    output: str | list[InputContentPart] | None = None
 
     def text(self) -> str:
         if isinstance(self.content, str):
             return self.content
         return "\n".join(part.text for part in self.content or () if part.text)
+
+    def tool_result(self) -> dict[str, str] | None:
+        """A client tool's output, as the message that replaces its placeholder result."""
+        if self.type not in _TOOL_OUTPUT_TYPES or not self.call_id:
+            return None
+        if isinstance(self.output, str):
+            text = self.output
+        else:
+            text = "\n".join(part.text for part in self.output or () if part.text)
+        return {
+            "type": "tool",
+            "id": ClientToolSpec.result_message_id(self.call_id),
+            "tool_call_id": self.call_id,
+            "content": text,
+        }
 
     @classmethod
     def render(cls, items: list[InputItem]) -> str:
@@ -81,6 +102,37 @@ class ReasoningParam(_Lenient):
     effort: str | None = None
 
 
+class RequestTool(_Lenient):
+    type: str
+    name: str | None = None
+    description: str | None = None
+    parameters: dict[str, JsonValue] | None = None
+    format: dict[str, JsonValue] | None = None
+
+    def client_tool(self) -> ClientToolSpec | None:
+        if not self.name:
+            return None
+        description = self.description or ""
+        match self.type:
+            case "function":
+                parameters = self.parameters or {"type": "object", "properties": {}}
+                return ClientToolSpec(
+                    kind="function", name=self.name, description=description, parameters=parameters
+                )
+            case "custom":
+                definition = (self.format or {}).get("definition")
+                if isinstance(definition, str):
+                    description = f"{description}\n\nThe input must follow:\n{definition}"
+                return ClientToolSpec(
+                    kind="custom",
+                    name=self.name,
+                    description=description,
+                    parameters=CUSTOM_TOOL_PARAMETERS,
+                )
+            case _:
+                return None
+
+
 class CreateResponseRequest(_Lenient):
     model: str = DEFAULT_MODEL
     input: str | list[InputItem]
@@ -90,6 +142,10 @@ class CreateResponseRequest(_Lenient):
     conversation: str | ConversationRef | None = None
     reasoning: ReasoningParam | None = None
     metadata: dict[str, str] | None = None
+    tools: list[RequestTool] = Field(default_factory=list)
+
+    def client_tools(self) -> list[ClientToolSpec]:
+        return [spec for tool in self.tools if (spec := tool.client_tool())]
 
     def items(self) -> list[InputItem]:
         if isinstance(self.input, str):
@@ -161,8 +217,29 @@ class WebSearchCallItem(BaseModel):
         return cls(id=item_id, action=WebSearchAction(query=query[:_QUERY_CHARS]))
 
 
+class FunctionCallItem(BaseModel):
+    """A call the client runs itself and answers with a ``function_call_output``."""
+
+    type: Literal["function_call"] = "function_call"
+    id: str
+    call_id: str
+    name: str
+    arguments: str
+    status: Literal["completed"] = "completed"
+
+
+class CustomToolCallItem(BaseModel):
+    type: Literal["custom_tool_call"] = "custom_tool_call"
+    id: str
+    call_id: str
+    name: str
+    input: str
+    status: Literal["completed"] = "completed"
+
+
 type OutputItem = Annotated[
-    MessageItem | McpCallItem | WebSearchCallItem, Field(discriminator="type")
+    MessageItem | McpCallItem | WebSearchCallItem | FunctionCallItem | CustomToolCallItem,
+    Field(discriminator="type"),
 ]
 
 
@@ -221,6 +298,8 @@ class StreamEvent(BaseModel):
     content_index: int | None = None
     part: OutputText | None = None
     delta: str | None = None
+    arguments: str | None = None
+    input: str | None = None
     text: str | None = None
 
     def sse(self) -> str:

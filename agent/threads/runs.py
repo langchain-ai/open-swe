@@ -457,6 +457,46 @@ async def start_dashboard_thread(
     return thread_id
 
 
+async def start_sandbox_guest_run(
+    thread_id: str,
+    login: str,
+    *,
+    prompt: str,
+    tool_results: Sequence[Mapping[str, str]],
+    overrides: dict[str, Any],
+) -> str:
+    """Start a run on a thread a sandbox program talks to, with the tool results it ran for it."""
+    await _ensure_dashboard_github_token(login)
+    client = langgraph_client()
+    metadata = thread_metadata(await client.threads.get(thread_id))
+    configurable = await _build_dashboard_configurable(
+        thread_id, login, metadata, overrides=overrides
+    )
+    if tool_results:
+        user = [{"role": "user", "content": prompt}] if prompt else []
+        run = await create_durable_run(
+            thread_id,
+            _ASSISTANT_ID,
+            input={"messages": [*tool_results, *user]},
+            config={"configurable": configurable},
+            source=DASHBOARD_SOURCE,
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    else:
+        run = await dispatch_agent_run(
+            thread_id,
+            prompt,
+            configurable,
+            source=DASHBOARD_SOURCE,
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    return str(run["run_id"])
+
+
 def _extract_run_id_from_command_response(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None

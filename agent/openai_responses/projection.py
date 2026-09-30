@@ -1,14 +1,18 @@
 """Project one run's transcript events onto a Responses object and its stream events."""
 
 import json
+from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
+from agent.openai_responses.client_tools import ClientToolKind
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import (
     TOOL_NAME_PREFIX,
+    CustomToolCallItem,
+    FunctionCallItem,
     IncompleteDetails,
     ItemStatus,
     McpCallItem,
@@ -55,11 +59,18 @@ class ResponseProjection:
     """
 
     def __init__(
-        self, response: Response, ids: OpenSweId, *, web_search_tools: bool = False
+        self,
+        response: Response,
+        ids: OpenSweId,
+        *,
+        web_search_tools: bool = False,
+        client_tools: Mapping[str, ClientToolKind] | None = None,
     ) -> None:
         self.response = response
         self._ids = ids
         self._web_search_tools = web_search_tools
+        self._client_tools = dict(client_tools or {})
+        self._client_calls: set[str] = set()
         self._turn_id: UUID | None = None
         self._sequence = 0
         self._messages: dict[str, tuple[int, MessageItem]] = {}
@@ -215,9 +226,54 @@ class ResponseProjection:
             self._event("response.output_item.done", output_index=index, item=item),
         ]
 
+    def _client_call(self, body: ToolStarted, kind: ClientToolKind) -> list[StreamEvent]:
+        self._client_calls.add(body.tool_call_id)
+        index = len(self.response.output)
+        item: FunctionCallItem | CustomToolCallItem
+        if kind == "custom":
+            raw = body.input.get("input")
+            item = CustomToolCallItem(
+                id=self._ids.item_id("ctc", body.tool_call_id),
+                call_id=body.tool_call_id,
+                name=body.name,
+                input=raw if isinstance(raw, str) else json.dumps(body.input),
+            )
+        else:
+            item = FunctionCallItem(
+                id=self._ids.item_id("fc", body.tool_call_id),
+                call_id=body.tool_call_id,
+                name=body.name,
+                arguments=json.dumps(body.input),
+            )
+        self.response.output.append(item)
+        added = self._event("response.output_item.added", output_index=index, item=item)
+        if isinstance(item, CustomToolCallItem):
+            done = self._event(
+                "response.custom_tool_call_input.done",
+                item_id=item.id,
+                output_index=index,
+                input=item.input,
+            )
+        else:
+            done = self._event(
+                "response.function_call_arguments.done",
+                item_id=item.id,
+                output_index=index,
+                arguments=item.arguments,
+            )
+        return [
+            added,
+            done,
+            self._event("response.output_item.done", output_index=index, item=item),
+        ]
+
     def _start_tool(self, body: ToolStarted) -> list[StreamEvent]:
         if body.tool_call_id in self._tools or body.tool_call_id in self._searches:
             return []
+        if body.tool_call_id in self._client_calls:
+            return []
+        if (kind := self._client_tools.get(body.name)) is not None:
+            return self._client_call(body, kind)
         index = len(self.response.output)
         if self._web_search_tools:
             search = WebSearchCallItem.for_call(
@@ -244,6 +300,8 @@ class ResponseProjection:
         ]
 
     async def _complete_tool(self, thread_id: str, body: ToolCompleted) -> list[StreamEvent]:
+        if body.tool_call_id in self._client_calls:
+            return []
         failed = body.status == "error"
         if body.tool_call_id in self._searches:
             index, search = self._searches[body.tool_call_id]

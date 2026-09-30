@@ -14,6 +14,7 @@ from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import (
     ConversationRef,
     CreateResponseRequest,
+    FunctionCallItem,
     McpCallItem,
     MessageItem,
     Response,
@@ -62,7 +63,9 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
         model="open-swe",
         conversation=ConversationRef(id=THREAD),
     )
-    projection = ResponseProjection(response, ids, web_search_tools=codex)
+    projection = ResponseProjection(
+        response, ids, web_search_tools=codex, client_tools={"exec_command": "function"}
+    )
     bodies: list[BaseModel] = [
         MessageAppended(turn_id=turn, message_id="early", text="before the run"),
         TurnStarted(turn_id=turn, run_id=RUN),
@@ -74,6 +77,8 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
         MessageCompleted(
             turn_id=turn, message_id="ai-1", role="ai", text="Hello", created_at=datetime.now(UTC)
         ),
+        ToolStarted(turn_id=turn, tool_call_id="call-2", name="exec_command", input={"cmd": "pwd"}),
+        ToolCompleted(turn_id=turn, tool_call_id="call-2", status="completed", output_preview="-"),
         TurnCompleted(turn_id=turn, run_id=RUN),
     ]
     events = projection.start()
@@ -81,7 +86,13 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
         events.extend(await projection.apply(stored(version, body)))
 
     assert response.status == "completed"
-    message, tool = response.output
+    message, tool, client_call = response.output
+    assert isinstance(client_call, FunctionCallItem)
+    assert (client_call.call_id, client_call.name, client_call.arguments) == (
+        "call-2",
+        "exec_command",
+        '{"cmd": "pwd"}',
+    )
     assert isinstance(message, MessageItem)
     assert (message.content[0].text, message.status) == ("Hello", "completed")
     if codex:

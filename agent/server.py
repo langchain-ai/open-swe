@@ -126,6 +126,7 @@ from agent.middleware import (
     task_on_failure,
     task_retry_on,
 )
+from agent.middleware.client_tools import ClientToolsMiddleware
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
@@ -139,6 +140,7 @@ from agent.middleware.require_user_reply import (
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
+from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
@@ -1740,6 +1742,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    client_tool_specs = [spec for spec in cfg.client_tools if spec.name not in reserved_tool_names]
+    client_tools = ClientToolsMiddleware(client_tool_specs) if client_tool_specs else None
+    if client_tools is not None:
+        excluded_tools |= CLIENT_OWNED_SERVER_TOOLS
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
@@ -1936,6 +1942,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         saved_requested_model=thread_settings.get("requested_model"),
                     ),
                     TranscriptMiddleware(),
+                    *([client_tools] if client_tools else []),
                     *(
                         [IncidentMiddleware(incident_session)]
                         if incident_session is not None

@@ -1,14 +1,13 @@
 """Which Open SWE thread a Responses request continues, and starting its run."""
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, ValidationError
 
+from agent.openai_responses.client_tools import ClientToolSpec
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import CreateResponseRequest, InputItem
 from agent.sandboxes.tool_access import (
@@ -18,8 +17,7 @@ from agent.sandboxes.tool_access import (
     TOOLS_HEADER,
     authenticate_tool_access,
 )
-from agent.threads.proxy import proxy_dashboard_thread_commands
-from agent.threads.runs import create_dashboard_thread_record
+from agent.threads.runs import create_dashboard_thread_record, start_sandbox_guest_run
 from agent.threads.summary import repo_config_from_metadata
 from agent.utils.json_types import JsonObject, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -133,46 +131,24 @@ class SandboxCaller:
         )
         return thread_id
 
-    async def start_run(self, thread_id: str, prompt: str, model: tuple[str, str] | None) -> str:
-        configurable = {"agent_model_id": model[0], "agent_effort": model[1]} if model else {}
-        command = {
-            "id": 1,
-            "method": "run.start",
-            "params": {
-                "input": {"messages": [{"type": "human", "content": prompt}]},
-                "config": {"configurable": configurable},
-                # A busy thread queues the request as its own run rather than
-                # steering it into another caller's turn.
-                "multitask_strategy": "enqueue",
-            },
+    async def start_run(
+        self,
+        thread_id: str,
+        *,
+        prompt: str,
+        tool_results: list[dict[str, str]],
+        model: tuple[str, str] | None,
+        client_tools: list[ClientToolSpec],
+    ) -> str:
+        overrides: dict[str, object] = {
+            "client_tools": [spec.model_dump(mode="json") for spec in client_tools]
         }
-        status_code, content, _ = await proxy_dashboard_thread_commands(
-            thread_id, self.owner_login, json.dumps(command).encode()
+        if model:
+            overrides.update(agent_model_id=model[0], agent_effort=model[1])
+        return await start_sandbox_guest_run(
+            thread_id,
+            self.owner_login,
+            prompt=prompt,
+            tool_results=tool_results,
+            overrides=overrides,
         )
-        run_id = None
-        if status_code in {200, 202}:
-            try:
-                run_id = _CommandResponse.model_validate_json(content).started_run_id()
-            except ValidationError:
-                logger.warning(
-                    "Unreadable run.start reply", extra={"thread_id": thread_id}, exc_info=True
-                )
-        if run_id is None:
-            logger.warning(
-                "Sandbox response run did not start",
-                extra={"thread_id": thread_id, "status_code": status_code},
-            )
-            raise HTTPException(502 if status_code < 400 else status_code, "Run did not start")
-        return run_id
-
-
-class _StartedRun(BaseModel):
-    run_id: str
-
-
-class _CommandResponse(BaseModel):
-    run_id: str | None = None
-    result: _StartedRun | None = None
-
-    def started_run_id(self) -> str | None:
-        return self.run_id or (self.result.run_id if self.result else None)
