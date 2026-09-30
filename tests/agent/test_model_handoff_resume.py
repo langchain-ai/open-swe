@@ -13,6 +13,7 @@ from langgraph.pregel import Pregel
 import agent.server as server
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.middleware.model_selection import ModelSelectionMiddleware
+from agent.tools.access import Access
 from agent.utils.thread_settings import ThreadSettings
 
 
@@ -31,8 +32,9 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
         "store_thread_settings",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
-    for name in ("_admin_thread", "_private_thread", "_bridged_thread"):
+    for name in ("_admin_thread", "_bridged_thread"):
         monkeypatch.setattr(server, name, AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "resolve_access", AsyncMock(return_value=Access()))
     for name in ("_mcp_tools_for", "_notion_tools_for"):
         monkeypatch.setattr(server, name, AsyncMock(return_value=[]))
     monkeypatch.setattr(

@@ -65,8 +65,10 @@ _PUBLIC_CHANNEL = {
 }
 
 
-async def test_read_channel_tool_refuses_a_private_channel(slack_api):
+async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool_access):  # noqa: ANN001
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    grant_tool_access(private=True)
 
     slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
     result = await slack_read_channel_messages("C1")

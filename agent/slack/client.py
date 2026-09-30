@@ -1364,8 +1364,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch messages for a Slack thread, keeping the most recent window."""
+async def fetch_slack_thread_messages(
+    channel_id: str, thread_ts: str, *, complete: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch messages for a Slack thread, keeping the most recent window.
+
+    With ``complete``, a failed page raises instead of returning the pages fetched so far.
+    """
     if not SLACK_BOT_TOKEN:
         return []
 
@@ -1390,6 +1395,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 )
             except SLACK_REQUEST_ERRORS as exc:
                 logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                if complete:
+                    raise
                 break
 
             batch = payload.get("messages", [])
