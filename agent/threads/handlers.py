@@ -521,13 +521,13 @@ def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
 
 
 async def share_thread_with_workspace(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str, requester_login: str, *, email: str | None = None
 ) -> dict[str, object]:
     """Publish a private thread only at its owner's explicit request."""
     client = langgraph_client()
-    thread = await _authorized_thread(thread_id, login, email=email)
+    thread = await _authorized_thread(thread_id, requester_login, email=email)
     metadata = thread_metadata(thread)
-    if not thread_is_owner(metadata, login):
+    if not thread_is_owner(metadata, requester_login):
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")

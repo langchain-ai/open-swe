@@ -85,13 +85,24 @@ async def test_slack_thread_counts_every_human_poster(metadata: dict, slack: lis
     assert (await resolve_access(cfg)).mode(_OWN) is None
 
 
-@pytest.mark.parametrize("visibility", ["private", "unknown"])
+@pytest.mark.parametrize(
+    "scope, expected",
+    [
+        ({"visibility": "private"}, "full"),
+        ({"visibility": "unknown"}, None),
+        ({"visibility": "private", "owner_type": "unknown"}, None),
+        ({"visibility": "private", "owner_type": "system"}, None),
+        ({"visibility": "private", "admin_thread": "true"}, None),
+    ],
+)
 async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
-    metadata: dict, visibility: str
+    metadata: dict[str, object], scope: dict[str, object], expected: tool_access.Mode | None
 ) -> None:
-    metadata.update(visibility=visibility, owner_login="alice")
-    expected = "full" if visibility == "private" else None
-    assert (await resolve_access(_cfg())).mode(_OWN) == expected
+    metadata.update(owner_login="alice", **scope)
+    resolved = await resolve_access(_cfg(admin_thread=True))
+    assert resolved.mode(_OWN) == expected
+    if expected is None:
+        assert resolved == tool_access.Access()
 
 
 @pytest.mark.parametrize("place", ["private", "admin_thread", "admin_surface"])

@@ -132,7 +132,7 @@ test("private threads require owner confirmation to expose the entire thread", a
       expect(denied.status()).toBe(404);
     }
     const forbidden = await page.request.post(
-      `/dashboard/api/threads/${createdId}/share-workspace`,
+      `/dashboard/api/threads/${createdId}/share-to-workspace`,
       { headers: { origin: new URL(page.url()).origin } },
     );
     expect(forbidden.status()).toBe(404);

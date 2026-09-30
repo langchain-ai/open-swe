@@ -372,7 +372,7 @@ async def api_rename_thread(
     )
 
 
-@router.post("/threads/{thread_id}/share-workspace")
+@router.post("/threads/{thread_id}/share-to-workspace")
 async def api_share_thread_with_workspace(
     thread_id: str,
     session: dict[str, str] = SESSION_DEP,

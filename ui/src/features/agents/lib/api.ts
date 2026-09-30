@@ -318,7 +318,7 @@ export const agentsApi = {
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
   shareThreadWithWorkspace: (threadId: string) =>
     agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/share-workspace`,
+      `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
       { method: "POST" }
     ),
   continueThreadPrivately: (threadId: string) =>
