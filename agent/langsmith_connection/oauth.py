@@ -19,15 +19,15 @@ class Region(StrEnum):
     EU = "eu"
     APAC = "apac"
 
-    @property
-    def issuer(self) -> str:
-        match self:
-            case Region.US:
-                return "https://api.smith.langchain.com"
-            case Region.EU:
-                return "https://eu.api.smith.langchain.com"
-            case Region.APAC:
-                return "https://apac.api.smith.langchain.com"
+
+def issuer(region: Region) -> str:
+    if region == Region.US:
+        return "https://api.smith.langchain.com"
+    if region == Region.EU:
+        return "https://eu.api.smith.langchain.com"
+    if region == Region.APAC:
+        return "https://apac.api.smith.langchain.com"
+    raise ValueError("Unsupported LangSmith region")
 
 
 class ConnectionError(Exception):
@@ -83,9 +83,10 @@ async def request(
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     try:
-        async with mcp_http_client(region.issuer, timeout=httpx.Timeout(15)) as client:
+        origin = issuer(region)
+        async with mcp_http_client(origin, timeout=httpx.Timeout(15)) as client:
             response = await client.request(
-                method, region.issuer + path, data=data, json=body, headers=headers
+                method, origin + path, data=data, json=body, headers=headers
             )
     except (httpx.HTTPError, ValueError) as exc:
         raise ConnectionError(
@@ -123,10 +124,10 @@ async def authorize_url(
     response = await request(region, "GET", "/.well-known/oauth-authorization-server")
     metadata = parse_response(response, Metadata)
     expected = {
-        "issuer": region.issuer,
-        "authorization_endpoint": region.issuer + "/oauth/authorize",
-        "token_endpoint": region.issuer + "/oauth/token",
-        "registration_endpoint": region.issuer + "/oauth/register",
+        "issuer": issuer(region),
+        "authorization_endpoint": issuer(region) + "/oauth/authorize",
+        "token_endpoint": issuer(region) + "/oauth/token",
+        "registration_endpoint": issuer(region) + "/oauth/register",
     }
     if metadata.model_dump() != expected:
         raise ConnectionError("LangSmith returned unexpected OAuth endpoints")
@@ -143,12 +144,12 @@ async def authorize_url(
         },
     )
     client_id = parse_response(registration, Registration).client_id
-    return region.issuer + "/oauth/authorize?" + urlencode(
+    return issuer(region) + "/oauth/authorize?" + urlencode(
         {
             "client_id": client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "resource": region.issuer + "/mcp",
+            "resource": issuer(region) + "/mcp",
             "scope": "openid profile email offline_access",
             "state": state,
             "nonce": nonce,
@@ -179,7 +180,7 @@ async def verify_identity(
             token.get_secret_value(),
             key.key,
             algorithms=["EdDSA"],
-            issuer=region.issuer,
+            issuer=issuer(region),
             audience=client_id,
             options={"require": ["iss", "aud", "sub", "exp", "iat", "nonce"]},
         )

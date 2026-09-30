@@ -186,7 +186,7 @@ async def complete(login: str, nonce_hash: str, code: str) -> None:
                 "client_id": flow.client_id,
                 "redirect_uri": flow.redirect_uri,
                 "code_verifier": verifier,
-                "resource": flow.region.issuer + "/mcp",
+                "resource": oauth.issuer(flow.region) + "/mcp",
             },
         )
         identity = await oauth.verify_identity(

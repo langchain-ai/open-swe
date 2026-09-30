@@ -17,6 +17,7 @@ from agent.langsmith_connection.oauth import (
     Identity,
     Region,
     TokenResponse,
+    issuer,
     request,
     token_request,
 )
@@ -92,7 +93,7 @@ def connection(record: Credential) -> MCPConnection:
         headers["X-Tenant-Id"] = str(record.workspace_id)
     return MCPConnection(
         name="personal_langsmith",
-        url=record.region.issuer + "/mcp",
+        url=issuer(record.region) + "/mcp",
         encrypted_headers=encrypt_token(json.dumps(headers)),
         header_names=list(headers),
         allowed_tools=record.allowed_tools,
@@ -176,7 +177,7 @@ async def load(login: str) -> MCPConnection | None:
                         "grant_type": "refresh_token",
                         "client_id": record.client_id,
                         "refresh_token": refresh,
-                        "resource": record.region.issuer + "/mcp",
+                        "resource": issuer(record.region) + "/mcp",
                     },
                 )
             except ConnectionError as exc:

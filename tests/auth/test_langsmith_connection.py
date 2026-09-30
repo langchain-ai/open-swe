@@ -86,6 +86,14 @@ async def test_key_validation_preserves_existing_connection_and_redacts_errors(
     )
     assert invalid.status_code == 422
     assert "secret" not in invalid.text and "private-key" not in invalid.text
+    accepted.reset_mock()
+    rejected_region = await client.put(
+        "/dashboard/api/my-credentials/langsmith",
+        json={"api_key": "private-key", "region": "https://attacker.example"},
+    )
+    assert rejected_region.status_code == 422
+    accepted.assert_not_awaited()
+    assert await credentials.store("alice").get("langsmith") == record
     csrf = await client.delete(
         "/dashboard/api/my-credentials/langsmith", headers={"origin": "https://evil.example"}
     )
@@ -116,21 +124,21 @@ async def test_oauth_callback_is_bound_to_browser_and_validates_signed_identity(
             return httpx.Response(
                 200,
                 json={
-                    "issuer": region.issuer,
-                    "authorization_endpoint": region.issuer + "/oauth/authorize",
-                    "token_endpoint": region.issuer + "/oauth/token",
-                    "registration_endpoint": region.issuer + "/oauth/register",
+                    "issuer": oauth.issuer(region),
+                    "authorization_endpoint": oauth.issuer(region) + "/oauth/authorize",
+                    "token_endpoint": oauth.issuer(region) + "/oauth/token",
+                    "registration_endpoint": oauth.issuer(region) + "/oauth/register",
                 },
             )
         if path == "/oauth/register":
             return httpx.Response(200, json={"client_id": "test-client"})
         if path == "/.well-known/jwks.json":
             return httpx.Response(200, json={"keys": [jwk]})
-        assert data is not None and data["resource"] == region.issuer + "/mcp"
+        assert data is not None and data["resource"] == oauth.issuer(region) + "/mcp"
         assert data["code_verifier"]
         token = jwt.encode(
             {
-                "iss": region.issuer,
+                "iss": oauth.issuer(region),
                 "aud": "test-client",
                 "sub": "ls-alice",
                 "email": "alice@example.com",
@@ -158,7 +166,7 @@ async def test_oauth_callback_is_bound_to_browser_and_validates_signed_identity(
     assert started.status_code == 302
     query = parse_qs(urlparse(started.headers["location"]).query)
     state, nonce = query["state"][0], query["nonce"][0]
-    assert query["resource"] == [oauth.Region.EU.issuer + "/mcp"]
+    assert query["resource"] == [oauth.issuer(oauth.Region.EU) + "/mcp"]
     params = {"state": state, "code": "provider-code"}
     cookie = client.cookies.get("osw_langsmith_oauth_state")
     client.cookies.delete("osw_langsmith_oauth_state")
