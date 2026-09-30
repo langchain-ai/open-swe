@@ -397,6 +397,7 @@ def _slack_context_input(
     request_text: str,
     request_blocks: list[dict[str, Any]],
     prior_message_text: str = "",
+    is_breakout: bool = False,
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -519,9 +520,11 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(current_message, bot_user_id)
-    _, separator, forwarded_context = rendered_request.partition("\n")
-    if separator and forwarded_context:
+    rendered_request = _slack_message_text(
+        {**current_message, "text": ""} if is_breakout else current_message, bot_user_id
+    )
+    _, _, forwarded_context = rendered_request.partition("\n")
+    if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
@@ -1155,6 +1158,7 @@ async def _process_slack_mention_impl(
         request_text=clean_text,
         request_blocks=content_blocks,
         prior_message_text=request.prior_message_text,
+        is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
         constant_context=constant_context,
         dispatched_timestamps=dispatched_timestamps,

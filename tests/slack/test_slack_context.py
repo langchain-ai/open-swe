@@ -734,7 +734,20 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
 
 def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
     run_input = slack_webhooks._slack_context_input(
-        [{"ts": "9.0", "text": "context <@UBOT> /breakout fix it", "user": "U123"}],
+        [
+            {
+                "ts": "9.0",
+                "text": "Context for this task.\nMore details <@UBOT> /breakout fix it",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "Forwarded details",
+                    }
+                ],
+            }
+        ],
         {"U123": "Alice"},
         {},
         channel={"id": "slack:C123", "platform": "slack"},
@@ -743,7 +756,8 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
         trigger_user_id="U123",
         request_text="fix it",
         request_blocks=[{"type": "text", "text": "fix it"}],
-        prior_message_text="context",
+        prior_message_text="Context for this task.\nMore details",
+        is_breakout=True,
     )
     inputs = [
         message["content"]
@@ -752,9 +766,12 @@ def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
     ]
 
     assert len(inputs) == 2
-    assert "context" in inputs[0]
+    assert "Context for this task.\nMore details" in inputs[0]
     assert "/breakout" not in inputs[0]
     assert "fix it" in inputs[1][0]["text"]
+    assert "[Forwarded Slack message from Bob]" in inputs[1][0]["text"]
+    assert "Forwarded details" in inputs[1][0]["text"]
+    assert "More details" not in inputs[1][0]["text"]
     assert "/breakout" not in inputs[1][0]["text"]
 
 
