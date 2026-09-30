@@ -42,6 +42,7 @@ from agent.threads.handlers import (
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
     send_dashboard_message,
+    share_thread_with_workspace,
 )
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
@@ -369,6 +370,14 @@ async def api_rename_thread(
         title=body.title,
         email=session.get("email"),
     )
+
+
+@router.post("/threads/{thread_id}/share-workspace")
+async def api_share_thread_with_workspace(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/continue-private")

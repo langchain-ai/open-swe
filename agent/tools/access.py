@@ -232,8 +232,12 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         private=metadata.get("visibility") == "private",
         owner=private_owner_login(cfg, metadata) is not None,
         admin=admin,
-        admin_thread=admin and cfg.admin_thread is True,
-        admin_surface=admin and is_private_admin_surface(cfg),
+        admin_thread=admin
+        and cfg.admin_thread is True
+        and (metadata.get("visibility") == "private" or metadata.get("admin_thread") is True),
+        admin_surface=admin
+        and metadata.get("visibility") == "private"
+        and is_private_admin_surface(cfg),
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
     )

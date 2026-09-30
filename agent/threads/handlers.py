@@ -14,6 +14,7 @@ from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
+from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
@@ -47,6 +48,7 @@ from agent.threads.summary import (
     _thread_summary,
     assert_thread_readable,
     run_status_to_agent_status,
+    thread_is_owner,
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
@@ -516,6 +518,40 @@ def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+async def share_thread_with_workspace(
+    thread_id: str, login: str, *, email: str | None = None
+) -> dict[str, object]:
+    """Publish a private thread only at its owner's explicit request."""
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, login, email=email)
+    metadata = thread_metadata(thread)
+    if not thread_is_owner(metadata, login):
+        raise HTTPException(403, "only the thread owner can share it")
+    if metadata.get("visibility") != "private":
+        raise HTTPException(409, "thread is not private")
+    if _thread_is_busy(thread):
+        raise HTTPException(409, "stop the run before sharing this thread")
+    for status in ("pending", "running"):
+        if await client.runs.list(thread_id, status=status, limit=1):
+            raise HTTPException(409, "stop the run before sharing this thread")
+    metadata_update = {
+        "visibility": "public",
+        "admin_thread": False,
+        "unlisted": False,
+        "updated_at_ms": _now_ms(),
+    }
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:
+        logger.warning("Could not share thread", extra={"thread_id": thread_id}, exc_info=True)
+        raise HTTPException(502, "failed to share thread") from exc
+    await invalidate_cached_github_token(thread_id)
+    await mirror_thread_metadata(thread_id, metadata_update)
+    return await _thread_summary(
+        {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+    )
 
 
 async def continue_thread_privately(

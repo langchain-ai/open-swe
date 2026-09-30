@@ -94,6 +94,26 @@ async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
     assert (await resolve_access(_cfg())).mode(_OWN) == expected
 
 
+@pytest.mark.parametrize("place", ["private", "admin_thread", "admin_surface"])
+async def test_sharing_revokes_tools_despite_stale_private_admin_run_config(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, place: tool_access.Place
+) -> None:
+    metadata.update(visibility="private", owner_login="alice", admin_thread=True)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    monkeypatch.setattr(tool_access, "configurable", lambda: _cfg(admin_thread=True))
+    calls: list[str] = []
+
+    @tool_access.access(Policy(trusted=place, actor="admin"))
+    async def tool() -> dict[str, object]:
+        calls.append("called")
+        return {"secret": "private data"}
+
+    assert await tool() == {"secret": "private data"}
+    metadata.update(visibility="public", admin_thread=False)
+    assert (await tool())["ok"] is False
+    assert calls == ["called"]
+
+
 async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch) -> None:
     @tool_access.access(_OWN)
     async def tool() -> dict[str, object]:
