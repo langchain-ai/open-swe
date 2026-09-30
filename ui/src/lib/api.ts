@@ -714,7 +714,16 @@ export interface WorkspaceCreate {
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 export interface WorkspaceUpdate {
+  create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
   repos?: Array<string>
@@ -732,6 +741,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  create_params?: Record<string, JsonValue>
   slug: string
   name: string
   prompt: string

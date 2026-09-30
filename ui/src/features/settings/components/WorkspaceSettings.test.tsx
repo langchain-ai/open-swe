@@ -415,6 +415,57 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("edits proxy configuration without losing other sandbox create parameters", async () => {
+    const record = {
+      ...RECORD,
+      create_params: { _internal_runtime: "v2", proxy_config: { rules: [] } },
+    }
+    mockApis(record)
+    const proxy = {
+      rules: [
+        {
+          name: "service",
+          match_hosts: ["api.example.com"],
+          env_vars: { SERVICE_MODE: "example" },
+        },
+      ],
+    }
+    const update = vi
+      .spyOn(api, "updateWorkspace")
+      .mockResolvedValue({
+        ...record,
+        create_params: { ...record.create_params, proxy_config: proxy },
+      })
+    renderPage()
+    const editor = await screen.findByLabelText("Proxy configuration (JSON)")
+    fireEvent.change(editor, { target: { value: "[]" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "JSON object"
+    )
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        create_params: { _internal_runtime: "v2", proxy_config: proxy },
+      })
+    )
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Save proxy configuration",
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(true)
+    )
+  })
+
   it("saves the sandbox scripts and starts a rebuild", async () => {
     mockApis()
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
