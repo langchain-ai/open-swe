@@ -2,9 +2,10 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired
 
 from langgraph_sdk.client import LangGraphClient
+from typing_extensions import TypedDict
 
 from agent.analytics.usage import (
     agent_invocation_needs_cost_refresh,
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
 
 
-class AgentCostRefresh(TypedDict):
+class AgentCostRefresh(TypedDict, closed=True):
     task: Literal["agent_cost"]
     thread_id: str
     invocation_id: str

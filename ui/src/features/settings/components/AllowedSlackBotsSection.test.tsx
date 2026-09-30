@@ -4,7 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { AllowedSlackBotsSection } from "./AllowedSlackBotsSection"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const BOT = {
   bot_id: "B123",
@@ -29,9 +33,8 @@ afterEach(() => {
 })
 
 function renderSection() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -131,5 +134,41 @@ describe("Allowed Slack bots", () => {
       "That Slack member is not a bot."
     )
     expect(screen.getByText("No Slack bots are allowed.")).toBeTruthy()
+  })
+
+  it("hides a removed bot at once and restores it when the removal fails", async () => {
+    let failRemoval: () => void = () => {}
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) =>
+        init.method === "DELETE"
+          ? new Promise<Response>(
+              (resolve) =>
+                (failRemoval = () =>
+                  resolve(
+                    new Response(JSON.stringify({ detail: "Slack is down." }), {
+                      status: 502,
+                    })
+                  ))
+            )
+          : Promise.resolve(new Response(JSON.stringify([BOT])))
+      )
+    )
+    renderSection()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Remove Release bot" })
+    )
+    await screen.findByText("No Slack bots are allowed.")
+
+    failRemoval()
+    expect(
+      await screen.findByRole("button", { name: "Remove Release bot" })
+    ).toBeTruthy()
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Couldn't remove Slack bot",
+        error: expect.objectContaining({ message: "Slack is down." }),
+      })
+    )
   })
 })

@@ -5,7 +5,6 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
-from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -19,14 +18,12 @@ REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
 
 
-async def get_approval_policy(owner: str, repo: str, settings: Mapping[str, object]) -> str | None:
-    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
-    policy = (record.approval_policy if record else None) or settings.get("approval_policy")
-    return policy.strip() or None if isinstance(policy, str) else None
+# What a positive approval assessment does; a repository with no mode set is ``dry_run``.
+ApprovalMode = Literal["off", "dry_run", "approve"]
 
 
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
-_TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
+TERMINAL_RUN_FAILURES = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
 
 
 def normalize_repo_full_name(raw: str) -> str:
@@ -55,7 +52,7 @@ class ReviewStyleCreate(BaseModel):
 
 class ReviewStylePromptUpdate(BaseModel):
     custom_prompt: str | None = None
-    approval_policy: str | None = Field(default=None, max_length=10_000)
+    approval_mode: ApprovalMode | None = None
 
     @field_validator("custom_prompt")
     @classmethod
@@ -73,7 +70,7 @@ class ReviewStyle(BaseModel):
     name: str = ""
     status: AnalysisStatus = "idle"
     custom_prompt: str | None = None
-    approval_policy: str | None = None
+    approval_mode: ApprovalMode | None = None
     analysis_summary: str | None = None
     top_reviewers: list[str] = Field(default_factory=list)
     prs_sampled: int = 0
@@ -102,6 +99,10 @@ class ReviewStyle(BaseModel):
     @property
     def has_saved_prompt(self) -> bool:
         return bool(self.custom_prompt and self.custom_prompt.strip())
+
+
+def effective_approval_mode(record: ReviewStyle | None) -> ApprovalMode:
+    return (record.approval_mode if record else None) or "dry_run"
 
 
 class ReviewStyleStore(TypedStore[ReviewStyle]):
@@ -138,8 +139,8 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
             if record.status == "running":
                 record.status = "completed"
                 record.error = None
-        if "approval_policy" in update.model_fields_set:
-            record.approval_policy = (update.approval_policy or "").strip() or None
+        if "approval_mode" in update.model_fields_set:
+            record.approval_mode = update.approval_mode
         return await self.save(record)
 
     async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:
@@ -223,6 +224,7 @@ async def reconcile_running_status(
     *,
     run_status: str | None,
     run_missing: bool = False,
+    run_error: str | None = None,
 ) -> ReviewStyle:
     """Clear stale ``running`` when the analyzer run is done or unreachable."""
     if record.status != "running":
@@ -236,10 +238,15 @@ async def reconcile_running_status(
             "Analysis finished without saving a prompt. Please retry.",
         )
 
-    if run_status in _TERMINAL_FAILURE:
+    if run_status in TERMINAL_RUN_FAILURES:
         if record.has_saved_prompt:
             return await REVIEW_STYLES.mark_completed(full_name)
-        return await REVIEW_STYLES.mark_failed(full_name, "Analysis run ended. Please retry.")
+        return await REVIEW_STYLES.mark_failed(
+            full_name,
+            f"Analysis run failed: {run_error}. Please retry."
+            if run_error
+            else "Analysis run ended. Please retry.",
+        )
 
     if run_missing:
         if record.has_saved_prompt:

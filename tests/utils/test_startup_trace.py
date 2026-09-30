@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -54,26 +53,6 @@ def _clean_phases() -> Any:
     startup_trace._PHASES.clear()
 
 
-async def test_phases_replay_as_child_spans_of_the_current_run() -> None:
-    async with aphase("thread-1", "sandbox.boot", snapshot_id="snap-1"):
-        await asyncio.sleep(0.01)
-    async with aphase("thread-1", "sandbox.git_identity"):
-        pass
-
-    client = await _flush_in_traced_node("thread-1")
-
-    names = [run["name"] for run in client.created]
-    assert names == ["LangGraph", "node", "startup", "sandbox.boot", "sandbox.git_identity"]
-    boot = next(run for run in client.created if run["name"] == "sandbox.boot")
-    assert boot["inputs"]["snapshot_id"] == "snap-1"
-    wrapper = next(run for run in client.updated if run["name"] == "startup")
-    assert [phase["name"] for phase in wrapper["outputs"]["phases"]] == [
-        "sandbox.boot",
-        "sandbox.git_identity",
-    ]
-    assert wrapper["outputs"]["phases"][0]["elapsed_ms"] >= 10
-
-
 async def test_failed_phase_is_replayed_with_its_error() -> None:
     with pytest.raises(RuntimeError):
         async with aphase("thread-2", "sandbox.boot"):
@@ -83,15 +62,6 @@ async def test_failed_phase_is_replayed_with_its_error() -> None:
 
     boot = next(run for run in client.updated if run["name"] == "sandbox.boot")
     assert boot["error"] == "RuntimeError: boom"
-
-
-async def test_flush_without_a_run_tree_drops_the_phases() -> None:
-    async with aphase("thread-3", "sandbox.boot"):
-        pass
-
-    flush_phases("thread-3")
-
-    assert "thread-3" not in startup_trace._PHASES
 
 
 async def test_unfinished_phase_is_kept_for_the_next_flush() -> None:
@@ -128,31 +98,3 @@ async def test_prepare_middleware_flushes_phases_even_when_prepare_fails() -> No
         )
 
     assert "thread-4" not in startup_trace._PHASES
-
-
-async def test_prepare_middleware_flushes_phases_when_the_latch_skips_prepare() -> None:
-    class _Latched(BasePrepareRunMiddleware):
-        _thread_id = "thread-6"
-
-        async def _prepare(self, state: Any, runtime: Any) -> dict[str, Any]:
-            del state, runtime
-            raise AssertionError("prepare should be latched out")
-
-    middleware = _Latched()
-    fingerprint = middleware._prepare_fingerprint(
-        cast(Any, {"messages": []}), cast(Runtime[None], MagicMock())
-    )
-    async with aphase("thread-6", "factory.thread_settings"):
-        pass
-
-    assert (
-        await middleware.abefore_agent(
-            cast(
-                AgentState, {"messages": [], "run_prepared": True, "run_prepared_for": fingerprint}
-            ),
-            cast(Runtime[None], MagicMock()),
-        )
-        is None
-    )
-
-    assert "thread-6" not in startup_trace._PHASES

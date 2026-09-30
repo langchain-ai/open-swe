@@ -106,6 +106,12 @@ export interface ToolExecutionChunk {
   input?: Record<string, unknown>
   status: AcpToolStatus
   output?: string
+  /**
+   * Fetches the call's full output, for sources that only hold a preview (the
+   * transcript log keeps large outputs out of its snapshot). Present only when
+   * there is more output than {@link output} already shows.
+   */
+  loadOutput?: () => Promise<string>
   display?: OutputIframeDisplay
   elapsedMs?: number
   approvalRequestId?: string
@@ -153,12 +159,35 @@ export interface TodoChunk {
   todos: Array<TodoItem>
 }
 
+/** An image carried inline, which is what a composer upload produces. */
 export interface ImageChunk {
   kind: "image"
   base64: string
   mimeType: string
   fileName?: string
 }
+
+/**
+ * An image the transcript references rather than inlines: the log stores
+ * metadata plus either an attachment id addressing bytes on our own API, or a
+ * third-party URL recorded with the message.
+ *
+ * `credentials` says how the bytes are reachable — `"session"` needs the
+ * session cookie, so the URL is fetched and shown through a blob URL rather
+ * than handed to `<img src>` (a cross-origin dashboard deployment would
+ * otherwise depend on the browser sending a third-party cookie for an image);
+ * `"none"` is a plain URL the browser loads itself.
+ */
+export interface RemoteImageChunk {
+  kind: "image"
+  url: string
+  credentials: "session" | "none"
+  mimeType?: string
+  fileName?: string
+}
+
+/** Either image form, as a renderer receives it from `Chunk`. */
+export type AnyImageChunk = ImageChunk | RemoteImageChunk
 
 export type Chunk =
   | TextChunk
@@ -169,17 +198,20 @@ export type Chunk =
   | ToolExecutionChunk
   | TodoChunk
   | ImageChunk
+  | RemoteImageChunk
 
 export interface Message {
   id: string
   author: Author
   timestamp: string
   deliveryStatus?: "sending" | "failed"
+  deliveryError?: string
   optimistic?: boolean
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
   structuredSenderNote?: string
+  structuredSenderIsBot?: boolean
   structuredSurface?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
@@ -209,6 +241,8 @@ export interface AgentSchedule {
   schedule: string | null
   trigger: AutomationTrigger
   scope: "workspace"
+  /** Slug of the workspace every run launches in. */
+  workspace: string
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
@@ -229,12 +263,24 @@ export interface AgentSchedule {
 export interface QueuedThreadMessage {
   id: string
   content: string
-  images?: Array<ImageChunk>
+  images?: Array<AnyImageChunk>
   createdAt: number
+  /** The server has not acknowledged it yet, so it cannot be sent now or cancelled. */
+  pending?: boolean
+  /** False when someone else sent it: only its sender may send it now or cancel it. */
+  mine?: boolean
 }
 
-export interface PendingThreadMessage extends QueuedThreadMessage {
+export interface PendingThreadMessage extends Omit<
+  QueuedThreadMessage,
+  "images" | "pending" | "mine"
+> {
+  images?: Array<ImageChunk>
   status: "sending" | "failed"
+  /** Sent to queue behind the live run, so it renders as a queued row. */
+  queued?: boolean
+  /** Why delivery failed, e.g. `503 Service Unavailable`. */
+  error?: string
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected"
@@ -358,9 +404,42 @@ export interface AgentPullRequestContextResponse {
   prompt: string
 }
 
+export interface ReviewPageRef {
+  owner: string
+  repo: string
+  number: number
+}
+
+export type AgentSubagentStatus = "in_progress" | "completed" | "error"
+
+/**
+ * A subagent the thread spawned with the `task` tool, as the sidebar lists it
+ * under the thread. `toolCallId` is the `task` call's id, which is also the
+ * last segment of the namespace every event the subagent emitted carries.
+ */
+export interface AgentSubagentSummary {
+  toolCallId: string
+  /** The first line of the task description. */
+  title: string
+  subagentType: string
+  status: AgentSubagentStatus
+  startedAt: number
+  endedAt: number | null
+}
+
 export interface AgentThread {
   visibility?: "public" | "private"
   id: string
+  /** Set on a PR review listed in the sidebar: its row opens this review page. */
+  reviewPage?: ReviewPageRef
+  /** Root-level subagents, oldest first; only transcript-log threads report them. */
+  subagents?: Array<AgentSubagentSummary>
+  /**
+   * Transcript source for the thread, from its LangGraph metadata. `"v2"` means
+   * the append-only event log serves it; absent means the SDK stream does.
+   */
+  transcript?: "v2"
+
   title: string
   repo: string
   repoFullName: string
@@ -368,7 +447,6 @@ export interface AgentThread {
   model: string
   effort?: string | null
   modelSelection?: "auto" | "explicit" | null
-  planMode?: boolean
   planStatus?: string | null
   adminThread?: boolean
   source?: AgentSource
@@ -392,7 +470,6 @@ export interface AgentThread {
   codeChannelUrl?: string | null
   sandboxId?: string | null
   messages: Array<Message>
-  queuedMessages?: Array<QueuedThreadMessage>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary
   pullRequests?: Array<AgentPullRequest>

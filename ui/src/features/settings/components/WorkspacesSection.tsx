@@ -7,11 +7,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
   WorkspaceEditor,
+  type ChipHref,
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import {
@@ -57,6 +58,12 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   const parsed = Date.parse(timestamp)
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
+
+// Repositories are stored as `owner/name`; anything else (an unlinked Slack
+// id, a future format) stays an inert chip.
+const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+const githubRepoHref: ChipHref = (repo) =>
+  REPO_PATTERN.test(repo) ? `https://github.com/${repo}` : null
 
 const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
   running: "…",
@@ -120,14 +127,24 @@ function WorkspaceRow({
           </span>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
-          <span className={`text-xs ${REFRESH_CLASS[status]}`}>
+          <span
+            className={`text-xs ${REFRESH_CLASS[status]}`}
+            title={
+              status !== "refreshing" && when && workspace.refresh_finished_at
+                ? new Date(workspace.refresh_finished_at).toLocaleString(
+                    undefined,
+                    { timeZoneName: "short" }
+                  )
+                : undefined
+            }
+          >
             {refreshLabel(status, workspace.refresh_kind)}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>
           {configure}
         </div>
       </div>
-      <Chips values={workspace.repos} />
+      <Chips values={workspace.repos} hrefFor={githubRepoHref} />
       <Chips values={workspace.slack_channel_ids.map(channelLabel)} />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
@@ -183,6 +200,7 @@ export function WorkspacesSection({
         name: createDraft.name.trim(),
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
+        kitchen_channel_ids: createDraft.kitchenChannelIds,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
@@ -259,7 +277,9 @@ export function WorkspacesSection({
                     setCreateError(null)
                   }}
                 >
-                  Cancel
+                  {JSON.stringify(createDraft) !== JSON.stringify(EMPTY_DRAFT)
+                    ? "Cancel"
+                    : "Close"}
                 </Button>
                 <Button
                   size="sm"

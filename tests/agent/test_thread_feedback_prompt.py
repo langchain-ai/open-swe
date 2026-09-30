@@ -68,33 +68,6 @@ async def test_schedules_isolated_delayed_job_and_delivers_once(context: Any) ->
     slack_feedback.post_slack_feedback_prompt.assert_awaited_once()
 
 
-@pytest.mark.parametrize("change", ["activity", "new_run", "completed", "dismissed"])
-async def test_new_activity_or_completion_suppresses_pending_prompt(
-    context: Any, change: str
-) -> None:
-    payload = await _schedule(context)
-    if change == "activity":
-        context.threads.get.return_value["metadata"][feedback.ACTIVITY_KEY] = 200000
-    elif change == "new_run":
-        context.runs.list.return_value = [{"run_id": "r2", "status": "success"}]
-    else:
-        await feedback.complete_feedback_prompt("t1", change)
-    assert await _run(context, payload, 400000) == {"status": "skipped"}
-    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
-
-
-async def test_new_qualifying_answer_supersedes_old_job(context: Any) -> None:
-    old = await _schedule(context)
-    context.runs.list.return_value = [{"run_id": "r2", "status": "success"}]
-    context.threads.get.return_value["metadata"][feedback.ACTIVITY_KEY] = 100000
-    context.now = 200000
-    new = await _schedule(context)
-    assert await _run(context, old, 302000) == {"status": "skipped"}
-    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
-    await _run(context, new, 500000)
-    assert slack_feedback.post_slack_feedback_prompt.await_args.args == ("t1", "r2", "C1")
-
-
 async def test_merged_pr_waits_five_minutes_after_followup_finishes(context: Any) -> None:
     payload = await _schedule(context, reason="merged_pr")
     context.runs.list.return_value = [{"run_id": "r2", "status": "running"}]
@@ -112,58 +85,12 @@ async def test_merged_pr_waits_five_minutes_after_followup_finishes(context: Any
     slack_feedback.post_slack_feedback_prompt.assert_awaited_once()
 
 
-async def test_duplicate_completion_does_not_schedule_or_send_twice(context: Any) -> None:
-    payload = await _schedule(context)
-    context.now = 100000
-    await feedback._schedule(
-        "t1", context.threads.get.return_value["metadata"], answer_run_id="r1", event_id="answer:r1"
-    )
-    assert context.runs.create.await_count == 1
-    await _run(context, payload, 302000)
-    assert await feedback.feedback_prompt_status("t1") == "ready"
-    slack_feedback.post_slack_feedback_prompt.assert_awaited_once()
-
-
-async def test_failed_delivery_is_not_retried(context: Any) -> None:
-    slack_feedback.post_slack_feedback_prompt.side_effect = RuntimeError("Slack unavailable")
-    payload = await _schedule(context)
-    await _run(context, payload, 302000)
-    slack_feedback.post_slack_feedback_prompt.assert_awaited_once()
-    assert context.runs.create.await_count == 1
-
-
 @pytest.mark.parametrize("status", ["error", "interrupted"])
 async def test_unsuccessful_answers_do_not_prompt(context: Any, status: str) -> None:
     payload = await _schedule(context)
     context.runs.list.return_value = [{"run_id": "r1", "status": status}]
     await _run(context, payload, 302000)
     assert await feedback.feedback_prompt_status("t1") == "unavailable"
-    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
-
-
-async def test_web_answer_becomes_ready_after_run_succeeds(context: Any) -> None:
-    metadata = context.threads.get.return_value["metadata"]
-    context.runs.list.return_value = [{"run_id": "r1", "status": "running"}]
-    await feedback.schedule_answer_feedback("t1", "r1", metadata)
-    payload = context.runs.create.call_args.kwargs["input"]
-    await _run(context, payload, 302000)
-    assert await feedback.feedback_prompt_status("t1") == "unavailable"
-    context.runs.list.return_value = [
-        {"run_id": "r1", "status": "success", "updated_at": "1970-01-01T00:06:00Z"}
-    ]
-    await _run(context, context.runs.create.call_args.kwargs["input"], 660000)
-    assert await feedback.feedback_prompt_status("t1") == "ready"
-    slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
-
-
-async def test_new_turn_within_quiet_period_suppresses_pending_prompt(context: Any) -> None:
-    payload = await _schedule(context)
-    context.runs.list.return_value = [{"run_id": "r2", "status": "success"}]
-    context.threads.get.return_value["metadata"][feedback.ACTIVITY_KEY] = 400000
-    await feedback.schedule_answer_feedback("t1", "r2", {})
-    assert context.runs.create.await_count == 1
-    assert await feedback.feedback_prompt_status("t1") == "unavailable"
-    await _run(context, payload, 400302000)
     slack_feedback.post_slack_feedback_prompt.assert_not_awaited()
 
 

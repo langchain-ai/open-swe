@@ -31,6 +31,7 @@ UsageSort = Literal[
     "merged_prs",
     "merged_prs_per_thread",
     "agent_loc",
+    "feedback_given",
 ]
 SortDirection = Literal["asc", "desc"]
 
@@ -39,18 +40,20 @@ class InvalidUsageCursor(ValueError):
     """Raised when a usage leaderboard cursor cannot be decoded."""
 
 
-def period_start(period: str | None) -> datetime:
+def period_start(period: str | None, *, as_of: datetime | None = None) -> datetime:
     days = 1 if period == "24h" else 7 if period == "7d" else 30
     if period == "all":
         return datetime.min.replace(tzinfo=UTC)
-    return datetime.now(UTC) - timedelta(days=days)
+    return (as_of or datetime.now(UTC)) - timedelta(days=days)
 
 
-async def _reporting_start(conn: AsyncConnection, period: str | None) -> datetime:
+async def _reporting_start(
+    conn: AsyncConnection, period: str | None, *, as_of: datetime | None = None
+) -> datetime:
     cutover = await conn.scalar(text("SELECT reporting_cutover_at FROM deployment_metadata"))
     if cutover is None:
         raise RuntimeError("analytics reporting has not been activated")
-    return max(period_start(period), cutover)
+    return max(period_start(period, as_of=as_of), cutover)
 
 
 def _integer(value: object) -> int:
@@ -119,6 +122,11 @@ async def pr_merge_rate_by_model(
                         AS avg_delivery_seconds,
                     count(*) FILTER (WHERE r.started_at IS NOT NULL
                         AND p.opened_at >= r.started_at) AS delivery_samples,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY p.distance_basis_points)
+                        FILTER (WHERE p.current_state = 'merged')
+                        AS effort_median_distance_basis_points,
+                    count(p.distance_basis_points) FILTER (WHERE p.current_state = 'merged')
+                        AS effort_distance_sample_size,
                     (SELECT percentile_cont(0.5) WITHIN GROUP
                         (ORDER BY distance_basis_points)
                      FROM pr_projection d
@@ -127,6 +135,13 @@ async def pr_merge_rate_by_model(
                        AND d.model_attribution_quality = p.model_attribution_quality
                        AND d.opened_at >= :start AND d.opened_at <= :as_of
                        AND d.current_state = 'merged') AS median_distance_basis_points,
+                    (SELECT avg(distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS mean_distance_basis_points,
                     (SELECT count(distance_basis_points)
                      FROM pr_projection d
                      WHERE d.workspace_id = :workspace_id
@@ -179,6 +194,11 @@ async def pr_merge_rate_by_model(
                         if row["median_distance_basis_points"] is not None
                         else None
                     ),
+                    "mean_distance_basis_points": (
+                        float(row["mean_distance_basis_points"])
+                        if row["mean_distance_basis_points"] is not None
+                        else None
+                    ),
                     "distance_sample_size": int(row["distance_sample_size"] or 0),
                 },
             )
@@ -186,6 +206,17 @@ async def pr_merge_rate_by_model(
             effort["avg_merge_seconds"] = (
                 float(row["avg_merge_seconds"]) if row["avg_merge_seconds"] is not None else None
             )
+            effort["avg_delivery_seconds"] = (
+                float(row["avg_delivery_seconds"])
+                if row["avg_delivery_seconds"] is not None
+                else None
+            )
+            effort["median_distance_basis_points"] = (
+                int(row["effort_median_distance_basis_points"])
+                if row["effort_median_distance_basis_points"] is not None
+                else None
+            )
+            effort["distance_sample_size"] = int(row["effort_distance_sample_size"] or 0)
             cohort["efforts"].append({"effort": row["configured_effort"], **effort})
             avg_merge_seconds = effort["avg_merge_seconds"]
             merged_count = effort["merged"]
@@ -425,8 +456,18 @@ WITH runs AS (
         sum(additions) AS additions, sum(deletions) AS deletions,
         sum(additions + deletions) AS agent_loc
     FROM prs GROUP BY person_id
+), feedback_totals AS (
+    SELECT COALESCE(a.person_id, f.user_id) AS person_id, count(*) AS feedback_given
+    FROM feedback_projection f
+    LEFT JOIN identity_aliases a
+      ON a.workspace_id = f.workspace_id AND a.alias_person_id = f.user_id
+    WHERE f.workspace_id = :workspace_id AND f.user_id IS NOT NULL
+      AND f.submitted_at >= :start AND f.submitted_at <= :as_of
+      AND (f.withdrawn_at IS NULL OR f.withdrawn_at > :as_of)
+    GROUP BY COALESCE(a.person_id, f.user_id)
 ), members AS (
     SELECT person_id FROM run_totals UNION SELECT person_id FROM pr_totals
+    UNION SELECT person_id FROM feedback_totals
 ), metrics AS (
     SELECT p.person_id, d.github_login, d.email,
         COALESCE(NULLIF(d.display_name, ''), NULLIF(d.github_login, ''),
@@ -453,12 +494,14 @@ WITH runs AS (
         END AS merged_prs_per_thread,
         COALESCE(pr.additions, 0) AS additions,
         COALESCE(pr.deletions, 0) AS deletions,
-        COALESCE(pr.agent_loc, 0) AS agent_loc
+        COALESCE(pr.agent_loc, 0) AS agent_loc,
+        COALESCE(f.feedback_given, 0) AS feedback_given
     FROM members p
     LEFT JOIN identity_directory d
       ON d.workspace_id = :workspace_id AND d.person_id = p.person_id
     LEFT JOIN run_totals r ON r.person_id = p.person_id
     LEFT JOIN pr_totals pr ON pr.person_id = p.person_id
+    LEFT JOIN feedback_totals f ON f.person_id = p.person_id
     LEFT JOIN models m ON m.person_id = p.person_id
     LEFT JOIN efforts e
       ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
@@ -468,6 +511,8 @@ WITH runs AS (
     FROM metrics
 ), ranked AS (
     SELECT *,
+        feedback_given > 0 AND feedback_given = max(feedback_given) OVER ()
+            AS is_top_feedback_contributor,
         -- Sorting and disclosure must agree, so derive each displayed label once here
         -- and let both the ordering and the emitted row read the same column.
         CASE WHEN :admin OR is_current OR NULLIF(github_login, '') IS NOT NULL
@@ -503,6 +548,7 @@ WITH runs AS (
             WHEN 'merged_prs' THEN merged_prs::numeric
             WHEN 'merged_prs_per_thread' THEN merged_prs_per_thread
             WHEN 'agent_loc' THEN agent_loc::numeric
+            WHEN 'feedback_given' THEN feedback_given::numeric
         END AS numeric_key
     FROM ranked
 ), ordered AS (
@@ -531,6 +577,8 @@ WITH runs AS (
             'agent_runs', invocations, 'invocations', invocations, 'threads', threads,
             'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
+            'feedback_given', feedback_given,
+            'is_top_feedback_contributor', is_top_feedback_contributor,
             'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,
             'total_tokens', total_tokens, 'total_cost_usd', total_cost_usd,
@@ -617,7 +665,7 @@ async def usage_leaderboard(
     }
     async with connection() as conn:
         await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
-        parameters["start"] = await _reporting_start(conn, normalized)
+        parameters["start"] = await _reporting_start(conn, normalized, as_of=as_of)
         result = await conn.execute(text(_USAGE_SQL), parameters)
         usage = dict(result.mappings().one())
         result = await conn.execute(text(_REVIEWER_SQL), parameters)

@@ -405,6 +405,22 @@ def require_session(
     return decode_session(token)
 
 
+def optional_session(request: HTTPConnection) -> dict[str, Any] | None:
+    """The caller's session, where another credential may serve instead.
+
+    An unreadable cookie reads as no session: a route that accepts more than one
+    kind of credential has to go on and try the others.
+    """
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        return decode_session(token)
+    except HTTPException:
+        logger.debug("Ignoring an unreadable session cookie on a multi-credential route")
+        return None
+
+
 def request_origin(request: HTTPConnection) -> str | None:
     """Return the request's origin (scheme + host + port), if present and valid."""
     raw_origin = request.headers.get("origin")

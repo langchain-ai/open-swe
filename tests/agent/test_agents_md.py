@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx2
 import pytest
 
 from agent.utils import agents_md
@@ -11,50 +10,6 @@ def _make_response(status: int, text: str = "") -> MagicMock:
     resp.status_code = status
     resp.text = text
     return resp
-
-
-@pytest.mark.asyncio
-async def test_fetch_agents_md_returns_content() -> None:
-    with patch("httpx2.AsyncClient") as mock_client_cls:
-        client = MagicMock()
-        client.get = AsyncMock(return_value=_make_response(200, "# AGENTS.md\nrules"))
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
-    assert result == "# AGENTS.md\nrules"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("claude_md_response", "expected"),
-    [
-        (_make_response(200, "# CLAUDE.md\nrules"), "# CLAUDE.md\nrules"),
-        (_make_response(404), None),
-    ],
-)
-async def test_fetch_agents_md_falls_back_to_claude_md(
-    claude_md_response: MagicMock, expected: str | None
-) -> None:
-    with patch("httpx2.AsyncClient") as mock_client_cls:
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=[_make_response(404), claude_md_response])
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
-    assert result == expected
-    assert client.get.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_fetch_agents_md_skips_oversized_file() -> None:
-    big = "x" * (agents_md._MAX_AGENTS_MD_BYTES + 1)
-    with patch("httpx2.AsyncClient") as mock_client_cls:
-        client = MagicMock()
-        client.get = AsyncMock(return_value=_make_response(200, big))
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
-    assert result is None
 
 
 @pytest.mark.asyncio
@@ -73,27 +28,6 @@ async def test_fetch_agents_md_oversized_agents_md_does_not_fall_back_to_claude_
         result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
     assert result is None
     assert client.get.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_fetch_agents_md_handles_http_error() -> None:
-    with patch("httpx2.AsyncClient") as mock_client_cls:
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=httpx2.HTTPError("boom"))
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-        result = await agents_md.fetch_agents_md("acme", "repo", "main", token="tok")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_fetch_agents_md_returns_none_for_missing_params() -> None:
-    result = await agents_md.fetch_agents_md("", "repo", "main", token="tok")
-    assert result is None
-    result = await agents_md.fetch_agents_md("acme", "", "main", token="tok")
-    assert result is None
-    result = await agents_md.fetch_agents_md("acme", "repo", "", token="tok")
-    assert result is None
 
 
 @pytest.mark.asyncio

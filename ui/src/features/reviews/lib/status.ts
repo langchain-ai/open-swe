@@ -39,6 +39,71 @@ export function statusLabels(pr: OpenPullRequest): string[] {
   ]
 }
 
+/**
+ * The single line a compact row shows under the title: whatever is most
+ * worth acting on. Ordered by how hard it blocks the merge, not by how the
+ * status was derived.
+ */
+export function blockerLabel(pr: OpenPullRequest): string {
+  if (pr.detailsLoading) return "Loading…"
+  if (pr.detailsError) return "Could not load status"
+  if (pr.mergeable === false || pr.mergeState === "dirty")
+    return "Merge conflict"
+  if (pr.failingChecks.length)
+    return pr.failingChecks.length === 1
+      ? `${pr.failingChecks[0]} failing`
+      : `${pr.failingChecks.length} checks failing`
+  if (pr.missingChecks.length)
+    return pr.missingChecks.length === 1
+      ? `${pr.missingChecks[0]} not reported`
+      : `${pr.missingChecks.length} required checks not reported`
+  if (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
+    return pr.unresolvedThreads === 1
+      ? "1 unresolved comment"
+      : `${pr.unresolvedThreads} unresolved comments`
+  if (pr.reviewDecision === "changes_requested") return "Changes requested"
+  if (pr.pendingChecks.length)
+    return pr.pendingChecks.length === 1
+      ? `${pr.pendingChecks[0]} running`
+      : `${pr.pendingChecks.length} checks running`
+  if (pr.reviewRequired) return "Waiting on review"
+  if (pr.draft) return "Draft"
+  // Nothing known to be wrong is not the same as known to be fine: claiming
+  // readiness for a PR whose status GitHub never returned would be a lie.
+  if (
+    !pr.statusAvailable ||
+    (pr.ci === "unknown" && pr.reviewDecision === null)
+  )
+    return "Status unavailable"
+  if (pr.reviewDecision === "approved") return "Approved, ready to merge"
+  return "Ready to merge"
+}
+
+export function blockerTone(pr: OpenPullRequest): string {
+  if (
+    pr.mergeable === false ||
+    pr.mergeState === "dirty" ||
+    pr.ci === "failing"
+  )
+    return "text-destructive"
+  if (pr.reviewDecision === "changes_requested") return "text-destructive"
+  if (
+    pr.ci === "pending" ||
+    pr.missingChecks.length > 0 ||
+    pr.reviewRequired ||
+    (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
+  )
+    return "text-amber-700 dark:text-amber-400"
+  if (
+    !pr.statusAvailable ||
+    (pr.ci === "unknown" && pr.reviewDecision === null)
+  )
+    return "text-amber-700 dark:text-amber-400"
+  if (pr.reviewDecision === "approved")
+    return "text-emerald-700 dark:text-emerald-400"
+  return "text-muted-foreground"
+}
+
 export const statusTones: Record<string, string> = {
   Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
   Failing: "border-destructive/30 bg-destructive/10 text-destructive",
@@ -65,12 +130,20 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
+// A conflicted branch cannot be updated by GitHub; the Fix action covers it.
+export function canUpdateBranch(pr: OpenPullRequest) {
+  return (
+    Boolean(pr.headSha) && pr.mergeable !== false && pr.mergeState !== "dirty"
+  )
+}
+
 // Offer the merge unless GitHub has already refused it. It enforces rules the
 // dashboard cannot see — an unresolved conversation, say — so an attempt that
 // only might fail is still worth offering, and its refusal is the answer. A
-// conflict, a draft, or a missing required approval is not a guess: those
-// merges are certain to be rejected.
+// conflict, a draft, a missing required approval, or a required check that
+// never reported is not a guess: those merges are certain to be rejected.
 export function canAttemptMerge(pr: OpenPullRequest) {
-  if (pr.draft === true || pr.reviewRequired) return false
+  if (pr.draft === true || pr.reviewRequired || pr.missingChecks.length)
+    return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }

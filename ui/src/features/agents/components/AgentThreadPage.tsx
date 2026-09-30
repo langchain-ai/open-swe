@@ -3,19 +3,23 @@ import { CatchBoundary } from "@tanstack/react-router"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
+import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
+import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useAgentThread } from "@/features/agents/lib/queries"
 import {
   ensureThreadLoad,
   threadDetailFailed,
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
+import { pageTitle } from "@/lib/pageTitle"
 
 export function AgentThreadPage(props: {
   threadId: string
   active?: boolean
-  autoFocusComposer?: boolean
+  /** Show this subagent's transcript instead of the thread's own. */
+  subagentId?: string
 }) {
   return (
     <CatchBoundary
@@ -37,13 +41,14 @@ export function AgentThreadPage(props: {
 function AgentThreadContent({
   threadId,
   active = true,
-  autoFocusComposer = false,
+  subagentId,
 }: {
   threadId: string
   active?: boolean
-  autoFocusComposer?: boolean
+  subagentId?: string
 }) {
   const threadQuery = useAgentThread(threadId)
+  const transcript = threadQuery.data?.transcript === "v2"
   const timedOut = useLoadTimedOut(threadQuery.isPending)
   const title = threadQuery.data?.title
   const hasDetail = threadQuery.data !== undefined
@@ -63,10 +68,10 @@ function AgentThreadContent({
 
   useEffect(() => {
     if (!active || !title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
-      if (document.title === documentTitle) document.title = "Open SWE"
+      if (document.title === documentTitle) document.title = pageTitle("Agents")
     }
   }, [active, title])
 
@@ -93,10 +98,17 @@ function AgentThreadContent({
 
   return (
     <AgentThreadStreamBoundary active={active}>
-      <AgentThreadView
-        thread={threadQuery.data}
-        autoFocusComposer={autoFocusComposer}
-      />
+      <ThreadSourceProvider threadId={threadId} transcript={transcript}>
+        {subagentId ? (
+          <SubagentThreadView
+            key={subagentId}
+            thread={threadQuery.data}
+            subagentId={subagentId}
+          />
+        ) : (
+          <AgentThreadView thread={threadQuery.data} />
+        )}
+      </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )
 }

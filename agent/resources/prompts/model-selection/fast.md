@@ -1,0 +1,1 @@
+Use for direct lookup, extraction, status checks, test or log collection, mechanical PR or release operations, and localized changes with explicit targets and strong verification. The least capable and least expensive profile.
