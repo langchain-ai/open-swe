@@ -207,6 +207,7 @@ export function WorkspacesSection({
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
         kitchen_channel_ids: createDraft.kitchenChannelIds,
+        breakout_channel_id: createDraft.breakoutChannelId,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt

@@ -596,7 +596,10 @@ async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> 
 
 
 async def process_slack_mention(
-    request: SlackRequest, repo: common.SlackRepoResolution | None
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    inherited_workspace: str | None = None,
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     status_ts = request.thread_ts
@@ -610,7 +613,9 @@ async def process_slack_mention(
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
     try:
-        status_handed_off = await _process_slack_mention_impl(request, repo)
+        status_handed_off = await _process_slack_mention_impl(
+            request, repo, inherited_workspace=inherited_workspace
+        )
         if show_status and not status_handed_off:
             await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
@@ -731,7 +736,10 @@ async def _mark_slack_thread_errored(
 
 
 async def _process_slack_mention_impl(
-    request: SlackRequest, repo_resolution: common.SlackRepoResolution | None
+    request: SlackRequest,
+    repo_resolution: common.SlackRepoResolution | None,
+    *,
+    inherited_workspace: str | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -976,6 +984,7 @@ async def _process_slack_mention_impl(
             if concierge_mode and not tagged_slug
             else (
                 await resolve_workspace(
+                    thread_workspace=inherited_workspace,
                     tag=tagged_slug,
                     repo=resolution.routing_repo,
                     slack_channel_id=channel_id,

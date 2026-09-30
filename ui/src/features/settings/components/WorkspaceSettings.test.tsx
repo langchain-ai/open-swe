@@ -254,6 +254,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        breakout_channel_id: null,
         prompt: "Run make test.",
       })
     )
@@ -263,6 +264,36 @@ describe("WorkspaceSettingsPanel", () => {
       ).toBe("OSS support")
     )
     expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("clears the breakout destination when its channel is unbound", async () => {
+    mockApis({ ...RECORD, breakout_channel_id: "C1" })
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...RECORD,
+      slack_channel_ids: [],
+      breakout_channel_id: null,
+    })
+    renderPage()
+
+    const destination = await screen.findByRole("combobox", {
+      name: "Breakout destination",
+    })
+    await waitFor(() => expect(destination.textContent).toContain("#oss-help"))
+    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
+    fireEvent.click(await screen.findByRole("checkbox", { name: "#oss-help" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
+    expect(destination.textContent).toContain("Current channel")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        "oss",
+        expect.objectContaining({
+          slack_channel_ids: [],
+          breakout_channel_id: null,
+        })
+      )
+    )
   })
 
   it.each([
