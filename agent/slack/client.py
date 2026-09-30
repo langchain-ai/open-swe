@@ -29,6 +29,7 @@ from agent.slack.http import (
     slack_error_details,
     slack_retry_after,
 )
+from agent.slack.pr_links import pr_review_links
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.threads.creation import create_lock_thread
@@ -447,6 +448,7 @@ async def _post_slack_message_with_ts(
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
+    text, blocks = await pr_review_links(text, blocks, channel_id=channel_id)
 
     try:
         async with SlackClient.bot() as client:
@@ -921,6 +923,7 @@ async def update_slack_message(
     if not SLACK_BOT_TOKEN:
         return False, "missing_slack_bot_token"
 
+    text, blocks = await pr_review_links(text, blocks, channel_id=channel_id)
     try:
         async with SlackClient.bot() as client:
             await client.chat_update(
@@ -1134,6 +1137,7 @@ async def post_slack_ephemeral_message(
     if not SLACK_BOT_TOKEN:
         return False
 
+    text, blocks = await pr_review_links(text, blocks, channel_id=channel_id)
     try:
         async with SlackClient.bot() as client:
             await client.chat_postEphemeral(
@@ -1284,6 +1288,7 @@ async def replace_slack_command_message(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    text, blocks = await pr_review_links(text, blocks)
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",

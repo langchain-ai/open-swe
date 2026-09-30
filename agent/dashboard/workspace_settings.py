@@ -64,6 +64,9 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     pr_summaries: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    pr_review_links: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     review_trace_links: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -316,6 +319,7 @@ def _default_settings() -> dict[str, Any]:
     return {
         "review_draft_prs": False,
         "pr_summaries": True,
+        "pr_review_links": False,
         "review_trace_links": True,
         "model_routing_enabled": None,
         "gateway_enabled": None,

@@ -2,12 +2,18 @@
 
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
 
+from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
 from agent.slack import client as slack_utils
+from agent.slack import pr_links
+from agent.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
+from agent.tools.manage_feature_flags import manage_feature_flags
+from tests.conftest import FakeStore
+from tests.support.slack_api import SlackAPI
 
 
 @pytest.mark.asyncio
@@ -144,3 +150,90 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
         "chat.postMessage",
         "conversations.replies",
     ]
+
+
+@pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
+async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
+    fake_store: FakeStore,
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery: str,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
+    monkeypatch.setattr(pr_links, "workspace_for_slack_channel", AsyncMock(return_value="team"))
+    fake_store.seed(["workspace_settings"], "team", {"pr_review_links": True})
+    await upsert_instance_settings(WorkspaceSettingsUpdate(pr_review_links=delivery == "command"))
+    url = "https://github.com/acme/app/pull/7"
+    target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
+    unchanged = f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
+    text = f"[PR]({url}), <{url}|PR> and {url}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    blocks = block_payload(
+        [
+            markdown(text),
+            section(f"<{url}|PR>"),
+            actions(button("I'll review", action_id="review", value=url, url=url)),
+            *code_blocks(url),
+        ]
+    )
+    if delivery == "post":
+        assert await slack_utils.post_slack_top_level_message_with_ts(
+            "C1", text, blocks=blocks
+        ) == (
+            "1.0",
+            None,
+        )
+    elif delivery == "update":
+        assert await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks) == (
+            True,
+            None,
+        )
+    elif delivery == "ephemeral":
+        assert await slack_utils.post_slack_ephemeral_message("C1", "U1", text, blocks=blocks)
+    else:
+
+        async def handle(request: httpx2.Request) -> httpx2.Response:
+            slack_api.calls.append(("callback", json.loads(request.content)))
+            return httpx2.Response(200, text="ok")
+
+        with patch.object(
+            slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+        ):
+            assert await slack_utils.replace_slack_command_message(
+                "https://hooks.slack.com/commands/test", text, blocks=blocks
+            )
+    payload = slack_api.calls[0][1]
+    expected = (
+        f"[PR]({target}), <{target}|PR> and {target}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    )
+    assert payload["text"] == expected
+    sent_blocks = payload["blocks"]
+    assert sent_blocks[0]["text"] == expected
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR>"
+    assert sent_blocks[2]["elements"][0]["url"] == target
+    assert sent_blocks[2]["elements"][0]["value"] == url
+    assert sent_blocks[3] == blocks[3]
+    assert blocks[0]["text"] == text
+
+
+async def test_review_links_default_off_inherit_and_allow_workspace_opt_out(
+    fake_store: FakeStore,
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    grant_tool_access,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    monkeypatch.setattr(pr_links, "workspace_for_slack_channel", AsyncMock(return_value="team"))
+    grant_tool_access(admin=True, admin_surface=True)
+    url = "https://github.com/acme/app/pull/7"
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url
+    await manage_feature_flags("set", {"pr_review_links": True})
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    fake_store.seed(["workspace_settings"], "team", {"pr_review_links": False})
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url
+    fake_store.seed(["workspace_settings"], "team", {})
+    monkeypatch.delenv("DASHBOARD_BASE_URL")
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url

@@ -25,6 +25,15 @@ falling back to the default branch when the head has no settings file. The
 `request_human_review` tool accepts a `channel` that overrides it or stands in when
 the repository sets none.
 
+The shared `pr_review_links` feature flag is off by default. Enable it through
+`manage_feature_flags` on a private admin surface, either instance-wide or for one
+workspace. Outgoing Slack PR links, including card buttons, then open the configured
+dashboard's `/agents/reviews/{owner}/{repo}/{number}` page instead of GitHub. The
+workspace bound to the destination channel controls the flag; unbound channels use
+the run's workspace. Stored GitHub URLs, button action values, code examples, and
+links to specific GitHub subpages or anchors stay unchanged. Without a configured
+dashboard URL, links still go to GitHub.
+
 ## Requesting
 
 - Asking is a per-person feature flag, **Request human reviews in Slack** on the
