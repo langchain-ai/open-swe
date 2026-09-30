@@ -14,7 +14,7 @@ import {
 import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
-import { refreshPullRequest } from "./lib/cache"
+import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { control } from "./lib/styles"
@@ -158,6 +158,14 @@ export function MyPullRequests({
     ? all.find((row) => pullRequestKey(row) === selected)
     : undefined
   const railed = Boolean(selectedRow)
+  const selectedIndex = visible.findIndex(
+    (row) => pullRequestKey(row) === selected
+  )
+  const nextRow = selectedIndex >= 0 ? visible[selectedIndex + 1] : undefined
+  useEffect(() => {
+    if (nextRow)
+      void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
+  }, [queryClient, nextRow])
 
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
