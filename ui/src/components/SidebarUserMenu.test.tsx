@@ -42,7 +42,6 @@ function renderMenu() {
           email: "octocat@example.com",
           avatar_url: null,
           is_admin: false,
-          default_workspace: null,
         }}
       />
     </QueryClientProvider>

@@ -1,18 +1,27 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
+import asyncio
 import logging
-from typing import Any
+import posixpath
+import re
+from datetime import UTC, datetime
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
-from agent.credential_scope import pr_author_login, private_credential_login
+from agent.credential_scope import (
+    PrAuthorNotAParticipant,
+    pr_author_login,
+    private_credential_login,
+)
 from agent.github.app import get_github_app_installation_token
 from agent.github.comments import derive_pr_state
-from agent.github.pull_requests import PullRequest, ThreadLink
+from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from agent.github.token import GitHubUserAuthRequired
 from agent.run_config import RunConfig
 from agent.slack.client import (
@@ -28,9 +37,11 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.utils.authorship import PR_ATTRIBUTION_TEXT
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
+from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +64,9 @@ _REPORTED_RESPONSE_HEADERS = (
 )
 
 
-async def _resolve_pr_author_token() -> tuple[str | None, str]:
-    """Use the run requester's OAuth for user-owned threads and the bot for system threads."""
-    login = await pr_author_login()
+async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | None, str]:
+    """Use the requested or requesting person's OAuth, and the bot for system threads."""
+    login = await pr_author_login(author)
     if login is None:
         return await get_github_app_installation_token(), "bot"
     from agent.dashboard.profiles import get_valid_access_token
@@ -556,21 +567,23 @@ PR_OPENED_FEEDBACK_KEY = "pr_opened"
 
 
 async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
-    """Record ``pr_opened`` feedback so LangSmith can count it against ``pr_merged``.
-
-    One row per thread, so a thread opening several PRs collapses to the last
-    write. Deliberate for now: it keeps the aggregate simple.
-
-    Args:
-        thread_id: LangGraph thread the PR was opened from.
-        pr_url: Stored as the feedback comment.
-    """
-    await create_langsmith_thread_feedback(
-        thread_id,
-        PR_OPENED_FEEDBACK_KEY,
-        score=1.0,
-        comment=pr_url,
-        source_info={"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url},
+    """Record aggregate and detailed ``pr_opened`` feedback on the thread's trace."""
+    source_info = {"source": "open_pull_request", "thread_id": thread_id, "pr_url": pr_url}
+    await asyncio.gather(
+        create_langsmith_thread_feedback(
+            thread_id,
+            f"github_pr_opened:{pr_url}",
+            score=1.0,
+            comment=f"Agent-authored pull request opened: {pr_url}",
+            source_info=source_info,
+        ),
+        create_langsmith_thread_feedback(
+            thread_id,
+            PR_OPENED_FEEDBACK_KEY,
+            score=1.0,
+            comment=pr_url,
+            source_info=source_info,
+        ),
     )
 
 
@@ -585,10 +598,41 @@ async def _record_pr_telemetry(
     pr: dict[str, Any],
     resolves_thread: bool = False,
     record_opening: bool = True,
+    creation_response: dict[str, Any] | None = None,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
         return
+    creation_base = creation_response.get("base") if creation_response else None
+    creation_head = creation_response.get("head") if creation_response else None
+    opening_base_sha = creation_base.get("sha") if isinstance(creation_base, dict) else None
+    opening_head_sha = creation_head.get("sha") if isinstance(creation_head, dict) else None
+    if record_opening and isinstance(opening_base_sha, str) and isinstance(opening_head_sha, str):
+        from agent.analytics.revisions import capture_pr_revision
+
+        try:
+            await capture_pr_revision(
+                owner=owner,
+                repo=repo,
+                number=pr_number,
+                endpoint_kind="opening",
+                base_sha=opening_base_sha,
+                head_sha=opening_head_sha,
+                endpoint_at=(
+                    datetime.fromisoformat(
+                        str(creation_response["created_at"]).replace("Z", "+00:00")
+                    )
+                    if creation_response is not None and creation_response.get("created_at")
+                    else datetime.now(UTC)
+                ),
+                source_kind="creation_response",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to retain pull request opening revisions",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
+                exc_info=True,
+            )
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
         config = get_config()
@@ -603,10 +647,6 @@ async def _record_pr_telemetry(
         merged = bool(details.get("merged"))
         is_draft = bool(details.get("draft", pr.get("draft")))
         state = details.get("state") if isinstance(details.get("state"), str) else "open"
-        base_details = details.get("base")
-        head_details = details.get("head")
-        opening_base_sha = base_details.get("sha") if isinstance(base_details, dict) else None
-        opening_head_sha = head_details.get("sha") if isinstance(head_details, dict) else None
         additions_value = details.get("additions")
         additions = additions_value if isinstance(additions_value, int) else 0
         deletions_value = details.get("deletions")
@@ -708,6 +748,11 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            origin = (
+                cfg.slack_thread
+                if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
+                else None
+            )
             try:
                 await PullRequest(
                     owner=owner,
@@ -727,10 +772,25 @@ async def _record_pr_telemetry(
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
                     ),
+                    opening_model_id=(
+                        (cfg.resolved_agent_model_id or "") if record_opening else ""
+                    ),
+                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    langsmith_run_id=str(run_id) if record_opening and run_id else "",
+                    slack_team_id=origin.team_id if origin else "",
+                    slack_channel_id=origin.channel_id if origin else "",
+                    slack_thread_ts=origin.thread_ts if origin else "",
+                    # Other sources carry a stale trigger or the bot's own post.
+                    slack_message_ts=(
+                        origin.triggering_event_ts if origin and cfg.source == "slack" else ""
+                    ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
                     resolves_thread=resolves_thread,
-                    threads=[ThreadLink(thread_id=thread_id, source="open_pull_request")],
+                    additions=additions,
+                    deletions=deletions,
+                    changed_files=changed_files,
+                    threads=[ThreadLink(thread_id=thread_id, source=AGENT_OPENED_LINK_SOURCE)],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the
@@ -851,6 +911,40 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
+async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
+    """Make the platform footer, naming this run's model, the body's last line."""
+    cfg = _configurable()
+    model_id: str | None = cfg.resolved_agent_model_id
+    effort: str | None = cfg.resolved_agent_effort
+    state = state or {}
+    if selected := state.get("selected_model_id"):
+        model_id, effort = selected, state.get("selected_effort")
+        usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
+        models = usage.models if usage else ()
+        reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in models}
+        if models and reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+            model_id, effort = ", ".join(models), None
+    elif cfg.thread_id:
+        try:
+            thread = await get_client().threads.get(cfg.thread_id)
+            metadata = thread.get("metadata") if isinstance(thread, dict) else None
+            if isinstance(metadata, dict):
+                model = metadata.get("model")
+                value = metadata.get("effort")
+                if model_id is None and isinstance(model, str) and model:
+                    model_id = model
+                if effort is None and isinstance(value, str) and value:
+                    effort = value
+        except Exception:
+            logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
+    return add_pr_collaboration_note(
+        body,
+        thread_url=dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None,
+        model_id=model_id,
+        reasoning_effort=effort,
+    )
+
+
 async def _maybe_append_references(
     client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
@@ -893,8 +987,25 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    author: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    token, kind = await _resolve_pr_author_token()
+    try:
+        token, kind = await _resolve_pr_author_token(author)
+    except PrAuthorNotAParticipant as exc:
+        return _failure_payload(
+            code="pr_author_not_a_participant",
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            token_kind="user",
+            http_status=None,
+            reason=str(exc),
+            likely_cause="the requested author has not posted in this thread",
+            branch_pushed=None,
+            failed_step="resolve_pr_author_token",
+        )
     if not token:
         return _failure_payload(
             code="no_github_token",
@@ -938,7 +1049,10 @@ async def _open_pull_request(
         )
         if preflight_failure is not None:
             return preflight_failure
-        body = await _maybe_append_references(client, token, owner, repo, body)
+        body = await _stamp_attribution_footer(
+            await _maybe_append_references(client, token, owner, repo, body),
+            state,
+        )
         draft = _effective_draft(draft)
         payload = {
             "title": title,
@@ -964,6 +1078,7 @@ async def _open_pull_request(
                     base=base,
                     pr=pr,
                     resolves_thread=resolves_thread,
+                    creation_response=pr,
                 )
             return {
                 "success": True,
@@ -1038,6 +1153,8 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
+    author: str = "",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1049,4 +1166,122 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        author=author or None,
+        state=state,
     )
+
+
+def _ref_name(pr: dict[str, Any], side: str) -> str:
+    branch = pr.get(side)
+    ref = branch.get("ref") if isinstance(branch, dict) else None
+    return ref if isinstance(ref, str) else ""
+
+
+async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
+    """Implement the `link_pull_request` tool."""
+    ref = parse_github_pr_url(pr_url)
+    if ref is None:
+        return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
+    token, kind = await _resolve_pr_author_token()
+    if not token:
+        return {"success": False, "error": "No GitHub token was available to read the PR"}
+    async with httpx2.AsyncClient(timeout=30.0) as client:
+        if (
+            kind == "user"
+            and await private_credential_login() is None
+            and not await _workspace_has_repository(client, ref.owner, ref.repo)
+        ):
+            return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
+        pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
+        if not pr:
+            return {"success": False, "error": f"Could not read {pr_url}"}
+        await _record_pr_telemetry(
+            client=client,
+            token=token,
+            owner=ref.owner,
+            repo=ref.repo,
+            head=_ref_name(pr, "head"),
+            base=_ref_name(pr, "base"),
+            pr=pr,
+            resolves_thread=resolves_thread,
+            record_opening=False,
+        )
+    return {"success": True, "url": pr.get("html_url"), "number": ref.number}
+
+
+UPLOADS_URL = "https://uploads.github.com/user-attachments/assets"
+MAX_BYTES = 10 * 1024 * 1024
+ATTACHMENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+
+def _upload_failure(error: str) -> dict[str, object]:
+    return {"success": False, "error": error}
+
+
+async def _read_attachment(file_path: str) -> tuple[str, bytes]:
+    backend, path, _ = await resolve_sandbox_file(file_path)
+    downloads = await backend.adownload_files([path])
+    content = downloads[0].content if downloads else None
+    if not content:
+        raise ValueError("file_path must identify a non-empty file")
+    if len(content) > MAX_BYTES:
+        raise ValueError("file exceeds the 10 MB attachment limit")
+    return path, content
+
+
+async def _upload_attachment(
+    owner: str, repo: str, name: str, content_type: str, content: bytes
+) -> str:
+    token, _kind = await _resolve_pr_author_token()
+    if not token:
+        raise ValueError("no GitHub token is available for this thread")
+    async with httpx2.AsyncClient(timeout=60.0) as client:
+        if await private_credential_login() is None and not await _workspace_has_repository(
+            client, owner, repo
+        ):
+            raise ValueError(f"{owner}/{repo} is not in the workspace GitHub App installation")
+        repo_resp = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token)
+        )
+        if repo_resp.status_code != 200:
+            raise ValueError(f"GitHub returned {repo_resp.status_code} for {owner}/{repo}")
+        resp = await client.post(
+            UPLOADS_URL,
+            params={
+                "name": name,
+                "content_type": content_type,
+                "repository_id": repo_resp.json()["id"],
+            },
+            headers={**_auth_headers(token), "Content-Type": "application/octet-stream"},
+            content=content,
+        )
+    if resp.status_code not in (200, 201):
+        raise ValueError(f"GitHub upload returned {resp.status_code}: {resp.text[:500]}")
+    return resp.json()["url"]
+
+
+async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[str, object]:
+    """Implement the `upload_pr_attachment` tool."""
+    content_type = ATTACHMENT_TYPES.get(posixpath.splitext(file_path)[1].lower())
+    if content_type is None:
+        return _upload_failure("unsupported file type")
+    try:
+        path, content = await _read_attachment(file_path)
+        name = posixpath.basename(path)
+        url = await _upload_attachment(owner, repo, name, content_type, content)
+    except ValueError as exc:
+        logger.warning("PR attachment upload failed", extra={"error": str(exc)})
+        return _upload_failure(str(exc))
+    alt = re.sub(r"[\\\[\]\r\n]", " ", posixpath.splitext(name)[0])
+    markdown = url if content_type.startswith("video/") else f"![{alt}]({url})"
+    return {"success": True, "url": url, "markdown": markdown}

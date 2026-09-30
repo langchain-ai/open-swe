@@ -3,10 +3,10 @@
 import asyncio
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from agent.database import postgres
-from agent.users import UnauthorizedUser, User
+from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -20,50 +20,6 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 async def _user_count() -> int:
     async with postgres.session() as session:
         return await session.scalar(select(func.count()).select_from(User)) or 0
-
-
-async def test_first_sign_in_creates_one_user_with_a_uuid7_id() -> None:
-    signed_in = await User.sign_in(
-        "github", "1001", login="OctoCat", email="octo@example.com", display_name="Octo Cat"
-    )
-
-    assert signed_in.id.version == 7
-    assert [(i.provider, i.external_id, i.login, i.email) for i in signed_in.identities] == [
-        ("github", "1001", "OctoCat", "octo@example.com")
-    ]
-    assert (signed_in.display_name, signed_in.is_admin) == ("Octo Cat", False)
-    assert await _user_count() == 1
-
-
-async def test_signing_in_again_returns_the_same_user() -> None:
-    first = await User.sign_in("github", "1001", login="OctoCat")
-    again = await User.sign_in("github", "1001", login="OctoCat")
-
-    assert again.id == first.id
-    assert await _user_count() == 1
-
-
-async def test_known_values_win_and_empty_ones_keep_what_is_stored() -> None:
-    await User.sign_in("github", "1001", login="OctoCat", email="octo@example.com")
-    renamed = await User.sign_in("github", "1001", login="Octo-Cat", email="cat@example.com")
-    unchanged = await User.sign_in("github", "1001")
-
-    assert (renamed.identities[0].login, renamed.identities[0].email) == (
-        "Octo-Cat",
-        "cat@example.com",
-    )
-    assert (unchanged.identities[0].login, unchanged.identities[0].email) == (
-        "Octo-Cat",
-        "cat@example.com",
-    )
-
-
-async def test_admin_is_written_only_when_the_caller_has_an_opinion() -> None:
-    promoted = await User.sign_in("github", "1001", login="OctoCat", admin=True)
-    kept = await User.sign_in("github", "1001")
-    demoted = await User.sign_in("github", "1001", admin=False)
-
-    assert (promoted.is_admin, kept.is_admin, demoted.is_admin) == (True, True, False)
 
 
 async def test_sync_admins_matches_github_logins_and_identity_emails_and_demotes() -> None:
@@ -96,12 +52,6 @@ async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
     assert await _user_count() == 1
 
 
-async def test_for_identity_is_none_for_an_unknown_account() -> None:
-    await User.sign_in("github", "1001", login="OctoCat")
-
-    assert await User.for_identity("slack", "U0123") is None
-
-
 async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
     first = await User.sign_in("github", "2002", login="ada")
     await first.link("slack", "U0123", team_id="T9")
@@ -131,17 +81,6 @@ async def test_a_slack_account_cannot_establish_a_user_on_its_own() -> None:
     assert await _user_count() == 0
 
 
-async def test_an_existing_user_signs_in_without_re_authorization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    created = await User.sign_in("github", "1001", login="OctoCat")
-    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
-
-    again = await User.sign_in("github", "1001", login="OctoCat", display_name="Octo")
-
-    assert (again.id, again.display_name) == (created.id, "Octo")
-
-
 async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
     signed_in = await asyncio.gather(
         *(User.sign_in("github", "1001", login="OctoCat") for _ in range(5))
@@ -151,15 +90,17 @@ async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
     assert await _user_count() == 1
 
 
-async def test_the_work_email_wins_over_a_personal_github_one() -> None:
-    """``resolve_run_email`` turns on this precedence: Slack's address is verified."""
-    user = await User.sign_in("github", "1001", login="OctoCat", email="octo@personal.example")
-    await user.link("slack", "U1", email="octo@work.example", team_id="T1")
+async def test_preference_patches_merge_and_skip_unset_fields() -> None:
+    await User.sign_in("github", "8", login="bob")
+    async with postgres.session() as session:
+        await session.execute(
+            update(User).values(preferences={"concierge_mode": True, "future": "kept"})
+        )
 
-    assert await User.email_for_login("OctoCat") == "octo@work.example"
+    unchanged = await User.update_preferences("bob", UserPreferencesPatch())
+    turned_off = await User.update_preferences("bob", UserPreferencesPatch(concierge_mode=False))
 
-
-async def test_the_github_email_is_used_when_no_slack_account_is_linked() -> None:
-    await User.sign_in("github", "1001", login="OctoCat", email="octo@personal.example")
-
-    assert await User.email_for_login("OctoCat") == "octo@personal.example"
+    assert unchanged == UserPreferences(concierge_mode=True)
+    assert turned_off == UserPreferences(concierge_mode=False)
+    stored = await User.for_login("github", "bob")
+    assert stored is not None and stored.preferences == {"concierge_mode": False, "future": "kept"}

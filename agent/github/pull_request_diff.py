@@ -17,9 +17,11 @@ from fastapi import HTTPException
 
 _GITHUB_API = "https://api.github.com"
 
-PR_DIFF_MAX_FILES = 50
+# GitHub lists at most this many files for a pull request or comparison.
+GITHUB_MAX_LISTED_FILES = 3000
 PR_DIFF_MAX_FILE_BYTES = 1_000_000
-PR_DIFF_FETCH_CONCURRENCY = 5
+PR_DIFF_FETCH_CONCURRENCY = 10
+_FILES_PAGE_SIZE = 100
 
 
 async def _fetch_file_at_ref(
@@ -146,11 +148,30 @@ async def build_pr_diff_files(
     hydrates on demand. ``client`` must already be configured with auth headers.
     """
     base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    # ``base.sha`` is the base branch's tip, not the merge base. Reading original
-    # blobs there would attribute every commit landed on the base branch since
-    # the fork to this PR, as deletions.
-    return await build_compare_diff_files(
-        client, full_name, base_sha, head_sha, with_contents=with_contents
+    raw_files: list[Any] = []
+    page = 1
+    while True:
+        response = await client.get(
+            f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
+            params={"per_page": _FILES_PAGE_SIZE, "page": page},
+        )
+        if response.status_code != 200:
+            raise HTTPException(502, f"github API error ({response.status_code})")
+        batch = response.json()
+        if not isinstance(batch, list):
+            raise HTTPException(502, "github API returned an unexpected files payload")
+        raw_files.extend(batch)
+        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
+            break
+        page += 1
+    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
+    return await _build_diff_files(
+        client,
+        full_name,
+        raw_files,
+        _merge_base_sha(comparison),
+        head_sha,
+        with_contents=with_contents,
     )
 
 
@@ -196,9 +217,8 @@ async def _build_diff_files(
     *,
     with_contents: bool,
 ) -> dict[str, Any]:
-    """Build file entries, optionally reading each blob at ``base_ref``/``head_ref``."""
-    truncated = len(raw_files) > PR_DIFF_MAX_FILES
-    raw_files = raw_files[:PR_DIFF_MAX_FILES]
+    """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
+    truncated = len(raw_files) >= GITHUB_MAX_LISTED_FILES
 
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
 

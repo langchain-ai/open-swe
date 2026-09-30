@@ -8,7 +8,7 @@ long a stored payload is trusted before Slack is asked again.
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Self
+from typing import Any, Self
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
+from agent.slack.client import post_slack_top_level_message_with_ts
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.payloads import SlackChannelContext, SlackChannelPayload, SlackMessage
 from agent.utils.json_types import JsonObject
@@ -57,6 +58,11 @@ class SlackChannel(Base):
     def context(self) -> SlackChannelContext:
         """This channel's identity and description, for prompts and thread metadata."""
         return self.details.to_context(self.id)
+
+    @property
+    def can_be_kitchen(self) -> bool:
+        """Whether Slack delivers this channel's messages and it is not externally shared."""
+        return self.context.allows_operations and self.payload.get("is_member") is True
 
     @classmethod
     def from_payload(cls, payload: JsonObject) -> Self | None:
@@ -187,7 +193,7 @@ class SlackChannel(Base):
         if not SLACK_BOT_TOKEN:
             return False
         try:
-            async with slack_client(token=SLACK_BOT_TOKEN) as client:
+            async with SlackClient.bot() as client:
                 await client.conversations_join(channel=self.id)
             return True
         except SLACK_REQUEST_ERRORS as exc:
@@ -199,6 +205,19 @@ class SlackChannel(Base):
                 extra={"slack_channel": self.id, "slack_error": error},
             )
             return False
+
+    async def post(
+        self, text: str, *, blocks: list[dict[str, Any]] | None = None
+    ) -> tuple[str | None, str | None]:
+        """Post a top-level message, joining the channel when the bot is outside it."""
+        message_ts, error = await post_slack_top_level_message_with_ts(
+            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+        )
+        if message_ts is None and error == "not_in_channel" and await self.join():
+            message_ts, error = await post_slack_top_level_message_with_ts(
+                self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+            )
+        return message_ts, error
 
     async def messages(self, limit: int = 30) -> list[SlackMessage]:
         """The most recent top-level messages, oldest first.

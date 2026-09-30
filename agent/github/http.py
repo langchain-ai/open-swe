@@ -1,8 +1,8 @@
 """Shared GitHub HTTP helper with sane timeouts, retries, and rate-limit handling.
 
-All GitHub API calls in the reviewer publish path (and gradually everywhere else)
-should go through ``github_request`` instead of raw ``httpx2.AsyncClient`` calls.
-This centralises:
+Existing reviewer publish calls use ``github_request`` instead of raw
+``httpx2.AsyncClient`` calls. App authentication and repository access checks
+use the typed async SDK in ``agent.github.sdk``. This helper centralises:
 
 - **Timeouts**: httpx2 defaults to 5 s which is too aggressive for paginated
   GitHub/GraphQL fetches.  The default here is 30 s read / 10 s connect.

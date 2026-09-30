@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, NotRequired
+from typing import Annotated, Any, NotRequired
 
 from deepagents.middleware.summarization import (
     SummarizationMiddleware,
@@ -14,6 +14,7 @@ from langchain.agents.middleware.types import (
     ExtendedModelResponse,
     ModelRequest,
     ModelResponse,
+    OmitFromOutput,
     hook_config,
 )
 from langchain_core.messages import AnyMessage
@@ -23,8 +24,12 @@ from langgraph.runtime import Runtime
 _manual = ContextVar("manual_offloading", default=False)
 
 
+def _take_latest[T](left: T | None, right: T | None) -> T | None:
+    return right if right is not None else left
+
+
 class OffloadingState(SummarizationState):
-    conversation_offloading: NotRequired[dict[str, Any]]
+    conversation_offloading: NotRequired[Annotated[dict[str, object], OmitFromOutput, _take_latest]]
 
 
 class ConversationOffloadingMiddleware(SummarizationMiddleware):

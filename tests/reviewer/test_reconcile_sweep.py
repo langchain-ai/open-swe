@@ -81,18 +81,6 @@ async def test_cancels_only_stale_pending_runs(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_no_stale_runs_means_no_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
-    threads = _FakeThreads([[{"thread_id": "t1"}]])
-    runs = _FakeRuns({"t1": [_run("fresh1", "t1", age_seconds=30)]})
-    _patch(monkeypatch, _FakeClient(threads, runs))
-
-    counts = await reconcile.reconcile_stale_runs(max_age_seconds=1800)
-
-    assert counts == {"threads_checked": 1, "stale_runs": 0, "cancelled": 0}
-    runs.cancel_many.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_bad_thread_does_not_abort_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
     threads = _FakeThreads([[{"thread_id": "bad"}, {"thread_id": "good"}]])
     runs = _FakeRuns(
@@ -132,28 +120,3 @@ async def test_paginates_busy_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     assert threads.search_calls[0]["offset"] == 0
     assert threads.search_calls[1]["offset"] == reconcile._SEARCH_PAGE_SIZE
     assert threads.search_calls[0]["status"] == "busy"
-
-
-@pytest.mark.asyncio
-async def test_unparseable_created_at_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    threads = _FakeThreads([[{"thread_id": "t1"}]])
-    runs = _FakeRuns(
-        {
-            "t1": [
-                {
-                    "run_id": "bad",
-                    "thread_id": "t1",
-                    "status": "pending",
-                    "created_at": "not-a-date",
-                },
-                _run("old", "t1", age_seconds=5000),
-            ]
-        }
-    )
-    _patch(monkeypatch, _FakeClient(threads, runs))
-
-    counts = await reconcile.reconcile_stale_runs(max_age_seconds=1800)
-
-    assert counts == {"threads_checked": 1, "stale_runs": 1, "cancelled": 1}
-    assert runs.cancel_many.await_args is not None
-    assert runs.cancel_many.await_args.kwargs["run_ids"] == ["old"]

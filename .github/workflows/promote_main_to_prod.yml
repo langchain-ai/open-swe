@@ -34,14 +34,49 @@ jobs:
   promote:
     needs: typecheck
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.typecheck.outputs.sha }}
           fetch-depth: 0
-      - name: Force-push the typechecked commit to prod
+      - name: Force-push the typechecked commit to prod and summarize released PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          RELEASE_COMMITS="$(git log origin/prod..HEAD --format=%s)"
+          export RELEASE_COMMITS
           git push --force origin HEAD:refs/heads/prod
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          released = {}
+          for subject in os.environ["RELEASE_COMMITS"].splitlines():
+              match = re.search(r"\(#(\d+)\)$|^Merge pull request #(\d+)\b", subject)
+              if match:
+                  number = match.group(1) or match.group(2)
+                  released.setdefault(number, subject)
+          lines = []
+          for number, subject in released.items():
+              url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/pull/{number}"
+              try:
+                  title = subprocess.check_output(
+                      ["gh", "pr", "view", url, "--json", "title", "--jq", ".title"],
+                      text=True,
+                      timeout=30,
+                  ).strip()
+              except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                  print(f"::warning::Could not fetch title for PR #{number}: {exc}")
+                  title = subject
+              lines.append(f"- {title} — {url}")
+          message = "\n".join(lines) or "No new PRs identified in the promoted commits."
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"## Released PRs\n\n{message}\n")
+          PY
 
   release-desktop-nightly:
     needs: [typecheck, promote]

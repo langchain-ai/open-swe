@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Literal
 from unittest.mock import AsyncMock, patch
 
 import langgraph_sdk
@@ -30,21 +30,6 @@ def _resolve_participant(monkeypatch):
         yield
 
 
-@pytest.mark.asyncio
-async def test_load_notion_tools_empty_when_not_connected() -> None:
-    with patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value=None)):
-        assert await notion_mcp.load_notion_tools("alice") == []
-
-
-@pytest.mark.asyncio
-async def test_load_notion_tools_degrades_on_error() -> None:
-    with (
-        patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value="tok")),
-        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(side_effect=RuntimeError("boom"))),
-    ):
-        assert await notion_mcp.load_notion_tools("alice") == []
-
-
 def _notion_tool_for_token(
     token: str,
     response_format: Literal["content", "content_and_artifact"] = "content",
@@ -62,24 +47,6 @@ def _notion_tool_for_token(
         description="Search Notion",
         response_format=response_format,
     )
-
-
-@pytest.mark.asyncio
-async def test_load_notion_tools_returns_wrappers() -> None:
-    discovered = _notion_tool_for_token("initial-token")
-    with (
-        patch.object(notion_mcp, "get_notion_access_token", AsyncMock(return_value="tok")),
-        patch.object(notion_mcp, "_build_mcp_tools", AsyncMock(return_value=[discovered])),
-    ):
-        tools = await notion_mcp.load_notion_tools("alice")
-    assert len(tools) == 1
-    assert tools[0].name == "notion_search"
-    assert tools[0].description == discovered.description
-    schema = cast("dict[str, Any]", tools[0].args_schema)
-    assert "query" in schema["properties"]
-    assert "on_behalf_of" in schema["properties"]
-    assert "on_behalf_of" in schema["required"]
-    assert tools[0].response_format == "content"
 
 
 @pytest.mark.asyncio

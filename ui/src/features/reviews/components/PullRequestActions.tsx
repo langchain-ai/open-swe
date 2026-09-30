@@ -1,0 +1,85 @@
+import type { OpenPullRequest } from "@/lib/api"
+import { PullRequestLinks } from "../PullRequestLinks"
+import {
+  canAttemptMerge,
+  canUpdateBranch,
+  hasUnresolvedConversations,
+  isFixable,
+} from "../lib/status"
+import { ClosePullRequest } from "./ClosePullRequest"
+import { MarkPullRequestReady } from "./MarkPullRequestReady"
+import { MergePullRequest } from "./MergePullRequest"
+import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { RequestHumanReview } from "./RequestHumanReview"
+import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
+
+export type PullRequestOutcome = "merged" | "closed"
+
+const outcomeLabels: Record<PullRequestOutcome, string> = {
+  merged: "Merged",
+  closed: "Closed",
+}
+
+/** Everything that can be done to a PR, shared by the card and the preview. */
+export function PullRequestActions({
+  pr,
+  login,
+  outcome,
+  onSettled,
+  onReady,
+  onReviewPage = false,
+}: {
+  pr: OpenPullRequest
+  login: string
+  outcome?: PullRequestOutcome
+  onSettled: (outcome: PullRequestOutcome) => void
+  onReady: () => void
+  onReviewPage?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+        {outcome ? (
+          <span className="text-xs text-muted-foreground">
+            {outcomeLabels[outcome]} · leaves the list on the next refresh
+          </span>
+        ) : (
+          <>
+            {isFixable(pr) && (
+              <PullRequestThreadAction pr={pr} login={login} action="fix" />
+            )}
+            {hasUnresolvedConversations(pr) && (
+              <PullRequestThreadAction
+                pr={pr}
+                login={login}
+                action="address-comments"
+              />
+            )}
+            {pr.draft === true && (
+              <MarkPullRequestReady pr={pr} onReady={onReady} />
+            )}
+            {pr.draft === false && <RequestHumanReview pr={pr} />}
+            {canUpdateBranch(pr) && (
+              <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
+            )}
+            {canAttemptMerge(pr) && (
+              <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />
+            )}
+            {pr.missingChecks.length > 0 && (
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                Merge blocked: {pr.missingChecks.join(", ")} never reported
+              </span>
+            )}
+            <ClosePullRequest pr={pr} onClosed={() => onSettled("closed")} />
+          </>
+        )}
+      </div>
+      <PullRequestLinks
+        repo={pr.repo}
+        number={pr.number}
+        title={pr.title}
+        onReviewPage={onReviewPage}
+      />
+    </div>
+  )
+}

@@ -15,6 +15,7 @@ __all__ = [
     "github_issue_thread_id",
     "linear_issue_thread_id",
     "pr_comment_thread_id",
+    "review_chat_thread_id",
     "review_style_thread_id",
     "reviewer_thread_id",
     "slack_thread_id",
@@ -40,9 +41,18 @@ def reviewer_thread_id(owner: str, repo: str, pr_number: int) -> str:
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/reviewer")
 
 
+def review_scout_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/review-scout")
+
+
 def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
     """Agent thread for a PR that Open SWE did not branch, keyed by the PR itself."""
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}")
+
+
+def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
+    """The one chat a user has about a PR. Per-user: chats are not shared."""
+    return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
 
 
 def review_style_thread_id(owner: str, repo: str) -> str:

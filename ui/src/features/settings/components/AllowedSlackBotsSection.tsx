@@ -16,6 +16,9 @@ import type { AllowedSlackBot } from "@/lib/api"
 
 const QUERY_KEY = ["allowedSlackBots"]
 
+const sameBot = (a: AllowedSlackBot, b: AllowedSlackBot) =>
+  a.team_id === b.team_id && a.bot_id === b.bot_id
+
 export function AllowedSlackBotsSection() {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState(false)
@@ -34,6 +37,7 @@ export function AllowedSlackBotsSection() {
     retry: false,
   })
   const add = useMutation({
+    meta: { silent: true },
     mutationFn: api.allowSlackBot,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: QUERY_KEY })
@@ -43,14 +47,26 @@ export function AllowedSlackBotsSection() {
     },
   })
   const remove = useMutation({
+    meta: { errorTitle: "Couldn't remove Slack bot" },
     mutationFn: (bot: AllowedSlackBot) =>
       api.removeAllowedSlackBot(bot.team_id, bot.bot_id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+    onMutate: async (bot) => {
+      await qc.cancelQueries({ queryKey: QUERY_KEY })
+      qc.setQueryData<Array<AllowedSlackBot>>(QUERY_KEY, (current) =>
+        current?.filter((b) => !sameBot(b, bot))
+      )
+    },
+    onError: (_error, bot) =>
+      qc.setQueryData<Array<AllowedSlackBot>>(QUERY_KEY, (current) =>
+        current && !current.some((b) => sameBot(b, bot))
+          ? [...current, bot]
+          : current
+      ),
+    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
 
-  const pending = add.isPending || remove.isPending
+  const pending = add.isPending
   const unavailable = pending || bots.isPending || bots.isError
-  const error = remove.error || bots.error
   const matches = directory.data?.filter((bot) =>
     `${bot.name} ${bot.bot_id} ${bot.user_id}`
       .toLowerCase()
@@ -58,7 +74,6 @@ export function AllowedSlackBotsSection() {
   )
   const allow = (id: string) => {
     if (!id || unavailable) return
-    remove.reset()
     add.mutate({ bot_id: id })
   }
 
@@ -241,9 +256,9 @@ export function AllowedSlackBotsSection() {
           </PopoverPopup>
         </Popover>
       </div>
-      {error && (
+      {bots.error && (
         <p role="alert" className="mt-3 text-xs text-destructive">
-          {error.message}
+          {bots.error.message}
         </p>
       )}
       {bots.isPending && (
@@ -291,9 +306,7 @@ export function AllowedSlackBotsSection() {
                   remove.mutate(bot)
                 }}
               >
-                {remove.isPending && remove.variables.bot_id === bot.bot_id
-                  ? "Removing…"
-                  : "Remove"}
+                Remove
               </Button>
             </li>
           ))}

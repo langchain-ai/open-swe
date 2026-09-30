@@ -1,0 +1,23 @@
+from typing import Any
+
+from agent.run_config import RunConfig
+from agent.sandboxes.providers.langsmith import create_workspace_service_url
+from agent.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+
+
+async def expose_port(port: int) -> dict[str, Any]:
+    """Implement the `expose_port` tool."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("port must be an integer between 1 and 65535")
+
+    thread_id = RunConfig.from_runtime().thread_id
+    if not isinstance(thread_id, str) or not thread_id:
+        raise ValueError("no thread_id in run config")
+
+    backend_proxy = await get_sandbox_backend(thread_id)
+    backend = unwrap_sandbox_backend(backend_proxy)
+    url = await create_workspace_service_url(backend.id, port)
+    if unwrap_sandbox_backend(backend_proxy) is not backend:
+        raise RuntimeError("sandbox changed while creating the service URL; retry")
+
+    return {"url": url, "port": port}

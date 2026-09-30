@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
-import type { ModelOption } from "@/lib/api"
+import type { ModelOption, ProfileUpdate } from "@/lib/api"
 import {
   AppShell,
   SettingsNavRow,
@@ -21,17 +21,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import {
-  buildProfileUpdate,
   useOptions,
+  usePatchProfile,
   useProfile,
   useRepos,
-  useSaveProfile,
 } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/cloud-agents")({
   component: CloudAgentsPage,
+  head: () => ({ meta: [{ title: pageTitle("Open SWE Agent") }] }),
 })
 
 function CloudAgentsPage() {
@@ -39,7 +40,7 @@ function CloudAgentsPage() {
   const profile = useProfile()
   const options = useOptions()
   const repos = useRepos()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
 
   const [modelId, setModelId] = useState("")
   const [effortChoice, setEffort] = useState("")
@@ -48,7 +49,6 @@ function CloudAgentsPage() {
   const [defaultRepo, setDefaultRepo] = useState("")
   const [baseBranch, setBaseBranch] = useState("")
   const [branchPrefix, setBranchPrefix] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const initialized = useRef(false)
 
   const defaultModels = options.data?.models.filter(
@@ -67,15 +67,18 @@ function CloudAgentsPage() {
     options.data?.default_agent_subagent_reasoning_effort ?? defaultAgentEffort
   const currentModel: ModelOption | undefined =
     defaultModels?.find((m) => m.id === modelId) ?? firstModel
-  const currentSubagentModel: ModelOption | undefined =
-    defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel
+  const subagentInheritsMain = subagentModelId === "inherit"
+  const currentSubagentModel: ModelOption | undefined = subagentInheritsMain
+    ? currentModel
+    : (defaultModels?.find((m) => m.id === subagentModelId) ?? firstModel)
   const effort =
     currentModel && !currentModel.efforts.includes(effortChoice)
       ? currentModel.default_effort
       : effortChoice
-  const subagentEffort =
-    currentSubagentModel &&
-    !currentSubagentModel.efforts.includes(subagentEffortChoice)
+  const subagentEffort = subagentInheritsMain
+    ? effort
+    : currentSubagentModel &&
+        !currentSubagentModel.efforts.includes(subagentEffortChoice)
       ? currentSubagentModel.default_effort
       : subagentEffortChoice
 
@@ -87,15 +90,11 @@ function CloudAgentsPage() {
     // oxlint-disable-next-line react/set-state-in-effect
     setModelId(profile.data.default_model ?? defaultAgentModel)
     setEffort(profile.data.reasoning_effort ?? defaultAgentEffort)
-    setSubagentModelId(
-      profile.data.default_subagent_model ??
-        profile.data.default_model ??
-        defaultSubagentModel
-    )
+    setSubagentModelId(profile.data.default_subagent_model ?? "inherit")
     setSubagentEffort(
-      profile.data.subagent_reasoning_effort ??
-        profile.data.reasoning_effort ??
-        defaultSubagentEffort
+      profile.data.default_subagent_model == null
+        ? (profile.data.reasoning_effort ?? defaultAgentEffort)
+        : (profile.data.subagent_reasoning_effort ?? defaultSubagentEffort)
     )
     setDefaultRepo(profile.data.default_repo ?? "")
     setBaseBranch(profile.data.base_branch ?? "")
@@ -120,21 +119,15 @@ function CloudAgentsPage() {
   const fallbackModel = defaultAgentModel
   const fallbackEffort = defaultAgentEffort
 
-  const persist = (patch: Parameters<typeof buildProfileUpdate>[1]) => {
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(profile.data, patch, fallbackModel, fallbackEffort)
-      )
-      .catch((e: Error) => setError(e.message))
-  }
+  const persist = (patch: Partial<ProfileUpdate>) =>
+    save.patch(patch, fallbackModel, fallbackEffort)
 
   const persistDefaults = () => {
     persist({
       default_model: modelId,
       reasoning_effort: effort,
-      default_subagent_model: subagentModelId,
-      subagent_reasoning_effort: subagentEffort,
+      default_subagent_model: subagentInheritsMain ? null : subagentModelId,
+      subagent_reasoning_effort: subagentInheritsMain ? null : subagentEffort,
       default_repo: defaultRepo || null,
       base_branch: baseBranch || null,
       branch_prefix: branchPrefix || null,
@@ -181,6 +174,19 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
+            label="Recent working contexts"
+            description="Include a filtered digest of your recent threads in agent runs."
+            control={
+              <Switch
+                checked={profile.data?.recent_thread_context_enabled ?? false}
+                onCheckedChange={(v) =>
+                  persist({ recent_thread_context_enabled: v })
+                }
+                disabled={profile.isLoading || save.isPending}
+              />
+            }
+          />
+          <SettingsRow
             label="Default Model"
             description="Used when adaptive routing is off or no model is specified"
             control={
@@ -218,7 +224,7 @@ function CloudAgentsPage() {
           />
           <SettingsRow
             label="Default Subagent Model"
-            description="Used for delegated tasks launched by your agent"
+            description="Used for delegated tasks; inherit follows your default model and effort"
             control={
               <Select
                 value={subagentModelId}
@@ -228,6 +234,7 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="inherit">Inherit from main</SelectItem>
                   {defaultModels?.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.label}
@@ -244,6 +251,7 @@ function CloudAgentsPage() {
               <Select
                 value={subagentEffort}
                 onValueChange={(v) => v && setSubagentEffort(v)}
+                disabled={subagentInheritsMain}
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -324,30 +332,15 @@ function CloudAgentsPage() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Pull Requests">
-        <div className="divide-y divide-border">
-          <SettingsRow
-            label="Automatically fix CI failures"
-            description="Agent will attempt to fix failing CI checks and resolve reviewer comments on PRs it opens."
-            control={
-              <Switch
-                checked={profile.data?.auto_fix_ci ?? true}
-                onCheckedChange={(v) => persist({ auto_fix_ci: v })}
-              />
-            }
-          />
-        </div>
-      </SettingsSection>
-
       <SettingsSection title="Slack">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Keep my DM as one conversation"
+            label="Concierge mode"
             description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread for every message."
             control={
               <Switch
-                checked={profile.data?.dm_session_enabled ?? false}
-                onCheckedChange={(v) => persist({ dm_session_enabled: v })}
+                checked={profile.data?.concierge_mode ?? false}
+                onCheckedChange={(v) => persist({ concierge_mode: v })}
               />
             }
           />
@@ -360,16 +353,7 @@ function CloudAgentsPage() {
           label="Repository Instructions"
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
-        {session.data.is_admin && (
-          <SettingsNavRow
-            to="/agents/sandbox"
-            label="Sandbox"
-            description="The snapshot new sandboxes boot from when their workspace has none."
-          />
-        )}
       </SettingsSection>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </AppShell>
   )
 }

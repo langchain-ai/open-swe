@@ -17,6 +17,35 @@ export interface ReviewsSearch {
   sort?: ReviewSort
   direction?: "asc" | "desc"
   page?: number
+  // The open pull request, as `owner/repo#number` — the same shape as
+  // `pullRequestKey`, so a row can put its own key straight into the URL.
+  pr?: string
+}
+
+const prSelectionPattern = /^[\w.-]+\/[\w.-]+#\d+$/
+
+export function parsePullRequestSelection(
+  value: string | undefined
+): { owner: string; repo: string; number: number } | null {
+  if (!value || !prSelectionPattern.test(value)) return null
+  const [fullName, rawNumber] = value.split("#")
+  const [owner, repo] = fullName!.split("/")
+  return { owner: owner!, repo: repo!, number: Number(rawNumber) }
+}
+
+const pullRequestUrlPattern =
+  /github\.com\/([\w.-]+)\/([\w.-]+)\/pulls?\/(\d+)/i
+const pullRequestRefPattern = /([\w.-]+)\/([\w.-]+)#(\d+)/
+
+/** The pull request a pasted GitHub URL or `owner/repo#number` names, ignoring surrounding text. */
+export function parsePullRequestReference(
+  text: string
+): { owner: string; repo: string; number: number } | null {
+  const match =
+    pullRequestUrlPattern.exec(text) ?? pullRequestRefPattern.exec(text)
+  if (!match) return null
+  const [, owner, repo, rawNumber] = match
+  return { owner: owner!, repo: repo!, number: Number(rawNumber) }
 }
 
 export function validateReviewsSearch(
@@ -51,5 +80,9 @@ export function validateReviewsSearch(
         ? search.direction
         : undefined,
     page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
+    pr:
+      typeof search.pr === "string" && prSelectionPattern.test(search.pr)
+        ? search.pr
+        : undefined,
   }
 }

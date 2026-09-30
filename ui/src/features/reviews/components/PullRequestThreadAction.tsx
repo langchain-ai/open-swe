@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -7,6 +7,10 @@ import {
   type PullRequestThreadActionName,
 } from "../lib/threadActions"
 import { PullRequestActionButton } from "./PullRequestActionButton"
+
+type PullRequestThreadStatus = Awaited<
+  ReturnType<typeof api.pullRequestThreadStatus>
+>
 
 /**
  * A button that dispatches agent work onto the pull request's own thread.
@@ -23,6 +27,7 @@ export function PullRequestThreadAction({
   action: PullRequestThreadActionName
 }) {
   const { labels, toasts, run: dispatch } = threadActions[action]
+  const queryClient = useQueryClient()
   const thread = useQuery({
     queryKey: ["pr-thread-status", login, pr.repo, pr.number],
     queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
@@ -32,32 +37,36 @@ export function PullRequestThreadAction({
     retry: false,
   })
   const run = useMutation({
-    mutationFn: () => dispatch(pr),
-    onSuccess: (result) =>
+    mutationFn: (target: OpenPullRequest) => dispatch(target),
+    meta: { errorTitle: `${toasts.failed} ${pr.repo}#${pr.number}` },
+    onSuccess: (result, target) => {
+      queryClient.setQueryData<PullRequestThreadStatus>(
+        ["pr-thread-status", login, target.repo, target.number],
+        (old) => ({ ...old, running: true })
+      )
       toast.success(
-        `${result.already_running ? toasts.running : toasts.queued} ${pr.repo}#${pr.number}`
-      ),
-    onError: (error) =>
-      toast.error(`${toasts.failed} ${pr.repo}#${pr.number}`, {
-        description: error.message,
-      }),
+        `${result.already_running ? toasts.running : toasts.queued} ${target.repo}#${target.number}`
+      )
+    },
   })
   return (
     <PullRequestActionButton
       label={
-        thread.data?.running || run.data?.already_running
+        run.data?.already_running
           ? labels.running
-          : thread.isPending
-            ? labels.checking
-            : thread.isError
-              ? labels.unavailable
-              : run.isPending
-                ? labels.queuing
-                : run.isSuccess
-                  ? labels.queued
-                  : run.isError
-                    ? labels.retry
-                    : labels.idle
+          : run.isSuccess
+            ? labels.queued
+            : thread.data?.running
+              ? labels.running
+              : thread.isPending
+                ? labels.checking
+                : thread.isError
+                  ? labels.unavailable
+                  : run.isPending
+                    ? labels.queuing
+                    : run.isError
+                      ? labels.retry
+                      : labels.idle
       }
       disabled={
         thread.isPending ||
@@ -66,8 +75,8 @@ export function PullRequestThreadAction({
         run.isPending ||
         run.isSuccess
       }
-      onClick={() => run.mutate()}
-      errors={[thread.error, run.error]}
+      onClick={() => run.mutate(pr)}
+      errors={[thread.error]}
     />
   )
 }

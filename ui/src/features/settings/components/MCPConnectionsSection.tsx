@@ -1,12 +1,13 @@
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { api } from "@/lib/api"
+import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
 import { MCPOAuthFields } from "./MCPOAuthFields"
@@ -15,7 +16,27 @@ type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
 
-export type MCPScope = "workspace" | "user"
+function editableValues(connection?: MCPConnectionUpdate): string {
+  const oauth = connection?.oauth
+  return JSON.stringify([
+    connection?.name ?? "",
+    connection?.url ?? "",
+    connection?.transport ?? "streamable_http",
+    connection?.enabled ?? true,
+    [...(connection?.allowed_tools ?? [])].sort(),
+    oauth
+      ? [
+          oauth.token_url,
+          oauth.client_id,
+          oauth.scope ?? "",
+          oauth.token_endpoint_auth_method ?? "client_secret_post",
+          oauth.client_secret ?? "",
+        ]
+      : null,
+  ])
+}
+
+export type MCPScope = "instance" | "workspace" | "user"
 
 type MCPScopeConfig = {
   title: string
@@ -28,36 +49,66 @@ type MCPScopeConfig = {
   discover: (body: MCPConnectionUpdate) => Promise<Catalog>
 }
 
-const scopes: Record<MCPScope, MCPScopeConfig> = {
-  workspace: {
-    title: "Workspace MCPs",
-    description:
-      "Connect remote MCP servers for authorized coding-agent runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["workspaceMCPs"],
-    // Hard-coded to the default workspace until a workspace selector lands.
-    list: () => api.getWorkspaceMCPs("default"),
-    save: (body) => api.saveWorkspaceMCP("default", body),
-    remove: (name) => api.deleteWorkspaceMCP("default", name),
-    revealHeaders: (name) => api.revealWorkspaceMCPHeaders("default", name),
-    discover: (body) => api.discoverWorkspaceMCP("default", body),
-  },
-  user: {
-    title: "Personal MCPs",
-    description:
-      "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
-    queryKey: ["myMCPs"],
-    list: api.getMyMCPs,
-    save: api.saveMyMCP,
-    remove: api.deleteMyMCP,
-    revealHeaders: api.revealMyMCPHeaders,
-    discover: api.discoverMyMCP,
-  },
+function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
+  const scopes: Record<MCPScope, MCPScopeConfig> = {
+    instance: {
+      title: "Instance MCPs",
+      description:
+        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["instanceMCPs"],
+      list: api.getInstanceMCPs,
+      save: api.saveInstanceMCP,
+      remove: api.deleteInstanceMCP,
+      revealHeaders: api.revealInstanceMCPHeaders,
+      discover: api.discoverInstanceMCP,
+    },
+    workspace: {
+      title: "Workspace MCPs",
+      description:
+        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["workspaceMCPs", workspace],
+      list: () => api.getWorkspaceMCPs(workspace),
+      save: (body) => api.saveWorkspaceMCP(workspace, body),
+      remove: (name) => api.deleteWorkspaceMCP(workspace, name),
+      revealHeaders: (name) => api.revealWorkspaceMCPHeaders(workspace, name),
+      discover: (body) => api.discoverWorkspaceMCP(workspace, body),
+    },
+    user: {
+      title: "Personal MCPs",
+      description:
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+      queryKey: ["myMCPs"],
+      list: api.getMyMCPs,
+      save: api.saveMyMCP,
+      remove: api.deleteMyMCP,
+      revealHeaders: api.revealMyMCPHeaders,
+      discover: api.discoverMyMCP,
+    },
+  }
+  return scopes[scope]
 }
 
-export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
-  const { title, description, queryKey, ...client } = scopes[scope]
+export function MCPConnectionsSection({
+  scope,
+  workspace = DEFAULT_WORKSPACE_SLUG,
+}: {
+  scope: MCPScope
+  /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
+  workspace?: string
+}) {
+  const { title, description, queryKey, ...client } = scopeConfig(
+    scope,
+    workspace
+  )
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
+  // What this workspace inherits; shown so an admin can see what a same-named
+  // connection here would replace.
+  const inherited = useQuery({
+    queryKey: ["instanceMCPs"],
+    queryFn: api.getInstanceMCPs,
+    enabled: scope === "workspace",
+  })
   const [draft, setDraft] = useState<Draft | null>(null)
   const [headers, setHeaders] = useState<Header[]>([])
   const [replaceHeaders, setReplaceHeaders] = useState(false)
@@ -67,6 +118,10 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
   > | null>(null)
   const [catalog, setCatalog] = useState<Catalog>([])
   const [busy, setBusy] = useState(false)
+  const [pendingRows, setPendingRows] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const rowWritesInFlight = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -76,6 +131,13 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
   const savedConnection = connections.data?.find(
     (connection) => connection.name === draft?.name
   )
+  const dirty =
+    draft !== null &&
+    (editableValues(draft) !==
+      editableValues(draft.existing ? savedConnection : undefined) ||
+      (replaceHeaders &&
+        (headers.length > 0 ||
+          (savedConnection?.header_names.length ?? 0) > 0)))
   const toolDescriptions = new Map(
     catalog.map((tool) => [tool.name, tool.description])
   )
@@ -170,6 +232,41 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
       )
     }
     setBusy(false)
+  }
+
+  const optimistic = async (
+    name: string,
+    errorTitle: string,
+    apply: (list: MCPConnection[]) => MCPConnection[],
+    revert: (list: MCPConnection[]) => MCPConnection[],
+    action: () => Promise<void>
+  ) => {
+    setPendingRows((rows) => new Set(rows).add(name))
+    rowWritesInFlight.current++
+    await qc.cancelQueries({ queryKey })
+    qc.setQueryData<MCPConnection[]>(
+      queryKey,
+      (current) => current && apply(current)
+    )
+    try {
+      await action()
+    } catch (e) {
+      qc.setQueryData<MCPConnection[]>(
+        queryKey,
+        (current) => current && revert(current)
+      )
+      reportError({ title: errorTitle, error: e })
+    } finally {
+      setPendingRows((rows) => {
+        const next = new Set(rows)
+        next.delete(name)
+        return next
+      })
+      rowWritesInFlight.current--
+    }
+    // A refetch while another row's write is pending would revert that row.
+    if (rowWritesInFlight.current === 0)
+      await qc.invalidateQueries({ queryKey })
   }
 
   const save = async (discover: boolean) => {
@@ -611,7 +708,7 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
             </Button>
           )}
           <Button type="button" size="sm" variant="ghost" onClick={closeEditor}>
-            Cancel
+            {dirty ? "Cancel" : "Close"}
           </Button>
         </div>
       </fieldset>
@@ -624,11 +721,54 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
         {connections.isLoading && (
           <p className="text-sm text-muted-foreground">Loading connections…</p>
         )}
-        {((error && !draft) || connections.error) && (
+        {connections.error && (
           <p role="alert" className="text-sm text-destructive">
-            {connections.error?.message || error}
+            {connections.error.message}
           </p>
         )}
+        {scope === "workspace" &&
+          inherited.data &&
+          inherited.data.length > 0 && (
+            <section
+              aria-label="Inherited instance MCP connections"
+              className="rounded-md border border-dashed"
+            >
+              <p className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+                Inherited from the instance
+              </p>
+              <ul className="divide-y divide-border">
+                {inherited.data.map((connection) => {
+                  const replaced = connections.data?.some(
+                    (own) => own.name === connection.name
+                  )
+                  return (
+                    <li
+                      key={connection.name}
+                      className="flex flex-wrap items-center justify-between gap-3 p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm">
+                          {connection.name}{" "}
+                          <span className="text-muted-foreground">
+                            · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
+                            {connection.allowed_tools.length} tools
+                          </span>
+                        </p>
+                        <p className="text-xs break-all text-muted-foreground">
+                          {connection.url}
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {replaced
+                          ? "Replaced by this workspace's connection"
+                          : "Edit under Admin"}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )}
         {connections.data?.map((connection) => {
           const isEditing = draft?.existing && draft.name === connection.name
           return (
@@ -668,20 +808,30 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await client.save({
-                          name: connection.name,
-                          url: connection.url,
-                          transport: connection.transport,
-                          enabled: !connection.enabled,
-                          allowed_tools: connection.allowed_tools,
-                        })
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
-                    }
+                    disabled={busy || pendingRows.has(connection.name)}
+                    onClick={() => {
+                      const withEnabled =
+                        (enabled: boolean) => (list: MCPConnection[]) =>
+                          list.map((c) =>
+                            c.name === connection.name ? { ...c, enabled } : c
+                          )
+                      void optimistic(
+                        connection.name,
+                        `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
+                        withEnabled(!connection.enabled),
+                        withEnabled(connection.enabled),
+                        async () => {
+                          await client.save({
+                            name: connection.name,
+                            url: connection.url,
+                            transport: connection.transport,
+                            enabled: !connection.enabled,
+                            allowed_tools: connection.allowed_tools,
+                          })
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
+                    }}
                     aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
                   >
                     {connection.enabled ? "Disable" : "Enable"}
@@ -689,13 +839,22 @@ export function MCPConnectionsSection({ scope }: { scope: MCPScope }) {
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || pendingRows.has(connection.name)}
                     onClick={() =>
-                      run(async () => {
-                        await client.remove(connection.name)
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
+                      void optimistic(
+                        connection.name,
+                        `Couldn't delete ${connection.name}`,
+                        (list) =>
+                          list.filter((c) => c.name !== connection.name),
+                        (list) =>
+                          list.some((c) => c.name === connection.name)
+                            ? list
+                            : [...list, connection],
+                        async () => {
+                          await client.remove(connection.name)
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
                     }
                     aria-label={`Delete ${connection.name}`}
                   >

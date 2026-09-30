@@ -19,12 +19,16 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRateEffort,
+  PRMergeRatePayload,
+  PRMergeRateResponse,
   ReviewerStatsPayload,
   SortDirection,
   UsageLeaderboardPeriod,
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -39,30 +43,48 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
+import {
+  buildUsageDiagnostics,
+  metricAvailability,
+  type MetricAvailability,
+} from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Usage") }] }),
   component: UsagePage,
 })
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
-interface SortableColumn {
-  key: UsageLeaderboardSort
+interface SortableColumn<Key extends string> {
+  key: Key
   label: string
   align: "left" | "right"
-  /** Direction applied on the first click. Counts read best highest-first. */
   defaultDirection?: SortDirection
+  tooltip?: string
 }
 
 type UsageScope = "invocations" | "threads"
-
+type PROutcomesSort =
+  | "model"
+  | "prs_opened"
+  | "merged"
+  | "closed_without_merge"
+  | "open"
+  | "median_distance"
+  | "mean_distance"
+  | "merge_rate"
+  | "avg_delivery_seconds"
+  | "avg_merge_seconds"
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
+  "24h": "Last 24h",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
   all: "All time",
@@ -73,9 +95,12 @@ function UsagePage() {
   const period =
     (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
-  const activePeriod: UsageLeaderboardPeriod = ["7d", "30d", "all"].includes(
-    period
-  )
+  const activePeriod: UsageLeaderboardPeriod = [
+    "24h",
+    "7d",
+    "30d",
+    "all",
+  ].includes(period)
     ? period
     : "7d"
 
@@ -183,7 +208,7 @@ function UsageAnalyticsPeriod({
   const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
   const [direction, setDirection] = useState<SortDirection>("asc")
-  const [usageScope, setUsageScope] = useState<UsageScope>("invocations")
+  const [usageScope, setUsageScope] = useState<UsageScope>("threads")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -217,15 +242,34 @@ function UsageAnalyticsPeriod({
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
   })
-  const report = usePRMergeRateReport(activePeriod, login, isAdmin)
+  // A refresh that fails keeps the last successful report visible, but the
+  // failure stays announced in the coverage details until one succeeds —
+  // manual or automatic (the query also refetches on interval/focus).
+  const [reportError, setReportError] = useState<ApiError | null>(null)
+  const report = usePRMergeRateReport(
+    activePeriod,
+    login,
+    isAdmin,
+    setReportError
+  )
   const refreshing = leaderboard.isFetching || report.isFetching
   const refreshNow = () => {
     void leaderboard.refetch()
-    void report.refetch()
+    // refetch() resolves on failure too, so the error has to come off the result.
+    void report.refetch().then((result) => {
+      const error = result.error
+      setReportError(
+        error == null
+          ? null
+          : error instanceof ApiError
+            ? error
+            : new ApiError(0, "unknown")
+      )
+    })
   }
   const metadata = [
     leaderboard.isError ? undefined : leaderboard.data,
-    report.isError ? undefined : report.data,
+    report.isError ? undefined : report.data?.payload,
   ].filter((data): data is NonNullable<typeof data> => data != null)
 
   return (
@@ -305,6 +349,7 @@ function UsageAnalyticsPeriod({
         ) : (
           <UsageTable
             scope={usageScope}
+            period={activePeriod}
             currentUserRank={leaderboard.data.current_user_rank}
             rows={leaderboard.data.rows}
             totalMembers={leaderboard.data.total_members}
@@ -371,8 +416,13 @@ function UsageAnalyticsPeriod({
       </SettingsSection>
       <AnalyticsCoverage
         reports={metadata}
+        reportPayload={report.data?.payload ?? null}
         refreshing={refreshing}
         onRefresh={refreshNow}
+        period={activePeriod}
+        reportFetchedAt={report.data?.fetchedAt ?? null}
+        reportServerAsOf={report.data?.payload.as_of ?? null}
+        reportRefreshError={report.isError && !report.data ? null : reportError}
       />
     </>
   )
@@ -380,18 +430,37 @@ function UsageAnalyticsPeriod({
 
 function AnalyticsCoverage({
   reports,
+  reportPayload,
   refreshing,
   onRefresh,
+  period,
+  reportFetchedAt,
+  reportServerAsOf,
+  reportRefreshError,
 }: {
   reports: AnalyticsMetadata[]
+  /** The retained PR report payload; survives a failed refresh even when `reports` excludes it. */
+  reportPayload: PRMergeRatePayload | null
   refreshing: boolean
   onRefresh: () => void
+  period: UsageLeaderboardPeriod
+  /** When this browser last received the PR report; separate from the server-side `as_of`. */
+  reportFetchedAt: string | null
+  /** The PR report's own server-side as_of; never another report's. */
+  reportServerAsOf: string | null
+  /** Failed manual refresh while the last good report stays on screen. */
+  reportRefreshError: ApiError | null
 }) {
   if (!reports.length) return null
   const latest = reports.reduce((a, b) => (a.as_of > b.as_of ? a : b))
   const hasPendingEvents = reports.some((data) => data.has_pending_events)
   const hasFailedEvents = reports.some((data) => data.has_failed_events)
-  const status = hasFailedEvents
+  const status: {
+    label: string
+    description?: string
+    icon: typeof WarningCircleIcon
+    tone: string
+  } = hasFailedEvents
     ? {
         label: "Analytics need attention",
         description:
@@ -408,9 +477,6 @@ function AnalyticsCoverage({
         }
       : {
           label: "Analytics are up to date",
-          description: latest.last_processed_at
-            ? `Last event processed ${new Date(latest.last_processed_at).toLocaleString()}.`
-            : "No events have been processed yet.",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
@@ -429,9 +495,11 @@ function AnalyticsCoverage({
             <span className="block font-medium text-foreground">
               {status.label}
             </span>
-            <span className="mt-0.5 block text-muted-foreground">
-              {status.description}
-            </span>
+            {status.description ? (
+              <span className="mt-0.5 block text-muted-foreground">
+                {status.description}
+              </span>
+            ) : null}
           </span>
           <Button
             type="button"
@@ -460,6 +528,30 @@ function AnalyticsCoverage({
         </summary>
         <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
           <p>
+            Period: {PERIOD_LABELS[period]} · PR report as of{" "}
+            {reportServerAsOf ? (
+              <time dateTime={reportServerAsOf}>
+                {new Date(reportServerAsOf).toLocaleString()}
+              </time>
+            ) : (
+              "Unavailable"
+            )}{" "}
+            (server); last fetched by this browser:{" "}
+            {reportFetchedAt
+              ? new Date(reportFetchedAt).toLocaleString()
+              : "Unavailable"}
+            .
+          </p>
+          {reportRefreshError ? (
+            <p className="text-destructive">
+              Last PR report refresh failed (
+              {reportRefreshError.status > 0
+                ? `HTTP ${reportRefreshError.status}`
+                : "network error"}
+              ). The report shown is from the last successful fetch above.
+            </p>
+          ) : null}
+          <p>
             Reporting since{" "}
             <time dateTime={latest.reporting_cutover_at}>
               {new Date(latest.reporting_cutover_at).toLocaleString()}
@@ -476,26 +568,58 @@ function AnalyticsCoverage({
             {hasFailedEvents
               ? "Some events could not be processed. Reports may be incomplete. "
               : ""}
-            Reports checked {new Date(latest.as_of).toLocaleString()}.
           </p>
+          <CopyDiagnosticsButton
+            getDiagnostics={() =>
+              buildUsageDiagnostics({
+                period,
+                reports,
+                reportServerAsOf,
+                reportFetchedAt,
+                reportRefreshError,
+                avgDeliverySeconds: avgDeliveryAvailability(reportPayload),
+              })
+            }
+          />
         </div>
       </details>
     </div>
   )
 }
 
+/** Delivery-timing availability of the retained PR report, even while a refresh fails. */
+function avgDeliveryAvailability(
+  payload: PRMergeRatePayload | null
+): MetricAvailability | null {
+  if (!payload || payload.status !== "ready" || !payload.cohorts.length) {
+    return null
+  }
+  const cohorts = payload.cohorts
+  const supported = cohorts.some((cohort) => "avg_delivery_seconds" in cohort)
+  const values = cohorts
+    .map((cohort) =>
+      "avg_delivery_seconds" in cohort ? cohort.avg_delivery_seconds : null
+    )
+    .filter((value): value is number => typeof value === "number")
+  return metricAvailability(supported, values[0] ?? null)
+}
+
 function usePRMergeRateReport(
   period: UsageLeaderboardPeriod,
   login: string,
-  isAdmin: boolean
+  isAdmin: boolean,
+  onRefreshErrorChange: (error: ApiError | null) => void
 ) {
   return useQuery({
     queryKey: ["prMergeRateByModel", period, login, isAdmin],
-    queryFn: () => api.prMergeRateByModel(period),
+    queryFn: (): Promise<PRMergeRateResponse> => api.prMergeRateByModel(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
       !(error instanceof ApiError && error.status >= 400) && count < 2,
+    // Manual refreshes are not the only successes: automatic interval/focus
+    // fetches must also clear a retained failure announcement.
+    meta: { onRefreshErrorChange },
   })
 }
 
@@ -504,7 +628,8 @@ function PRMergeRateSection({
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
 }) {
-  const data = report.isError ? undefined : report.data
+  const data = report.data?.payload
+  const failed = report.isError && !data
   const emptyMessage =
     data?.status === "not_started"
       ? "No analytics records have been captured since the reporting cutover yet."
@@ -526,7 +651,7 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
         </div>
-      ) : report.isError ? (
+      ) : failed ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
             {report.error instanceof ApiError && report.error.status === 503
@@ -596,7 +721,11 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; lower means less post-open editing.
+              patches; higher means more post-open editing.{" "}
+              <strong>Mean distance</strong> is the arithmetic mean of those
+              same per-PR percentages; unusually rewritten PRs affect it more.
+              Neither metric weights PRs by size. The measured/merged count
+              shows how many merged PRs had complete patches.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -606,14 +735,14 @@ function PRMergeRateSection({
               they have had enough time to merge.
             </p>
             <p>
-              <strong>Avg time to merge</strong> is the arithmetic mean of time
-              from PR opened to merged across merged PRs opened in the selected
+              <strong>Time to merge</strong> is the arithmetic mean of time from
+              PR opened to merged across merged PRs opened in the selected
               period. Unmerged PRs are excluded, and it shows — when a group has
               no merges.
             </p>
             <p>
-              <strong>Avg time to PR</strong> is the arithmetic mean of time
-              from opening-run start to PR creation across all PRs opened in the
+              <strong>Time to PR</strong> is the arithmetic mean of time from
+              opening-run start to PR creation across all PRs opened in the
               selected period. PRs without a valid opening-run start time are
               excluded, and it shows — when a group has none.
             </p>
@@ -642,41 +771,11 @@ function PRMergeRateSection({
   )
 }
 
-function OpenPRCount({
+function AvgTimeToMerge({
   cohort,
-  maturityDays,
 }: {
-  cohort: Pick<PRMergeRateCohort, "mature_pending" | "waiting">
-  maturityDays: number
+  cohort: PRMergeRateCohort | PRMergeRateEffort
 }) {
-  const [open, setOpen] = useState(false)
-
-  if (cohort.waiting === 0 && cohort.mature_pending === 0) {
-    return <span>0</span>
-  }
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger
-        closeOnClick={false}
-        onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-      >
-        {cohort.waiting + cohort.mature_pending}
-      </TooltipTrigger>
-      <TooltipPopup>
-        <div>
-          {cohort.waiting} open for less than {maturityDays} days
-        </div>
-        <div>
-          {cohort.mature_pending} open for {maturityDays} days or longer
-        </div>
-      </TooltipPopup>
-    </Tooltip>
-  )
-}
-
-function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   return (
     <span>
       {cohort.avg_merge_seconds == null
@@ -686,20 +785,267 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   )
 }
 
-function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
-  if (cohort.avg_delivery_seconds == null) {
-    return <span>—</span>
+function AvgTimeToPR({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
+  if (!("avg_delivery_seconds" in cohort)) {
+    // A backend that predates the metric has no key for it at all.
+    return (
+      <span
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        title="Metric unavailable from this backend"
+        aria-label="Time to PR: metric unavailable from this backend"
+        tabIndex={0}
+      >
+        —
+      </span>
+    )
   }
+  if (cohort.avg_delivery_seconds == null) {
+    return <span title="No PRs with valid timing in this group">—</span>
+  }
+  return <span>{formatAvgDuration(cohort.avg_delivery_seconds)}</span>
+}
+
+type OutcomeGroup = Pick<
+  PRMergeRateCohort,
+  | "cohort_size"
+  | "merged"
+  | "closed_without_merge"
+  | "mature_pending"
+  | "waiting"
+>
+type Outcome = "merged" | "closed_without_merge" | "open"
+
+function outcomePercent(group: OutcomeGroup, outcome: Outcome): number {
+  if (!group.cohort_size) return 0
+  const counts = [
+    group.merged,
+    group.closed_without_merge,
+    group.mature_pending + group.waiting,
+  ]
+  const raw = counts.map((count) => (count * 100) / group.cohort_size)
+  const rounded = raw.map(Math.floor)
+  const remainder = 100 - rounded.reduce((sum, value) => sum + value, 0)
+  const order = [0, 1, 2].sort(
+    (a, b) => raw[b]! - rounded[b]! - (raw[a]! - rounded[a]!) || a - b
+  )
+  for (let index = 0; index < remainder; index++) rounded[order[index]!]!++
+  return rounded[{ merged: 0, closed_without_merge: 1, open: 2 }[outcome]]!
+}
+
+function OutcomeCell({
+  group,
+  outcome,
+  maturityDays,
+}: {
+  group: OutcomeGroup
+  outcome: Outcome
+  maturityDays: number
+}) {
+  const [open, setOpen] = useState(false)
+  const count =
+    outcome === "open" ? group.mature_pending + group.waiting : group[outcome]
+  const value = (
+    <>
+      {count}{" "}
+      <span className="text-muted-foreground">
+        ({outcomePercent(group, outcome)}%)
+      </span>
+    </>
+  )
+  if (outcome !== "open" || !count) return value
   return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgDuration(cohort.avg_delivery_seconds)}
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        {value}
       </TooltipTrigger>
-      <TooltipPopup className="max-w-xs">
-        Based on PRs whose opening run has a valid start time, regardless of
-        outcome; PRs with missing or invalid timing are excluded.
+      <TooltipPopup>
+        <div>
+          {group.waiting} open for less than {maturityDays} days
+        </div>
+        <div>
+          {group.mature_pending} open for {maturityDays} days or longer
+        </div>
       </TooltipPopup>
     </Tooltip>
+  )
+}
+
+function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
+  switch (sort) {
+    case "model":
+      return safeModelLabel(cohort.model_id ?? "") || "Unavailable"
+    case "prs_opened":
+      return cohort.cohort_size
+    case "merged":
+      return cohort.merged
+    case "closed_without_merge":
+      return cohort.closed_without_merge
+    case "open":
+      return cohort.waiting + cohort.mature_pending
+    case "median_distance":
+      return cohort.median_distance_basis_points ?? null
+    case "mean_distance":
+      return cohort.mean_distance_basis_points ?? null
+    case "merge_rate":
+      return cohort.mature_cohort_merge_share
+    case "avg_delivery_seconds":
+      return cohort.avg_delivery_seconds ?? null
+    case "avg_merge_seconds":
+      return cohort.avg_merge_seconds ?? null
+  }
+}
+
+function prOutcomeColumns(
+  maturityDays: number
+): Array<SortableColumn<PROutcomesSort>> {
+  return [
+    {
+      key: "model",
+      label: "Opening model",
+      align: "left",
+      defaultDirection: "asc",
+    },
+    { key: "prs_opened", label: "PRs opened (base)", align: "right" },
+    { key: "merged", label: "Merged", align: "right" },
+    {
+      key: "merge_rate",
+      label: "Mature merge rate",
+      align: "right",
+      tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
+    },
+    {
+      key: "closed_without_merge",
+      label: "Closed without merge",
+      align: "right",
+    },
+    { key: "open", label: "Open", align: "right" },
+    {
+      key: "median_distance",
+      label: "Median distance",
+      align: "right",
+      tooltip:
+        "Median post-open line edit distance across measurable merged PRs.",
+    },
+    {
+      key: "mean_distance",
+      label: "Mean distance",
+      align: "right",
+      tooltip:
+        "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size.",
+    },
+    {
+      key: "avg_delivery_seconds",
+      label: "Time to PR",
+      align: "right",
+      tooltip:
+        "Average time from opening-run start to PR creation, regardless of outcome. PRs with missing or invalid timing are excluded.",
+    },
+    {
+      key: "avg_merge_seconds",
+      label: "Time to merge",
+      align: "right",
+      tooltip:
+        "Average time from PR opened to merged. Unmerged PRs are excluded.",
+    },
+  ]
+}
+
+function PROutcomeCells({
+  group,
+  maturityDays,
+}: {
+  group: PRMergeRateCohort | PRMergeRateEffort
+  maturityDays: number
+}) {
+  const rate = group.mature_cohort_merge_share
+  return (
+    <>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        {group.cohort_size}{" "}
+        <span className="text-muted-foreground">(100%)</span>
+      </td>
+      {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
+        <Fragment key={outcome}>
+          <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+            <OutcomeCell
+              group={group}
+              outcome={outcome}
+              maturityDays={maturityDays}
+            />
+          </td>
+          {outcome === "merged" && (
+            <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+              <span className="font-semibold">
+                {rate == null ? "—" : formatPercent(rate)}
+              </span>
+              {rate != null && (
+                <div className="text-xs text-muted-foreground">
+                  {group.merged}/{group.mature_denominator} eligible
+                </div>
+              )}
+              {rate != null && group.mature_denominator < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+            </td>
+          )}
+        </Fragment>
+      ))}
+      {(["median_distance", "mean_distance"] as const).map((metric) => {
+        const value =
+          metric === "median_distance"
+            ? group.median_distance_basis_points
+            : "mean_distance_basis_points" in group
+              ? group.mean_distance_basis_points
+              : undefined
+        const supported =
+          metric === "median_distance" || "mean_distance_basis_points" in group
+        return (
+          <td
+            key={metric}
+            className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
+          >
+            <Tooltip>
+              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {supported
+                  ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
+                  : "Mean distance unavailable for this group"}
+              </TooltipPopup>
+            </Tooltip>
+            {supported && group.distance_sample_size !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                {group.distance_sample_size}/{group.merged} measured
+              </div>
+            )}
+            {supported &&
+              (group.distance_sample_size ?? 0) > 0 &&
+              (group.distance_sample_size ?? 0) < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+          </td>
+        )
+      })}
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToPR cohort={group} />
+      </td>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToMerge cohort={group} />
+      </td>
+    </>
   )
 }
 
@@ -713,150 +1059,146 @@ function PRMergeRateTable({
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const pageCount = Math.max(1, Math.ceil(cohorts.length / pageSize))
+  const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
+  const [direction, setDirection] = useState<SortDirection>("desc")
+  const sortedCohorts = [...cohorts].sort((a, b) => {
+    const aValue = prOutcomeSortValue(a, sort)
+    const bValue = prOutcomeSortValue(b, sort)
+    if (aValue == null) return bValue == null ? 0 : 1
+    if (bValue == null) return -1
+    const comparison =
+      typeof aValue === "string" && typeof bValue === "string"
+        ? aValue.localeCompare(bValue, undefined, { sensitivity: "base" })
+        : Number(aValue) - Number(bValue)
+    return (
+      (direction === "asc" ? comparison : -comparison) ||
+      (safeModelLabel(a.model_id ?? "") || "Unavailable").localeCompare(
+        safeModelLabel(b.model_id ?? "") || "Unavailable"
+      )
+    )
+  })
+  const pageCount = Math.max(1, Math.ceil(sortedCohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
-  const rows = cohorts.slice(
+  const rows = sortedCohorts.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[860px] text-xs">
-        <thead className="border-b border-border text-muted-foreground">
-          <tr>
-            <th className="px-4 py-3 text-left font-normal">Opening model</th>
-            <th className="px-2 py-3 text-right font-normal">PRs opened</th>
-            <th className="px-2 py-3 text-right font-normal">Merged</th>
-            <th className="px-2 py-3 text-right font-normal">
-              Closed without merge
-            </th>
-            <th className="px-2 py-3 text-right font-normal">Open</th>
-            <th className="px-2 py-3 text-right font-medium text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Median distance
-                </TooltipTrigger>
-                <TooltipPopup className="max-w-xs">
-                  Median post-open line edit distance across merged PRs. Lower
-                  means the final diff changed less after the PR opened.
-                </TooltipPopup>
-              </Tooltip>
-            </th>
-            <th className="px-4 py-3 text-right font-medium text-foreground">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Merge rate
-                </TooltipTrigger>
-                <TooltipPopup className="max-w-xs">
-                  Includes merged and closed PRs, plus PRs open for at least{" "}
-                  {maturityDays} days. Newer open PRs are excluded.
-                </TooltipPopup>
-              </Tooltip>
-            </th>
-            <th className="px-4 py-3 text-right font-normal">Avg time to PR</th>
-            <th className="px-4 py-3 text-right font-normal">
-              <Tooltip>
-                <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                  Avg time to merge
-                </TooltipTrigger>
-                <TooltipPopup>Unmerged PRs are excluded.</TooltipPopup>
-              </Tooltip>
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {rows.map((cohort) => {
-            const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
-            const hasMultipleEfforts = cohort.efforts.length > 1
-            const isExpanded = hasMultipleEfforts && expanded.has(key)
-            const modelLabel = cohort.model_id
-              ? safeModelLabel(cohort.model_id) || "Unavailable"
-              : "Unavailable"
-            return (
-              <Fragment key={key}>
-                <tr>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {hasMultipleEfforts ? (
-                        <button
-                          type="button"
-                          className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                          aria-expanded={isExpanded}
-                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
-                          onClick={() =>
-                            setExpanded((current) => {
-                              const next = new Set(current)
-                              if (next.has(key)) next.delete(key)
-                              else next.add(key)
-                              return next
-                            })
-                          }
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="size-3.5" />
-                          ) : (
-                            <ChevronRight className="size-3.5" />
-                          )}
-                        </button>
-                      ) : (
-                        <span
-                          aria-hidden="true"
-                          className="-ml-1 size-5.5 shrink-0"
-                        />
-                      )}
-                      <div>
-                        <div className="font-medium">{modelLabel}</div>
-                        <div className="text-muted-foreground">
-                          {hasMultipleEfforts
-                            ? `All efforts · ${cohort.model_attribution_quality} attribution`
-                            : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] text-xs">
+          <caption className="px-4 py-3 text-left text-muted-foreground">
+            Outcome shares use PRs opened in each row as their base. Expand a
+            model to see its reasoning efforts.
+          </caption>
+          <thead className="border-b border-border text-muted-foreground">
+            <tr>
+              {prOutcomeColumns(maturityDays).map((column) => (
+                <SortableHeader
+                  key={column.key}
+                  column={column}
+                  sortKey={sort}
+                  sortDirection={direction}
+                  onSort={(nextSort, defaultDirection) => {
+                    setDirection(
+                      nextSort === sort
+                        ? direction === "asc"
+                          ? "desc"
+                          : "asc"
+                        : defaultDirection
+                    )
+                    setSort(nextSort)
+                    setPage(1)
+                  }}
+                  className={
+                    column.key === "model"
+                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      : "text-right"
+                  }
+                />
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
+            {rows.map((cohort) => {
+              const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+              const modelLabel =
+                safeModelLabel(cohort.model_id ?? "") || "Unavailable"
+              const hasMultipleEfforts = cohort.efforts.length > 1
+              const isExpanded = hasMultipleEfforts && expanded.has(key)
+              return (
+                <Fragment key={key}>
+                  <tr>
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 bg-inherit px-4 py-3 text-left font-normal"
+                    >
+                      <div className="flex items-center gap-2">
+                        {hasMultipleEfforts ? (
+                          <button
+                            type="button"
+                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
+                            onClick={() =>
+                              setExpanded((current) => {
+                                const next = new Set(current)
+                                if (next.has(key)) next.delete(key)
+                                else next.add(key)
+                                return next
+                              })
+                            }
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="size-3.5" />
+                            ) : (
+                              <ChevronRight className="size-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="-ml-1 size-5.5 shrink-0"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">{modelLabel}</div>
+                          <div className="text-muted-foreground">
+                            {hasMultipleEfforts
+                              ? "All efforts"
+                              : formatEffort(cohort.efforts[0]?.effort)}{" "}
+                            · {cohort.model_attribution_quality} attribution
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <PRMergeRateCells
-                    cohort={cohort}
-                    maturityDays={maturityDays}
-                  />
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <AvgTimeToPR cohort={cohort} />
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <AvgTimeToMerge cohort={cohort} />
-                  </td>
-                </tr>
-                {isExpanded
-                  ? cohort.efforts.map((effort) => (
-                      <tr
-                        key={`${key}-${effort.effort ?? "unknown"}`}
-                        className="bg-muted/35"
-                      >
-                        <td className="py-3 pr-2 pl-11 font-medium">
+                    </th>
+                    <PROutcomeCells
+                      group={cohort}
+                      maturityDays={maturityDays}
+                    />
+                  </tr>
+                  {isExpanded &&
+                    cohort.efforts.map((effort) => (
+                      <tr key={`${key}-${effort.effort ?? "unknown"}`}>
+                        <th
+                          scope="row"
+                          className="sticky left-0 z-10 bg-inherit py-3 pr-2 pl-11 text-left font-medium"
+                        >
                           {formatEffort(effort.effort)}
-                        </td>
-                        <PRMergeRateCells
-                          cohort={effort}
+                        </th>
+                        <PROutcomeCells
+                          group={effort}
                           maturityDays={maturityDays}
                         />
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          <span title="Average shown at the model level">
-                            —
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          <span title="Average shown at the model level">
-                            —
-                          </span>
-                        </td>
                       </tr>
-                    ))
-                  : null}
-              </Fragment>
-            )
-          })}
-        </tbody>
-      </table>
+                    ))}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={currentPage}
         pageSize={pageSize}
@@ -871,7 +1213,10 @@ function PRMergeRateTable({
   )
 }
 
-function usageColumns(scope: UsageScope): Array<SortableColumn> {
+function usageColumns(
+  scope: UsageScope,
+  period: UsageLeaderboardPeriod
+): Array<SortableColumn<UsageLeaderboardSort>> {
   return [
     { key: "rank", label: "Rank", align: "left", defaultDirection: "asc" },
     { key: "user", label: "User", align: "left", defaultDirection: "asc" },
@@ -884,6 +1229,11 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
     {
       key: scope === "threads" ? "threads" : "invocations",
       label: scope === "threads" ? "Threads" : "Invocations",
+      align: "right",
+    },
+    {
+      key: "avg_invocations_per_thread",
+      label: "Avg Invocations / Thread",
       align: "right",
     },
     { key: "total_tokens", label: "Tokens", align: "right" },
@@ -901,22 +1251,28 @@ function usageColumns(scope: UsageScope): Array<SortableColumn> {
       key: "merged_prs_per_thread",
       label: "Merged PRs / Thread",
       align: "right",
+      tooltip: `Merged PRs ÷ distinct threads ${
+        period === "all"
+          ? "all time"
+          : `in the ${PERIOD_LABELS[period].toLowerCase()}`
+      } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
+    { key: "feedback_given", label: "# Feedback Given", align: "right" },
   ]
 }
 
-function SortableHeader({
+function SortableHeader<Key extends string>({
   column,
   sortKey,
   sortDirection,
   onSort,
   className,
 }: {
-  column: SortableColumn
-  sortKey: UsageLeaderboardSort
+  column: SortableColumn<Key>
+  sortKey: Key
   sortDirection: SortDirection
-  onSort: (key: UsageLeaderboardSort, direction: SortDirection) => void
+  onSort: (key: Key, direction: SortDirection) => void
   className: string
 }) {
   const isActive = sortKey === column.key
@@ -931,25 +1287,40 @@ function SortableHeader({
       : "descending"
     : undefined
 
+  const button = (
+    <button
+      type="button"
+      onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
+      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+        column.align === "right" ? "justify-end" : "justify-start"
+      } ${isActive ? "text-foreground" : ""} ${
+        column.tooltip
+          ? "cursor-help underline decoration-dotted underline-offset-2"
+          : ""
+      }`}
+    >
+      {column.label}
+      <Icon
+        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        aria-hidden
+      />
+    </button>
+  )
+
   return (
     <th
       scope="col"
       aria-sort={ariaSort}
       className={`${className} p-0 font-normal`}
     >
-      <button
-        type="button"
-        onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-        className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-          column.align === "right" ? "justify-end" : "justify-start"
-        } ${isActive ? "text-foreground" : ""}`}
-      >
-        {column.label}
-        <Icon
-          className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
-          aria-hidden
-        />
-      </button>
+      {column.tooltip ? (
+        <Tooltip>
+          <TooltipTrigger render={button} />
+          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        button
+      )}
     </th>
   )
 }
@@ -960,59 +1331,9 @@ function formatEffort(effort: string | null | undefined) {
     : "Unknown / legacy"
 }
 
-function PRMergeRateCells({
-  cohort,
-  maturityDays,
-}: {
-  cohort: Pick<
-    PRMergeRateCohort,
-    | "cohort_size"
-    | "merged"
-    | "closed_without_merge"
-    | "mature_pending"
-    | "waiting"
-    | "mature_cohort_merge_share"
-    | "median_distance_basis_points"
-    | "distance_sample_size"
-  >
-  maturityDays: number
-}) {
-  return (
-    <>
-      <td className="px-2 py-3 text-right tabular-nums">
-        {cohort.cohort_size}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">{cohort.merged}</td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        {cohort.closed_without_merge}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        <Tooltip>
-          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            {cohort.median_distance_basis_points == null
-              ? "—"
-              : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {cohort.distance_sample_size ?? 0} merged PR
-            {cohort.distance_sample_size === 1 ? "" : "s"} measured
-          </TooltipPopup>
-        </Tooltip>
-      </td>
-      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
-        {cohort.mature_cohort_merge_share == null
-          ? "—"
-          : formatPercent(cohort.mature_cohort_merge_share)}
-      </td>
-    </>
-  )
-}
-
 function UsageTable({
   scope,
+  period,
   currentUserRank,
   rows,
   totalMembers,
@@ -1026,6 +1347,7 @@ function UsageTable({
   onPageSizeChange,
 }: {
   scope: UsageScope
+  period: UsageLeaderboardPeriod
   currentUserRank: number | null
   rows: Array<UsageLeaderboardRow>
   totalMembers: number
@@ -1039,86 +1361,97 @@ function UsageTable({
   onPageSizeChange: (pageSize: number) => void
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
-        {isUpdating ? (
-          <caption className="sr-only">Updating leaderboard</caption>
-        ) : null}
-        <thead className="border-b border-border text-xs text-muted-foreground">
-          <tr>
-            {usageColumns(scope).map((column, index, columns) => (
-              <SortableHeader
-                key={column.key}
-                column={column}
-                sortKey={sort}
-                sortDirection={direction}
-                onSort={onSort}
-                className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody
-          className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
-        >
-          {rows.map((row) => (
-            <tr
-              key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-            >
-              <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-              <td className="px-2 py-3">
-                <UserCell
-                  row={row}
-                  isCurrentUser={row.rank === currentUserRank}
+    <div>
+      <div className="overflow-x-auto">
+        <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
+          {isUpdating ? (
+            <caption className="sr-only">Updating leaderboard</caption>
+          ) : null}
+          <thead className="border-b border-border text-xs text-muted-foreground">
+            <tr>
+              {usageColumns(scope, period).map((column, index, columns) => (
+                <SortableHeader
+                  key={column.key}
+                  column={column}
+                  sortKey={sort}
+                  sortDirection={direction}
+                  onSort={onSort}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
-              </td>
-              <td className="max-w-48 px-2 py-3 text-muted-foreground">
-                <div className="truncate">
-                  {safeModelLabel(row.favorite_model) || "Unavailable"}
-                </div>
-                <div className="capitalize">
-                  {row.favorite_model_effort === undefined
-                    ? null
-                    : (row.favorite_model_effort ?? "Unknown")}
-                </div>
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(
-                  scope === "threads" ? (row.threads ?? 0) : row.invocations
-                )}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.total_tokens)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                <UsageCost row={row} />
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatDuration(
-                  scope === "threads"
-                    ? (row.avg_thread_seconds ?? 0)
-                    : row.avg_invocation_seconds
-                )}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.prs_opened)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {formatNumber(row.merged_prs)}
-              </td>
-              <td className="px-2 py-3 text-right tabular-nums">
-                {(row.merged_prs_per_thread ?? 0).toFixed(2)}
-              </td>
-              <td
-                className="px-4 py-3 text-right tabular-nums"
-                title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
-              >
-                {formatNumber(row.agent_loc)}
-              </td>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody
+            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+          >
+            {rows.map((row) => (
+              <tr
+                key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
+              >
+                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
+                <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
+                  <UserCell
+                    row={row}
+                    isCurrentUser={row.rank === currentUserRank}
+                  />
+                </td>
+                <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                  <div className="truncate">
+                    {safeModelLabel(row.favorite_model) || "Unavailable"}
+                  </div>
+                  <div className="capitalize">
+                    {row.favorite_model_effort === undefined
+                      ? null
+                      : (row.favorite_model_effort ?? "Unknown")}
+                  </div>
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(
+                    scope === "threads" ? (row.threads ?? 0) : row.invocations
+                  )}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {row.threads
+                    ? (row.invocations / row.threads).toFixed(1)
+                    : "—"}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.total_tokens)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  <UsageCost row={row} />
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatDuration(
+                    scope === "threads"
+                      ? (row.avg_thread_seconds ?? 0)
+                      : row.avg_invocation_seconds
+                  )}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.prs_opened)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.merged_prs)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {(row.merged_prs_per_thread ?? 0).toFixed(2)}
+                </td>
+                <td
+                  className="px-2 py-3 text-right tabular-nums"
+                  title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
+                >
+                  {formatNumber(row.agent_loc)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatNumber(row.feedback_given)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={page}
         pageSize={pageSize}
@@ -1348,6 +1681,19 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
+          {row.is_top_feedback_contributor && (
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Top feedback contributor"
+                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                <span aria-hidden="true">🏆</span>
+              </TooltipTrigger>
+              <TooltipPopup>
+                Most feedback given in the selected date range.
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You

@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
@@ -46,11 +46,11 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 # Cap the guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
 ORG_GUIDELINES_MAX_CHARS = 10_000
-DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-5.6-luna"
+DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-haiku-4-5"
-# Titles are a one-shot classification; no extended thinking needed.
-ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "none"
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
+ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
+ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
 
 class WorkspaceSettingsUpdate(BaseModel):
@@ -60,18 +60,28 @@ class WorkspaceSettingsUpdate(BaseModel):
     default; on a workspace's record, None inherits the instance value.
     """
 
-    review_draft_prs: bool | None = None
-    pr_summaries: bool | None = None
-    review_trace_links: bool | None = None
+    review_draft_prs: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    pr_summaries: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    review_trace_links: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
     # on the instance is off (routing is opt-in); None on a workspace inherits.
-    model_routing_enabled: bool | None = None
-    gateway_enabled: bool | None = None
-    fable_enabled: bool | None = None
-    expedited_review_enabled: bool | None = None
+    model_routing_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    gateway_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -88,8 +98,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
-    default_grouping_model: str | None = None
-    default_grouping_reasoning_effort: str | None = None
     default_chat_model: str | None = None
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
@@ -97,17 +105,17 @@ class WorkspaceSettingsUpdate(BaseModel):
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
-    def _normalize_org_guidelines(cls, v: object) -> str | None:
+    def _normalize_review_instructions(cls, v: object) -> str | None:
         if v is None:
             return None
         if not isinstance(v, str):
-            raise ValueError("org_guidelines must be a string")
+            raise ValueError("review instructions must be a string")
         text = v.strip()
         if not text:
             return None
         if len(text) > ORG_GUIDELINES_MAX_CHARS:
             raise ValueError(
-                f"org_guidelines must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
+                f"review instructions must be at most {ORG_GUIDELINES_MAX_CHARS} characters"
             )
         return text
 
@@ -146,12 +154,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
         )
-        self.default_grouping_model, self.default_grouping_reasoning_effort = (
-            _normalize_stale_model_pair(
-                self.default_grouping_model,
-                self.default_grouping_reasoning_effort,
-            )
-        )
         self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
             self.default_chat_model,
             self.default_chat_reasoning_effort,
@@ -183,11 +185,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
-        )
-        _validate_model_effort_pair(
-            self.default_grouping_model,
-            self.default_grouping_reasoning_effort,
-            "review diff grouping",
         )
         _validate_model_effort_pair(
             self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
@@ -233,7 +230,6 @@ class WorkspaceSettingsUpdate(BaseModel):
                 ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_grouping_model", "default_grouping_reasoning_effort"),
                 ("default_chat_model", "default_chat_reasoning_effort"),
                 ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
@@ -282,7 +278,6 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-    ("default_grouping_model", "default_grouping_reasoning_effort"),
     ("default_chat_model", "default_chat_reasoning_effort"),
     ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
@@ -331,9 +326,9 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
-        "default_agent_routing_fast_model": "openai:gpt-5.6-luna",
+        "default_agent_routing_fast_model": "openai:gpt-6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-5.6-sol",
+        "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
         "default_agent_routing_performance_reasoning_effort": "low",
@@ -342,10 +337,6 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
-        # No hardcoded grouping default: unset means "inherit the Reviewer
-        # subagent default".
-        "default_grouping_model": None,
-        "default_grouping_reasoning_effort": None,
         # No hardcoded chat default: unset means "inherit the Agent default".
         "default_chat_model": None,
         "default_chat_reasoning_effort": None,
@@ -386,6 +377,9 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
+    # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
+    "approval_policy",
+    "review_auto_approve",
 )
 
 
@@ -508,12 +502,7 @@ async def delete_workspace_settings(slug: str) -> None:
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
-    """Swap an OpenAI title model for Haiku on Anthropic-only deployments.
-
-    Title generation is the one model choice users rarely revisit, so an
-    Anthropic-only install would otherwise fail every title with a missing
-    OPENAI_API_KEY.
-    """
+    """Use Opus for titles on Anthropic-only deployments."""
     if not pair[0].startswith("openai:"):
         return pair
     # The toggle alone isn't enough: without a LangSmith key the gateway is
@@ -633,16 +622,10 @@ class WorkspaceSettings(Mapping[str, Any]):
         }
 
     @property
-    def default_grouping_model(self) -> tuple[str, str]:
-        """The default ``(model_id, reasoning_effort)`` for the review diff-grouping pass.
-
-        When no grouping-specific model is configured (or it's no longer
-        supported), inherit the **reviewer subagent** default: the grouping
-        pass is a cheap, fast companion to the reviewer, so it should track that
-        cheaper tier rather than the primary reviewer model.
-        """
-        model = self.get("default_grouping_model")
-        effort = self.get("default_grouping_reasoning_effort")
+    def review_scout_model(self) -> tuple[str, str]:
+        """The review scout's ``(model_id, reasoning_effort)``: model routing's balanced tier."""
+        model = self.get("default_agent_routing_balanced_model")
+        effort = self.get("default_agent_routing_balanced_reasoning_effort")
         if (
             isinstance(model, str)
             and isinstance(effort, str)
@@ -650,8 +633,8 @@ class WorkspaceSettings(Mapping[str, Any]):
             and model not in NON_DEFAULT_MODEL_IDS
             and model_supports_effort(model, effort)
         ):
-            return _resolve_default_pair(model, effort)
-        return self.default_subagent_model("reviewer")
+            return model, effort
+        return REVIEW_SCOUT_FALLBACK_MODEL
 
     @property
     def default_thread_title_model(self) -> tuple[str, str]:
@@ -741,7 +724,8 @@ async def api_put_instance_settings(
     body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
     try:
-        return await upsert_instance_settings(body)
+        await upsert_instance_settings(body)
+        return dict(await get_instance_settings())
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

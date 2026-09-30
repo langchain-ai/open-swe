@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { ReviewStyle } from "@/lib/api"
+import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,17 +14,26 @@ import {
 } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
+import { useSession } from "@/lib/session"
 
-function formatMutationError(e: Error): string {
-  return isGithubReauthError(e)
-    ? "GitHub token expired — sign in again using the link above."
-    : e.message
-}
+const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "dry_run", label: "Dry run" },
+  { value: "approve", label: "Approve" },
+]
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -40,8 +49,8 @@ function statusVariant(status: ReviewStyle["status"]) {
 }
 
 export function ReviewStylesPanel() {
+  const session = useSession()
   const qc = useQueryClient()
-  const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
@@ -66,33 +75,79 @@ export function ReviewStylesPanel() {
     refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
   })
 
+  const loadedRepo = detail.data?.full_name
+  const loadedPrompt = detail.data?.custom_prompt
   useEffect(() => {
-    if (detail.data?.custom_prompt != null) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setDraftPrompt(detail.data.custom_prompt)
-    } else if (detail.data) {
-      setDraftPrompt("")
-    }
-  }, [detail.data?.custom_prompt, detail.data?.full_name])
+    if (loadedRepo === undefined) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setDraftPrompt(loadedPrompt ?? "")
+  }, [loadedPrompt, loadedRepo])
+
+  const approvalsFile = useQuery({
+    queryKey: ["reviewStyleApprovalsFile", selected],
+    queryFn: () => api.getApprovalsFile(selected!),
+    enabled: !!selected,
+  })
+
+  const saveMode = useMutation({
+    mutationFn: ({
+      repo,
+      mode,
+    }: {
+      repo: string
+      mode: ReviewApprovalMode | null
+    }) => api.saveReviewApprovalMode(repo, mode),
+    meta: { errorTitle: "Couldn't save approval mode" },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+    },
+  })
 
   const createStyle = useMutation({
     mutationFn: (full_name: string) => api.createReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't add repository" },
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       setSelected(record.full_name)
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const analyze = useMutation({
     mutationFn: (full_name: string) => api.analyzeReviewStyle(full_name),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
+    meta: { errorTitle: "Couldn't start analysis" },
+    onMutate: async (full_name) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["reviewStyles"] }),
+        qc.cancelQueries({ queryKey: ["reviewStyle", full_name] }),
+      ])
+      const snapshot = {
+        list: qc.getQueryData<Array<ReviewStyle>>(["reviewStyles"]),
+        detail: qc.getQueryData<ReviewStyle>(["reviewStyle", full_name]),
+      }
+      const running = (style: ReviewStyle): ReviewStyle =>
+        style.full_name === full_name
+          ? { ...style, status: "running", error: null }
+          : style
+      qc.setQueryData<Array<ReviewStyle>>(["reviewStyles"], (old) =>
+        old?.map(running)
+      )
+      qc.setQueryData<ReviewStyle>(["reviewStyle", full_name], (old) =>
+        old ? running(old) : old
+      )
+      return snapshot
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
+    },
+    onError: (_e, full_name, snapshot) => {
+      qc.setQueryData(["reviewStyles"], snapshot?.list)
+      qc.setQueryData(["reviewStyle", full_name], snapshot?.detail)
+    },
+    onSettled: (_record, _error, full_name) => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+      void qc.invalidateQueries({ queryKey: ["reviewStyle", full_name] })
+    },
   })
 
   const savePrompt = useMutation({
@@ -103,35 +158,42 @@ export function ReviewStylesPanel() {
       full_name: string
       custom_prompt: string
     }) => api.saveReviewStylePrompt(full_name, custom_prompt),
-    onSuccess: () => {
+    meta: { errorTitle: "Couldn't save prompt" },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const cancelAnalysis = useMutation({
     mutationFn: (full_name: string) => api.cancelReviewStyle(full_name),
-    onSuccess: () => {
+    meta: { errorTitle: "Couldn't cancel analysis" },
+    onSuccess: (record) => {
+      qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
-      void qc.invalidateQueries({ queryKey: ["reviewStyle", selected] })
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const removeStyle = useMutation({
     mutationFn: (full_name: string) => api.deleteReviewStyle(full_name),
+    meta: { errorTitle: "Couldn't remove repository" },
+    onMutate: async (full_name) => ({
+      undo: await optimisticUpdate<Array<ReviewStyle>>(
+        qc,
+        ["reviewStyles"],
+        (old) => old.filter((style) => style.full_name !== full_name)
+      ),
+    }),
     onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
       if (selected === full_name) {
         setSelected(null)
         setDraftPrompt("")
       }
-      setError(null)
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (_e, _full_name, ctx) => ctx?.undo(),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
+    },
   })
 
   if (styles.isLoading) {
@@ -158,7 +220,9 @@ export function ReviewStylesPanel() {
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    (error !== null && /github token|re-login required/i.test(error))
+    [saveMode, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
+      .map((m) => m.error)
+      .some(isGithubReauthError)
 
   return (
     <div className="flex flex-col gap-6 p-4">
@@ -318,9 +382,7 @@ export function ReviewStylesPanel() {
                   size="sm"
                   variant="outline"
                   disabled={cancelAnalysis.isPending}
-                  onClick={() =>
-                    void cancelAnalysis.mutateAsync(active.full_name)
-                  }
+                  onClick={() => cancelAnalysis.mutate(active.full_name)}
                 >
                   Cancel
                 </Button>
@@ -329,7 +391,7 @@ export function ReviewStylesPanel() {
                 size="sm"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
                 onClick={() =>
-                  void savePrompt.mutateAsync({
+                  savePrompt.mutate({
                     full_name: active.full_name,
                     custom_prompt: draftPrompt,
                   })
@@ -340,7 +402,10 @@ export function ReviewStylesPanel() {
               <Button
                 size="sm"
                 variant="destructive"
-                disabled={removeStyle.isPending}
+                disabled={
+                  removeStyle.isPending ||
+                  (!!active.approval_mode && !session.data?.is_admin)
+                }
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -349,7 +414,7 @@ export function ReviewStylesPanel() {
                   ) {
                     return
                   }
-                  void removeStyle.mutateAsync(active.full_name)
+                  removeStyle.mutate(active.full_name)
                 }}
               >
                 Remove
@@ -366,9 +431,52 @@ export function ReviewStylesPanel() {
               }
               disabled={active.status === "running"}
             />
+            <Label htmlFor="repo-approval-mode">Approval mode</Label>
+            <p className="text-xs text-muted-foreground">
+              Criteria come from <code>.open-swe/APPROVALS.md</code> in the
+              repository, read from each pull request&apos;s base branch. Dry
+              run posts the assessment without approving; Approve submits a
+              GitHub approval when the assessment passes. Nothing is merged.
+            </p>
+            <Select
+              items={APPROVAL_MODES}
+              value={detail.data?.approval_mode ?? "dry_run"}
+              onValueChange={(mode) => {
+                if (!mode) return
+                saveMode.mutate({ repo: active.full_name, mode })
+              }}
+              disabled={
+                !session.data?.is_admin || !detail.data || saveMode.isPending
+              }
+            >
+              <SelectTrigger id="repo-approval-mode" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {APPROVAL_MODES.map((mode) => (
+                  <SelectItem key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {approvalsFile.data && (
+              <p className="text-xs text-muted-foreground">
+                {approvalsFile.data.found ? (
+                  <>
+                    <code>.open-swe/APPROVALS.md</code> found on the default
+                    branch.
+                  </>
+                ) : (
+                  <>
+                    No <code>.open-swe/APPROVALS.md</code> on the default
+                    branch, so reviews post no approval assessment.
+                  </>
+                )}
+              </p>
+            )}
           </>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
       </section>
     </div>
   )

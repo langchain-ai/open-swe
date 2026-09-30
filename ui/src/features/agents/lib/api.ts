@@ -3,38 +3,30 @@ import type {
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
-  ImageChunk,
   Message,
   SlackNotificationMode,
   AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
   dashboardApiUrl,
   dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
 
-export class AgentsApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string
-  ) {
-    super(message)
+export class AgentsApiError extends DashboardRequestError {
+  constructor(status: number, message: string, requestId?: string) {
+    super(status, message, requestId)
     this.name = "AgentsApiError"
   }
-}
-
-export interface ThreadMessageRequest {
-  content: string
-  images?: Array<ImageChunk>
-  model_id?: string | null
-  effort?: string | null
-  plan_mode?: boolean
-  client_message_id?: string
 }
 
 export interface ScheduleCreateRequest {
@@ -48,6 +40,8 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
+  /** Slug of the workspace every run launches in. */
+  workspace: string
 }
 
 export interface ScheduleUpdateRequest {
@@ -62,6 +56,7 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+  workspace?: string | null
 }
 
 export interface ScheduleTriggerResult {
@@ -143,10 +138,12 @@ export interface ThreadsPage {
   hasMore?: boolean
 }
 
-export interface SidebarProject {
+export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
+  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
+  workspace: string
 }
 
 const API_BASE = dashboardApiBase()
@@ -155,18 +152,22 @@ export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
-async function agentsRequest<T>(
+export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
+  const requestId = newRequestId()
   const res = await timedFetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      [REQUEST_ID_HEADER]: requestId,
       ...dashboardForwardedHeaders(),
       ...init.headers,
     },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -181,10 +182,11 @@ async function agentsRequest<T>(
     } catch {
       /* ignore */
     }
-    throw new AgentsApiError(res.status, message)
+    throw new AgentsApiError(res.status, message, requestId)
   }
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  // A proxied cancel comes back 202 with no body; only parse what is there.
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 function filenameFromContentDisposition(value: string | null): string | null {
@@ -193,9 +195,16 @@ function filenameFromContentDisposition(value: string | null): string | null {
 }
 
 async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
+  const requestId = newRequestId()
   const res = await fetch(dashboardApiUrl(path), {
     credentials: "include",
-    headers: { Accept: "text/x-diff", ...dashboardForwardedHeaders() },
+    headers: {
+      Accept: "text/x-diff",
+      [REQUEST_ID_HEADER]: requestId,
+      ...dashboardForwardedHeaders(),
+    },
+  }).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
   })
   if (!res.ok) {
     let message = res.statusText
@@ -210,7 +219,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     } catch {
       /* ignore */
     }
-    throw new AgentsApiError(res.status, message)
+    throw new AgentsApiError(res.status, message, requestId)
   }
   return {
     blob: await res.blob(),
@@ -240,7 +249,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   return query ? `?${query}` : ""
 }
 
-function buildProjectsQuery(params: {
+function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
 }): string {
@@ -295,14 +304,14 @@ export const agentsApi = {
         body: JSON.stringify(body),
       }
     ),
-  listThreadProjects: (
+  listThreadRepos: (
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
     } = {}
   ) =>
-    agentsRequest<Array<SidebarProject>>(
-      `/threads/projects${buildProjectsQuery(params)}`
+    agentsRequest<Array<SidebarRepo>>(
+      `/threads/repos${buildReposQuery(params)}`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
@@ -400,13 +409,10 @@ export const agentsApi = {
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
     ),
-  queueMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
+  cancelRun: (threadId: string, runId: string) =>
+    agentsRequest<unknown>(
+      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST" }
     ),
   cancelThread: (threadId: string) =>
     agentsRequest<AgentThread>(
@@ -433,6 +439,14 @@ export const agentsApi = {
   getThreadWorkingTreeDiff: (threadId: string) =>
     agentsRequest<ThreadTurnDiff>(
       `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
+    ),
+  getThreadPath: (threadId: string, path: string) =>
+    agentsRequest<WorkspacePath>(
+      `/threads/${encodeURIComponent(threadId)}/files?path=${encodeURIComponent(path)}`
+    ),
+  getThreadFileIndex: (threadId: string) =>
+    agentsRequest<WorkspaceFileIndex>(
+      `/threads/${encodeURIComponent(threadId)}/file-index`
     ),
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(

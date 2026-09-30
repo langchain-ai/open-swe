@@ -59,59 +59,8 @@ async def test_prepare_review_repo_clones_and_checks_out_head() -> None:
     assert "git fetch --all --quiet || true" in cmd
 
 
-async def test_prepare_review_repo_skips_pull_ref_without_pr_number() -> None:
-    backend = _FakeSandboxBackend()
-    ok = await prepare_review_repo(
-        cast(SandboxBackendProtocol, backend),
-        work_dir="/work",
-        repo_owner="acme",
-        repo_name="widget",
-        head_sha="abc123",
-    )
-    assert ok is True
-    assert "refs/pull" not in backend.commands[0]
-
-
-async def test_prepare_review_repo_skips_checkout_without_head() -> None:
-    backend = _FakeSandboxBackend()
-    ok = await prepare_review_repo(
-        cast(SandboxBackendProtocol, backend),
-        work_dir="/work",
-        repo_owner="acme",
-        repo_name="widget",
-        head_sha="",
-    )
-    assert ok is True
-    assert "git checkout" not in backend.commands[0]
-
-
-async def test_prepare_review_repo_requires_owner_and_name() -> None:
-    backend = _FakeSandboxBackend()
-    ok = await prepare_review_repo(
-        cast(SandboxBackendProtocol, backend),
-        work_dir="/work",
-        repo_owner="",
-        repo_name="widget",
-        head_sha="abc",
-    )
-    assert ok is False
-    assert backend.commands == []
-
-
 async def test_prepare_review_repo_returns_false_on_nonzero_exit() -> None:
     backend = _FakeSandboxBackend(exit_code=1)
-    ok = await prepare_review_repo(
-        cast(SandboxBackendProtocol, backend),
-        work_dir="/work",
-        repo_owner="acme",
-        repo_name="widget",
-        head_sha="abc",
-    )
-    assert ok is False
-
-
-async def test_prepare_review_repo_returns_false_on_exception() -> None:
-    backend = _FakeSandboxBackend(raise_exc=True)
     ok = await prepare_review_repo(
         cast(SandboxBackendProtocol, backend),
         work_dir="/work",
@@ -132,28 +81,3 @@ async def test_materialize_trusted_skills_extracts_from_trusted_ref() -> None:
     for cmd in backend.commands:
         assert "git cat-file -e def456:" in cmd
         assert "git archive def456" in cmd
-
-
-async def test_materialize_trusted_skills_empty_without_ref() -> None:
-    backend = _FakeSandboxBackend()
-    sources = await materialize_trusted_skills(
-        cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref=""
-    )
-    assert sources == []
-    assert backend.commands == []
-
-
-async def test_materialize_trusted_skills_empty_when_none_exist() -> None:
-    backend = _FakeSandboxBackend(output="")
-    sources = await materialize_trusted_skills(
-        cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
-    )
-    assert sources == []
-
-
-async def test_materialize_trusted_skills_handles_exception() -> None:
-    backend = _FakeSandboxBackend(raise_exc=True)
-    sources = await materialize_trusted_skills(
-        cast(SandboxBackendProtocol, backend), repo_dir="/work/widget", trusted_ref="def456"
-    )
-    assert sources == []

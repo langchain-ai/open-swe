@@ -3,14 +3,40 @@ import { expect, type Page } from "@playwright/test";
 // Shared fixtures for the specs that drive the REAL built ui/ app (served
 // same-origin from the harness). Only the LLM/GitHub/Slack/token boundaries
 // are faked.
-export const SAME_USER = { login: "alice", email: "alice@example.com" };
-export const OTHER_USER = { login: "bob", email: "bob@example.com" };
+export const SAME_USER = {
+  login: "alice",
+  email: "alice@example.com",
+  name: "Alice",
+};
+export const OTHER_USER = {
+  login: "bob",
+  email: "bob@example.com",
+  name: "Bob",
+};
+
+// The dashboard's mutating routes enforce same-origin, which a browser sets for
+// itself but APIRequestContext does not.
+const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
+export const SAME_ORIGIN_HEADERS = {
+  origin: BASE_URL,
+  referer: `${BASE_URL}/`,
+};
 
 export async function loginAs(
   page: Page,
   user: { login: string; email: string },
 ) {
   const res = await page.request.post("/control/login", { data: user });
+  expect(res.ok()).toBeTruthy();
+}
+
+export async function optIntoQueue(page: Page) {
+  const saved = await page.request.get("/dashboard/api/me/preferences");
+  expect(saved.ok()).toBeTruthy();
+  const res = await page.request.put("/dashboard/api/me/preferences", {
+    data: { ...(await saved.json()), follow_up_behavior: "queue" },
+    headers: SAME_ORIGIN_HEADERS,
+  });
   expect(res.ok()).toBeTruthy();
 }
 
@@ -140,6 +166,8 @@ export interface SeedPullRequestOptions {
   reviews?: FakeReview[];
   review_threads?: FakeReviewThread[];
   review_decision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+  // Committed to `head` off the base branch, so the PR carries a real diff.
+  files?: Record<string, string>;
 }
 
 export interface SeededPullRequest {

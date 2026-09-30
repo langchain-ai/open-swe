@@ -9,7 +9,7 @@ import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { cn } from "@/lib/utils"
 
 /**
- * The Pinned / Projects / Recents header. The caret only shows on hover while
+ * The Pinned / Repositories / Recents header. The caret only shows on hover while
  * the section is open — collapsed sections keep it visible, since that is the
  * only cue left once their contents are gone.
  */

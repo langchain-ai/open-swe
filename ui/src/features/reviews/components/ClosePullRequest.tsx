@@ -1,10 +1,9 @@
-import { useState } from "react"
-
+import { Button } from "@/components/ui/button"
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
+import { pullRequestKey } from "../lib/status"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
-import { ConfirmCloseDialog } from "./ConfirmCloseDialog"
-import { PullRequestActionButton } from "./PullRequestActionButton"
+import { TextPopover } from "./TextPopover"
 
 export function ClosePullRequest({
   pr,
@@ -13,25 +12,27 @@ export function ClosePullRequest({
   pr: OpenPullRequest
   onClosed: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
   const close = usePullRequestAction({ pr, action: "close", onDone: onClosed })
   return (
-    <PullRequestActionButton
-      label={actionLabel(githubActions.close.labels, close)}
-      disabled={close.isPending || close.isSuccess}
-      onClick={() => setConfirming(true)}
-      errors={[close.error]}
-    >
-      {confirming && (
-        <ConfirmCloseDialog
-          pr={pr}
-          onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setConfirming(false)
-            close.mutate()
-          }}
-        />
-      )}
-    </PullRequestActionButton>
+    <div>
+      <TextPopover
+        trigger={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={close.isPending || close.isSuccess}
+            aria-live="polite"
+          >
+            {actionLabel(githubActions.close.labels, close)}
+          </Button>
+        }
+        title={`Close ${pullRequestKey(pr)}?`}
+        description="GitHub closes it without merging. A reason is posted as a comment."
+        placeholder="Reason (optional)"
+        submitLabel="Close pull request"
+        pending={close.isPending}
+        onSubmit={(reason, done) => close.mutate(reason, { onSuccess: done })}
+      />
+    </div>
   )
 }

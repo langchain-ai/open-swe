@@ -1,28 +1,34 @@
 """Dashboard API for the repos a user can reach through the GitHub App."""
 
 import logging
-from typing import Any
+from collections.abc import AsyncIterable
+from typing import TypedDict
 
-import httpx2
 from fastapi import HTTPException
+from githubkit.auth import TokenAuthStrategy
+from githubkit.exception import RequestError, RequestFailed, RequestTimeout
 
 from agent.dashboard.profiles import get_valid_access_token
+from agent.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_API_TIMEOUT = httpx2.Timeout(10.0, connect=3.0)
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
 
 
-def _next_link_url(link_header: str | None) -> str | None:
-    if not link_header:
-        return None
-    # GitHub Link header is comma-separated: '<url>; rel="next", <url>; rel="last"'
-    for part in link_header.split(","):
-        segments = [s.strip() for s in part.split(";")]
-        if len(segments) >= 2 and 'rel="next"' in segments[1] and segments[0].startswith("<"):
-            return segments[0][1:-1]
-    return None
+class InstallationAccount(TypedDict):
+    login: str | None
+    type: str | None
+
+
+class InstallationSummary(TypedDict):
+    id: int
+    account: InstallationAccount | None
+
+
+class RepositorySummary(TypedDict):
+    full_name: str
+    private: bool
 
 
 def _github_api_http_exception(status_code: int) -> HTTPException:
@@ -35,111 +41,93 @@ def _github_api_http_exception(status_code: int) -> HTTPException:
     return HTTPException(502, f"github API error ({status_code})")
 
 
-async def _paginate(
-    client: httpx2.AsyncClient,
-    url: str,
-    *,
-    headers: dict[str, str],
-    items_key: str | None,
-    cap: int = 1000,
-) -> list[dict[str, Any]]:
-    """Follow ``Link: rel="next"`` until exhausted (or cap reached).
-
-    ``items_key`` is the JSON key holding the list when the endpoint returns
-    a wrapper object (e.g. ``/user/installations`` returns
-    ``{"total_count": N, "installations": [...]}``). When ``None`` the
-    response body itself is treated as the list.
-    """
-    out: list[dict[str, Any]] = []
-    next_url: str | None = url
-    first = True
-    while next_url and len(out) < cap:
-        params = {"per_page": "100"} if first else None
-        try:
-            r = await client.get(next_url, headers=headers, params=params)
-        except httpx2.TimeoutException as exc:
-            logger.warning("GitHub API timed out while paginating %s", next_url)
-            raise HTTPException(503, "github API request timed out") from exc
-        except httpx2.RequestError as exc:
-            logger.warning("GitHub API request failed while paginating %s: %s", next_url, exc)
-            raise HTTPException(502, "github API request failed") from exc
-        try:
-            r.raise_for_status()
-        except httpx2.HTTPStatusError as exc:
-            logger.warning(
-                "GitHub API returned %s while paginating %s",
-                r.status_code,
-                next_url,
-            )
-            raise _github_api_http_exception(r.status_code) from exc
-        body = r.json()
-        page = body.get(items_key, []) if items_key else body
-        if isinstance(page, list):
-            out.extend(page)
-        next_url = _next_link_url(r.headers.get("Link"))
-        first = False
+async def _collect[T](items: AsyncIterable[T], *, cap: int = 1000) -> list[T]:
+    out: list[T] = []
+    try:
+        async for item in items:
+            out.append(item)
+            if len(out) >= cap:
+                break
+    except RequestTimeout as exc:
+        logger.warning("GitHub API timed out while paginating")
+        raise HTTPException(503, "github API request timed out") from exc
+    except RequestFailed as exc:
+        logger.warning(
+            "GitHub API returned an error while paginating",
+            extra={"status_code": exc.response.status_code},
+        )
+        raise _github_api_http_exception(exc.response.status_code) from exc
+    except RequestError as exc:
+        logger.warning("GitHub API request failed while paginating", exc_info=True)
+        raise HTTPException(502, "github API request failed") from exc
     return out
 
 
 async def fetch_user_installations_and_repos(
     login: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Resolve the installations and repos a user can access via the GitHub App.
-
-    Paginates both ``/user/installations`` and per-installation
-    ``/user/installations/{id}/repositories`` so users with multiple
-    installations or >30 accessible repos get the complete set. Shared by the
-    ``/repos`` endpoint and the reviews access filter.
-    """
+) -> tuple[list[InstallationSummary], list[RepositorySummary]]:
+    """Resolve the installations and repos a user can access via the GitHub App."""
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx2.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
-        try:
-            installations = await _paginate(
-                client,
-                "https://api.github.com/user/installations",
+    try:
+        return await _fetch_with_token(token)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        token = await get_valid_access_token(login, force_refresh=True)
+        if not token:
+            raise HTTPException(401, "github token expired, re-login required") from exc
+        return await _fetch_with_token(token)
+
+
+async def _fetch_with_token(
+    token: str,
+) -> tuple[list[InstallationSummary], list[RepositorySummary]]:
+    headers = {"X-GitHub-Api-Version": GITHUB_API_VERSION}
+    async with github_sdk(TokenAuthStrategy(token), timeout=10.0, connect_timeout=3.0) as client:
+        apps = client.rest(GITHUB_API_VERSION).apps
+        records = await _collect(
+            client.rest.paginate(
+                apps.async_list_installations_for_authenticated_user,
+                map_func=lambda response: response.json()["installations"],
+                per_page=100,
                 headers=headers,
-                items_key="installations",
             )
-        except HTTPException as exc:
-            if exc.status_code != 401:
-                raise
-            token = await get_valid_access_token(login, force_refresh=True)
-            if not token:
-                raise HTTPException(401, "github token expired, re-login required") from exc
-            headers["Authorization"] = f"Bearer {token}"
-            installations = await _paginate(
-                client,
-                "https://api.github.com/user/installations",
-                headers=headers,
-                items_key="installations",
+        )
+        installations: list[InstallationSummary] = []
+        repositories: list[RepositorySummary] = []
+        for record in records:
+            account = record.get("account")
+            installations.append(
+                {
+                    "id": record["id"],
+                    "account": {"login": account.get("login"), "type": account.get("type")}
+                    if account
+                    else None,
+                }
             )
-        repositories: list[dict[str, Any]] = []
-        for inst in installations:
-            inst_id = inst.get("id")
-            if inst_id is None:
-                continue
             try:
-                repos = await _paginate(
-                    client,
-                    f"https://api.github.com/user/installations/{inst_id}/repositories",
-                    headers=headers,
-                    items_key="repositories",
+                repos = await _collect(
+                    client.rest.paginate(
+                        apps.async_list_installation_repos_for_authenticated_user,
+                        installation_id=record["id"],
+                        map_func=lambda response: response.json()["repositories"],
+                        per_page=100,
+                        headers=headers,
+                    )
                 )
             except HTTPException as exc:
                 if exc.status_code in _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES:
                     logger.warning(
-                        "Skipping installation %s repository list: %s", inst_id, exc.detail
+                        "Skipping inaccessible installation repository list",
+                        extra={"installation_id": record["id"], "status_code": exc.status_code},
                     )
                     continue
                 raise
-            repositories.extend(repos)
+            repositories.extend(
+                {"full_name": repo["full_name"], "private": repo["private"]} for repo in repos
+            )
     return installations, repositories
 
 

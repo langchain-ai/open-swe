@@ -1,4 +1,5 @@
 import { GitPullRequestIcon } from "@phosphor-icons/react"
+import { IoLogoGithub } from "react-icons/io5"
 
 import { cn } from "@/lib/utils"
 
@@ -42,7 +43,7 @@ export function PrHeader({
 }: PrHeaderProps) {
   return (
     <div className={className}>
-      <div className={cn(compact && "flex min-w-0 items-center gap-2")}>
+      <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
             "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
@@ -56,7 +57,7 @@ export function PrHeader({
           className={cn(
             compact
               ? "min-w-0 flex-1 truncate text-sm font-medium"
-              : "mt-2 text-base font-medium",
+              : "min-w-0 text-base font-medium",
             titleClassName
           )}
         >
@@ -66,6 +67,10 @@ export function PrHeader({
             rel="noreferrer"
             className={cn("hover:underline", compact && "block truncate")}
           >
+            <IoLogoGithub
+              aria-label="GitHub"
+              className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground"
+            />
             {title}
             {number != null && (
               <span className="text-muted-foreground"> #{number}</span>

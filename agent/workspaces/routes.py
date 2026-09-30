@@ -1,25 +1,26 @@
-"""Dashboard API for instance-wide sandbox settings and named workspaces."""
+"""Dashboard API for named workspaces."""
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
-from agent.dashboard.deps import ADMIN_DEP, ADMIN_OR_TOKEN_DEP, SESSION_DEP, session_is_admin
-from agent.dashboard.workspace_settings import delete_workspace_settings
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from agent.slack.channels import SlackChannel
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
     is_refresh_in_flight,
     start_refresh_run,
 )
-from agent.workspaces.sandbox_settings import (
-    SandboxSettingsUpdate,
-    get_sandbox_settings,
-    upsert_sandbox_settings,
-)
 from agent.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
+    DefaultWorkspaceDeletionError,
+    RepositorySettings,
     Workspace,
     WorkspaceConflictError,
     WorkspaceCreate,
@@ -28,22 +29,9 @@ from agent.workspaces.store import (
     slugify,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["workspaces"])
-
-
-@router.get("/sandbox-settings")
-async def api_get_sandbox_settings(
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await get_sandbox_settings()
-
-
-@router.put("/sandbox-settings")
-async def api_set_sandbox_settings(
-    body: SandboxSettingsUpdate,
-    _admin: dict[str, Any] = ADMIN_OR_TOKEN_DEP,
-) -> dict[str, Any]:
-    return await upsert_sandbox_settings(body, updated_by=_admin.get("sub"))
 
 
 def _normalized_slug(raw: str) -> str:
@@ -64,6 +52,20 @@ def _save_conflict(error: ValueError) -> HTTPException:
     return HTTPException(400, str(error))
 
 
+async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
+    """Reject newly enabled kitchen channels Slack would not deliver messages from."""
+    channels = await asyncio.gather(
+        *(SlackChannel.load(channel_id, use_cache=False) for channel_id in channel_ids)
+    )
+    for channel_id, channel in zip(channel_ids, channels, strict=True):
+        if channel is None or not channel.can_be_kitchen:
+            raise HTTPException(
+                400,
+                f"Slack channel {channel_id} cannot be a kitchen channel: choose an internal "
+                "Slack channel that Open SWE has joined.",
+            )
+
+
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -79,6 +81,7 @@ async def api_create_workspace(
     body: WorkspaceCreate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    await _require_kitchen_eligible(body.kitchen_channel_ids)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -88,15 +91,28 @@ async def api_create_workspace(
     return record
 
 
+async def _default_repo_for(slug: str) -> str | None:
+    """The repository a run composed in ``slug`` starts from when none is picked."""
+    repo = (await get_workspace_settings(slug)).default_repo
+    if not repo:
+        return None
+    return f"{repo['owner']}/{repo['name']}"
+
+
 @router.get("/workspaces/options")
 async def api_workspace_options(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    """Pickable workspaces for any signed-in user; refresh logs only for admins."""
-    return {
-        "workspaces": await list_workspace_options(include_logs=session_is_admin(session)),
-        "default_slug": DEFAULT_WORKSPACE_SLUG,
-    }
+    """Pickable workspaces for any signed-in user; refresh logs only for admins.
+
+    Each option carries ``default_repo`` so the composer can preselect it when
+    the workspace is chosen first.
+    """
+    options = await list_workspace_options(include_logs=session_is_admin(session))
+    defaults = await asyncio.gather(*(_default_repo_for(option["slug"]) for option in options))
+    for option, default_repo in zip(options, defaults, strict=True):
+        option["default_repo"] = default_repo
+    return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
 
 
 @router.get("/workspaces/{slug}")
@@ -116,13 +132,81 @@ async def api_update_workspace(
     body: WorkspaceUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
+    normalized = _normalized_slug(slug)
+    previous = await WORKSPACES.get(normalized)
+    repos_changed = (
+        previous is not None
+        and body.repos is not None
+        and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
+    )
+    if repos_changed and is_refresh_in_flight(previous):
+        raise HTTPException(409, "a refresh of this workspace is already running")
+    if body.kitchen_channel_ids is not None:
+        already = set(previous.kitchen_channel_ids) if previous is not None else set()
+        await _require_kitchen_eligible(
+            [channel for channel in body.kitchen_channel_ids if channel not in already]
+        )
     try:
-        record = await WORKSPACES.apply_update(_normalized_slug(slug), body)
+        record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
+        if repos_changed:
+            run_id = await start_refresh_run(record.slug)
+            if run_id is None:
+                raise HTTPException(
+                    502, "workspace was saved but its snapshot rebuild could not start"
+                )
+            return record.model_copy(
+                update={"refresh_status": "refreshing", "refresh_run_id": run_id}
+            )
     return record
+
+
+class RepositoryConfiguration(BaseModel):
+    """Settings to change on one repository. Anything left out keeps its value."""
+
+    may_start_threads: bool | None = None
+
+
+@router.get("/workspaces/{slug}/repositories")
+async def api_list_workspace_repositories(
+    slug: str,
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> list[RepositorySettings]:
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.slug_exists(normalized):
+        raise HTTPException(404, "workspace not found")
+    return await WORKSPACES.repository_settings(normalized)
+
+
+@router.put("/workspaces/{slug}/repositories/{owner}/{name}")
+async def api_configure_workspace_repository(
+    slug: str,
+    owner: str,
+    name: str,
+    body: RepositoryConfiguration,
+    admin: dict[str, Any] = ADMIN_DEP,
+) -> RepositorySettings:
+    """Change how one of a workspace's repositories is configured there."""
+    normalized = _normalized_slug(slug)
+    try:
+        settings = await WORKSPACES.configure_repository(
+            normalized, f"{owner}/{name}", may_start_threads=body.may_start_threads
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    logger.info(
+        "Configured a workspace repository",
+        extra={
+            "workspace": normalized,
+            "repository": settings.repo,
+            "may_start_threads": settings.may_start_threads,
+            "changed_by": str(admin.get("sub") or ""),
+        },
+    )
+    return settings
 
 
 @router.post("/workspaces/{slug}/refresh")
@@ -155,7 +239,11 @@ async def api_delete_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
     normalized = _normalized_slug(slug)
-    if not await WORKSPACES.remove(normalized):
+    try:
+        removed = await WORKSPACES.remove(normalized)
+    except DefaultWorkspaceDeletionError as e:
+        raise HTTPException(409, str(e)) from e
+    if not removed:
         raise HTTPException(404, "workspace not found")
     # A later workspace under the same slug must start from the instance record.
     await delete_workspace_settings(normalized)

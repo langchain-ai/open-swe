@@ -66,7 +66,7 @@ export function formatToolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
-  _projectPath?: string
+  _repoPath?: string
 ): ToolDisplayParts {
   const toolName = normalizedToolName(title)
   const path = firstStringArg(input, ["path", "file_path", "target_file"])
@@ -135,13 +135,13 @@ export function formatToolDisplay(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,
-  projectPath?: string
+  repoPath?: string
 ): string {
   const { heading, preview } = formatToolDisplayParts(
     title,
     toolKind,
     input,
-    projectPath
+    repoPath
   )
   return preview ? `${heading} ${preview}` : heading
 }

@@ -1,242 +1,167 @@
+import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
+import httpx
 import pytest
 
 from agent.github import app as github_app
+from tests.support.github_sdk import mock_github_sdk
 
 
 @pytest.fixture(autouse=True)
-def _clear_token_cache() -> Any:
+def app_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
+    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "test-key")
+    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
     github_app.clear_app_token_cache()
     yield
     github_app.clear_app_token_cache()
 
 
-class _FakeResponse:
-    def raise_for_status(self) -> None:
-        pass
+@pytest.mark.parametrize("kind", ["org", "repo"])
+async def test_resolves_installation_with_escaped_names(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        expected = (
+            "/orgs/secondary%2Forg/installation"
+            if kind == "org"
+            else "/repos/acme/private%2Frepo/installation"
+        )
+        assert request.url.raw_path.decode() == expected
+        assert request.headers["authorization"] == "Bearer test-app-jwt"
+        return httpx.Response(200, json={"id": 3})
 
-    def json(self) -> dict[str, str]:
-        return {"token": "token", "expires_at": "expires"}
-
-
-class _FakeAsyncClient:
-    last_post: dict[str, Any] | None = None
-
-    def __init__(self, **kwargs: Any) -> None:
-        pass
-
-    async def __aenter__(self) -> _FakeAsyncClient:
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        return None
-
-    async def post(self, url: str, **kwargs: Any) -> _FakeResponse:
-        type(self).last_post = {"url": url, **kwargs}
-        return _FakeResponse()
+    mock_github_sdk(monkeypatch, handle)
+    if kind == "org":
+        result = await github_app.get_github_app_installation_id_for_org("secondary/org")
+    else:
+        result = await github_app.get_github_app_installation_id_for_repo("acme", "private/repo")
+    assert result == 3
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, client_cls: type) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
-    monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx2, "AsyncClient", client_cls)
+@pytest.mark.parametrize("status", [401, 403, 404, 500])
+async def test_installation_lookup_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    mock_github_sdk(
+        monkeypatch, lambda request: httpx.Response(status, json={"message": "unavailable"})
+    )
+    assert await github_app.get_github_app_installation_id_for_org("acme") is None
+    assert await github_app.get_github_app_installation_id_for_repo("acme", "api") is None
 
 
-@pytest.mark.asyncio
-async def test_resolves_org_installation(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Response:
-        def raise_for_status(self) -> None:
-            pass
+@pytest.mark.parametrize("minutes,expected_requests", [(60, 1), (2, 2)])
+async def test_token_cache_respects_expiry(
+    monkeypatch: pytest.MonkeyPatch, minutes: int, expected_requests: int
+) -> None:
+    expires_at = (datetime.now(UTC) + timedelta(minutes=minutes)).isoformat()
+    requests: list[httpx.Request] = []
 
-        def json(self) -> dict[str, int]:
-            return {"id": 3}
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201, json={"token": f"token-{len(requests)}", "expires_at": expires_at}
+        )
 
-    class Client(_FakeAsyncClient):
-        async def get(self, url: str, **kwargs: Any) -> Response:
-            type(self).last_post = {"url": url, **kwargs}
-            return Response()
-
-    _configure(monkeypatch, Client)
-
-    assert await github_app.get_github_app_installation_id_for_org("secondary/org") == 3
-    assert Client.last_post is not None
-    assert Client.last_post["url"].endswith("/orgs/secondary%2Forg/installation")
-
-
-class _CountingResponse:
-    def __init__(self, expires_at: str) -> None:
-        self._expires_at = expires_at
-
-    def raise_for_status(self) -> None:
-        pass
-
-    def json(self) -> dict[str, str]:
-        return {"token": "tok-123", "expires_at": self._expires_at}
+    mock_github_sdk(monkeypatch, handle)
+    first, expiry = await github_app.get_github_app_installation_token_with_expiry()
+    second, _ = await github_app.get_github_app_installation_token_with_expiry()
+    assert first == "token-1"
+    assert second == f"token-{expected_requests}"
+    assert expiry == expires_at
+    assert len(requests) == expected_requests
 
 
-class _CountingClient:
-    posts = 0
-    expires_at = "2099-01-01T00:00:00Z"
-
-    def __init__(self, **kwargs: Any) -> None:
-        pass
-
-    async def __aenter__(self) -> _CountingClient:
-        return self
-
-    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        return None
-
-    async def post(self, url: str, **kwargs: Any) -> _CountingResponse:
-        type(self).posts += 1
-        return _CountingResponse(type(self).expires_at)
-
-
-@pytest.mark.asyncio
-async def test_token_is_cached_until_near_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-
-    class Client(_CountingClient):
-        posts = 0
-        expires_at = future
-
-    _configure(monkeypatch, Client)
-
-    t1, _ = await github_app.get_github_app_installation_token_with_expiry()
-    t2, _ = await github_app.get_github_app_installation_token_with_expiry()
-
-    assert t1 == t2 == "tok-123"
-    assert Client.posts == 1  # second call served from the in-process cache
-
-
-@pytest.mark.asyncio
-async def test_cache_is_scoped_per_repository_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-
-    class Client(_CountingClient):
-        posts = 0
-        expires_at = future
-
-    _configure(monkeypatch, Client)
-
-    await github_app.get_github_app_installation_token_with_expiry(repositories=["a"])
-    await github_app.get_github_app_installation_token_with_expiry(repositories=["b"])
-    await github_app.get_github_app_installation_token_with_expiry(repositories=["a"])
-
-    assert Client.posts == 2  # distinct scopes mint separately; the repeat is cached
-
-
-@pytest.mark.asyncio
-async def test_cache_is_scoped_per_installation(monkeypatch: pytest.MonkeyPatch) -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-
-    class Client(_CountingClient):
-        posts = 0
-        expires_at = future
-
-    _configure(monkeypatch, Client)
-
-    await github_app.get_github_app_installation_token_with_expiry(installation_id=2)
-    await github_app.get_github_app_installation_token_with_expiry(installation_id=3)
-    await github_app.get_github_app_installation_token_with_expiry(installation_id=2)
-
-    assert Client.posts == 2
-
-
-@pytest.mark.asyncio
-async def test_near_expiry_token_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
-    soon = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
-
-    class Client(_CountingClient):
-        posts = 0
-        expires_at = soon
-
-    _configure(monkeypatch, Client)
-
-    await github_app.get_github_app_installation_token_with_expiry()
-    await github_app.get_github_app_installation_token_with_expiry()
-
-    assert Client.posts == 2  # within the safety margin -> re-minted every call
-
-
-@pytest.mark.asyncio
-async def test_installation_token_can_be_scoped_to_repository_ids(
+async def test_cache_separates_repository_installation_and_permission_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
-    monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
+    expires_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    requests: list[tuple[str, dict[str, object]]] = []
 
-    token, expires_at = await github_app.get_github_app_installation_token_with_expiry(
-        installation_id=3, repository_ids=[123]
-    )
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(
+            201, json={"token": f"token-{len(requests)}", "expires_at": expires_at}
+        )
 
-    assert token == "token"
-    assert expires_at == "expires"
-    assert _FakeAsyncClient.last_post is not None
-    assert _FakeAsyncClient.last_post["url"].endswith("/app/installations/3/access_tokens")
-    assert _FakeAsyncClient.last_post["json"] == {"repository_ids": [123]}
-
-
-@pytest.mark.asyncio
-async def test_installation_token_includes_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
-    monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
-
-    await github_app.get_github_app_installation_token_with_expiry(
-        repositories=["open-swe"], permissions={"workflows": "write", "contents": "write"}
-    )
-
-    assert _FakeAsyncClient.last_post is not None
-    assert _FakeAsyncClient.last_post["json"] == {
-        "repositories": ["open-swe"],
-        "permissions": {"contents": "write", "workflows": "write"},
-    }
+    mock_github_sdk(monkeypatch, handle)
+    for _ in range(2):
+        for installation_id in (2, 3):
+            for ids in ([11], [22]):
+                for permission in ("read", "write"):
+                    token = await github_app.get_github_app_installation_token(
+                        installation_id=installation_id,
+                        repository_ids=ids,
+                        permissions={"contents": permission},
+                    )
+                    assert token is not None
+    assert len(requests) == 8
+    assert len({(path, json.dumps(body, sort_keys=True)) for path, body in requests}) == 8
 
 
-@pytest.mark.asyncio
-async def test_cache_is_scoped_per_permission_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-
-    class Client(_CountingClient):
-        posts = 0
-        expires_at = future
-
-    _configure(monkeypatch, Client)
-
-    await github_app.get_github_app_installation_token_with_expiry(
-        permissions={"contents": "write"}
-    )
-    await github_app.get_github_app_installation_token_with_expiry(
-        permissions={"contents": "write", "workflows": "write"}
-    )
-    await github_app.get_github_app_installation_token_with_expiry(
-        permissions={"contents": "write"}
-    )
-
-    assert Client.posts == 2
-
-
-@pytest.mark.asyncio
-async def test_installation_token_omits_scope_for_full_installation(
+async def test_repository_names_and_full_installation_have_distinct_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_app, "GITHUB_APP_ID", "1")
-    monkeypatch.setattr(github_app, "GITHUB_APP_PRIVATE_KEY", "key")
-    monkeypatch.setattr(github_app, "GITHUB_APP_INSTALLATION_ID", "2")
-    monkeypatch.setattr(github_app, "_generate_app_jwt", lambda: "jwt")
-    monkeypatch.setattr(github_app.httpx2, "AsyncClient", _FakeAsyncClient)
+    scopes: list[dict[str, object]] = []
 
-    await github_app.get_github_app_installation_token_with_expiry()
+    def handle(request: httpx.Request) -> httpx.Response:
+        scopes.append(json.loads(request.content))
+        return httpx.Response(
+            201, json={"token": f"token-{len(scopes)}", "expires_at": "2099-01-01T00:00:00Z"}
+        )
 
-    assert _FakeAsyncClient.last_post is not None
-    assert _FakeAsyncClient.last_post["json"] is None
+    mock_github_sdk(monkeypatch, handle)
+    for names in (["a"], ["b"], ["a"], None):
+        assert await github_app.get_github_app_installation_token(repositories=names)
+    assert scopes == [{"repositories": ["a"]}, {"repositories": ["b"]}, {}]
+
+
+async def test_token_request_preserves_repository_ids_and_permissions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/app/installations/3/access_tokens"
+        assert json.loads(request.content) == {
+            "repository_ids": [123],
+            "permissions": {"contents": "write", "workflows": "write"},
+        }
+        return httpx.Response(201, json={"token": "token", "expires_at": "2099-01-01T00:00:00Z"})
+
+    mock_github_sdk(monkeypatch, handle)
+    token, expiry = await github_app.get_github_app_installation_token_with_expiry(
+        installation_id=3,
+        repository_ids=[123],
+        repositories=["ignored"],
+        permissions={"workflows": "write", "contents": "write"},
+    )
+    assert (token, expiry) == ("token", "2099-01-01T00:00:00Z")
+
+
+@pytest.mark.parametrize("status", [403, 500])
+async def test_token_failure_never_returns_cached_broader_access(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content).get("repository_ids"):
+            return httpx.Response(status, json={"message": "unavailable"})
+        return httpx.Response(
+            201, json={"token": "broad-token", "expires_at": "2099-01-01T00:00:00Z"}
+        )
+
+    mock_github_sdk(monkeypatch, handle)
+    assert await github_app.get_github_app_installation_token() == "broad-token"
+    assert await github_app.get_github_app_installation_token(repository_ids=[123]) is None
+
+
+async def test_unknown_permissions_cannot_be_silently_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        pytest.fail("Invalid permissions must not reach GitHub")
+
+    mock_github_sdk(monkeypatch, handle)
+    assert (
+        await github_app.get_github_app_installation_token(permissions={"unknown": "read"}) is None
+    )

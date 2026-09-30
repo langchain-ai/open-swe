@@ -17,13 +17,21 @@ from urllib.parse import urlparse
 import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    slack_error,
+    slack_error_details,
+    slack_retry_after,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
+from agent.threads.creation import create_lock_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -407,15 +415,18 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
-async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
         async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
-            "Orphaned Slack reply could not be removed",
+            "Slack message could not be deleted",
             extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
         )
+        return False
+    return True
 
 
 async def _post_slack_message_with_ts(
@@ -426,6 +437,7 @@ async def _post_slack_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
@@ -434,6 +446,7 @@ async def _post_slack_message_with_ts(
 
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
+    broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
 
     try:
         async with SlackClient.bot() as client:
@@ -444,6 +457,7 @@ async def _post_slack_message_with_ts(
                 unfurl_links=unfurl_links,
                 unfurl_media=unfurl_media,
                 blocks=blocks or None,
+                **broadcast,
             )
         message_ts = data.get("ts")
         if isinstance(message_ts, str) and message_ts:
@@ -455,7 +469,7 @@ async def _post_slack_message_with_ts(
                 and not _threaded_under(data, reply_ts)
                 and not await _slack_thread_exists(channel_id, reply_ts)
             ):
-                await _delete_slack_message(channel_id, message_ts)
+                await delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
@@ -466,7 +480,10 @@ async def _post_slack_message_with_ts(
         return None, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return None, error
 
 
@@ -481,7 +498,8 @@ def _safe_model_label(model: str) -> str:
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
-SLACK_COST_PENDING_LABEL = "calculating cost"
+SLACK_COST_PENDING_LABEL = "calculating cost..."
+_PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
 def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
@@ -491,6 +509,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
@@ -498,7 +518,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    rf"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|{re.escape(SLACK_COST_PENDING_LABEL)})(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -509,25 +530,26 @@ def format_slack_session_cost(cost: float) -> str:
     return f"${cost:.2f}"
 
 
-def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+def _replace_slack_session_cost(text: str, label: str, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return (
-        f"{cleaned} • {format_slack_session_cost(cost)}"
-        if cleaned
-        else format_slack_session_cost(cost)
-    )
+    return f"{cleaned} • {label}" if cleaned else label
 
 
 def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    run_cost: float | None = None,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
-    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    """Replace cumulative and optional per-run costs in a live Slack footer."""
+    label = format_slack_session_cost(cost)
+    if run_cost is not None:
+        label += f" ({format_slack_session_cost(run_cost)})"
+    updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
 
@@ -551,7 +573,7 @@ def with_slack_session_cost(
             if (
                 block.get("block_id") == "open_swe_usage_footer"
                 or "main-agent tokens" in value_text
-                or SLACK_COST_PENDING_LABEL in value_text
+                or _PENDING_COST_LABEL_RE.search(value_text)
             ):
                 candidates.append(value)
             elif SLACK_WEB_LINK_FOOTER_LABEL in value_text:
@@ -560,7 +582,7 @@ def with_slack_session_cost(
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
         target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
+            str(target.get("text") or ""), label, require_web_link=False
         )
     elif (
         updated_text != text
@@ -573,7 +595,7 @@ def with_slack_session_cost(
             {
                 "type": "context",
                 "block_id": "open_swe_usage_footer",
-                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+                "elements": [{"type": "mrkdwn", "text": label}],
             }
         )
     return updated_text, updated_blocks
@@ -587,8 +609,7 @@ def with_slack_pending_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Append the pending cost label to a live Slack footer awaiting its cost."""
     if clear:
-        suffix = f" • {SLACK_COST_PENDING_LABEL}"
-        updated_text = text.removesuffix(suffix)
+        updated_text = _PENDING_COST_LABEL_RE.sub("", text)
         updated_blocks = copy.deepcopy(blocks)
         for block in updated_blocks or []:
             if block.get("type") != "context":
@@ -596,11 +617,12 @@ def with_slack_pending_session_cost(
             values = [block.get("text"), *(block.get("elements") or [])]
             for value in values:
                 if isinstance(value, dict) and isinstance(value.get("text"), str):
-                    value["text"] = value["text"].removesuffix(suffix)
-                    if value["text"] == SLACK_COST_PENDING_LABEL:
+                    if _PENDING_COST_LABEL_RE.fullmatch(value["text"]):
                         value["text"] = "Cost unavailable"
+                    else:
+                        value["text"] = _PENDING_COST_LABEL_RE.sub("", value["text"])
         return updated_text, updated_blocks
-    if SLACK_COST_PENDING_LABEL in text or SLACK_WEB_LINK_FOOTER_LABEL not in text:
+    if _PENDING_COST_LABEL_RE.search(text) or SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text, blocks
     updated_text = f"{text} • {SLACK_COST_PENDING_LABEL}"
     if blocks is None:
@@ -622,7 +644,7 @@ def with_slack_pending_session_cost(
             values.extend(item for item in elements if isinstance(item, dict))
         for value in values:
             value_text = value.get("text")
-            if isinstance(value_text, str) and SLACK_COST_PENDING_LABEL not in value_text:
+            if isinstance(value_text, str) and not _PENDING_COST_LABEL_RE.search(value_text):
                 value["text"] = f"{value_text} • {SLACK_COST_PENDING_LABEL}"
                 return updated_text, updated_blocks
     updated_blocks.append(
@@ -727,6 +749,7 @@ async def post_slack_thread_reply_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
+    reply_broadcast: bool = False,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -743,6 +766,7 @@ async def post_slack_thread_reply_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
+        reply_broadcast=reply_broadcast,
     )
 
 
@@ -910,20 +934,27 @@ async def update_slack_message(
         return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return False, error
 
 
 async def upload_slack_thread_file(
-    channel_id: str,
-    thread_ts: str,
+    channel_id: str | None,
+    thread_ts: str | None,
     filename: str,
     content: bytes,
     *,
     title: str | None = None,
     initial_comment: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Upload one file to a Slack thread and return its file ID and any error."""
+    """Upload one file and return its file ID and any error.
+
+    Without a channel the file is hosted but never posted, which is what a block
+    that renders the file itself needs.
+    """
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
     if not content:
@@ -964,6 +995,34 @@ async def upload_slack_thread_file(
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
         return None, error
+
+
+class _SlackFileInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    mimetype: str = ""
+
+
+async def wait_for_slack_file(
+    file_id: str, *, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Whether Slack finished processing an upload; a block citing it before then is refused."""
+    deadline = time.monotonic() + timeout
+    try:
+        async with SlackClient.bot() as client:
+            while True:
+                response = await client.files_info(file=file_id)
+                if _SlackFileInfo.model_validate(response.get("file") or {}).mimetype:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(interval)
+    except (*SLACK_REQUEST_ERRORS, ValidationError) as exc:
+        logger.warning(
+            "Slack file status check failed",
+            extra={"slack_error": slack_error(exc), "slack_file_id": file_id},
+        )
+        return False
 
 
 SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
@@ -1159,8 +1218,9 @@ async def invite_to_slack_channel(
     )
 
 
-async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
-    """Update or delete an interaction's source message, including ephemeral messages."""
+async def _post_slack_callback(
+    response_url: str, payload: dict[str, Any], path_prefix: str
+) -> bool:
     try:
         parsed = urlparse(response_url)
     except ValueError:
@@ -1168,7 +1228,7 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     if (
         parsed.scheme != "https"
         or parsed.netloc not in {"hooks.slack.com", "hooks.slack-gov.com"}
-        or not parsed.path.startswith("/actions/")
+        or not parsed.path.startswith(path_prefix)
     ):
         return False
     request = httpx2.Request(
@@ -1194,6 +1254,51 @@ async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any
     except httpx2.HTTPError, ValueError:
         logger.warning("Slack interaction response failed")
         return False
+
+
+async def respond_to_slack_interaction(response_url: str, payload: dict[str, Any]) -> bool:
+    """Update or delete an interaction's source message, including ephemeral messages."""
+    return await _post_slack_callback(response_url, payload, "/actions/")
+
+
+async def acknowledge_slack_command(response_url: str, text: str) -> bool:
+    """Post a slash command's acknowledgement so a later reply can replace it.
+
+    `replace_original` only reaches a message sent through `response_url`, never
+    the body of the command's own HTTP response, so the acknowledgement has to
+    come from here for the answer to take its place.
+    """
+    return await _post_slack_callback(
+        response_url,
+        {"response_type": "ephemeral", "text": text},
+        "/commands/",
+    )
+
+
+async def replace_slack_command_message(
+    response_url: str,
+    text: str,
+    *,
+    blocks: list[dict[str, Any]] | None = None,
+    usage: RunUsageSummary | None = None,
+    agent_thread_id: str | None = None,
+) -> bool:
+    """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
+    payload: dict[str, Any] = {
+        "response_type": "ephemeral",
+        "replace_original": True,
+        "text": append_slack_web_link_footer(text, dashboard_url, usage),
+    }
+    updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
+    if updated_blocks:
+        payload["blocks"] = updated_blocks
+    return await _post_slack_callback(response_url, payload, "/commands/")
+
+
+async def clear_slack_command_message(response_url: str) -> bool:
+    """Remove a slash command's acknowledgement when something else answers instead."""
+    return await _post_slack_callback(response_url, {"delete_original": True}, "/commands/")
 
 
 async def open_slack_modal(trigger_id: str, view: dict[str, Any]) -> bool:
@@ -1332,10 +1437,8 @@ async def slack_thread_mutation_lock(
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
-            await langgraph_client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            await create_lock_thread(
+                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
             )
             break
         except ConflictError:

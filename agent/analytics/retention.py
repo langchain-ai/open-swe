@@ -27,10 +27,11 @@ async def enforce_retention() -> None:
         )
         await conn.execute(
             text(
-                "UPDATE identity_directory SET github_login = NULL, display_name = NULL, email = "
-                "NULL, team_id = NULL, updated_at = clock_timestamp() WHERE anonymize_after < "
+                "UPDATE identity_directory SET github_login = NULL, display_name = NULL, "
+                "display_name_source = NULL, email = NULL, team_id = NULL, "
+                "updated_at = clock_timestamp() WHERE anonymize_after < "
                 "clock_timestamp() AND (github_login IS NOT NULL OR display_name IS NOT NULL OR "
-                "email IS NOT NULL OR team_id IS NOT NULL)"
+                "display_name_source IS NOT NULL OR email IS NOT NULL OR team_id IS NOT NULL)"
             )
         )
         await conn.execute(

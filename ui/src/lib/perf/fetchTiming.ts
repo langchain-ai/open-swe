@@ -13,6 +13,8 @@ export interface ServerTimingEntry {
 export type TimedRequestKind =
   | "thread_detail"
   | "thread_state"
+  /** The transcript log's snapshot, which hydrates a thread in place of `thread_state`. */
+  | "thread_transcript"
   | "stream_events"
   | "command"
 
@@ -39,6 +41,7 @@ const THREAD_REQUEST_RE =
 const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
   "": "thread_detail",
   "/state": "thread_state",
+  "/transcript": "thread_transcript",
   "/stream/events": "stream_events",
   "/commands": "command",
 }
