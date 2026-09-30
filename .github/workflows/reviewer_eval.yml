@@ -15,15 +15,15 @@ on:
       model_id:
         description: Reviewer model id
         type: string
-        default: google_genai:gemini-3.7-flash
+        default: anthropic:claude-opus-5-5
       reasoning_effort:
         description: Reasoning effort
         type: string
-        default: medium
+        default: high
       dataset_name:
         description: LangSmith dataset
         type: string
-        default: openswe-reviewer-v1
+        default: openswe-reviewer-v2
       experiment_prefix:
         description: Run name (LangSmith experiment prefix)
         type: string

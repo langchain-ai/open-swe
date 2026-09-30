@@ -186,6 +186,8 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
         )
         _record_completed()
         return {
+            "thread_id": thread_id,
+            "pr_url": pr_url,
             "comments": comments,
             "score_mode": score_mode,
             "publish_completed": publish_completed,

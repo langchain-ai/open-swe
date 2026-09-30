@@ -1,8 +1,10 @@
 # Reviewer Eval
 
 Offline LangSmith eval for the Open SWE Reviewer graph against the 50 PRs and
-136 reference findings from `withmartian/code-review-benchmark`. Examples have
-1–6 references (mean 2.72).
+173 categorized golden comments from `withmartian/code-review-benchmark`
+(`offline/golden_comments` at `e616e84`, the 2026-08 golden refresh). The
+`openswe-reviewer-v1` dataset holds the earlier 136 uncategorized goldens;
+scores across the two datasets are not comparable.
 
 ## Layout
 
@@ -11,6 +13,7 @@ evals/reviewer/
 ├── golden_comments/      # 50 PRs × golden comments (copied from martian benchmark)
 ├── build_dataset.py      # martian JSON → LangSmith dataset (resolves SHAs via gh)
 ├── config.toml           # default benchmark run config
+├── costs.py              # per-PR / per-run LLM cost from the reviewer's traces
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
 ├── store_reporter.py     # publishes live progress to the dashboard store record
@@ -33,7 +36,7 @@ evals/reviewer/
 uv run python -m evals.reviewer.build_dataset --dry-run
 
 # Upload for real
-uv run python -m evals.reviewer.build_dataset --dataset-name openswe-reviewer-v1
+uv run python -m evals.reviewer.build_dataset --dataset-name openswe-reviewer-v2
 ```
 
 Each example carries: `repo`, `pr_number`, `pr_url`, `base_sha`, `head_sha`,
@@ -50,6 +53,10 @@ by the harness.
 ```bash
 uv run python -m evals.reviewer.run_eval
 ```
+
+`max_concurrency` defaults to 10, matching the `--n-jobs-per-worker 10` that
+`make dev` starts the local server with; each PR is one server run, so a higher
+eval concurrency only queues on the server.
 
 Smoke-test with 3 PRs first:
 
@@ -91,24 +98,47 @@ deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).
 The target sets `reviewer_eval` for every run, so `publish_review` does not post
 to GitHub.
 
-## Per-repo review style prompts
+## Scoring
 
-At runtime the reviewer loads a custom style guide from LangGraph Store when
-`configurable.repo` is set (`owner` + `name` → store key `owner/name`). This
-applies to **eval runs too**, as long as a completed style profile exists for
-that repo.
+The judge prompt and model (`claude-opus-4-5`) match upstream. Unprefixed
+metrics count every golden (upstream's "all" profile). `strict_*` and `core_*`
+follow upstream's category profiles: a candidate that matches a golden outside
+the profile is neither a true nor a false positive, and only in-profile goldens
+count as misses. Upstream's leaderboard headline is **`core_micro_f2`**.
 
-The Martian benchmark uses these upstream repos (10 PRs each):
+| Profile | Categories | Goldens |
+|---|---|---|
+| `strict` | bug, security, concurrency, data, api | 139 |
+| `core` | strict + perf, test_gap, doc_defect | 158 |
+| all (unprefixed) | core + style, speculative | 173 |
 
-- `getsentry/sentry`
-- `keycloak/keycloak`
-- `grafana/grafana`
-- `discourse/discourse`
-- `calcom/cal.com`
+Upstream also runs an LLM step that groups a tool's duplicate comments before
+judging. It is not ported: the reviewer's published findings are already
+deduplicated, and the judge drops exact duplicates.
 
-Before scoring with repo-specific styles, run **Review styles** analysis in the
-dashboard for each repo (or copy prompts into store). Re-run `make dev` so the
-reviewer graph sees the same store.
+## Prompts in eval runs
+
+Eval runs score the stock reviewer. They skip workspace org guidelines,
+per-repo review style prompts, the API-standards skill, approval policy,
+historical PR comments, and the walkthrough. They keep the repo's own
+AGENTS.md and `resources/prompts/reviewer/eval.md`.
+
+## Cost
+
+The reviewer traces into the server's LangSmith project, not the experiment,
+so `run_eval` reads each reviewer thread's cost from that project when the
+experiment finishes. It records `cost_usd` and `total_tokens` feedback per
+example and writes `cost_total_usd`, `cost_mean_per_pr_usd`,
+`cost_median_per_pr_usd`, `cost_max_per_pr_usd`, and `cost_priced_prs` into
+the experiment metadata. The project defaults to `LANGSMITH_PROJECT` from
+`.env`, which is what local `make dev` traces into; pass
+`--reviewer-langsmith-project` for a deployment. Costs cover LLM calls only,
+not sandbox time. LangSmith can lag while pricing traces; re-run the lookup
+for an experiment with:
+
+```bash
+uv run python -m evals.reviewer.costs --experiment <experiment-name>
+```
 
 By default the judge scores the exact final `surfaced_findings` snapshot,
 including only renderable findings selected by `publish_review`. Set
