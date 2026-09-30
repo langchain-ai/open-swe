@@ -113,7 +113,6 @@ from agent.middleware import (
     SanitizeThinkingBlocksMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
@@ -1965,7 +1964,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if stop_summary_mode
                         else [check_message_queue_before_model, deliver_event_matches_before_model]
                     ),
-                    TimeoutWrapupMiddleware(),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),
                         _registered_tool_name(slack_no_reply_needed),
