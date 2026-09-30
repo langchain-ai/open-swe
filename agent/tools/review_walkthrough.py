@@ -1,6 +1,9 @@
 """Tools that walk the review guide's chunks; the server renders, checks and tracks every one."""
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Literal, Self
 
 from agent.review_guide.buttons import APPROVE, LOOKS_GOOD, MARK_READY
@@ -25,6 +28,21 @@ from agent.slack.tools.reply import slack_reply
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
 )
+# Each tool reads the whole walk and writes it back, and one model message's tool calls run
+# concurrently, so they take turns per thread or the last write drops the others.
+_WALK_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _one_at_a_time[**P](
+    tool: Callable[P, Awaitable[dict[str, Any]]],
+) -> Callable[P, Awaitable[dict[str, Any]]]:
+    @wraps(tool)
+    async def serialized(*args: P.args, **kwargs: P.kwargs) -> dict[str, Any]:
+        thread_id = RunConfig.from_runtime().thread_id or ""
+        async with _WALK_LOCKS.setdefault(thread_id, asyncio.Lock()):
+            return await tool(*args, **kwargs)
+
+    return serialized
 
 
 @dataclass
@@ -38,9 +56,8 @@ class _State:
     async def load(cls) -> Self:
         ctx = await GuideContext.current()
         changes = await ctx.changes()
-        return cls(
-            ctx=ctx, changes=changes, unseen=await ctx.unseen(changes), walk=ctx.walk(changes)
-        )
+        walk = ctx.walk(changes)
+        return cls(ctx=ctx, changes=changes, unseen=await ctx.unseen(changes, walk), walk=walk)
 
     @property
     def left(self) -> list[ChangedLine]:
@@ -107,6 +124,7 @@ async def _post(state: _State, chunk: Group, replaced: Group | None) -> dict[str
     return state.report(shown=chunk.title)
 
 
+@_one_at_a_time
 async def show_chunk(
     title: str, show: list[FileRanges], explanation: str, other: list[FileRanges] | None = None
 ) -> dict[str, Any]:
@@ -122,6 +140,7 @@ async def show_chunk(
     return await _post(state, chunk, replaced)
 
 
+@_one_at_a_time
 async def show_queued() -> dict[str, Any]:
     """Implement the `show_queued` tool."""
     try:
@@ -136,6 +155,7 @@ async def show_queued() -> dict[str, Any]:
     return await _post(state, state.walk.queue[0], replaced)
 
 
+@_one_at_a_time
 async def queue_chunk(
     title: str, show: list[FileRanges], explanation: str, other: list[FileRanges] | None = None
 ) -> dict[str, Any]:
@@ -149,6 +169,7 @@ async def queue_chunk(
     return state.report(queued=chunk.title)
 
 
+@_one_at_a_time
 async def edit_queue(keep: list[int]) -> dict[str, Any]:
     """Implement the `edit_queue` tool."""
     try:
@@ -164,6 +185,7 @@ async def edit_queue(keep: list[int]) -> dict[str, Any]:
     return state.report()
 
 
+@_one_at_a_time
 async def move_to_other(files: list[FileRanges], restore: bool = False) -> dict[str, Any]:
     """Implement the `move_to_other` tool."""
     try:
@@ -181,6 +203,7 @@ async def move_to_other(files: list[FileRanges], restore: bool = False) -> dict[
     return state.report()
 
 
+@_one_at_a_time
 async def skip_changes(
     reason: str, files: list[FileRanges] | None = None, include_other: bool = False
 ) -> dict[str, Any]:
@@ -206,6 +229,7 @@ async def skip_changes(
     return state.report(skipped_lines=len(lines))
 
 
+@_one_at_a_time
 async def show_other(description: str) -> dict[str, Any]:
     """Implement the `show_other` tool."""
     try:
@@ -237,6 +261,7 @@ async def show_other(description: str) -> dict[str, Any]:
     return state.report(shown="Other")
 
 
+@_one_at_a_time
 async def end_walkthrough(message: str = "", archive: bool = False) -> dict[str, Any]:
     """Implement the `end_walkthrough` tool."""
     try:

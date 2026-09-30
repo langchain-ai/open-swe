@@ -9,6 +9,7 @@ again after a rebase or force-push.
 import hashlib
 import re
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -43,6 +44,8 @@ class FileChange:
     # Binary, mode-only and empty-file changes have no lines to show.
     textless: bool = False
     deleted: bool = False
+    # Hash of the file's diff header, whose blob ids and modes change with its content.
+    fingerprint: str = ""
 
     def stat(self, lines: list[ChangedLine] | None = None) -> str:
         chosen = self.lines if lines is None else lines
@@ -65,6 +68,7 @@ def parse(diff: str) -> list[FileChange]:
         change = files[-1]
         change.textless = not change.lines
         change.deleted = any(line.startswith("deleted file mode") for line in header)
+        change.fingerprint = hashlib.sha256("\n".join(header).encode()).hexdigest()
 
     for line in diff.splitlines():
         if line.startswith("diff --git "):
@@ -99,14 +103,30 @@ def parse(diff: str) -> list[FileChange]:
     return files
 
 
-def unseen(files: list[FileChange], seen: Counter[str]) -> list[ChangedLine]:
-    """The changed lines not yet approved, each approval consuming one matching line."""
+def unseen(
+    files: list[FileChange],
+    seen: Counter[str],
+    approved: Collection[tuple[str, Sign, int]] = (),
+) -> list[ChangedLine]:
+    """The changed lines not yet approved, each approval consuming one matching line.
+
+    ``approved`` names the exact (path, sign, lineno) occurrences approved at this
+    head; they settle first, so of two identical lines the one the reader approved
+    is the one that counts as seen.
+    """
     remaining = Counter(seen)
+    lines = [line for file in files for line in file.lines]
+    settled: set[int] = set()
+    for index, line in enumerate(lines):
+        if (line.path, line.sign, line.lineno) in approved and remaining[line.key] > 0:
+            remaining[line.key] -= 1
+            settled.add(index)
     out: list[ChangedLine] = []
-    for file in files:
-        for line in file.lines:
-            if remaining[line.key] > 0:
-                remaining[line.key] -= 1
-            else:
-                out.append(line)
+    for index, line in enumerate(lines):
+        if index in settled:
+            continue
+        if remaining[line.key] > 0:
+            remaining[line.key] -= 1
+        else:
+            out.append(line)
     return out

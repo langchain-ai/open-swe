@@ -20,6 +20,7 @@ from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.review_guide.walk import Walk
+from agent.users.models import User
 from agent.utils.json_types import JsonObject
 
 ASSISTANT_ID = "review-guide"
@@ -68,6 +69,11 @@ class ReviewGuideSession(Base):
     @property
     def closed(self) -> bool:
         return self.closed_at is not None
+
+    async def is_reader(self, slack_user_id: str) -> bool:
+        """Whether this Slack member is the person being walked through; only they approve."""
+        user = await User.for_identity("slack", slack_user_id) if slack_user_id else None
+        return user is not None and user.id == self.user_id
 
     async def set_closed(self, closed: bool) -> None:
         """Close the session so nothing but a person's message wakes it, or reopen it."""

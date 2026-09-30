@@ -9,7 +9,7 @@ import shlex
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 GIT_TIMEOUT_SECONDS = 300
-_DIFF = "git -c core.quotePath=false diff --no-color --no-ext-diff --no-renames"
+_DIFF = "git -c core.quotePath=false diff --no-color --no-ext-diff --no-renames --full-index"
 _BASE_REF = "refs/review-guide/base"
 _HEAD_REF = "refs/review-guide/head"
 _MERGE_BASE_REF = "refs/review-guide/merge-base"

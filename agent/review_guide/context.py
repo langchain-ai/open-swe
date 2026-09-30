@@ -5,7 +5,7 @@ from typing import Self
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from agent.review_guide import git
-from agent.review_guide.diff import ChangedLine, FileChange, parse, unseen
+from agent.review_guide.diff import ChangedLine, FileChange, parse
 from agent.review_guide.render import MessageRenderer, render_chunk
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.review_guide.walk import LineRef, Walk
@@ -64,8 +64,8 @@ class GuideContext:
     async def changes(self) -> list[FileChange]:
         return parse(await git.pr_diff(self.backend, self.repo_dir))
 
-    async def unseen(self, changes: list[FileChange]) -> list[ChangedLine]:
-        return unseen(changes, await self.session.seen_lines())
+    async def unseen(self, changes: list[FileChange], walk: Walk) -> list[ChangedLine]:
+        return walk.unseen(changes, await self.session.seen_lines())
 
     def walk(self, changes: list[FileChange]) -> Walk:
         """The walkthrough of the checkout's head, started fresh when the head moved."""

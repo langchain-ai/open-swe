@@ -7,12 +7,14 @@ in Other, or skipped at the reader's request; the walkthrough cannot finish
 while any line is left or on screen, or while Other has not been shown.
 """
 
+from collections import Counter
 from collections.abc import Iterable
 from typing import Literal, Self
 
 from pydantic import BaseModel
 
 from agent.review_guide.diff import ChangedLine, FileChange, Sign
+from agent.review_guide.diff import unseen as unseen_lines
 
 GroupStatus = Literal["queued", "shown", "approved", "skipped"]
 OtherStatus = Literal["open", "shown", "approved", "skipped"]
@@ -110,6 +112,8 @@ class Walk(BaseModel):
     other: list[LineRef] = []
     # Binary, mode-only and empty-file changes: nothing to show, so always Other.
     other_files: list[str] = []
+    # Their diff fingerprints, so a push that changes one reopens an approved Other.
+    other_file_fingerprints: list[str] = []
     other_status: OtherStatus = "open"
     other_message_ts: str = ""
     other_message_text: str = ""
@@ -118,7 +122,12 @@ class Walk(BaseModel):
 
     @classmethod
     def start(cls, head_sha: str, changes: list[FileChange]) -> Self:
-        return cls(head_sha=head_sha, other_files=[c.path for c in changes if c.textless])
+        textless = [c for c in changes if c.textless]
+        return cls(
+            head_sha=head_sha,
+            other_files=[c.path for c in textless],
+            other_file_fingerprints=[c.fingerprint for c in textless],
+        )
 
     def moved_to(self, head_sha: str, changes: list[FileChange]) -> tuple[Self, list[Group]]:
         """This walkthrough on a new head, following every line by content.
@@ -159,6 +168,10 @@ class Walk(BaseModel):
                 gone.append(group)
         moved.other = take(self.other, whole=False)
         moved.other_status = self.other_status
+        if self.other_status == "approved" and not set(moved.other_file_fingerprints) <= set(
+            self.other_file_fingerprints
+        ):
+            moved.other_status = "open"
         moved.other_message_ts = self.other_message_ts
         moved.other_message_text = self.other_message_text
         return moved, gone
@@ -180,6 +193,13 @@ class Walk(BaseModel):
         queue = self.queue
         kept = [queue[p - 1] for p in positions]
         self.groups = [g for g in self.groups if g.status != "queued"] + kept
+
+    def unseen(self, changes: list[FileChange], seen: Counter[str]) -> list[ChangedLine]:
+        """The changed lines not yet approved, this walkthrough's own approvals by position."""
+        refs = [ref for g in self.groups if g.status == "approved" for ref in g.lines]
+        if self.other_status == "approved":
+            refs += self.other
+        return unseen_lines(changes, seen, {(ref.path, ref.sign, ref.lineno) for ref in refs})
 
     def left(self, unseen: list[ChangedLine]) -> list[ChangedLine]:
         """Unseen lines that are not queued, on screen, in Other, or skipped."""

@@ -1022,6 +1022,21 @@ async def slack_interactivity(
         )
         if not thread_id:
             return ignored("Slack thread is not associated")
+        # A review guide's "Looks good" is recorded by the server, never by the model, and
+        # only for the person being walked through: approval marks their lines as reviewed.
+        guide = (
+            await ReviewGuideSession.for_channel(channel_id)
+            if in_code_channel and response == LOOKS_GOOD
+            else None
+        )
+        if guide is not None:
+            if not await guide.is_reader(user_id):
+                return ignored("Only the review guide's reader can approve its chunks")
+            background_tasks.add_task(
+                _update_selected_option_message, interaction, action, response
+            )
+            background_tasks.add_task(advance, channel_id, interaction.message_ts)
+            return accepted("Slack option queued")
         repo = await common.get_slack_repo_config(
             channel_id,
             option_thread_ts,
@@ -1046,15 +1061,7 @@ async def slack_interactivity(
             explicit_request=in_code_channel,
         )
 
-        # A review guide's "Looks good" is recorded by the server, never by the model.
-        if (
-            in_code_channel
-            and response == LOOKS_GOOD
-            and await ReviewGuideSession.for_channel(channel_id) is not None
-        ):
-            background_tasks.add_task(advance, channel_id, interaction.message_ts)
-        else:
-            background_tasks.add_task(service.process_slack_mention, request, repo)
+        background_tasks.add_task(service.process_slack_mention, request, repo)
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)

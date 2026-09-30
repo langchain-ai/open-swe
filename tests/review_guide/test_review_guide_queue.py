@@ -47,6 +47,40 @@ def test_queued_lines_are_held_and_a_pr_update_drops_the_queue() -> None:
     assert moved.on_screen() is not None
 
 
+def test_approving_one_of_two_identical_lines_leaves_the_other() -> None:
+    changes = parse(
+        "diff --git a/b.py b/b.py\nnew file mode 100644\n--- /dev/null\n+++ b/b.py\n"
+        "@@ -0,0 +1,2 @@\n+pass\n+pass\n"
+    )
+    walk = Walk.start("head-1", changes)
+    walk.groups = [Group(title="Second", lines=_refs(changes, 2), status="approved")]
+
+    left = walk.left(walk.unseen(changes, Counter({changes[0].lines[1].key: 1})))
+
+    assert [line.lineno for line in left] == [1]
+    assert walk.unfinished(walk.unseen(changes, Counter({changes[0].lines[1].key: 1})))
+
+
+def _binary(path: str, blob: str) -> str:
+    return (
+        f"diff --git a/{path} b/{path}\nindex {'0' * 40}..{blob * 40} 100644\n"
+        f"Binary files a/{path} and b/{path} differ\n"
+    )
+
+
+def test_a_push_that_changes_a_binary_file_reopens_an_approved_other() -> None:
+    walk = Walk.start("head-1", parse(_binary("logo.png", "a")))
+    walk.other_status = "approved"
+
+    unchanged, _ = walk.moved_to("head-2", parse(_binary("logo.png", "a")))
+    changed, _ = walk.moved_to("head-3", parse(_binary("logo.png", "b")))
+    added, _ = walk.moved_to("head-4", parse(_binary("logo.png", "a") + _binary("new.png", "c")))
+
+    assert unchanged.other_status == "approved"
+    assert changed.other_status == "open"
+    assert added.other_status == "open"
+
+
 @dataclass
 class _Session:
     walk: Walk

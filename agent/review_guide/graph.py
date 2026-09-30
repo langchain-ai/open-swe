@@ -43,7 +43,7 @@ from agent.review.walkthrough import Walkthrough
 from agent.review_guide import git
 from agent.review_guide.advance import approve_click
 from agent.review_guide.context import guide_repo_dir
-from agent.review_guide.diff import parse, unseen
+from agent.review_guide.diff import parse
 from agent.review_guide.github import fetch_head
 from agent.review_guide.messages import resume, retire
 from agent.review_guide.sessions import ReviewGuideSession
@@ -195,7 +195,7 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
             walk = Walk.start(head.head.sha, changes)
         approve_ts = RunConfig.from_config(self._config).review_guide_approve_ts
         approved = await approve_click(session, walk, approve_ts) if approve_ts else None
-        status = walk.status(unseen(changes, await session.seen_lines()))
+        status = walk.status(walk.unseen(changes, await session.seen_lines()))
         updates["messages"] = [
             HumanMessage(
                 content=prompt(
