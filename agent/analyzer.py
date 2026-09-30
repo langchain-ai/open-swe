@@ -34,6 +34,7 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     ToolErrorMiddleware,
 )
+from agent.middleware.common_prompt import common_general_purpose_subagent
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
@@ -152,6 +153,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
         system_prompt="",
+        subagents=[{**common_general_purpose_subagent(), "skills": [SKILLS_ROUTE]}],
         tools=apply_tool_descriptions([save_review_style_prompt, read_finding_outcomes]),
         backend=backend,
         skills=[SKILLS_ROUTE],

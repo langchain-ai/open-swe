@@ -57,6 +57,7 @@ from agent.middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
+from agent.middleware.common_prompt import CommonPromptMiddleware, common_general_purpose_subagent
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
@@ -122,6 +123,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                CommonPromptMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
@@ -999,7 +1001,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 http_request,
             ]
         ),
-        subagents=[_reviewer_subagent(reviewer_subagent_model)],
+        subagents=[
+            common_general_purpose_subagent(),
+            _reviewer_subagent(reviewer_subagent_model),
+        ],
         backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],

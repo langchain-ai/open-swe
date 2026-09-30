@@ -49,6 +49,7 @@ from agent.middleware import (
     SanitizeThinkingBlocksMiddleware,
     ToolErrorMiddleware,
 )
+from agent.middleware.common_prompt import CommonPromptMiddleware
 from agent.middleware.prepare_run import PrepareRunState
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.run_config import RunConfig
@@ -92,6 +93,7 @@ def _chat_general_purpose_subagent() -> SubAgent:
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                CommonPromptMiddleware(),
                 FilesystemMiddleware(tools=["read_file", "ls", "glob", "grep"]),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelCallTimeoutMiddleware(),

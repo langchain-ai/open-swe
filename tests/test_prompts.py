@@ -2,8 +2,13 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
-from agent.prompt import _deployment_context, construct_system_prompt
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.prompts import (
+    _deployment_context,
+    apply_tool_descriptions,
+    common_prompt,
+    load_prompt,
+    prompt,
+)
 
 
 @pytest.mark.parametrize(
@@ -35,10 +40,10 @@ def test_deployment_context(
         monkeypatch.setenv(name, value)
 
     assert _deployment_context() == expected
-    assert f"**{expected[0]}**" in construct_system_prompt("/root")
+    assert f"**{expected[0]}**" in common_prompt()
 
     monkeypatch.setenv("OPENSWE_ENV", "staging")
-    assert "**staging**" in construct_system_prompt("/root")
+    assert "**staging**" in common_prompt()
 
 
 def sample_tool(value: str) -> str:

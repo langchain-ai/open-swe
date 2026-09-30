@@ -109,16 +109,6 @@ def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
     return "system/working-environment"
 
 
-def _deployment_context() -> tuple[str, str]:
-    """Identify the agent service deployment from explicit configuration."""
-    if configured := ENV.OPENSWE_ENV.optional():
-        environment = configured.lower()
-        return "production" if environment == "prod" else environment, "OPENSWE_ENV"
-    if ENV.LANGSMITH_LANGGRAPH_API_VARIANT.optional() == "local_dev":
-        return "local", "LANGSMITH_LANGGRAPH_API_VARIANT"
-    return "unknown", "no explicit environment or local runtime marker"
-
-
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
@@ -149,7 +139,6 @@ def construct_system_prompt(
     git-identity steps a hosted sandbox needs would rewrite their checkout.
     """
     del linear_project_id, linear_issue_number
-    deployment_environment, deployment_source = _deployment_context()
     return prompt(
         "system/main",
         working_dir=working_dir,
@@ -170,8 +159,6 @@ def construct_system_prompt(
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",
-            deployment_environment=deployment_environment,
-            deployment_source=deployment_source,
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),

@@ -35,6 +35,7 @@ from agent.middleware import (
     StableToolResultOrderMiddleware,
     ToolErrorMiddleware,
 )
+from agent.middleware.common_prompt import common_general_purpose_subagent
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import apply_tool_descriptions, prompt
@@ -258,6 +259,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
+        subagents=[common_general_purpose_subagent()],
         tools=apply_tool_descriptions([commit_walkthrough_step, record_human_input]),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(

@@ -15,11 +15,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
+from agent.chat import _chat_general_purpose_subagent
 from agent.input_messages import human_input, person_introduction
+from agent.middleware.common_prompt import common_general_purpose_subagent
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.middleware.require_user_reply import RequireUserReplyMiddleware
+from agent.reviewer import _reviewer_subagent
 from agent.run_config import RunConfig
 from agent.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
 from agent.utils import ttl_cache
@@ -33,6 +36,39 @@ class DummyPrepareMiddleware(BasePrepareRunMiddleware):
     async def _prepare(self, state, runtime):
         self.calls += 1
         return {"work_dir": "/tmp/work", "rendered_system_prompt": "prepared prompt"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_kind", ["default", "reviewer", "chat"])
+async def test_isolated_subagents_receive_current_service_context(
+    monkeypatch: pytest.MonkeyPatch, agent_kind: str
+) -> None:
+    model = FakeListChatModel(responses=["unused"])
+    specs = {
+        "default": common_general_purpose_subagent(),
+        "reviewer": _reviewer_subagent(model),
+        "chat": _chat_general_purpose_subagent(),
+    }
+    spec = specs[agent_kind]
+    seen: list[str] = []
+
+    @wrap_model_call
+    async def capture(
+        request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
+    ) -> ModelResponse:
+        assert request.system_message is not None
+        seen.append(request.system_message.text)
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    graph = create_deep_agent(
+        model=model,
+        system_prompt=spec.get("system_prompt", ""),
+        middleware=[*spec.get("middleware", []), capture],
+    )
+    for environment in ("preview", "staging"):
+        monkeypatch.setenv("OPENSWE_ENV", environment)
+        await graph.ainvoke({"messages": [HumanMessage(content="Investigate")]})
+        assert seen[-1].count(f"**{environment}**") == 1
 
 
 @pytest.mark.asyncio
@@ -157,7 +193,9 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
 @pytest.mark.parametrize("requested_model", [None, "openai:gpt-5.4"])
 async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
     requested_model: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("OPENSWE_ENV", "preview")
     middleware = DummyPrepareMiddleware()
     fork_prompts: list[str] = []
     fingerprints: list[str] = []
@@ -166,6 +204,8 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
     async def scripted_model(
         request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
     ) -> ModelResponse | ExtendedModelResponse:
+        assert request.system_message is not None
+        assert request.system_message.text.count("**preview**") == 1
         if request.state.get("_deepagents_forked_context"):
             assert request.state.get("run_prepared") is True
             assert request.state["requested_model"] == requested_model

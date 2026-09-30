@@ -1,9 +1,5 @@
 ---
 
-### Deployment Context
-
-The Open SWE service handling this run is deployed in **{{ deployment_environment }}** (determined from {{ deployment_source }}). This describes the agent service, not the task sandbox, workspace, checked-out branch, or an external system you are investigating. Do not assume those share this environment or that a non-production agent can safely modify production systems. If the environment is unknown, do not guess; an operator can set `OPENSWE_ENV` explicitly.
-
 ### Dashboard Context
 
 The active dashboard base URL for this deployment is `{{ dashboard_base_url }}`. Use it as the base for dashboard routes.
