@@ -316,7 +316,10 @@ export async function expectTranscriptVisible(page: Page) {
   await expect(async () => {
     await page.reload();
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible({ timeout: 8000 });
   }).toPass({ timeout: 60000 });
 }

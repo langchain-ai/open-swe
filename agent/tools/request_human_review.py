@@ -1,4 +1,4 @@
-"""Tools that ask people in Slack to review a pull request, and assign one when nobody signs up."""
+"""Tools that ask people in Slack to review a pull request, assign a reviewer, or dismiss the ask."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -8,8 +8,9 @@ from langgraph.config import get_config
 
 from agent.dashboard import repo_access
 from agent.github.token import resolve_github_token
+from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
-from agent.human_review.standard import Origin, assign, request_review
+from agent.human_review.standard import Origin, assign, request_review, start_auto_assign
 from agent.run_config import RunConfig
 from agent.slack.cards import run_slack_location
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
@@ -66,11 +67,12 @@ async def request_human_review(
     result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
     if not result.success:
         return _failure(result.error)
-    posted = (
-        "This pull request already has an open review request; no new card was posted."
-        if result.reused
-        else "The review card is posted."
-    )
+    if result.summary_updated:
+        posted = "The open review card now shows your new inline_summary."
+    elif result.reused:
+        posted = "This pull request already has an open review request; no new card was posted."
+    else:
+        posted = "The review card is posted."
     return {
         "success": True,
         "request_id": result.request_id,
@@ -80,13 +82,34 @@ async def request_human_review(
     }
 
 
+async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[str, Any]:
+    """Implement the `dismiss_human_review_request` tool."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return _failure("pr_url must be a canonical GitHub pull request URL")
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if request is None:
+        return _failure("This pull request has no open review request to dismiss.")
+    thread_id = RunConfig.from_config(get_config()).thread_id
+    if not thread_id:
+        return _failure("No executable agent thread is available")
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
+    if not await dismiss_by(request, "Open SWE", reason):
+        return _failure("This review request is already closed.")
+    return {
+        "success": True,
+        "next": "The card is marked dismissed. Call request_human_review to post a new one.",
+    }
+
+
 async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = "") -> dict[str, Any]:
     """Implement the `assign_human_reviewer` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if request is None or request.kind != "standard":
+    if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
     thread_id = RunConfig.from_config(get_config()).thread_id
     # Only the thread woken to pick a reviewer may pick one.
@@ -100,4 +123,26 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     return {
         "success": True,
         "next": "They are tagged on the card and messaged directly. Nothing else to post.",
+    }
+
+
+async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
+    """Implement the `auto_assign_human_reviewer` tool."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return _failure("pr_url must be a canonical GitHub pull request URL")
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if request is None or request.kind == "expedited":
+        return _failure("This pull request has no open review request to assign a reviewer to.")
+    thread_id = RunConfig.from_config(get_config()).thread_id
+    if not thread_id:
+        return _failure("No executable agent thread is available")
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
+    if not await start_auto_assign(request, asked=True):
+        return _failure("Open SWE could not start picking a reviewer for this pull request.")
+    return {
+        "success": True,
+        "next": "Open SWE is picking a reviewer; whoever it picks is tagged in the review's "
+        "Slack thread and messaged directly. Tell the person who asked, and post nothing else.",
     }

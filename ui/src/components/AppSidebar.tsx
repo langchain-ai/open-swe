@@ -20,7 +20,6 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
-import { useFeatureFlagsPanel } from "@/lib/featureFlags"
 import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
@@ -30,7 +29,6 @@ interface NavItem {
   label: string
   icon: IconType
   adminOnly?: boolean
-  featureFlagsOnly?: boolean
 }
 
 const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
@@ -44,7 +42,6 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         to: "/feature-flags",
         label: "Feature Flags",
         icon: IoFlaskOutline,
-        featureFlagsOnly: true,
       },
     ],
   },
@@ -99,7 +96,6 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
-  const showFeatureFlags = useFeatureFlagsPanel()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -127,11 +123,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
 
       <nav className="flex flex-1 flex-col gap-5 px-2">
         {NAV.map((group) => {
-          const items = group.items.filter(
-            (i) =>
-              (!i.adminOnly || user.is_admin) &&
-              (!i.featureFlagsOnly || showFeatureFlags)
-          )
+          const items = group.items.filter((i) => !i.adminOnly || user.is_admin)
           if (items.length === 0) return null
           return (
             <div key={group.heading} className="flex flex-col gap-0.5">

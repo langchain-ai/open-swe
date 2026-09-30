@@ -6,7 +6,7 @@ import { SubagentActivity } from "./SubagentActivity"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { useOptionalThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 export function asString(value: unknown): string {
@@ -23,7 +23,7 @@ export const SubagentCard = memo(function SubagentCard({
   chunk: ToolExecutionChunk
 }) {
   const inLiveStream = useIsInAgentThreadStream()
-  const source = useThreadSource()
+  const source = useOptionalThreadSource()
   const input = chunk.input ?? {}
   const subagentType = asString(input.subagent_type) || "subagent"
   const description = asString(input.description)
@@ -49,7 +49,7 @@ export const SubagentCard = memo(function SubagentCard({
         <span className="truncate text-[11px] font-medium text-muted-foreground">
           {subagentType}
         </span>
-        {source.kind === "transcript" && namespace && namespace.length > 0 && (
+        {source?.kind === "transcript" && namespace && namespace.length > 0 && (
           <Link
             to="/agents/$threadId"
             params={{ threadId: source.threadId }}

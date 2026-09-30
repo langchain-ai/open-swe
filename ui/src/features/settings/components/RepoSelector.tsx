@@ -5,7 +5,9 @@ import {
   FolderIcon,
 } from "@phosphor-icons/react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Command,
   CommandGroup,
@@ -19,7 +21,7 @@ import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
-type RepoOption = { full_name: string }
+type RepoOption = { full_name: string; private?: boolean; archived?: boolean }
 
 const EMPTY_SELECTION_VALUE = "__no_repository__"
 
@@ -37,6 +39,7 @@ interface RepoSelectorProps {
   dropdownClassName?: string
   side?: "top" | "bottom"
   disabled?: boolean
+  allowArchived?: boolean
 }
 
 export function RepoSelector({
@@ -53,17 +56,21 @@ export function RepoSelector({
   dropdownClassName,
   side = "bottom",
   disabled = false,
+  allowArchived = false,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [showArchived, setShowArchived] = useState(false)
   const refresh = useRefreshRepos()
 
   const filteredRepos = useMemo(() => {
-    const all = repos ?? []
     const q = query.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
-  }, [repos, query])
+    return (repos ?? []).filter(
+      (repo) =>
+        ((allowArchived && showArchived) || !repo.archived) &&
+        repo.full_name.toLowerCase().includes(q)
+    )
+  }, [repos, query, showArchived, allowArchived])
 
   const select = (repo: string | null) => {
     onRepoChange(repo)
@@ -125,6 +132,15 @@ export function RepoSelector({
                 {refresh.isPending ? <Spinner /> : <ArrowsClockwiseIcon />}
               </TooltipIconButton>
             </div>
+            {allowArchived && repos?.some((repo) => repo.archived) && (
+              <label className="flex cursor-pointer items-center gap-2 border-b border-border px-2.5 py-1.5 text-muted-foreground">
+                <Checkbox
+                  checked={showArchived}
+                  onCheckedChange={(checked) => setShowArchived(checked)}
+                />
+                Show archived
+              </label>
+            )}
             <CommandList>
               <CommandGroup>
                 <CommandItem
@@ -154,7 +170,15 @@ export function RepoSelector({
                           selected ? "text-foreground" : "text-muted-foreground"
                         }
                       >
-                        <span className="truncate">{repo.full_name}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          {repo.full_name}
+                        </span>
+                        {repo.private !== undefined && (
+                          <Badge variant="outline" className="rounded-sm">
+                            {repo.private ? "Private" : "Public"}
+                            {repo.archived ? " archive" : ""}
+                          </Badge>
+                        )}
                       </CommandItem>
                     )
                   })

@@ -41,7 +41,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     // The transcript that started in Slack is here too (incl. the PR link).
     const pullRequestLink = page
-      .getByRole("link", { name: "Add greet() helper" })
+      .getByRole("main")
+      .getByRole("link", { name: "Add greet() helper", exact: true })
       .first();
     await expect(pullRequestLink).toBeVisible();
     // The hover card exists only once the thread's PR list has loaded; the PR

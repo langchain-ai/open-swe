@@ -48,7 +48,12 @@ async def test_list_repos_follows_installation_and_repository_next_links(
         if request.url.path == "/user/installations/123/repositories":
             if request.url.params.get("page") == "2":
                 return httpx.Response(
-                    200, json={"repositories": [{"full_name": "acme/later", "private": True}]}
+                    200,
+                    json={
+                        "repositories": [
+                            {"full_name": "acme/later", "private": True, "archived": True}
+                        ]
+                    },
                 )
             return httpx.Response(
                 200,
@@ -62,6 +67,12 @@ async def test_list_repos_follows_installation_and_repository_next_links(
         )
 
     mock_github_sdk(monkeypatch, handle)
+    payload = await dashboard_routes.list_repos(session={"sub": "octocat"})
+    assert payload["repositories"] == [
+        {"full_name": "acme/first", "private": False, "archived": False},
+        {"full_name": "acme/later", "private": True, "archived": True},
+        {"full_name": "other/api", "private": True, "archived": False},
+    ]
     assert await repos.accessible_repo_full_names("octocat") == {
         "acme/first",
         "acme/later",

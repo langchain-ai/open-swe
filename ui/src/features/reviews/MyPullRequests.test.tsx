@@ -515,8 +515,8 @@ describe("My PRs", () => {
     vi.mocked(api.repos).mockResolvedValue({
       installations: [],
       repositories: [
-        { full_name: "acme/app", private: false },
-        { full_name: "acme/other", private: true },
+        { full_name: "acme/app", private: false, archived: false },
+        { full_name: "acme/other", private: true, archived: false },
       ],
     })
     mount()
@@ -786,9 +786,9 @@ describe("My PRs", () => {
     vi.mocked(api.repos).mockResolvedValue({
       installations: [],
       repositories: [
-        { full_name: "globex/quiet", private: false },
-        { full_name: "acme/other", private: true },
-        { full_name: "acme/app", private: false },
+        { full_name: "globex/quiet", private: false, archived: false },
+        { full_name: "acme/other", private: true, archived: false },
+        { full_name: "acme/app", private: false, archived: false },
       ],
     })
     mount()

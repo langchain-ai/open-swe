@@ -37,6 +37,26 @@ const AUTH_MODE_LABELS: Record<AuthMode, string> = {
   oauth: "OAuth client credentials",
 }
 
+function editableValues(connection?: MCPConnectionUpdate): string {
+  const oauth = connection?.oauth
+  return JSON.stringify([
+    connection?.name ?? "",
+    connection?.url ?? "",
+    connection?.transport ?? "streamable_http",
+    connection?.enabled ?? true,
+    [...(connection?.allowed_tools ?? [])].sort(),
+    oauth
+      ? [
+          oauth.token_url,
+          oauth.client_id,
+          oauth.scope ?? "",
+          oauth.token_endpoint_auth_method ?? "client_secret_post",
+          oauth.client_secret ?? "",
+        ]
+      : null,
+  ])
+}
+
 export type MCPScope = "instance" | "workspace" | "user"
 
 type MCPScopeConfig = {
@@ -132,6 +152,13 @@ export function MCPConnectionsSection({
   const savedConnection = connections.data?.find(
     (connection) => connection.name === draft?.name
   )
+  const dirty =
+    draft !== null &&
+    (editableValues(draft) !==
+      editableValues(draft.existing ? savedConnection : undefined) ||
+      (replaceHeaders &&
+        (headers.length > 0 ||
+          (savedConnection?.header_names.length ?? 0) > 0)))
   const toolDescriptions = new Map(
     catalog.map((tool) => [tool.name, tool.description])
   )
@@ -709,7 +736,7 @@ export function MCPConnectionsSection({
             </Button>
           )}
           <Button type="button" size="sm" variant="ghost" onClick={closeEditor}>
-            Cancel
+            {dirty ? "Cancel" : "Close"}
           </Button>
         </div>
       </fieldset>
