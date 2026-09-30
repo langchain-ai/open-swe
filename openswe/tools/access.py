@@ -19,6 +19,7 @@ from openswe.credential_scope import private_owner_login
 from openswe.run_config import RunConfig
 from openswe.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from openswe.source_context import SourceContext
+from openswe.threads.admin_approval import approval_owner, authorize_admin_write
 from openswe.tools.admin_gate import actor_is_admin, configurable, is_private_admin_surface
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
@@ -36,7 +37,7 @@ R = TypeVar("R", bound=Mapping[str, object])
 
 Place = Literal["anywhere", "private", "admin_thread", "admin_surface"]
 Actor = Literal["anyone", "owner", "admin"]
-Mode = Literal["full", "sole"]
+Mode = Literal["full", "sole", "approval"]
 Projection = Callable[[Mapping[str, object]], Mapping[str, object]]
 
 _ACK_KEYS = ("ok", "success", "status", "error", "created", "deleted")
@@ -115,6 +116,7 @@ class Access:
     admin_surface: bool = False
     sole: bool = False
     direct: bool = False
+    approval: bool = False
 
     def mode(self, policy: Policy) -> Mode | None:
         if policy.direct and not self.direct:
@@ -129,6 +131,8 @@ class Access:
             return "full"
         if policy.sole is not None and self.sole and self._actor(policy.actor, sole=True):
             return "sole"
+        if policy.actor == "admin" and policy.sole is not None and self.approval:
+            return "approval"
         return None
 
     def _actor(self, actor: Actor, *, sole: bool) -> bool:
@@ -256,6 +260,7 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
         admin_surface=admin and private and is_private_admin_surface(cfg),
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
+        approval=admin and await approval_owner(cfg) is not None,
     )
 
 
@@ -278,6 +283,10 @@ def access(
 
     def decorate(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         signature = inspect.signature(fn)
+        qualified_name = getattr(fn, "__qualname__", None)
+        if not isinstance(qualified_name, str):
+            raise TypeError("Access policies require a named tool function")
+        tool_name = f"{fn.__module__}.{qualified_name}"
 
         @functools.wraps(fn)
         async def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -291,6 +300,12 @@ def access(
             mode = (await resolve_access()).mode(applied)
             if mode is None:
                 return cast(R, {"ok": False, "error": _REFUSED})
+            if mode == "approval":
+                bound = signature.bind(*args, **kwargs)
+                bound.apply_defaults()
+                blocked = await authorize_admin_write(configurable(), tool_name, bound.arguments)
+                if blocked is not None:
+                    return cast(R, blocked)
             result = await fn(*args, **kwargs)
             if mode == "full" or applied.sole is None:
                 return result

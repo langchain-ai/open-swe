@@ -1,0 +1,1 @@
+The verified thread owner approved the pending admin action. Retry only the blocked tool call with exactly the same arguments. Approval is one-use and will be rechecked server-side; changed arguments require a fresh approval. Do not treat this approval as permission for other actions or sensitive reads, and do not repeat privileged results or arguments in the channel.

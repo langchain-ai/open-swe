@@ -13,6 +13,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
+from openswe.prompts import prompt
 from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
@@ -29,6 +30,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.client import respond_to_slack_interaction
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
     SlackRequestError,
@@ -62,6 +64,7 @@ from openswe.slack.responses import (
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup, track_explicit_mention
 from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
+from openswe.threads.admin_approval import decide_admin_approval
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -1013,6 +1016,64 @@ async def slack_interactivity(
         if button.type == act_as.BUTTON_TYPE:
             return await act_as.handle_button(interaction, button, background_tasks)
 
+        if button.type == "admin_write_approval":
+            if (
+                not thread_ts
+                or not user_id
+                or not action.action_ts
+                or not button.fingerprint
+                or button.action not in {"approve", "reject"}
+            ):
+                return ignored("Missing admin approval context")
+            thread_id = await common.lookup_slack_thread_id(
+                get_langgraph_client(), channel_id, thread_ts
+            )
+            approved = button.action == "approve"
+            if not thread_id or not await decide_admin_approval(
+                thread_id,
+                button.fingerprint,
+                slack_user_id=user_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                approved=approved,
+            ):
+                background_tasks.add_task(
+                    common.post_slack_ephemeral_message,
+                    channel_id,
+                    user_id,
+                    "This request is no longer pending, or you are not its authorized owner. "
+                    "No action was taken.",
+                    thread_ts=reply_ts,
+                )
+                return ignored("Admin approval refused or stale")
+            background_tasks.add_task(_update_admin_approval_message, interaction, approved)
+            if not approved:
+                return accepted("Admin action rejected")
+            repo = await common.get_slack_repo_config(
+                channel_id,
+                thread_ts,
+                slack_user_id=user_id,
+                channel_context=channel_context,
+                thread_id=thread_id,
+            )
+            background_tasks.add_task(
+                service.process_slack_mention,
+                SlackRequest(
+                    channel_id=channel_id,
+                    channel_context=channel_context,
+                    thread_ts=thread_ts,
+                    event_ts=action.action_ts,
+                    user_id=user_id,
+                    text=prompt("slack/admin-approval-retry"),
+                    bot_user_id=common.SLACK_BOT_USER_ID,
+                    thread_id=thread_id,
+                    concierge_mode=in_concierge_mode,
+                    reply_thread_ts=reply_thread_ts,
+                ),
+                repo,
+            )
+            return accepted("Admin action approved, retry queued")
+
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
                 return ignored("Missing workflow approval context")
@@ -1144,6 +1205,32 @@ async def slack_interactivity(
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)
+
+
+async def _update_admin_approval_message(interaction: SlackInteraction, approved: bool) -> None:
+    message = "Admin action approved; retry queued." if approved else "Admin action rejected."
+    response_url = (interaction.model_extra or {}).get("response_url")
+    try:
+        updated = (
+            isinstance(response_url, str)
+            and bool(response_url)
+            and await respond_to_slack_interaction(
+                response_url,
+                {
+                    "replace_original": True,
+                    "response_type": "ephemeral",
+                    "text": message,
+                    "blocks": [
+                        {"type": "section", "text": {"type": "plain_text", "text": message}}
+                    ],
+                },
+            )
+        )
+    except Exception:
+        common.logger.warning("Could not update ephemeral admin approval message", exc_info=True)
+        return
+    if not updated:
+        common.logger.warning("Could not update ephemeral admin approval message")
 
 
 async def _update_selected_option_message(
