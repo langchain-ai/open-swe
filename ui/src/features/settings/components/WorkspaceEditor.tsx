@@ -136,7 +136,7 @@ export function WorkspaceEditor({
       </label>
       <div className="text-sm">
         <span className="inline-flex items-center gap-1.5">
-          Repositories
+          Bound repositories
           <Tooltip>
             <TooltipTrigger
               aria-label="About workspace repositories"
@@ -147,16 +147,16 @@ export function WorkspaceEditor({
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
               Threads in any workspace can use any repository the GitHub App can
-              access. Preferring a repository routes its GitHub issues, pull
+              access. Binding a repository routes its GitHub issues, pull
               requests, Linear tickets, and automations to this workspace and
-              preloads it into this workspace&apos;s sandbox image. Each
-              repository can be preferred by only one workspace.
+              preloads it into this workspace&apos;s sandbox image. A repository
+              is bound to one workspace.
             </TooltipPopup>
           </Tooltip>
         </span>
         <div
           role="group"
-          aria-label="Repositories"
+          aria-label="Bound repositories"
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (

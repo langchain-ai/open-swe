@@ -6,6 +6,10 @@ failing a required check. People sign up from the card; after
 pull request merges once every reviewer approves on GitHub, or once
 ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval, and only while
 it is otherwise ready.
+
+A ``posted`` request settles here too but never merges: its message gets an
+approved reaction, and once its pull request has sat green and unapproved for
+``UNCLAIMED_AFTER_MINUTES`` the agent picks a reviewer, the same way.
 """
 
 import logging
@@ -30,6 +34,7 @@ from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
 from agent.human_review.lifecycle import (
+    mark_approved,
     mark_merged,
     notify_agent,
     post_standard_card,
@@ -38,7 +43,7 @@ from agent.human_review.lifecycle import (
 )
 from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
-from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
 from agent.slack.blocks import escape
 from agent.slack.channels import SlackChannel
@@ -57,6 +62,10 @@ AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 DeadlineStep = Literal["unclaimed", "auto_merge"]
+SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
+# A deadline run may start a little before the wait its timer was set for has passed.
+_SCHEDULER_EARLINESS = timedelta(minutes=1)
+_DEADLINE_RETRY = timedelta(minutes=5)
 
 
 class RequestResult(BaseModel):
@@ -208,6 +217,28 @@ async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
     return result
 
 
+async def record_pull_request(
+    pr_ref: GitHubPrRef, token: str
+) -> tuple[PullRequest, PullRequestPayload] | None:
+    """Fetch the pull request and save what a review request shows of it; ``None`` if unavailable."""
+    payload = await fetch_pr(
+        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
+    )
+    if payload is None:
+        return None
+    details = PullRequestPayload.model_validate(payload)
+    pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    pull_request.title = details.title
+    pull_request.head_ref = details.head_ref
+    pull_request.base_ref = details.base_ref
+    pull_request.author = details.author
+    pull_request.author_github_id = details.author_id
+    pull_request.additions = details.additions
+    pull_request.deletions = details.deletions
+    pull_request.changed_files = details.changed_files
+    return await pull_request.save(), details
+
+
 async def request_review(
     pr_ref: GitHubPrRef, origin: Origin, *, channel: str = "", inline_summary: str | None = None
 ) -> RequestResult:
@@ -238,23 +269,10 @@ async def request_review(
     target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
     if isinstance(target, RequestResult):
         return target
-    payload = await fetch_pr(
-        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
-    )
-    if payload is None:
+    recorded = await record_pull_request(pr_ref, token)
+    if recorded is None:
         return _failure("Pull request is unavailable")
-    details = PullRequestPayload.model_validate(payload)
-
-    pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    pull_request.title = details.title
-    pull_request.head_ref = details.head_ref
-    pull_request.base_ref = details.base_ref
-    pull_request.author = details.author
-    pull_request.author_github_id = details.author_id
-    pull_request.additions = details.additions
-    pull_request.deletions = details.deletions
-    pull_request.changed_files = details.changed_files
-    pull_request = await pull_request.save()
+    pull_request, details = recorded
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
@@ -389,6 +407,30 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
+def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str, bool]:
+    """What the thread is told about a pick, and whether it bumps the post in the channel.
+
+    The deadline's wording is used only when its wait really passed; any other pick is
+    announced plainly.
+    """
+    now = datetime.now(UTC)
+    wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    if not request.has_card and request.ready_since and now - request.ready_since >= wait:
+        return (
+            f"{who}, {label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an "
+            "approval, so Open SWE picked you.",
+            True,
+        )
+    if (
+        request.has_card
+        and not request.reviewers
+        and request.created_at
+        and now - request.created_at >= wait
+    ):
+        return f"{who}, nobody signed up to review {label}, so Open SWE picked you.", False
+    return f"{who}, Open SWE picked you to review {label}.", False
+
+
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
     user = await User.for_login("github", github_login)
@@ -397,25 +439,28 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
+    pr = request.pull_request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    who = mention(user)
+    notice, bump = _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, assigned_by_agent=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
     await _request_github_review(added, github_login)
-    pr = added.pull_request
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    who = mention(user)
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     thread_ts = added.slack_thread_ts or added.slack_message_ts
     await post_slack_thread_reply_with_ts(
         added.slack_channel_id,
         thread_ts,
-        f"{who}, nobody signed up to review {label}, so Open SWE picked you.{why}",
+        f"{notice}{why}",
         unfurl_links=False,
         agent_thread_id=added.thread_id or None,
+        reply_broadcast=bump,
     )
     permalink = await _permalink(added)
     if user.slack_user_id:
-        card = f" (<{permalink}|review card>)" if permalink else ""
+        where = "review card" if added.has_card else "Slack post"
+        card = f" (<{permalink}|{where}>)" if permalink else ""
         await send_dm(
             user.slack_user_id,
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
@@ -454,30 +499,83 @@ def merge_wait(
     return None
 
 
-async def settle(request: HumanReviewRequest) -> None:
-    """Re-read the pull request, update the card, and merge when the request is satisfied."""
-    if request.kind != "standard" or request.state != "open":
+async def _settle_posted(
+    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str]
+) -> None:
+    """React once the pull request is approved; until then, time how long it has sat green."""
+    if "APPROVED" in states.values():
+        await mark_approved(request)
         return
+    now = datetime.now(UTC)
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None or row.state != "open":
+            return
+        previous = row.ready_since
+        if not snapshot.green:
+            row.ready_since = None
+            return
+        # A check that finished after the clock started was rerun unseen, so it restarts the clock.
+        ready_since = (
+            now if previous is None else max(previous, snapshot.checks_finished_at or previous)
+        )
+        if ready_since == previous:
+            return
+        row.ready_since = ready_since
+    wait = max(ready_since + timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - now, timedelta(0))
+    if await _schedule(request, "unclaimed", wait):
+        return
+    # Without its deadline nothing would ever bump the post, so the next settle schedules it again.
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None and row.ready_since == ready_since:
+            row.ready_since = previous
+
+
+async def _posted_deadline(request: HumanReviewRequest) -> str | None:
+    """Why a posted request's deadline does not bump it yet; ``None`` when it should."""
+    if not await settle(request):
+        await _schedule(request, "unclaimed", _DEADLINE_RETRY)
+        return "retrying"
+    current = await HumanReviewRequest.get(request.id)
+    if current is None or current.state != "open":
+        return "closed"
+    if current.approved_at is not None:
+        return "approved"
+    waited = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    if current.ready_since is None or datetime.now(UTC) - current.ready_since < waited:
+        return "not_ready"
+    return None
+
+
+async def settle(request: HumanReviewRequest) -> bool:
+    """Re-read the pull request and move the request on: react, update the card, or merge.
+
+    ``False`` only when GitHub could not be read, so nothing is known to have changed.
+    """
+    if request.kind not in SETTLED_KINDS or request.state != "open":
+        return True
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
-        return
+        return False
     readiness = await assess_readiness(
         owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
     )
     if readiness is None:
-        return
+        return False
     snapshot = readiness.snapshot
     if snapshot.merged:
         await mark_merged(request)
-        return
+        return True
     if snapshot.state != "open":
         await retire(request, "cancelled", "the pull request was closed")
-        return
+        return True
     async with github_client(token=token) as client:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
-        return
+        return False
+    if request.kind == "posted":
+        await _settle_posted(request, snapshot, states)
+        return True
     waiting = merge_wait(
         [reviewer.github_login for reviewer in request.reviewers],
         request.created_at,
@@ -488,10 +586,10 @@ async def settle(request: HumanReviewRequest) -> None:
         waiting = "; ".join(readiness.blockers)
     if waiting is not None:
         await refresh_card(await _set_detail(request, waiting))
-        return
+        return True
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
-            return
+            return True
         result = await merge_pull_request(
             row, snapshot.head_sha, snapshot.allowed_merge_methods, token
         )
@@ -499,7 +597,7 @@ async def settle(request: HumanReviewRequest) -> None:
             row.detail = result.message
     if result.status == "merged":
         await mark_merged(request)
-        return
+        return True
     logger.warning(
         "Auto-merge of a reviewed pull request was refused",
         extra={"request_id": str(request.id), "merge_status": result.status},
@@ -507,6 +605,7 @@ async def settle(request: HumanReviewRequest) -> None:
     current = await HumanReviewRequest.get(request.id)
     if current is not None:
         await refresh_card(current)
+    return True
 
 
 async def settle_pull_request(owner: str, repo: str, number: int) -> None:
@@ -516,18 +615,24 @@ async def settle_pull_request(owner: str, repo: str, number: int) -> None:
 
 
 async def settle_repository(owner: str, repo: str) -> None:
-    """Re-check every open standard request in a repository, for events that name no PR."""
-    for request in await HumanReviewRequest.open_in_repository(owner, repo, kind="standard"):
+    """Re-check every open standard or posted request in a repository, for events that name no PR."""
+    for request in await HumanReviewRequest.open_in_repository(owner, repo, kinds=SETTLED_KINDS):
         await settle(request)
 
 
-async def _wake_for_reviewer(request: HumanReviewRequest) -> bool:
+async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False) -> bool:
+    """Wake an agent to pick a reviewer, as the unclaimed deadline does; whether one was woken.
+
+    ``asked`` is someone requesting it now rather than the deadline passing.
+    """
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
         pr_url=pr.url,
         minutes=UNCLAIMED_AFTER_MINUTES,
         author=pr.author,
+        posted=not request.has_card,
+        asked=asked,
     )
     if request.thread_id:
         return await notify_agent(request, text)
@@ -568,7 +673,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     if step == "unclaimed":
         if request.reviewers:
             return {"status": "claimed"}
-        return {"status": "woken" if await _wake_for_reviewer(request) else "not_woken"}
+        if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
+            return {"status": waiting}
+        return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}

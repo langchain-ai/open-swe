@@ -2425,6 +2425,17 @@
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
           },
+          "review_channel_watch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Watch"
+          },
           "review_draft_prs": {
             "anyOf": [
               {

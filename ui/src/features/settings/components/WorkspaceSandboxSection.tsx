@@ -126,8 +126,8 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Preferred repositories
-            are available in <WorkspaceReposPopover repos={record.repos} /> to
+            Runs on the base snapshot to build the image. Bound repositories are
+            available in <WorkspaceReposPopover repos={record.repos} /> to
             preload; runs clone any other repository on demand.
           </span>
           <WorkspaceScriptEditor
@@ -170,17 +170,19 @@ export function WorkspaceSandboxSection({
             {refreshing ? "Rebuilding…" : "Rebuild image"}
           </Button>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!dirty || save.isPending}
-              onClick={() => {
-                setSetupScript(record.setup_script ?? "")
-                setUpdateScript(record.update_script ?? "")
-              }}
-            >
-              Cancel
-            </Button>
+            {dirty && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => {
+                  setSetupScript(record.setup_script ?? "")
+                  setUpdateScript(record.update_script ?? "")
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="sm"
               disabled={!dirty || save.isPending}

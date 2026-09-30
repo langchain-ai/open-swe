@@ -1077,6 +1077,7 @@ async def process_github_pr_comment(
     if (
         event_type == "pull_request_review"
         and str(event.get("state") or "").lower() == "approved"
+        and postgres.configured()
         and await HumanReviewRequest.is_expedited_approver(
             repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
         )

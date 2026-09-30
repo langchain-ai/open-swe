@@ -10,6 +10,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
 from agent.human_review import slack as human_review
+from agent.human_review.posted import watch_post
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -480,6 +481,20 @@ async def slack_webhook(
 
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
+
+    # Watching a review channel post never takes over the message's own routing.
+    if (
+        not is_message_update
+        and allowed_bot is None
+        and not in_code_channel
+        and not in_dm_channel
+        and event.type == "message"
+        and event.subtype in {"", "file_share"}
+        and not reply_thread_ts
+        and user_id
+        and "/pull/" in text
+    ):
+        background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
