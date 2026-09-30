@@ -14,6 +14,9 @@ from agent.utils.dashboard_links import dashboard_base_url
 logger = logging.getLogger(__name__)
 
 
+REVIEW_BODY_PREFIX = "Approved in Slack via"
+
+
 def settings_hint(action: str) -> str:
     base = dashboard_base_url()
     return f"{action}: {base}/my-settings" if base else f"{action} in your Open SWE settings."
@@ -42,8 +45,8 @@ async def _review_body(approval: HumanReviewRequest) -> str:
     )
     permalink = await get_slack_permalink(approval.slack_channel_id, anchor)
     if permalink is None:
-        return "Approved in Slack via Open SWE expedited review."
-    return f"Approved in Slack via [expedited review]({permalink})."
+        return f"{REVIEW_BODY_PREFIX} Open SWE expedited review."
+    return f"{REVIEW_BODY_PREFIX} [expedited review]({permalink})."
 
 
 async def submit_approval(
