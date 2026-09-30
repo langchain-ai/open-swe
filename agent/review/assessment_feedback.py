@@ -43,7 +43,7 @@ def feedback_store(review_id: int) -> TypedStore[AssessmentFeedback]:
 
 async def require_assessment_access(
     owner: str, repo: str, pr_number: int, review_id: int, login: str
-) -> None:
+) -> PublishedAssessment:
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     assessment = await ASSESSMENTS.get(str(review_id))
     if (
@@ -53,6 +53,7 @@ async def require_assessment_access(
         or assessment.pr_number != pr_number
     ):
         raise HTTPException(404, "Assessment not found")
+    return assessment
 
 
 async def save_feedback(
@@ -63,7 +64,7 @@ async def save_feedback(
     login: str,
     submission: FeedbackSubmission,
 ) -> AssessmentFeedback:
-    await require_assessment_access(owner, repo, pr_number, review_id, login)
+    assessment = await require_assessment_access(owner, repo, pr_number, review_id, login)
     feedback = AssessmentFeedback(
         rating=submission.rating,
         comment=submission.comment.strip(),
@@ -71,8 +72,7 @@ async def save_feedback(
         updated_at=now_iso(),
     )
     await feedback_store(review_id).put(feedback.login, feedback)
-    assessment = await ASSESSMENTS.get(str(review_id))
-    if assessment and assessment.run_id:
+    if assessment.run_id:
         try:
             saved = await create_langsmith_feedback(
                 assessment.run_id,

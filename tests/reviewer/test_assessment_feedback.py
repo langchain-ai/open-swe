@@ -93,10 +93,16 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
             run_id="c" * 36,
         ),
     )
+    assessment = await ASSESSMENTS.get("123")
     with (
         patch(
             "agent.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
+        ),
+        patch.object(
+            ASSESSMENTS,
+            "get",
+            AsyncMock(side_effect=[assessment, RuntimeError("store unavailable")]),
         ),
         patch(
             "agent.review.assessment_feedback.create_langsmith_feedback",
@@ -106,6 +112,10 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
         saved = await submit_assessment_feedback(
             "o", "r", 1, 123, FeedbackSubmission(rating="unhelpful"), {"sub": "alice"}
         )
+    with patch(
+        "agent.review.assessment_feedback.require_repo_access_for_user",
+        AsyncMock(return_value="t"),
+    ):
         assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) == saved
 
 
