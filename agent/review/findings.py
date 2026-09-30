@@ -18,7 +18,9 @@ import copy
 import hashlib
 import json
 import logging
+import threading
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Literal, Self, TypedDict, cast
@@ -746,6 +748,24 @@ async def _link_interaction_authors(session: AsyncSession, rows: list[FindingRow
             interaction.author_user_id = user_ids.get(interaction.author.lower())
 
 
+# Eval runs review one pull request once and are scored from their publish
+# snapshot, so their findings live in this process for the run. Postgres keeps
+# one reviewer thread's findings per pull request, which repeated benchmark runs
+# of the same pull request would contend for.
+_RUN_SCOPED_FINDINGS: OrderedDict[str, list[Finding]] = OrderedDict()
+_RUN_SCOPED_FINDINGS_LIMIT = 1000
+_RUN_SCOPED_FINDINGS_LOCK = threading.Lock()
+
+
+def start_run_scoped_findings(thread_id: str) -> None:
+    """Keep ``thread_id``'s findings in memory for this run, starting empty."""
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        _RUN_SCOPED_FINDINGS.pop(thread_id, None)
+        _RUN_SCOPED_FINDINGS[thread_id] = []
+        while len(_RUN_SCOPED_FINDINGS) > _RUN_SCOPED_FINDINGS_LIMIT:
+            _RUN_SCOPED_FINDINGS.popitem(last=False)
+
+
 def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     return (
         select(FindingRow)
@@ -761,6 +781,9 @@ async def list_findings(thread_id: str) -> list[Finding]:
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
     PostgreSQL does not exist; other failures degrade to no findings.
     """
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
+            return copy.deepcopy(scoped)
     try:
         pull_request_id = await _ensure_finding_state(thread_id)
         async with postgres.session() as session:
@@ -914,6 +937,10 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
+            mutator(scoped)
+            return copy.deepcopy(scoped)
     pull_request_id = await _ensure_finding_state(thread_id)
     async with postgres.session() as session:
         await session.execute(
