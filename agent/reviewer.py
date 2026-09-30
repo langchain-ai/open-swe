@@ -119,7 +119,7 @@ from agent.utils.model import (
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
 
 
-def _reviewer_subagent(model: BaseChatModel, fallback: BaseChatModel | None) -> SubAgent:
+def _reviewer_subagent(model: BaseChatModel, fallback: BaseChatModel | None = None) -> SubAgent:
     return {
         "name": "reviewer",
         "description": load_prompt("reviewer/subagent-description.md"),

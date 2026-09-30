@@ -259,11 +259,7 @@ from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
-from agent.utils.model import make_fallback_model as build_fallback_model
-from agent.utils.model import (
-    make_model,
-    provider_model_kwargs,
-)
+from agent.utils.model import make_fallback_model, make_model, provider_model_kwargs
 from agent.utils.startup_trace import aphase
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from agent.utils.thread_settings import (
@@ -1546,12 +1542,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
-        return build_fallback_model(
-            primary_model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
-        )
-
-    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
+    fallback_middleware = ModelFallbackMiddleware(
+        make_fallback_model(model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS)
+    )
 
     source = cfg.source or "dashboard"
     configurable["source"] = source
@@ -1816,7 +1809,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
         if image_fallback is not None and not option["supports_images"]:
             image_fallback.add_text_only_model(model)
-        fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
+        fallback_middleware.register_fallback(
+            model,
+            make_fallback_model(
+                requested_model, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
+            ),
+        )
         return model
 
     # Keep checkpointed routing tasks resumable after a handoff disables routing.
