@@ -23,7 +23,7 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
@@ -150,6 +150,8 @@ class RunConfig(BaseModel):
     resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
+    model_selection_changed: bool = False
+    model_override_reason: Literal["image_input"] | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
@@ -160,6 +162,8 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     stop_summary: bool | None = None
     slack_ask: bool | None = None
+    # First run of a thread broken out from another Slack thread.
+    slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.

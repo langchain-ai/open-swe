@@ -107,4 +107,5 @@ async def dispatch_followup(
         text,
         configurable,
         source=configurable["source"],
+        thread_title=None,
     )

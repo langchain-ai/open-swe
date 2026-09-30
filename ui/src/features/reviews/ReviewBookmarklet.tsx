@@ -1,4 +1,3 @@
-import { BookmarkSimpleIcon } from "@phosphor-icons/react"
 import { useCallback } from "react"
 import { toast } from "sonner"
 
@@ -36,8 +35,8 @@ export function ReviewBookmarklet() {
         "cursor-grab active:cursor-grabbing"
       )}
     >
-      <BookmarkSimpleIcon />
-      Open in Open SWE
+      {/* Browsers keep no favicon for a `javascript:` bookmark; the emoji in its name stands in. */}
+      👀 Open in Open SWE
     </a>
   )
 }

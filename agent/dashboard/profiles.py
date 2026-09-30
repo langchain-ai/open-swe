@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -60,9 +60,14 @@ class ProfileUpdate(BaseModel):
     model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
+    preserve_sandbox_memory: bool | None = None
+    human_review_requests: bool | None = None
+    review_channel_watch: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = None
+    experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -416,8 +421,8 @@ async def get_my_profile(
         get_profile(session["sub"]), User.preferences_for_login(session["sub"])
     )
     if not profile:
-        return {"concierge_mode": preferences.concierge_mode}
-    return {**normalize_profile_for_response(profile), "concierge_mode": preferences.concierge_mode}
+        return preferences.model_dump()
+    return {**normalize_profile_for_response(profile), **preferences.model_dump()}
 
 
 @router.put("/profile")
@@ -428,12 +433,23 @@ async def put_my_profile(
     update.validate_pairing()
     login = session["sub"]
     preferences = await User.update_preferences(
-        login, UserPreferencesPatch(concierge_mode=update.concierge_mode)
+        login,
+        UserPreferencesPatch(
+            concierge_mode=update.concierge_mode,
+            preserve_sandbox_memory=update.preserve_sandbox_memory,
+            human_review_requests=update.human_review_requests,
+            review_channel_watch=update.review_channel_watch,
+        ),
     )
-    if preferences is None and update.concierge_mode:
+    if preferences is None and (
+        update.concierge_mode
+        or update.preserve_sandbox_memory
+        or update.human_review_requests
+        or update.review_channel_watch
+    ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {
         **normalize_profile_for_response(profile),
-        "concierge_mode": (preferences or UserPreferences()).concierge_mode,
+        **(preferences or UserPreferences()).model_dump(),
     }

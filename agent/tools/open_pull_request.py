@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+import posixpath
+import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
@@ -34,9 +37,11 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -743,6 +748,11 @@ async def _record_pr_telemetry(
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            origin = (
+                cfg.slack_thread
+                if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
+                else None
+            )
             try:
                 await PullRequest(
                     owner=owner,
@@ -761,6 +771,18 @@ async def _record_pr_telemetry(
                         opening_head_sha
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
+                    ),
+                    opening_model_id=(
+                        (cfg.resolved_agent_model_id or "") if record_opening else ""
+                    ),
+                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    langsmith_run_id=str(run_id) if record_opening and run_id else "",
+                    slack_team_id=origin.team_id if origin else "",
+                    slack_channel_id=origin.channel_id if origin else "",
+                    slack_thread_ts=origin.thread_ts if origin else "",
+                    # Other sources carry a stale trigger or the bot's own post.
+                    slack_message_ts=(
+                        origin.triggering_event_ts if origin and cfg.source == "slack" else ""
                     ),
                     author=author if isinstance(author, str) else "",
                     author_github_id=author_id if isinstance(author_id, int) else None,
@@ -889,12 +911,20 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
-async def _stamp_attribution_footer(body: str) -> str:
+async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    if cfg.thread_id:
+    state = state or {}
+    if selected := state.get("selected_model_id"):
+        model_id, effort = selected, state.get("selected_effort")
+        usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
+        models = usage.models if usage else ()
+        reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in models}
+        if models and reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+            model_id, effort = ", ".join(models), None
+    elif cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -958,6 +988,7 @@ async def _open_pull_request(
     draft: bool,
     resolves_thread: bool = False,
     author: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         token, kind = await _resolve_pr_author_token(author)
@@ -1019,7 +1050,8 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _stamp_attribution_footer(
-            await _maybe_append_references(client, token, owner, repo, body)
+            await _maybe_append_references(client, token, owner, repo, body),
+            state,
         )
         draft = _effective_draft(draft)
         payload = {
@@ -1122,6 +1154,7 @@ async def open_pull_request(
     draft: bool = True,
     resolves_thread: bool = False,
     author: str = "",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1134,6 +1167,7 @@ async def open_pull_request(
         draft=draft,
         resolves_thread=resolves_thread,
         author=author or None,
+        state=state,
     )
 
 
@@ -1173,3 +1207,81 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
             record_opening=False,
         )
     return {"success": True, "url": pr.get("html_url"), "number": ref.number}
+
+
+UPLOADS_URL = "https://uploads.github.com/user-attachments/assets"
+MAX_BYTES = 10 * 1024 * 1024
+ATTACHMENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+
+def _upload_failure(error: str) -> dict[str, object]:
+    return {"success": False, "error": error}
+
+
+async def _read_attachment(file_path: str) -> tuple[str, bytes]:
+    backend, path, _ = await resolve_sandbox_file(file_path)
+    downloads = await backend.adownload_files([path])
+    content = downloads[0].content if downloads else None
+    if not content:
+        raise ValueError("file_path must identify a non-empty file")
+    if len(content) > MAX_BYTES:
+        raise ValueError("file exceeds the 10 MB attachment limit")
+    return path, content
+
+
+async def _upload_attachment(
+    owner: str, repo: str, name: str, content_type: str, content: bytes
+) -> str:
+    token, _kind = await _resolve_pr_author_token()
+    if not token:
+        raise ValueError("no GitHub token is available for this thread")
+    async with httpx2.AsyncClient(timeout=60.0) as client:
+        if await private_credential_login() is None and not await _workspace_has_repository(
+            client, owner, repo
+        ):
+            raise ValueError(f"{owner}/{repo} is not in the workspace GitHub App installation")
+        repo_resp = await client.get(
+            f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token)
+        )
+        if repo_resp.status_code != 200:
+            raise ValueError(f"GitHub returned {repo_resp.status_code} for {owner}/{repo}")
+        resp = await client.post(
+            UPLOADS_URL,
+            params={
+                "name": name,
+                "content_type": content_type,
+                "repository_id": repo_resp.json()["id"],
+            },
+            headers={**_auth_headers(token), "Content-Type": "application/octet-stream"},
+            content=content,
+        )
+    if resp.status_code not in (200, 201):
+        raise ValueError(f"GitHub upload returned {resp.status_code}: {resp.text[:500]}")
+    return resp.json()["url"]
+
+
+async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[str, object]:
+    """Implement the `upload_pr_attachment` tool."""
+    content_type = ATTACHMENT_TYPES.get(posixpath.splitext(file_path)[1].lower())
+    if content_type is None:
+        return _upload_failure("unsupported file type")
+    try:
+        path, content = await _read_attachment(file_path)
+        name = posixpath.basename(path)
+        url = await _upload_attachment(owner, repo, name, content_type, content)
+    except ValueError as exc:
+        logger.warning("PR attachment upload failed", extra={"error": str(exc)})
+        return _upload_failure(str(exc))
+    alt = re.sub(r"[\\\[\]\r\n]", " ", posixpath.splitext(name)[0])
+    markdown = url if content_type.startswith("video/") else f"![{alt}]({url})"
+    return {"success": True, "url": url, "markdown": markdown}

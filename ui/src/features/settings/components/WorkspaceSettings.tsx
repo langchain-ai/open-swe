@@ -21,14 +21,19 @@ import {
   useWorkspaceOptions,
   workspaceOptionKeys,
 } from "@/features/agents/lib/queries"
-import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import {
+  api,
+  DEFAULT_WORKSPACE_SLUG,
+  type WorkspaceOption,
+  type WorkspaceRecord,
+} from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   draftFromWorkspace,
   WorkspaceEditor,
@@ -42,7 +47,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
 
@@ -75,6 +80,7 @@ function GeneralSection({
         name: draft.name.trim(),
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
+        kitchen_channel_ids: draft.kitchenChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)
@@ -89,7 +95,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, and what it owns. A repository or Slack channel belongs to exactly one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -107,14 +113,16 @@ function GeneralSection({
           </p>
         )}
         <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(draftFromWorkspace(record))}
-          >
-            Cancel
-          </Button>
+          {dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setDraft(draftFromWorkspace(record))}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={!dirty || saving || !draft.name.trim()}
@@ -178,6 +186,7 @@ export function WorkspaceSettingsPanel({
         : false,
   })
   const options = useWorkspaceOptions(true)
+  const repositories = useRepos()
   // Model options follow the workspace: the Fable flag that gates some of
   // them is one of its settings.
   const modelOptions = useOptions(slug)
@@ -248,7 +257,7 @@ export function WorkspaceSettingsPanel({
             >
               <CircleNotchIcon
                 aria-hidden="true"
-                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
                 ? "Rebuilding sandbox image…"
@@ -289,14 +298,19 @@ export function WorkspaceSettingsPanel({
           (model) => model.can_be_default !== false
         )}
       />
-      <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <DefaultRepoSection
+        scope={scope}
+        repositories={(repositories.data?.repositories ?? []).map(
+          (repo) => repo.full_name
+        )}
+      />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
-      {canEdit && (
+      {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."

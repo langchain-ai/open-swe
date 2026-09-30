@@ -9,6 +9,8 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
+from agent.human_review import slack as human_review
+from agent.human_review.posted import watch_post
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -18,7 +20,7 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from agent.slack.breakout import parse_breakout_command, process_slack_breakout
+from agent.slack.breakout import BreakoutCommand, process_slack_breakout
 from agent.slack.dm import CONCIERGE_TS, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -54,6 +56,8 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
+from agent.webhooks.event_log import EventLog, EventRefs
+from agent.workspaces.routing import is_kitchen_channel
 
 router = APIRouter()
 
@@ -274,10 +278,23 @@ async def slack_webhook(
     _verify_signature(request, body, "events")
 
     payload = parse_json_object(body)
+    envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=envelope.kind if envelope else "",
+        delivery_id=envelope.event_id if envelope else "",
+        refs=EventRefs(
+            slack_user_id=envelope.event.resolve_user_id(),
+            slack_channel_id=envelope.event.resolve_channel_id(),
+        )
+        if envelope and envelope.event
+        else None,
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
-    envelope = SlackEventEnvelope.parse(payload)
     if envelope is None:
         return ignored("Invalid Slack event")
 
@@ -438,6 +455,14 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
+    in_kitchen_channel = (
+        not in_code_channel
+        and event.channel_type != "im"
+        and not is_dm_channel(channel_context)
+        and event.type == "message"
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+        and await is_kitchen_channel(channel_id)
+    )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
@@ -456,6 +481,20 @@ async def slack_webhook(
 
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
+
+    # Watching a review channel post never takes over the message's own routing.
+    if (
+        not is_message_update
+        and allowed_bot is None
+        and not in_code_channel
+        and not in_dm_channel
+        and event.type == "message"
+        and event.subtype in {"", "file_share"}
+        and not reply_thread_ts
+        and user_id
+        and "/pull/" in text
+    ):
+        background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
@@ -485,6 +524,11 @@ async def slack_webhook(
         explicit_mention
         or is_message_update
         or in_code_channel
+        or (
+            in_kitchen_channel
+            and event.type == "message"
+            and event.subtype in {"", "file_share", "thread_broadcast"}
+        )
         or allowed_bot is not None
         or is_direct_message
         or solo_followup
@@ -554,7 +598,9 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
+                or in_kitchen_channel
                 or solo_followup,
+                kitchen_channel=in_kitchen_channel,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
@@ -562,15 +608,13 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
-            breakout_instruction = (
+            breakout = (
                 None
                 if in_code_channel or in_dm_channel or allowed_bot is not None
-                else parse_breakout_command(text, bot_user_id)
+                else BreakoutCommand.parse(text, bot_user_id)
             )
-            if breakout_instruction is not None:
-                background_tasks.add_task(
-                    process_slack_breakout, request, breakout_instruction, repo
-                )
+            if breakout is not None:
+                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
                 return accepted("Slack breakout queued")
             background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
@@ -591,6 +635,14 @@ async def slack_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command")
@@ -638,6 +690,14 @@ async def slack_code_channel_command(
 
     form = common.parse_qs(body.decode("utf-8"))
     value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=value("command"),
+        delivery_id=value("trigger_id"),
+        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
+    )
     channel_id = value("channel_id")
     user_id = value("user_id")
     command = value("command").removeprefix("/")
@@ -676,13 +736,25 @@ async def slack_interactivity(
     form = common.parse_qs(body.decode("utf-8"))
     payload_raw = (form.get("payload") or [""])[0]
     payload = parse_json_object(payload_raw.encode("utf-8"))
+    interaction = SlackInteraction.parse(payload) if payload is not None else None
+    await EventLog.record(
+        request,
+        body,
+        "slack",
+        event_type=interaction.type if interaction else "",
+        delivery_id=interaction.trigger_id if interaction else "",
+        refs=EventRefs(
+            slack_user_id=interaction.user.id, slack_channel_id=interaction.origin_channel_id
+        )
+        if interaction
+        else None,
+    )
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
 
-    interaction = SlackInteraction.parse(payload)
     if interaction is None:
         return ignored("Invalid Slack interaction")
     if interaction.type == "block_actions":
@@ -776,6 +848,8 @@ async def slack_interactivity(
     async def dispatch() -> WebhookResponse:
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
+        if button.type == human_review.BUTTON_TYPE:
+            return await human_review.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:

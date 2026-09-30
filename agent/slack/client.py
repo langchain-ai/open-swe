@@ -31,6 +31,7 @@ from agent.slack.http import (
 )
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
+from agent.threads.creation import create_lock_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -517,7 +518,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -528,25 +530,26 @@ def format_slack_session_cost(cost: float) -> str:
     return f"${cost:.2f}"
 
 
-def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+def _replace_slack_session_cost(text: str, label: str, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return (
-        f"{cleaned} • {format_slack_session_cost(cost)}"
-        if cleaned
-        else format_slack_session_cost(cost)
-    )
+    return f"{cleaned} • {label}" if cleaned else label
 
 
 def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    run_cost: float | None = None,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
-    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    """Replace cumulative and optional per-run costs in a live Slack footer."""
+    label = format_slack_session_cost(cost)
+    if run_cost is not None:
+        label += f" ({format_slack_session_cost(run_cost)})"
+    updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
 
@@ -579,7 +582,7 @@ def with_slack_session_cost(
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
         target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
+            str(target.get("text") or ""), label, require_web_link=False
         )
     elif (
         updated_text != text
@@ -592,7 +595,7 @@ def with_slack_session_cost(
             {
                 "type": "context",
                 "block_id": "open_swe_usage_footer",
-                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+                "elements": [{"type": "mrkdwn", "text": label}],
             }
         )
     return updated_text, updated_blocks
@@ -1434,10 +1437,8 @@ async def slack_thread_mutation_lock(
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
-            await langgraph_client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            await create_lock_thread(
+                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
             )
             break
         except ConflictError:

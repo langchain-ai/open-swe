@@ -7,6 +7,7 @@ import {
   expectTranscriptVisible,
   loginAs,
   openRunningThreadViaSlackLink,
+  optIntoQueue,
   openThreadViaSlackLink,
   threadIdFromUrl,
   threadState,
@@ -199,6 +200,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
     await openRunningThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
 
@@ -480,6 +482,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
     await openRunningThreadViaSlackLink(page);
 
     const queuedText = "Please pick this up once the current run stops.";
@@ -515,6 +518,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.request.post("/control/reset");
+    await optIntoQueue(page);
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
 

@@ -25,6 +25,7 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
+import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type { FollowUpBehavior, UserPreferences } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
@@ -49,6 +50,7 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
+  const { prefs, setCollapseSubagentsByDefault } = useSidebarPrefs()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -181,7 +183,7 @@ export function PreferencesSection() {
         control={
           <Select
             items={FOLLOW_UP_BEHAVIORS}
-            value={preferences.data?.follow_up_behavior ?? "queue"}
+            value={preferences.data?.follow_up_behavior ?? "steer"}
             onValueChange={(v) =>
               v &&
               savePreferences.mutate({
@@ -220,6 +222,17 @@ export function PreferencesSection() {
                 local_tracing_project: event.target.value.trim() || null,
               })
             }
+          />
+        }
+      />
+      <SettingsRow
+        label="Collapse subagent threads by default"
+        description="Keep nested subagent threads folded in the sidebar until you expand them."
+        control={
+          <Switch
+            aria-label="Collapse subagent threads by default"
+            checked={prefs.collapseSubagentsByDefault}
+            onCheckedChange={setCollapseSubagentsByDefault}
           />
         }
       />

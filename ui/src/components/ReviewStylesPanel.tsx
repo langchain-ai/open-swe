@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { ReviewStyle } from "@/lib/api"
+import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,6 +14,13 @@ import {
 } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
@@ -21,6 +28,12 @@ import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 import { useSession } from "@/lib/session"
+
+const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "dry_run", label: "Dry run" },
+  { value: "approve", label: "Approve" },
+]
 
 function statusVariant(status: ReviewStyle["status"]) {
   switch (status) {
@@ -41,7 +54,6 @@ export function ReviewStylesPanel() {
   const [addRepo, setAddRepo] = useState("")
   const [selected, setSelected] = useState<string | null>(null)
   const [draftPrompt, setDraftPrompt] = useState("")
-  const [draftPolicy, setDraftPolicy] = useState("")
 
   const styles = useQuery({
     queryKey: ["reviewStyles"],
@@ -71,15 +83,21 @@ export function ReviewStylesPanel() {
     setDraftPrompt(loadedPrompt ?? "")
   }, [loadedPrompt, loadedRepo])
 
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setDraftPolicy(detail.data?.approval_policy ?? "")
-  }, [detail.data?.approval_policy, detail.data?.full_name])
+  const approvalsFile = useQuery({
+    queryKey: ["reviewStyleApprovalsFile", selected],
+    queryFn: () => api.getApprovalsFile(selected!),
+    enabled: !!selected,
+  })
 
-  const savePolicy = useMutation({
-    mutationFn: ({ repo, policy }: { repo: string; policy: string | null }) =>
-      api.saveReviewApprovalPolicy(repo, policy),
-    meta: { errorTitle: "Couldn't save approval policy" },
+  const saveMode = useMutation({
+    mutationFn: ({
+      repo,
+      mode,
+    }: {
+      repo: string
+      mode: ReviewApprovalMode | null
+    }) => api.saveReviewApprovalMode(repo, mode),
+    meta: { errorTitle: "Couldn't save approval mode" },
     onSuccess: (record) => {
       qc.setQueryData(["reviewStyle", record.full_name], record)
       void qc.invalidateQueries({ queryKey: ["reviewStyles"] })
@@ -202,7 +220,7 @@ export function ReviewStylesPanel() {
 
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
-    [savePolicy, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
+    [saveMode, createStyle, analyze, savePrompt, cancelAnalysis, removeStyle]
       .map((m) => m.error)
       .some(isGithubReauthError)
 
@@ -386,7 +404,7 @@ export function ReviewStylesPanel() {
                 variant="destructive"
                 disabled={
                   removeStyle.isPending ||
-                  (!!active.approval_policy && !session.data?.is_admin)
+                  (!!active.approval_mode && !session.data?.is_admin)
                 }
                 onClick={() => {
                   if (
@@ -413,41 +431,49 @@ export function ReviewStylesPanel() {
               }
               disabled={active.status === "running"}
             />
-            <Label htmlFor="repo-approval-policy">
-              Approval policy override
-            </Label>
+            <Label htmlFor="repo-approval-mode">Approval mode</Label>
             <p className="text-xs text-muted-foreground">
-              Replaces the shared approval policy for this repository. Leave
-              blank to inherit. Review style analysis does not change this
-              policy.
+              Criteria come from <code>.open-swe/APPROVALS.md</code> in the
+              repository, read from each pull request&apos;s base branch. Dry
+              run posts the assessment without approving; Approve submits a
+              GitHub approval when the assessment passes. Nothing is merged.
             </p>
-            <Textarea
-              id="repo-approval-policy"
-              className="min-h-[160px] w-full font-mono text-xs"
-              value={draftPolicy}
-              onChange={(e) => setDraftPolicy(e.target.value)}
-              placeholder="Inherit the shared approval policy"
-              maxLength={10000}
-              disabled={!session.data?.is_admin || !detail.data}
-            />
-            {session.data?.is_admin && (
-              <Button
-                size="sm"
-                disabled={
-                  !detail.data ||
-                  savePolicy.isPending ||
-                  draftPolicy.trim() ===
-                    (detail.data.approval_policy ?? "").trim()
-                }
-                onClick={() =>
-                  savePolicy.mutate({
-                    repo: active.full_name,
-                    policy: draftPolicy.trim() || null,
-                  })
-                }
-              >
-                Save approval policy
-              </Button>
+            <Select
+              items={APPROVAL_MODES}
+              value={detail.data?.approval_mode ?? "dry_run"}
+              onValueChange={(mode) => {
+                if (!mode) return
+                saveMode.mutate({ repo: active.full_name, mode })
+              }}
+              disabled={
+                !session.data?.is_admin || !detail.data || saveMode.isPending
+              }
+            >
+              <SelectTrigger id="repo-approval-mode" className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {APPROVAL_MODES.map((mode) => (
+                  <SelectItem key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {approvalsFile.data && (
+              <p className="text-xs text-muted-foreground">
+                {approvalsFile.data.found ? (
+                  <>
+                    <code>.open-swe/APPROVALS.md</code> found on the default
+                    branch.
+                  </>
+                ) : (
+                  <>
+                    No <code>.open-swe/APPROVALS.md</code> on the default
+                    branch, so reviews post no approval assessment.
+                  </>
+                )}
+              </p>
             )}
           </>
         )}
