@@ -415,6 +415,51 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("saves sandbox sizing and proxy overrides without losing other create parameters", async () => {
+    const record = {
+      ...RECORD,
+      create_params: {
+        preserve_memory_on_stop: true,
+        proxy_config: { rules: [] },
+      },
+    }
+    mockApis(record)
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(record)
+    renderPage()
+    const cpu = await screen.findByLabelText("vCPUs")
+    fireEvent.change(cpu, { target: { value: "8" } })
+    fireEvent.change(screen.getByLabelText("Memory (GiB)"), {
+      target: { value: "32" },
+    })
+    fireEvent.change(screen.getByLabelText("Disk (GiB)"), {
+      target: { value: "256" },
+    })
+    fireEvent.change(screen.getByLabelText("Proxy configuration (JSON)"), {
+      target: { value: "[]" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "must be a JSON object"
+    )
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText("Proxy configuration (JSON)"), {
+      target: { value: "" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: 8,
+        mem_bytes: 32 * 1024 ** 3,
+        fs_capacity_bytes: 256 * 1024 ** 3,
+        create_params: { preserve_memory_on_stop: true },
+      })
+    )
+  })
+
   it("saves the sandbox scripts and starts a rebuild", async () => {
     mockApis()
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
