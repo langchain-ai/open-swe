@@ -197,6 +197,14 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
+    async def is_expedited_approver(cls, owner: str, repo: str, number: int, login: str) -> bool:
+        """Whether ``login`` approved the PR through its open expedited card."""
+        request = await cls.active_for(owner, repo, number)
+        if request is None or request.kind != "expedited":
+            return False
+        return login.lower() in {approver.lower() for approver in request.approvers}
+
+    @classmethod
     async def open_in_repository(
         cls, owner: str, repo: str, *, kinds: tuple[RequestKind, ...]
     ) -> list[Self]:
