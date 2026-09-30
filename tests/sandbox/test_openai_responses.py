@@ -4,11 +4,13 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from agent.openai_responses import conversations
+from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from agent.openai_responses import conversations, routes
 from agent.openai_responses.conversations import SandboxCaller
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import (
@@ -31,9 +33,41 @@ from agent.transcript.events import (
     TurnCompleted,
     TurnStarted,
 )
+from tests.conftest import FakeStore
 
 THREAD = str(uuid.uuid4())
 RUN = str(uuid.uuid4())
+
+
+async def test_api_flag_blocks_requests_and_can_be_revoked(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caller = SandboxCaller("host-thread", "sandbox-a", {"workspace": "experiment"})
+    monkeypatch.setattr(SandboxCaller, "authenticate", AsyncMock(return_value=caller))
+    app = FastAPI()
+    app.include_router(routes.router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://agent.example.test"
+    ) as client:
+        for method, path, body in (
+            ("GET", "/models", None),
+            ("POST", "/responses", {"input": "hello"}),
+            ("GET", "/responses/unknown", None),
+            ("POST", "/responses/unknown/cancel", None),
+        ):
+            response = await client.request(method, routes.OPENAI_PATH + path, json=body)
+            assert response.status_code == 403
+        await upsert_workspace_overrides(
+            "experiment", WorkspaceSettingsUpdate(sandbox_openai_enabled=True)
+        )
+        assert (await client.get(routes.OPENAI_PATH + "/models")).status_code == 200
+        caller.host_metadata["workspace"] = "other"
+        assert (await client.get(routes.OPENAI_PATH + "/models")).status_code == 403
+        caller.host_metadata["workspace"] = "experiment"
+        await upsert_workspace_overrides(
+            "experiment", WorkspaceSettingsUpdate(sandbox_openai_enabled=False)
+        )
+        assert (await client.get(routes.OPENAI_PATH + "/models")).status_code == 403
 
 
 def stored(version: int, body: BaseModel) -> StoredEvent:

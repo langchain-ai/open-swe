@@ -10,6 +10,7 @@ from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, ValidationError
 
 from agent.config import ENV
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.utils.dashboard_links import dashboard_api_base_url
 
 if TYPE_CHECKING:
@@ -94,15 +95,20 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     if access is None:
         return None
     url, token = access
+    host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
+    workspace = (host.get("metadata") or {}).get("workspace")
+    settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
+    env_vars = {"OPEN_SWE_TOOLS_URL": url}
+    if settings.sandbox_openai_enabled:
+        env_vars.update(
+            OPENAI_BASE_URL=url.removesuffix(TOOLS_PATH) + OPENAI_PATH,
+            OPENAI_API_KEY=OPENAI_API_KEY_PLACEHOLDER,
+        )
     return {
         "name": TOOLS_RULE,
         "match_hosts": [urlsplit(url).hostname],
         "headers": [{"name": TOOLS_HEADER, "type": "opaque", "value": token}],
-        "env_vars": {
-            "OPEN_SWE_TOOLS_URL": url,
-            "OPENAI_BASE_URL": url.removesuffix(TOOLS_PATH) + OPENAI_PATH,
-            "OPENAI_API_KEY": OPENAI_API_KEY_PLACEHOLDER,
-        },
+        "env_vars": env_vars,
     }
 
 

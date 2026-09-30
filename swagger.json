@@ -5746,6 +5746,18 @@
               }
             ],
             "title": "Review Trace Links"
+          },
+          "sandbox_openai_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Openai Enabled"
           }
         },
         "title": "WorkspaceSettingsUpdate",

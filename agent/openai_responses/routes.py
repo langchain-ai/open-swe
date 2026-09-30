@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agent.dashboard.options import SUPPORTED_MODEL_IDS
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.openai_responses.client_tools import ClientToolSpec
 from agent.openai_responses.conversations import SandboxCaller
 from agent.openai_responses.ids import OpenSweId
@@ -43,7 +44,12 @@ _SSE_HEADERS = {
 
 
 async def _caller(request: Request) -> SandboxCaller:
-    return await SandboxCaller.authenticate(request)
+    caller = await SandboxCaller.authenticate(request)
+    workspace = caller.host_metadata.get("workspace")
+    settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
+    if not settings.sandbox_openai_enabled:
+        raise HTTPException(403, "Sandbox OpenAI API is disabled")
+    return caller
 
 
 Caller = Annotated[SandboxCaller, Depends(_caller)]
