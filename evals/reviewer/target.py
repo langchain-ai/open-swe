@@ -288,4 +288,3 @@ def _score_severity_threshold() -> Severity:
     if value in _VALID_SEVERITIES:
         return cast(Severity, value)
     return "low"
-
