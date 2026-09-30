@@ -1434,6 +1434,10 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  slackUserName: (userId: string) =>
+    request<{ name: string }>(
+      `/slack/users/${encodeURIComponent(userId)}/name`
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
   listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),

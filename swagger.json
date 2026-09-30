@@ -13412,6 +13412,60 @@
         ]
       }
     },
+    "/dashboard/api/slack/users/{user_id}/name": {
+      "get": {
+        "operationId": "api_slack_user_name_dashboard_api_slack_users__user_id__name_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "pattern": "^[UW][A-Z0-9]{2,}$",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Slack User Name Dashboard Api Slack Users  User Id  Name Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack User Name",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/threads": {
       "get": {
         "operationId": "api_list_threads_dashboard_api_threads_get",
