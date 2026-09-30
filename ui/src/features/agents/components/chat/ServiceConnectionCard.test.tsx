@@ -10,6 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
+import * as apiModule from "@/lib/api"
 import { api } from "@/lib/api"
 import { ServiceConnectionCard } from "./ServiceConnectionCard"
 
@@ -49,6 +50,21 @@ it("requires a click and does not treat cancelled desktop consent as connected",
   expect(connect).toHaveBeenCalledWith("notion")
   expect(screen.queryByText("Connected to your account")).toBeNull()
   expect((button as HTMLButtonElement).disabled).toBe(false)
+})
+
+it("leaves the web connection retryable when navigation does not complete", async () => {
+  vi.spyOn(api, "getMyNotionStatus").mockResolvedValue({ connected: false })
+  const connect = vi
+    .spyOn(apiModule, "connectService")
+    .mockReturnValue(undefined)
+  renderCard()
+  const button = await screen.findByRole("button", { name: "Connect Notion" })
+  fireEvent.click(button)
+  expect((button as HTMLButtonElement).disabled).toBe(false)
+  expect(screen.queryByText("Connected to your account")).toBeNull()
+  fireEvent.click(button)
+  expect(connect).toHaveBeenCalledTimes(2)
+  expect(connect).toHaveBeenLastCalledWith("notion", window.location.href)
 })
 
 it("shows connected only after reading the current viewer's persisted status", async () => {

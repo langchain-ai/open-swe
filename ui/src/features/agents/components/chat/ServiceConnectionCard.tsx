@@ -21,10 +21,11 @@ export function ServiceConnectionCard() {
     setCancelled(false)
     try {
       const pending = connectService("notion", window.location.href)
-      if (!pending) return
-      const completed = await pending
-      setCancelled(!completed)
-      await credentials.refetch()
+      if (pending) {
+        const completed = await pending
+        setCancelled(!completed)
+        await credentials.refetch()
+      }
     } catch {
       toast.error("Couldn't connect Notion. Please try again.")
     }
