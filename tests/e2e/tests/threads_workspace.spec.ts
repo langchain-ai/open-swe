@@ -461,6 +461,17 @@ test.describe("threads workspace", () => {
       },
     ]);
     await loginAs(page);
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          ...session,
+          slack_oauth_enabled: true,
+          slack_user_id: null,
+        },
+      });
+    });
 
     const profileGate = deferred();
     const profileStarted = deferred();
@@ -494,7 +505,7 @@ test.describe("threads workspace", () => {
       (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
         seen;
       const detect = () => {
-        if (document.body.textContent?.includes("Choose your default model")) {
+        if (document.body.textContent?.includes("Connect your Slack account")) {
           seen.value = true;
         }
       };

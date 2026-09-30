@@ -19,6 +19,36 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("opens the composer without saving a personal model for a fresh user", async ({
+    page,
+  }) => {
+    await loginAs(page, {
+      login: "workspace-default-onboarding-e2e",
+      email: "workspace-default-onboarding-e2e@example.com",
+    });
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: { ...session, slack_oauth_enabled: false },
+      });
+    });
+    const profileBefore = await page.request.get("/dashboard/api/profile");
+    expect(profileBefore.ok()).toBeTruthy();
+    expect(await profileBefore.json()).not.toHaveProperty("default_model");
+
+    await page.goto("/agents");
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.reload();
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    const profileAfter = await page.request.get("/dashboard/api/profile");
+    expect(profileAfter.ok()).toBeTruthy();
+    expect(await profileAfter.json()).not.toHaveProperty("default_model");
+  });
+
   test("the SAME user continues the conversation in the web app", async ({
     page,
   }) => {
@@ -277,11 +307,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
-    await page.keyboard.press("Escape");
+    await dismissOnboardingIfShown(page);
 
     const clearInstructions = await page.request.delete(
       "/dashboard/api/me/instructions",
