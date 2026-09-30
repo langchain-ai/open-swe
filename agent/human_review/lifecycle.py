@@ -37,6 +37,8 @@ from agent.slack.client import (
     upload_slack_thread_file,
     wait_for_slack_file,
 )
+from agent.slack.dm import send_dm
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,24 @@ async def post_card(
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
     )
+
+
+async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
+    """Ask only the author to undraft; return a delivery problem, if any."""
+    if not approval.awaiting_ready:
+        return None
+    pr = approval.pull_request
+    author = (
+        await User.get(pr.author_user_id)
+        if pr.author_user_id
+        else await User.for_login("github", pr.author)
+    )
+    if author is None or not author.slack_user_id:
+        return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
+    text, blocks = expedited_card.readiness_prompt(approval)
+    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
+        return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+    return None
 
 
 async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, str | None]:
