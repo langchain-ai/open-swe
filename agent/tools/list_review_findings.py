@@ -8,6 +8,7 @@ by the dashboard chat proxy.
 from collections.abc import Mapping
 from typing import Any
 
+from agent.review.findings import ReviewerThreadMissingError
 from agent.review.findings import list_findings as list_findings_async
 from agent.run_config import RunConfig
 
@@ -43,6 +44,8 @@ async def list_review_findings(status_filter: str | None = None) -> dict[str, An
 
     try:
         findings = await list_findings_async(reviewer_thread_id)
+    except ReviewerThreadMissingError:
+        return {"findings": [], "count": 0, "note": "No review has run on this pull request yet."}
     except Exception as exc:  # noqa: BLE001
         return {"findings": [], "count": 0, "error": f"could not load findings: {exc!s}"}
 

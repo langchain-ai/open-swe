@@ -15,8 +15,10 @@ import type { DesktopLocalThreadSummary } from "@/desktop"
 import { Kbd } from "@/components/ui/kbd"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
+import { useChatRoutes } from "@/lib/chatRoutes"
 
 interface CommandResult {
   id: string
@@ -129,6 +131,7 @@ export function AppCommandPalette({
   onOpenChange: (open: boolean) => void
 }) {
   const navigate = useNavigate()
+  const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const [activeHighlight, setActiveHighlight] = useState({ key: "", index: 0 })
@@ -194,9 +197,11 @@ export function AppCommandPalette({
     onOpenChange(false)
     if (result.kind === "command") {
       void result.command.run?.()
+    } else if (result.kind === "cloud-thread" && result.thread.reviewPage) {
+      void navigate(reviewPageRoute(result.thread.reviewPage))
     } else if (result.kind === "cloud-thread") {
       void navigate({
-        to: "/agents/$threadId",
+        to: chat.thread,
         params: { threadId: result.thread.id },
       })
     } else {

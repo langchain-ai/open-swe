@@ -4,22 +4,27 @@ import { useEffect, useState } from "react"
 // JS-driven layout decisions stay in sync with the CSS responsive utilities.
 export const MOBILE_MEDIA_QUERY = "(max-width: 767px)"
 
-function readIsMobile(): boolean {
+function readMatches(query: string): boolean {
   if (typeof window === "undefined") return false
-  return window.matchMedia(MOBILE_MEDIA_QUERY).matches
+  return window.matchMedia(query).matches
+}
+
+/** Reactive flag that tracks whether `query` matches the viewport. */
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState<boolean>(() => readMatches(query))
+
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const onChange = () => setMatches(media.matches)
+    onChange()
+    media.addEventListener("change", onChange)
+    return () => media.removeEventListener("change", onChange)
+  }, [query])
+
+  return matches
 }
 
 /** Reactive flag that tracks whether the viewport is at mobile width. */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState<boolean>(readIsMobile)
-
-  useEffect(() => {
-    const media = window.matchMedia(MOBILE_MEDIA_QUERY)
-    const onChange = () => setIsMobile(media.matches)
-    onChange()
-    media.addEventListener("change", onChange)
-    return () => media.removeEventListener("change", onChange)
-  }, [])
-
-  return isMobile
+  return useMediaQuery(MOBILE_MEDIA_QUERY)
 }

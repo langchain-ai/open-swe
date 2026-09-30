@@ -9,13 +9,9 @@ Reviewers leave whole-document comments, stored one item per comment under
 store operations (no CRDT/WebSocket).
 """
 
-import hashlib
-import html
-import json
 import logging
 import re
 import uuid
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,22 +23,12 @@ logger = logging.getLogger(__name__)
 
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
+PLAN_DISMISSED_NAMESPACE = ["plan", "dismissed"]
 
 # Plans are mirrored into the sandbox outside cloned repositories.
 PLAN_FILE_DIRECTORY = "/workspace/plans"
 
-# Plan/share lifecycle, stored on both the content record and the thread metadata.
-PLAN_STATUS_PLANNING = "planning"
-PLAN_STATUS_READY = "ready"
 PLAN_STATUS_SHARED = "shared"
-PLAN_STATUS_REVISING = "revising"
-PLAN_STATUS_APPROVED = "approved"
-PLAN_STATUS_CANCELLED = "cancelled"
-
-
-def plan_fingerprint(content: Mapping[str, object]) -> str:
-    snapshot = {key: content.get(key) for key in ("html", "markdown", "plan_file_path", "revision")}
-    return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
 
 
 def make_plan_approver(*, actor_id: str, name: str, source: str) -> dict[str, str]:
@@ -73,17 +59,11 @@ async def save_plan_content(
     *,
     html: str | None = None,
     markdown: str | None = None,
-    status: str = PLAN_STATUS_READY,
+    status: str = PLAN_STATUS_SHARED,
     clear_comments: bool = True,
     plan_file_path: str | None = None,
-    plan_mode: bool | None = True,
 ) -> None:
-    """Publish HTML + status for the dashboard to render.
-
-    A republished (revised) plan supersedes the prior revision, so comments left
-    on it are cleared — otherwise stale feedback would resurface on the new plan
-    and be fed back to the agent on the next approve/reject. A manual owner edit
-    passes ``clear_comments=False`` so reviewer feedback survives the edit."""
+    """Publish an artifact, clearing old comments unless this is a manual edit."""
     if plan_file_path is None:
         plan_file_path = await _stored_plan_file_path(thread_id)
     record: dict[str, Any] = {"status": status, "revision": str(uuid.uuid4())}
@@ -98,12 +78,29 @@ async def save_plan_content(
         try:
             await clear_plan_comments(thread_id)
         except Exception:
-            # Best-effort: a failed cleanup must not block publishing the new plan.
-            pass
-    metadata: dict[str, Any] = {"plan_status": status}
-    if plan_mode is not None:
-        metadata["plan_mode"] = plan_mode
+            logger.warning(
+                "Could not clear artifact comments",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
+    metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
     await _merge_thread_metadata(thread_id, metadata)
+
+
+async def dismiss_plan(thread_id: str, revision: str | None) -> None:
+    """Hide this revision's inline preview until a new revision is published."""
+    await put_value(PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": revision})
+
+
+async def plan_is_dismissed(thread_id: str, revision: str | None) -> bool:
+    try:
+        record = await get_value(PLAN_DISMISSED_NAMESPACE, thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read artifact dismissal", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
+        return False
+    return record is not None and record.get("revision") == revision
 
 
 async def write_plan_to_sandbox(
@@ -129,11 +126,7 @@ async def write_plan_to_sandbox(
 async def get_plan_content(
     thread_id: str, *, raise_on_error: bool = False
 ) -> dict[str, Any] | None:
-    """The published plan record, or ``None`` when none exists.
-
-    With ``raise_on_error=True`` a store failure propagates instead of resolving
-    to ``None``. Approve uses this so a transient failure aborts the decision
-    rather than dispatching the agent without the (possibly edited) plan."""
+    """Read the published artifact, optionally propagating store failures."""
     try:
         return await get_value(PLAN_CONTENT_NAMESPACE, thread_id)
     except Exception:
@@ -143,85 +136,14 @@ async def get_plan_content(
         return None
 
 
-async def set_plan_status(
-    thread_id: str,
-    status: str,
-    *,
-    plan_mode: bool | None = None,
-    approved_by: Mapping[str, str] | None = None,
-) -> None:
-    """Update the plan lifecycle status on both the content record and metadata."""
-    existing = await get_plan_content(thread_id) or {}
-    entering_plan_after_share = (
-        existing.get("status") == PLAN_STATUS_SHARED and status == PLAN_STATUS_PLANNING
-    )
-    record: dict[str, Any] = {"status": status}
-    if not entering_plan_after_share:
-        for field in ("html", "markdown", "revision"):
-            value = existing.get(field)
-            if isinstance(value, str):
-                record[field] = value
-    else:
-        record["html"] = ""
-    plan_file_path = existing.get("plan_file_path")
-    if not entering_plan_after_share and isinstance(plan_file_path, str) and plan_file_path:
-        record["plan_file_path"] = plan_file_path
-    metadata: dict[str, Any] = {"plan_status": status}
-    if status == PLAN_STATUS_APPROVED and approved_by is not None:
-        approver = make_plan_approver(
-            actor_id=str(approved_by.get("id") or ""),
-            name=str(approved_by.get("name") or ""),
-            source=str(approved_by.get("source") or ""),
-        )
-        approved_at = now_iso()
-        record.update(approved_by=approver, approved_at=approved_at)
-        metadata.update(plan_approved_by=approver, plan_approved_at=approved_at)
-    await put_value(PLAN_CONTENT_NAMESPACE, thread_id, record)
-    if plan_mode is not None:
-        metadata["plan_mode"] = plan_mode
-    await _merge_thread_metadata(thread_id, metadata)
-
-
 def _comments_namespace(thread_id: str) -> list[str]:
     return [*PLAN_COMMENTS_NAMESPACE, thread_id]
-
-
-def format_plan_comments(comments: list[dict[str, Any]]) -> str:
-    entries: list[str] = []
-    for comment in comments:
-        body = str(comment.get("body", "")).strip()
-        if not body:
-            continue
-        author = html.escape(str(comment.get("author") or "reviewer").strip(), quote=True)
-        anchor = comment.get("anchor")
-        anchor = anchor if isinstance(anchor, dict) else {}
-        exact = str(anchor.get("exact") or "").strip()
-        prefix = str(anchor.get("context_before") or anchor.get("prefix") or "").strip()
-        suffix = str(anchor.get("context_after") or anchor.get("suffix") or "").strip()
-        context = "\n".join(part for part in (prefix, exact, suffix) if part)
-        fields = []
-        if context:
-            fields.append(f"<surrounding-context>{html.escape(context)}</surrounding-context>")
-        if exact:
-            fields.append(f"<highlighted-text>{html.escape(exact)}</highlighted-text>")
-        fields.append(f"<reviewer-feedback>{html.escape(body)}</reviewer-feedback>")
-        entries.append(
-            f'{len(entries) + 1}. <plan-review-comment author="{author}">\n'
-            + "\n".join(fields)
-            + "\n</plan-review-comment>"
-        )
-    return "\n".join(entries)
 
 
 async def list_plan_comments(
     thread_id: str, *, raise_on_error: bool = False
 ) -> list[dict[str, Any]]:
-    """All comments on a plan, oldest first.
-
-    With ``raise_on_error=True`` a store/search failure propagates instead of
-    resolving to ``[]``. Approve/reject use this so a transient failure surfaces
-    (the decision endpoint errors) rather than silently feeding the agent an
-    empty comment set and dropping the reviewer's feedback."""
+    """Read comments oldest first, optionally propagating store failures."""
     try:
         comments = await search_values(_comments_namespace(thread_id), limit=1000)
     except Exception:
@@ -270,6 +192,8 @@ async def _merge_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> No
     try:
         await get_client().threads.update(thread_id=thread_id, metadata=metadata)
     except Exception:
-        # The thread always exists by the time a plan is saved (the run created
-        # it); a transient update failure must not crash the agent mid-run.
-        pass
+        logger.warning(
+            "Could not update artifact metadata",
+            extra={"agent_thread_id": thread_id},
+            exc_info=True,
+        )

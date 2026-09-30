@@ -23,10 +23,12 @@ from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from agent.sandboxes.tool_data import ToolContext
 from agent.sandboxes.tool_runtime import ToolSurface
 
+TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
+
 
 @pytest.fixture
 def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-tools-signing-key")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", TEST_SIGNING_KEY)
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://agent.example.test")
 
 
@@ -56,13 +58,9 @@ def surface() -> ToolSurface:
     )
     graph = create_agent(
         FakeListChatModel(responses=[]),
-        tools=[
-            StructuredTool.from_function(coroutine=integration_echo, name=name)
-            for name in ("enter_plan_mode", "approve_plan")
-        ],
         middleware=cast(list[AgentMiddleware], [dynamic, DenyValue()]),
     )
-    return ToolSurface(graph=graph, dynamic=dynamic, plan_excluded=frozenset({"integration_echo"}))
+    return ToolSurface(graph=graph, dynamic=dynamic)
 
 
 async def test_capability_carries_binding_and_is_revoked_on_rebinding(
@@ -72,9 +70,9 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
-    assert url == "https://agent.example.test/sandbox-tools"
+    assert url == "https://agent.example.test/dashboard/api/sandbox-tools"
     claims = jwt.decode(
-        token, "test-tools-signing-key", algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        token, TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
     )
     assert claims["thread_id"] == "thread-a"
     assert claims["sandbox_id"] == "sandbox-a"
@@ -110,7 +108,9 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     rule = next(rule for rule in rules if rule["name"] == tool_access.TOOLS_RULE)
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
-    assert rule["env_vars"] == {"OPEN_SWE_TOOLS_URL": "https://agent.example.test/sandbox-tools"}
+    assert rule["env_vars"] == {
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools"
+    }
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
     await langsmith.configure_sandbox_proxy(
@@ -124,7 +124,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["headers"][0]["value"] == first_token
 
 
-async def test_restores_idle_context_and_initial_plan_restrictions(
+async def test_restores_idle_context_ignoring_legacy_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent import server
@@ -146,12 +146,11 @@ async def test_restores_idle_context_and_initial_plan_restrictions(
         assert config["configurable"]["thread_id"] == "thread-a"
         tool_surface.graph = source.graph
         tool_surface.dynamic = source.dynamic
-        tool_surface.plan_excluded = source.plan_excluded
         return source.graph
 
     monkeypatch.setattr(server, "build_agent", build_agent)
     restored, _, _ = await tool_runtime.load_tool_surface("thread-a")
-    assert "integration_echo" not in restored.tools
+    assert "integration_echo" in restored.tools
 
 
 async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() -> None:
@@ -175,8 +174,7 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
         with pytest.raises(HTTPException):
             await tools.invoke("thread-a", config, state, name, {})
     await tools.prepare({"plan_mode": True})
-    with pytest.raises(HTTPException):
-        await tools.invoke("thread-a", config, state, "integration_echo", {"value": "hello"})
+    assert "integration_echo" in tools.tools
 
 
 async def test_http_list_search_invoke_and_reject_context_overrides(
@@ -201,22 +199,22 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
-        assert (await http.get("/sandbox-tools/list")).status_code == 401
+        assert (await http.get("/dashboard/api/sandbox-tools/list")).status_code == 401
         headers = {tool_access.TOOLS_HEADER: token}
-        result = await http.get("/sandbox-tools/search?q=connected", headers=headers)
+        result = await http.get("/dashboard/api/sandbox-tools/search?q=connected", headers=headers)
         assert result.status_code == 200
         assert result.json()["tools"][0]["name"] == "integration_echo"
         assert result.headers["cache-control"] == "no-store"
-        listed = await http.get("/sandbox-tools/list", headers=headers)
+        listed = await http.get("/dashboard/api/sandbox-tools/list", headers=headers)
         assert listed.json()["total"] == 1
         invoked = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={"value": "hello"},
         )
         assert invoked.json() == {"status": "success", "content": "hello"}
         forged = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={
                 "value": "hello",
@@ -225,7 +223,7 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         )
         assert forged.status_code == 422
         large = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             content=b" " * (tool_routes.MAX_REQUEST_BYTES + 1),
         )
@@ -237,15 +235,17 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
             '{"name":"integration_echo","arguments":{"value":"hello"}}',
         ):
             invalid = await http.post(
-                "/sandbox-tools/invoke/integration_echo",
+                "/dashboard/api/sandbox-tools/invoke/integration_echo",
                 headers=headers,
                 content=content,
             )
             assert invalid.status_code == 422
-        unknown = await http.post("/sandbox-tools/invoke/unknown", headers=headers, json={})
+        unknown = await http.post(
+            "/dashboard/api/sandbox-tools/invoke/unknown", headers=headers, json={}
+        )
         assert unknown.status_code == 404
         unauthorized = await http.post(
-            "/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
+            "/dashboard/api/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
         )
         assert unauthorized.status_code == 401
 
@@ -259,12 +259,12 @@ async def test_postgres_records_round_trip_and_isolate_threads(registry_db: None
 @pytest.mark.parametrize(
     "overrides,secret,algorithm",
     [
-        ({"sandbox_id": "other"}, "wrong-signing-secret", "HS256"),
-        ({"aud": "dashboard"}, "test-tools-signing-key", "HS256"),
-        ({"thread_id": None}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": 42}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": ""}, "test-tools-signing-key", "HS256"),
-        ({}, "test-tools-signing-key", "HS384"),
+        ({"sandbox_id": "other"}, "wrong-signing-secret-" * 3, "HS256"),
+        ({"aud": "dashboard"}, TEST_SIGNING_KEY, "HS256"),
+        ({"thread_id": None}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": 42}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": ""}, TEST_SIGNING_KEY, "HS256"),
+        ({}, TEST_SIGNING_KEY, "HS384"),
     ],
 )
 async def test_invalid_claims_never_reach_thread_lookup(
@@ -297,7 +297,7 @@ def test_invocation_openapi_declares_raw_arguments_and_result() -> None:
     app = FastAPI()
     app.include_router(tool_routes.router)
     schema = app.openapi()
-    operation = schema["paths"]["/sandbox-tools/invoke/{tool_name}"]["post"]
+    operation = schema["paths"]["/dashboard/api/sandbox-tools/invoke/{tool_name}"]["post"]
     assert operation["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ToolArguments"
     }
@@ -321,7 +321,7 @@ async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.M
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
         response = await http.post(
-            "/sandbox-tools/invoke/integration_echo",
+            "/dashboard/api/sandbox-tools/invoke/integration_echo",
             content=chunks(),
             headers={"Content-Type": "application/json"},
         )

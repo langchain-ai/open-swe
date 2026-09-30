@@ -17,6 +17,8 @@ vi.mock("@tanstack/react-query", () => ({
       markdown: "",
     },
   }),
+  useMutation: () => ({ isPending: false, mutate: vi.fn() }),
+  useQueryClient: () => ({}),
 }))
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
@@ -42,13 +44,13 @@ describe("InlinePlanArtifact", () => {
     expect(screen.getByTitle("Artifact preview")).toBeTruthy()
   })
 
-  it("keeps plan terminology for implementation plans", () => {
+  it("uses artifact terminology for legacy implementation plans", () => {
     render(<InlinePlanArtifact threadId="thread-1" />)
 
     expect(
-      screen.getByRole("button", { name: "Open plan in the conversation" })
+      screen.getByRole("button", { name: "Open artifact in the conversation" })
         .textContent
-    ).toContain("Open plan")
-    expect(screen.getByTitle("Plan preview")).toBeTruthy()
+    ).toContain("Open artifact")
+    expect(screen.getByTitle("Artifact preview")).toBeTruthy()
   })
 })

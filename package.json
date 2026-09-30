@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "turbo run dev --filter=open-swe-dashboard",
     "dev:desktop": "pnpm --dir desktop run dev",
+    "dev:desktop:experimental": "VITE_EXPERIMENTAL_ASSISTANT_UI=true pnpm run dev:desktop",
     "dev:mock": "bash tests/e2e/dev-mock.sh",
     "dev:prod": "node scripts/dev-prod.mjs",
+    "dev:chatgpt": "pnpm --dir desktop run build && node scripts/dev-chatgpt.cjs",
     "build": "turbo run build",
     "check": "turbo run check",
     "format:check": "oxfmt --check",

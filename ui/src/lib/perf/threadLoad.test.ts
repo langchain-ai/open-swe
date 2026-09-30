@@ -79,6 +79,21 @@ describe("thread load span", () => {
     ])
   })
 
+  it("tags which thread UI the span measured", () => {
+    onRouterNavigation(`/assistant/${THREAD_A}`, "/assistant")
+    ensureThreadLoad(THREAD_A, "assistant")
+    threadHydrated(THREAD_A)
+    threadTranscriptPainted(THREAD_A, { messages: 1, chunks: 1 })
+    onRouterNavigation(`/agents/${THREAD_B}`, `/assistant/${THREAD_A}`)
+    ensureThreadLoad(THREAD_B)
+    threadTranscriptPainted(THREAD_B, { messages: 1, chunks: 1 })
+
+    expect(getPerfSpans().map((span) => span.attributes.ui)).toEqual([
+      "assistant",
+      "agents",
+    ])
+  })
+
   it("treats a mount without prior navigation as a page load from time origin", () => {
     ensureThreadLoad(THREAD_A)
     const [span] = getPerfSpans()

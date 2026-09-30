@@ -20,7 +20,10 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
       api.getReview(owner as string, repo as string, number as number),
     enabled,
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
+      query.state.data?.status === "running" ||
+      query.state.data?.walkthrough_running
+        ? 5000
+        : false,
   })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, number],

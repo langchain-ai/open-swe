@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useMutationState,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 
 import { ApiError, api, DEFAULT_WORKSPACE_SLUG } from "./api"
 import {
@@ -9,12 +14,51 @@ import {
 import { useSession } from "./session"
 import type { Profile, ProfileUpdate, ReposPayload } from "./api"
 
+const profileQueryKey = (login: string | undefined) => [
+  "profile",
+  login ?? null,
+]
+
+const saveProfileMutationKey = (login: string | undefined) => [
+  "saveProfile",
+  login ?? null,
+]
+
+interface ProfilePatch {
+  login: string | undefined
+  patch: Partial<ProfileUpdate>
+  fallbackModel: string
+  fallbackEffort: string
+}
+
+function applyProfileWrite(profile: Profile, write: ProfilePatch): Profile {
+  const { model_routing_enabled, ...rest } = write.patch
+  return {
+    ...profile,
+    ...rest,
+    ...(model_routing_enabled !== undefined && {
+      model_routing_enabled: model_routing_enabled ?? undefined,
+    }),
+  }
+}
+
+/** The profile, with saves still in flight already applied. */
 export function useProfile() {
   const session = useSession()
+  const login = session.data?.login
+  const pending = useMutationState({
+    filters: {
+      mutationKey: saveProfileMutationKey(login),
+      exact: true,
+      status: "pending",
+    },
+    select: (m) => m.state.variables as ProfilePatch,
+  })
   return useQuery({
-    queryKey: ["profile"],
+    queryKey: profileQueryKey(login),
     queryFn: api.profile,
     enabled: !!session.data,
+    select: (profile) => pending.reduce(applyProfileWrite, profile),
   })
 }
 
@@ -72,6 +116,7 @@ export function useRefreshRepos() {
   const login = session.data?.login ?? null
   const qc = useQueryClient()
   return useMutation({
+    meta: { errorTitle: "Couldn't refresh repositories" },
     mutationFn: () => api.repos({ refresh: true }),
     onSuccess: (payload) => {
       qc.setQueryData<ReposPayload>(reposQueryKey(login), payload)
@@ -80,14 +125,51 @@ export function useRefreshRepos() {
   })
 }
 
-export function useSaveProfile() {
+/**
+ * Saves `patch` over the profile the server last confirmed. Saves run one at
+ * a time per account, so each request carries every earlier one's result and
+ * a failed save drops only its own patch.
+ */
+export function usePatchProfile() {
   const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: ProfileUpdate) => api.saveProfile(body),
-    onSuccess: (saved) => {
-      qc.setQueryData(["profile"], saved)
+  const session = useSession()
+  const login = session.data?.login
+  const mutationKey = saveProfileMutationKey(login)
+  const mutation = useMutation({
+    mutationKey,
+    scope: { id: JSON.stringify(mutationKey) },
+    meta: { errorTitle: "Couldn't save preferences" },
+    mutationFn: (write: ProfilePatch) =>
+      api.saveProfile(
+        buildProfileUpdate(
+          qc.getQueryData<Profile>(profileQueryKey(write.login)),
+          write.patch,
+          write.fallbackModel,
+          write.fallbackEffort
+        )
+      ),
+    onMutate: async (write) => {
+      await qc.cancelQueries({ queryKey: profileQueryKey(write.login) })
+    },
+    onSuccess: (saved, write) => {
+      qc.setQueryData(profileQueryKey(write.login), saved)
+    },
+    onSettled: async (_saved, _error, write) => {
+      if (
+        qc.isMutating({ mutationKey: saveProfileMutationKey(write.login) }) > 1
+      )
+        return
+      await qc.invalidateQueries({ queryKey: profileQueryKey(write.login) })
     },
   })
+  return {
+    patch: (
+      patch: Partial<ProfileUpdate>,
+      fallbackModel: string,
+      fallbackEffort: string
+    ) => mutation.mutate({ login, patch, fallbackModel, fallbackEffort }),
+    isPending: mutation.isPending,
+  }
 }
 
 /**
@@ -114,9 +196,19 @@ export function buildProfileUpdate(
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     model_routing_enabled: current?.model_routing_enabled ?? null,
-    dm_session_enabled: current?.dm_session_enabled ?? false,
+    recent_thread_context_enabled:
+      current?.recent_thread_context_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
+    experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     ...patch,
   }
+}
+
+export function useExperimentalAssistantUi(): boolean {
+  const profile = useProfile()
+  return (
+    profile.data?.experimental_assistant_ui ??
+    import.meta.env.VITE_EXPERIMENTAL_ASSISTANT_UI === "true"
+  )
 }

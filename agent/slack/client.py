@@ -17,13 +17,21 @@ from urllib.parse import urlparse
 import httpx2
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error, slack_retry_after
+from agent.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    slack_error,
+    slack_error_details,
+    slack_retry_after,
+)
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
+from agent.threads.creation import create_lock_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -407,15 +415,18 @@ async def _slack_thread_exists(channel_id: str, thread_ts: str) -> bool:
     return True
 
 
-async def _delete_slack_message(channel_id: str, message_ts: str) -> None:
+async def delete_slack_message(channel_id: str, message_ts: str) -> bool:
+    """Delete one of the bot's own messages; whether Slack confirmed it."""
     try:
         async with SlackClient.bot() as client:
             await client.chat_delete(channel=channel_id, ts=message_ts)
     except SLACK_REQUEST_ERRORS as exc:
         logger.warning(
-            "Orphaned Slack reply could not be removed",
+            "Slack message could not be deleted",
             extra={"slack_error": slack_error(exc), "slack_channel": channel_id},
         )
+        return False
+    return True
 
 
 async def _post_slack_message_with_ts(
@@ -458,7 +469,7 @@ async def _post_slack_message_with_ts(
                 and not _threaded_under(data, reply_ts)
                 and not await _slack_thread_exists(channel_id, reply_ts)
             ):
-                await _delete_slack_message(channel_id, message_ts)
+                await delete_slack_message(channel_id, message_ts)
                 logger.warning(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
@@ -469,7 +480,10 @@ async def _post_slack_message_with_ts(
         return None, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return None, error
 
 
@@ -495,6 +509,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
@@ -502,7 +518,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -513,25 +530,26 @@ def format_slack_session_cost(cost: float) -> str:
     return f"${cost:.2f}"
 
 
-def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+def _replace_slack_session_cost(text: str, label: str, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return (
-        f"{cleaned} • {format_slack_session_cost(cost)}"
-        if cleaned
-        else format_slack_session_cost(cost)
-    )
+    return f"{cleaned} • {label}" if cleaned else label
 
 
 def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    run_cost: float | None = None,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
-    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    """Replace cumulative and optional per-run costs in a live Slack footer."""
+    label = format_slack_session_cost(cost)
+    if run_cost is not None:
+        label += f" ({format_slack_session_cost(run_cost)})"
+    updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
 
@@ -564,7 +582,7 @@ def with_slack_session_cost(
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
         target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
+            str(target.get("text") or ""), label, require_web_link=False
         )
     elif (
         updated_text != text
@@ -577,7 +595,7 @@ def with_slack_session_cost(
             {
                 "type": "context",
                 "block_id": "open_swe_usage_footer",
-                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+                "elements": [{"type": "mrkdwn", "text": label}],
             }
         )
     return updated_text, updated_blocks
@@ -916,7 +934,10 @@ async def update_slack_message(
         return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
-        logger.warning("Slack message request failed", extra={"slack_error": error})
+        logger.warning(
+            "Slack message request failed",
+            extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
+        )
         return False, error
 
 
@@ -974,6 +995,34 @@ async def upload_slack_thread_file(
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
         return None, error
+
+
+class _SlackFileInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    mimetype: str = ""
+
+
+async def wait_for_slack_file(
+    file_id: str, *, timeout: float = 10.0, interval: float = 0.5
+) -> bool:
+    """Whether Slack finished processing an upload; a block citing it before then is refused."""
+    deadline = time.monotonic() + timeout
+    try:
+        async with SlackClient.bot() as client:
+            while True:
+                response = await client.files_info(file=file_id)
+                if _SlackFileInfo.model_validate(response.get("file") or {}).mimetype:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(interval)
+    except (*SLACK_REQUEST_ERRORS, ValidationError) as exc:
+        logger.warning(
+            "Slack file status check failed",
+            extra={"slack_error": slack_error(exc), "slack_file_id": file_id},
+        )
+        return False
 
 
 SLACK_FILE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
@@ -1388,10 +1437,8 @@ async def slack_thread_mutation_lock(
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
-            await langgraph_client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            await create_lock_thread(
+                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
             )
             break
         except ConflictError:

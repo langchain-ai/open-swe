@@ -21,7 +21,7 @@ from agent.sandboxes.tool_models import ToolDescription
 from agent.sandboxes.tool_store import ToolStore
 
 _json = TypeAdapter(JsonValue)
-EXCLUDED_TOOLS = frozenset({"enter_plan_mode", "approve_plan", "load_integration_tools"})
+EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 
 
 async def save_tool_context(thread_id: str, config: RunnableConfig) -> None:
@@ -48,7 +48,6 @@ class ToolSurface:
     graph: CompiledStateGraph | None = None
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
-    plan_excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
 
@@ -64,8 +63,6 @@ class ToolSurface:
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
         excluded = self.excluded | EXCLUDED_TOOLS
-        if state.get("plan_mode") is True:
-            excluded = excluded | self.plan_excluded
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
     def catalog(self, query: str = "") -> list[ToolDescription]:
@@ -149,7 +146,6 @@ async def load_tool_surface(
     snapshot = await get_client().threads.get_state(thread_id)
     values = snapshot.get("values")
     state: dict[str, object] = dict(values) if isinstance(values, dict) else {}
-    state.setdefault("plan_mode", context.configurable.get("plan_mode") is True)
     config: RunnableConfig = {
         "configurable": {
             **context.configurable,

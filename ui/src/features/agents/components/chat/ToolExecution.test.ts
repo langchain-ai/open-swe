@@ -51,9 +51,6 @@ describe("formatToolDisplay", () => {
   })
 
   it("sentence-cases raw tool names", () => {
-    expect(formatToolDisplay("enter_plan_mode", "other", {}, repoPath)).toBe(
-      "Enter plan mode"
-    )
     expect(formatToolDisplay("save_plan", "other", {}, repoPath)).toBe(
       "Save plan"
     )
