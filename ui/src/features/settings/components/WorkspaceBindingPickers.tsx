@@ -53,6 +53,13 @@ export function RepositoryPicker({
   disabled,
 }: BindingPickerProps) {
   const repos = useRepos()
+  const reposByName = useMemo(
+    () =>
+      new Map(
+        (repos.data?.repositories ?? []).map((repo) => [repo.full_name, repo])
+      ),
+    [repos.data]
+  )
   const owners = useMemo(
     () => ownersOf(workspaces, (workspace) => workspace.repos),
     [workspaces]
@@ -62,7 +69,7 @@ export function RepositoryPicker({
       (repos.data?.repositories ?? []).map((repo) => ({
         id: repo.full_name,
         label: repo.full_name,
-        meta: repo.private ? "private" : "public",
+        meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
         icon: repo.private ? (
           <LockSimpleIcon size={14} />
         ) : (
@@ -84,9 +91,19 @@ export function RepositoryPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search repositories"
+      filter={{
+        label: "Exclude archived",
+        matches: (item) => !reposByName.get(item.id)?.archived,
+      }}
       filters={[
-        { label: "Public", matches: (item) => item.meta === "public" },
-        { label: "Internal", matches: (item) => item.meta === "private" },
+        {
+          label: "Public",
+          matches: (item) => reposByName.get(item.id)?.private === false,
+        },
+        {
+          label: "Internal",
+          matches: (item) => reposByName.get(item.id)?.private === true,
+        },
       ]}
       manual={{
         label: "Add a repository by name",

@@ -13,6 +13,8 @@ vi.mock("@/lib/profile", () => ({
         { full_name: "org/public-sdk", private: false },
         { full_name: "org/internal-sdk", private: true },
         { full_name: "org/public-docs", private: false },
+        { full_name: "org/public-archive", private: false, archived: true },
+        { full_name: "org/private-archive", private: true, archived: true },
       ],
     },
   }),
@@ -71,7 +73,7 @@ describe("OwnershipPicker", () => {
     const onChange = vi.fn()
     render(
       <RepositoryPicker
-        selected={[]}
+        selected={["org/public-archive"]}
         onChange={onChange}
         workspaceSlug="oss"
         workspaces={[]}
@@ -79,12 +81,37 @@ describe("OwnershipPicker", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
     expect(await screen.findByText("Available · 3")).toBeTruthy()
+    expect(screen.getByText("Public archive")).toBeTruthy()
+    expect(
+      screen.queryByRole("checkbox", { name: "org/private-archive" })
+    ).toBeNull()
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "org/public-archive" })
+    )
+    expect(
+      screen.queryByRole("checkbox", { name: "org/public-archive" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("switch", { name: "Exclude archived" }))
+    expect(screen.getByText("Public archive")).toBeTruthy()
+    expect(screen.getByText("Private archive")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Public" }))
+    expect(
+      screen.getByRole("checkbox", { name: "org/public-archive" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("checkbox", { name: "org/private-archive" })
+    ).toBeNull()
     expect(
       screen.queryByRole("checkbox", { name: "org/internal-sdk" })
     ).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "org/public-sdk" }))
     fireEvent.click(screen.getByRole("button", { name: "Internal" }))
+    expect(
+      screen.getByRole("checkbox", { name: "org/private-archive" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("checkbox", { name: "org/public-archive" })
+    ).toBeNull()
     expect(
       screen.getByRole<HTMLInputElement>("checkbox", { name: "org/public-sdk" })
         .checked
