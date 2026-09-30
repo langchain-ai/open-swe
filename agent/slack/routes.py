@@ -15,6 +15,7 @@ from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
     ASK_COMMAND,
+    BY_THE_WAY_COMMAND,
     MAX_QUESTION_CHARS,
     SlackAskRequest,
     ask_thread_id,
@@ -510,9 +511,15 @@ async def slack_webhook(
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
         or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    by_the_way = (
+        SlackAskRequest.by_the_way_question(text, bot_user_id)
+        if explicit_mention and not (in_code_channel or in_dm_channel or allowed_bot)
+        else None
+    )
     solo_followup = False
     if (
-        not is_message_update
+        by_the_way is None
+        and not is_message_update
         and not in_code_channel
         and not in_dm_channel
         and allowed_bot is None
@@ -542,6 +549,9 @@ async def slack_webhook(
         or solo_followup
     ):
         return ignored("Not an app mention or DM")
+
+    if is_message_update and by_the_way is not None:
+        return ignored("By-the-way questions are answered once")
 
     if is_message_update:
         try:
@@ -584,6 +594,24 @@ async def slack_webhook(
     async def dispatch() -> WebhookResponse:
         if channel_context is None:
             return ignored("Slack channel is not eligible")
+
+        if by_the_way is not None:
+            if not await common.claim_slack_event(event_id, channel_id, event_ts):
+                return ignored("Duplicate Slack event delivery")
+            background_tasks.add_task(
+                process_slack_ask,
+                SlackAskRequest(
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    question=by_the_way,
+                    thread_id=ask_thread_id(channel_id, user_id, original_message_ts),
+                    command=BY_THE_WAY_COMMAND,
+                    team_id=team_id,
+                    reply_thread_ts=thread_ts,
+                    message_ts=original_message_ts,
+                ),
+            )
+            return accepted("Slack by-the-way question queued")
 
         try:
             thread_id = await common.resolve_slack_thread_id(

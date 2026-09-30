@@ -24,7 +24,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
-from agent.slack.events import claim_slack_event
+from agent.slack.events import claim_slack_event, slack_event_already_seen
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
@@ -72,6 +72,10 @@ async def slack_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True and cfg.slack_by_the_way_thread_ts:
+        return await _by_the_way_reply(
+            cfg, cfg.slack_by_the_way_thread_ts, message, response_type, blocks, options
+        )
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
@@ -160,6 +164,55 @@ async def slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    return {"success": True}
+
+
+async def _by_the_way_reply(
+    cfg: RunConfig,
+    thread_ts: str,
+    message: str,
+    response_type: Literal["progress", "final"],
+    blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
+) -> dict[str, Any]:
+    """Post the one public `/btw` answer, with no link back to the asker's private thread."""
+    if options or response_type != "final":
+        return {
+            "success": False,
+            "error": "only one final answer is posted for /btw",
+            "retry": True,
+            "hint": (
+                "Nothing was posted. Everyone in the Slack thread reads this reply and this run "
+                "ends with it, so send a single `final` reply without `options`."
+            ),
+        }
+    answered_key = f"slack-by-the-way-answer:{cfg.thread_id}"
+    if await slack_event_already_seen(answered_key):
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
+    channel_id = cfg.slack_thread.channel_id if cfg.slack_thread else ""
+    if not channel_id:
+        return {"success": False, "error": "Missing the Slack channel to answer in"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    if blocks is None:
+        blocks = _reply_blocks(message, None, reserve=0)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            message = markdown_to_mrkdwn(message)
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, message, blocks=blocks
+    )
+    if message_ts is None:
+        return {
+            "success": False,
+            "error": slack_error or "post failed",
+            "slack_error": slack_error,
+            "hint": _slack_reply_failure_hint(slack_error),
+        }
+    await claim_slack_event(answered_key)
     return {"success": True}
 
 
