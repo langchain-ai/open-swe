@@ -1439,7 +1439,10 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  listSlackChannels: (refresh = false) =>
+    request<SlackChannelDirectory>(
+      `/slack/channels${refresh ? "?refresh=true" : ""}`
+    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
