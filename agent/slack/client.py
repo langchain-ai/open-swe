@@ -1331,6 +1331,22 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         return False
 
 
+async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+    """Remove the bot's reaction from a Slack message."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    try:
+        async with SlackClient.bot() as client:
+            await client.reactions_remove(channel=channel_id, timestamp=message_ts, name=emoji)
+        return True
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "no_reaction":
+            return True
+        logger.warning("Slack reaction removal failed", extra={"slack_error": error})
+        return False
+
+
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
     if not SLACK_BOT_TOKEN:
