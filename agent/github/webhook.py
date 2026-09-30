@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
+from agent.expedited_review.reviews import REVIEW_BODY_PREFIX
 from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
@@ -1076,7 +1077,9 @@ async def process_github_pr_comment(
     # The card's own vote already woke the agent and shows the approval.
     if (
         event_type == "pull_request_review"
+        and payload.get("action") == "submitted"
         and str(event.get("state") or "").lower() == "approved"
+        and event_body.startswith(REVIEW_BODY_PREFIX)
         and postgres.configured()
         and await HumanReviewRequest.is_expedited_approver(
             repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
