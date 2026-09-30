@@ -229,7 +229,6 @@ from agent.tools import (
     submit_thread_feedback,
     trigger_automation,
     update_automation,
-    upload_pr_attachment,
     web_search,
 )
 from agent.tools.access import permitted, resolve_access
@@ -512,7 +511,6 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "manage_thread",
         "link_pull_request",
         "open_pull_request",
-        "upload_pr_attachment",
         "recreate_sandbox",
         "request_pr_review",
         "save_user_skill",
@@ -1633,7 +1631,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         notify_automation_channel,
         open_pull_request,
         link_pull_request,
-        upload_pr_attachment,
         *(
             (output_iframe, create_sandbox_file_download_url, expose_port)
             if sandbox_file_downloads
