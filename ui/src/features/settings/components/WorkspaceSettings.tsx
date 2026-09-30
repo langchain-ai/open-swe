@@ -312,8 +312,7 @@ export function WorkspaceSettingsPanel({
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-        >
-          <div className="px-4 py-3.5">
+          action={
             <Button
               size="sm"
               variant="destructive"
@@ -322,8 +321,8 @@ export function WorkspaceSettingsPanel({
             >
               Delete
             </Button>
-          </div>
-        </SettingsSection>
+          }
+        />
       )}
       {canEdit && deleting && (
         <AlertDialog
