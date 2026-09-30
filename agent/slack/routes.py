@@ -294,12 +294,7 @@ async def slack_webhook(
         "slack",
         event_type=envelope.kind if envelope else "",
         delivery_id=envelope.event_id if envelope else "",
-        refs=EventRefs(
-            slack_user_id=envelope.event.resolve_user_id(),
-            slack_channel_id=envelope.event.resolve_channel_id(),
-        )
-        if envelope and envelope.event
-        else None,
+        refs=EventRefs.slack(envelope) if envelope else None,
     )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")

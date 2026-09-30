@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.slack.client import parse_github_pr_url
+from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.slack.payloads import SlackEventEnvelope
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,26 @@ def _linked_urls(value: object) -> set[str]:
     return set()
 
 
+def event_pull_requests(envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
+    event = envelope.event
+    if (
+        envelope.type != "event_callback"
+        or event is None
+        or event.type not in {"message", "app_mention"}
+        or event.subtype
+        not in {"", "file_share", "thread_broadcast", "bot_message", "message_changed"}
+    ):
+        return []
+    message = event.message if event.subtype == "message_changed" else event
+    if message is None:
+        return []
+    return [
+        ref
+        for url in sorted(_linked_urls(message.model_dump(exclude={"message", "previous_message"})))
+        if (ref := parse_github_pr_url(url)) is not None
+    ]
+
+
 class SlackPullRequestLink(Base):
     __tablename__ = "slack_pull_request_link"
 
@@ -48,13 +68,10 @@ class SlackPullRequestLink(Base):
     async def record(cls, envelope: SlackEventEnvelope) -> None:
         """Record links without changing Slack routing or requiring a managed PR."""
         event = envelope.event
-        if (
-            not postgres.configured()
-            or event is None
-            or event.type not in {"message", "app_mention"}
-            or event.subtype
-            not in {"", "file_share", "thread_broadcast", "bot_message", "message_changed"}
-        ):
+        if not postgres.configured() or event is None:
+            return
+        refs = event_pull_requests(envelope)
+        if not refs:
             return
         message = event.message if event.subtype == "message_changed" else event
         if message is None:
@@ -63,9 +80,6 @@ class SlackPullRequestLink(Base):
         channel_id = event.resolve_channel_id()
         thread_ts = message.thread_ts or message.ts
         if not (team_id and channel_id and thread_ts and message.ts):
-            return
-        urls = _linked_urls(message.model_dump(exclude={"message", "previous_message"}))
-        if not urls:
             return
         try:
             async with postgres.session() as session:
@@ -77,10 +91,10 @@ class SlackPullRequestLink(Base):
                                 "team_id": team_id,
                                 "channel_id": channel_id,
                                 "thread_ts": thread_ts,
-                                "pr_url": url,
+                                "pr_url": ref.url,
                                 "message_ts": message.ts,
                             }
-                            for url in sorted(urls)
+                            for ref in refs
                         ]
                     )
                     .on_conflict_do_nothing()
