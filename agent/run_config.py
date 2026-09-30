@@ -190,7 +190,6 @@ class RunConfig(BaseModel):
     # Eval harness
     eval: bool | None = None
     reviewer_eval: bool | None = None
-    reviewer_eval_cap: Int | None = None
     reviewer_eval_severity_threshold: str | None = None
 
     # Background jobs

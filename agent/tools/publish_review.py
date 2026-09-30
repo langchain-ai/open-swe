@@ -20,7 +20,6 @@ from agent.review.approvals import approval_mode_for
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
-    REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
     Finding,
@@ -112,14 +111,10 @@ async def publish_review(
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
             severity_threshold = cfg.reviewer_eval_severity_threshold
-        eval_cap = cfg.reviewer_eval_cap
-        if eval_cap is None or eval_cap < 0:
-            eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=severity_threshold,
-                cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
@@ -136,7 +131,6 @@ async def publish_review(
             head_sha=head_sha,
             token=token,
             severity_threshold=severity_threshold,
-            cap=None,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=cfg.review_trace_link_enabled,
@@ -231,7 +225,6 @@ async def _publish_review_eval_dry_run_async(
     *,
     head_sha: str,
     severity_threshold: Severity,
-    cap: int,
 ) -> dict[str, Any]:
     """Simulate publish_review for benchmark runs without posting to GitHub."""
     thread_id = get_thread_id_from_runtime()
@@ -243,7 +236,6 @@ async def _publish_review_eval_dry_run_async(
     eligible = filter_findings_for_publish(
         in_diff_unpublished,
         severity_threshold=severity_threshold,
-        cap=cap,
     )
     eligible_with_payload = [
         (finding, payload)
@@ -259,7 +251,6 @@ async def _publish_review_eval_dry_run_async(
         "finding_ids": finding_ids,
         "findings": [finding for finding, _payload in eligible_with_payload],
         "severity_threshold": severity_threshold,
-        "cap": cap,
     }
 
     await set_reviewer_thread_metadata(
@@ -286,7 +277,6 @@ async def _publish_review_async(
     head_sha: str,
     token: str,
     severity_threshold: Severity,
-    cap: int | None,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: bool | None = None,
@@ -349,7 +339,7 @@ async def _publish_review_async(
     # hidden).
     in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
     eligible = filter_findings_for_publish(
-        in_diff_unpublished, severity_threshold=severity_threshold, cap=cap
+        in_diff_unpublished, severity_threshold=severity_threshold
     )
 
     severity_rank = SEVERITY_ORDER[severity_threshold]
