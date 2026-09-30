@@ -113,9 +113,10 @@ describe("OwnershipPicker", () => {
       screen.queryByRole("checkbox", { name: "org/public-archive" })
     ).toBeNull()
     expect(
-      screen.getByRole<HTMLInputElement>("checkbox", { name: "org/public-sdk" })
-        .checked
-    ).toBe(true)
+      screen
+        .getByRole("checkbox", { name: "org/public-sdk" })
+        .getAttribute("aria-checked")
+    ).toBe("true")
     expect(
       screen.getByRole("checkbox", { name: "org/internal-sdk" })
     ).toBeTruthy()
