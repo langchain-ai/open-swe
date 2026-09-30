@@ -20,6 +20,8 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
+    "list_event_types": ".listen_events",
+    "listen_events": ".listen_events",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -92,6 +94,8 @@ __all__ = [
     "get_thread",
     "http_request",
     "list_automations",
+    "list_event_types",
+    "listen_events",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -179,6 +183,7 @@ if TYPE_CHECKING:
     from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
+    from agent.tools.listen_events import list_event_types, listen_events
     from agent.tools.manage_baby_sit import manage_baby_sit
     from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel

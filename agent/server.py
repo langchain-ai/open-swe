@@ -120,6 +120,7 @@ from agent.middleware import (
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
+    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -193,8 +194,10 @@ from agent.tools import (
     http_request,
     link_pull_request,
     list_automations,
+    list_event_types,
     list_threads,
     list_workspaces,
+    listen_events,
     manage_baby_sit,
     manage_code_channel,
     manage_incident,
@@ -510,6 +513,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "auto_assign_human_reviewer",
         "dismiss_human_review_request",
         "manage_baby_sit",
+        "listen_events",
         "manage_thread",
         "link_pull_request",
         "open_pull_request",
@@ -586,6 +590,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "manage_code_channel",
         "manage_incident",
         "list_threads",
+        "listen_events",
         "manage_thread",
         "notify_automation_channel",
         "read_incident",
@@ -1643,6 +1648,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        listen_events,
+        list_event_types,
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
@@ -1885,6 +1892,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     guard_middleware=_subagent_guard_middleware(local_run),
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
+                        deliver_event_matches_before_model.name,
                         model_selection.name,
                     ),
                 ),
@@ -1954,7 +1962,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
                     refresh_github_proxy_before_model,
-                    *([] if stop_summary_mode else [check_message_queue_before_model]),
+                    *(
+                        []
+                        if stop_summary_mode
+                        else [check_message_queue_before_model, deliver_event_matches_before_model]
+                    ),
                     TimeoutWrapupMiddleware(),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),
