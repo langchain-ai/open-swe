@@ -241,6 +241,7 @@ declare global {
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getLocalPr: (threadId: string) => Promise<AgentPullRequest | null>
       getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
       readWorkspacePath: (input: {
         localSessionId: string

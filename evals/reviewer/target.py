@@ -16,7 +16,6 @@ from langgraph_sdk import get_client
 
 from agent.input_messages import build_run_input
 from agent.review.findings import (
-    REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
     Severity,
@@ -124,7 +123,6 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
         "head_sha": inputs.get("head_sha", ""),
         "branch_name": inputs.get("head_ref", ""),
         "reviewer_eval_severity_threshold": _score_severity_threshold(),
-        "reviewer_eval_cap": _score_cap(),
     }
     model_id = get_reviewer_model_id()
     if model_id:
@@ -191,7 +189,6 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
             "comments": comments,
             "score_mode": score_mode,
             "publish_completed": publish_completed,
-            "score_cap": REVIEW_FINDING_CAP,
         }
     except Exception:
         logger.exception("Reviewer eval example failed: repo=%s pr=%s", repo, pr_number)
@@ -291,12 +288,3 @@ def _score_severity_threshold() -> Severity:
     if value in _VALID_SEVERITIES:
         return cast(Severity, value)
     return "low"
-
-
-def _score_cap() -> int:
-    raw = os.getenv("REVIEWER_EVAL_CAP", str(REVIEW_FINDING_CAP))
-    try:
-        cap = int(raw)
-    except ValueError:
-        return REVIEW_FINDING_CAP
-    return max(cap, 0)

@@ -146,6 +146,18 @@ def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     )
 
 
+def readiness_prompt(approval: HumanReviewRequest) -> tuple[str, list[Block]]:
+    """The author-only prompt; never included in the shared card."""
+    pr = approval.pull_request
+    text = f"Mark {pr.url} ready for review so someone else can approve it."
+    return text, [
+        section(
+            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> is a draft. Mark it ready for review?"
+        ),
+        actions(_ready_button(approval)),
+    ]
+
+
 def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Dismiss",
@@ -166,8 +178,8 @@ def _voting_diff(
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
-            actions(_ready_button(approval), _dismiss_button(approval)),
+            section(f"*Draft.* Waiting for {author} to mark it ready for review."),
+            actions(_dismiss_button(approval)),
         ]
     return [
         section(_vote_summary(approval, author)),

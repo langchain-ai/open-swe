@@ -482,6 +482,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    assert (
+        f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
+    ) == explicitly_tagged
     run_config = kwargs["config"]
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
@@ -662,7 +665,7 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert message.attrib["sender"] == "system:slack-bot-B123"
     assert message.attrib["kind"] == "system"
-    assert (message.text or "").strip() == "Open a PR"
+    assert (message.text or "").strip() == f"@{webhook_common.SLACK_BOT_USERNAME} Open a PR"
     await slack_webhooks._process_slack_mention_impl(
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )
@@ -730,6 +733,49 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [
+            {
+                "ts": "9.0",
+                "text": "Context for this task.\nMore details <@UBOT> /breakout fix it",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "Forwarded details",
+                    }
+                ],
+            }
+        ],
+        {"U123": "Alice"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="fix it",
+        request_blocks=[{"type": "text", "text": "fix it"}],
+        prior_message_text="Context for this task.\nMore details",
+        is_breakout=True,
+    )
+    inputs = [
+        message["content"]
+        for message in run_input["messages"]
+        if message["role"] == "user" and 'kind="human"' in str(message["content"])
+    ]
+
+    assert len(inputs) == 2
+    assert "Context for this task.\nMore details" in inputs[0]
+    assert "/breakout" not in inputs[0]
+    assert "fix it" in inputs[1][0]["text"]
+    assert "[Forwarded Slack message from Bob]" in inputs[1][0]["text"]
+    assert "Forwarded details" in inputs[1][0]["text"]
+    assert "More details" not in inputs[1][0]["text"]
+    assert "/breakout" not in inputs[1][0]["text"]
 
 
 def test_slack_context_never_replays_open_swes_own_replies(
