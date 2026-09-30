@@ -1,7 +1,9 @@
+import { maybeDiffFromArgs, outputIframeDisplay } from "./toolDisplay"
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
 import {
   collectStructuredEntities,
+  isSilentSender,
   parseStructuredInput,
 } from "./structuredInputMessages"
 import { humanizeToolName } from "./toolNames"
@@ -9,16 +11,10 @@ import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
 import type { StructuredEntity } from "./structuredInputMessages"
-import type {
-  Chunk,
-  DiffData,
-  Message,
-  OutputIframeDisplay,
-  ToolExecutionChunk,
-} from "./types"
+import type { Chunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
-  if (entity?.senderType === "bot") return "bot"
+  if (entity?.senderType === "bot") return undefined
   if (entity?.openSweAccount === "unlinked") return "not an Open SWE user"
   return undefined
 }
@@ -44,7 +40,7 @@ export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
-  if (lowered === "slack_thread_reply") return "slack"
+  if (lowered === "slack_reply") return "slack"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||
@@ -84,26 +80,6 @@ function parseToolArgs(raw: unknown): Record<string, unknown> {
     }
   }
   return {}
-}
-
-export function maybeDiffFromArgs(
-  args: Record<string, unknown>
-): DiffData | null {
-  const path = args.path ?? args.file_path ?? args.target_file
-  if (typeof path !== "string" || !path.trim()) return null
-  const oldContent = args.old_string ?? args.original_content
-  const newContent = args.new_string ?? args.content ?? args.new_content
-  if (typeof newContent !== "string") return null
-  const original = typeof oldContent === "string" ? oldContent : null
-  return {
-    originalContent: original,
-    newContent,
-    filePath: path.trim(),
-    isNewFile: original === null,
-    isBinary: false,
-    isTruncated: false,
-    totalLines: Math.max(newContent.split("\n").length, 1),
-  }
 }
 
 /** Only the last prose chunk of an agent turn survives; the earlier ones were partial. */
@@ -263,51 +239,6 @@ function toolOutputText(
   return text || undefined
 }
 
-function isHttpUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false
-  try {
-    const url = new URL(value)
-    return url.protocol === "https:" || url.protocol === "http:"
-  } catch {
-    return false
-  }
-}
-
-function outputIframeDisplay(
-  toolMessage: ToolMessage | undefined
-): OutputIframeDisplay | undefined {
-  const artifact = toolMessage?.artifact
-  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
-    return undefined
-  }
-  const value = artifact as Record<string, unknown>
-  if (
-    value.type !== "output_iframe" ||
-    typeof value.title !== "string" ||
-    typeof value.filename !== "string"
-  ) {
-    return undefined
-  }
-  if (isHttpUrl(value.preview_url) && isHttpUrl(value.download_url)) {
-    return {
-      type: "output_iframe",
-      previewUrl: value.preview_url,
-      downloadUrl: value.download_url,
-      title: value.title,
-      filename: value.filename,
-    }
-  }
-  if (typeof value.html === "string") {
-    return {
-      type: "output_iframe",
-      html: value.html,
-      title: value.title,
-      filename: value.filename,
-    }
-  }
-  return undefined
-}
-
 /**
  * Convert the SDK's live projections into the dashboard chunk model so the
  * transcript streams (and hydrates) directly from the SDK instead of a
@@ -392,17 +323,13 @@ export function streamMessagesToUi(
       const chunks = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
-      if (
-        parsed.type === "message" &&
-        parsed.sender === "system:sender-context"
-      )
-        return
+      if (parsed.type === "message" && isSilentSender(parsed.sender)) return
       const entity =
         parsed.type === "message"
           ? structuredEntities.get(parsed.sender)
           : undefined
       // Our own replies reach the transcript twice: once forwarded as thread
-      // context, once as the `slack_thread_reply` call that sent them.
+      // context, once as the `slack_reply` call that sent them.
       if (entity?.senderType === "self") return
       const text = parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })
@@ -425,6 +352,7 @@ export function streamMessagesToUi(
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),
               structuredSenderNote: senderNote(entity),
+              structuredSenderIsBot: entity?.senderType === "bot",
             }
           : {}),
       })
@@ -457,7 +385,7 @@ export function streamMessagesToUi(
         }
         const output = toolOutputText(assembled, toolMessage)
         if (output) chunk.output = output
-        const display = outputIframeDisplay(toolMessage)
+        const display = outputIframeDisplay(toolMessage?.artifact)
         if (display) chunk.display = display
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData

@@ -4,21 +4,19 @@ import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
 import type {
   AgentThread,
   PendingThreadMessage,
-  QueuedThreadMessage,
 } from "@/features/agents/lib/types"
-import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import {
   agentThreadKeys,
   setAgentThreadStatus,
 } from "@/features/agents/lib/queries"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
+import { reportError } from "@/lib/errorReporting"
 
-function upsertMessage<T extends QueuedThreadMessage>(
-  messages: Array<T> | undefined,
-  message: T
-): Array<T> {
-  return [...(messages ?? []).filter((item) => item.id !== message.id), message]
+export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
+  /** The stream can reject after the optimistic mutation has already resolved. */
+  onStartError?: () => void
 }
 
 function setPendingMessage(
@@ -27,35 +25,12 @@ function setPendingMessage(
 ): AgentThread {
   return {
     ...thread,
-    pendingMessages: upsertMessage(thread.pendingMessages, message),
-  }
-}
-
-function removePendingMessage(thread: AgentThread, id: string): AgentThread {
-  return {
-    ...thread,
-    pendingMessages: thread.pendingMessages?.filter(
-      (message) => message.id !== id
-    ),
-  }
-}
-
-function setQueuedMessage(
-  thread: AgentThread,
-  message: QueuedThreadMessage
-): AgentThread {
-  return {
-    ...removePendingMessage(thread, message.id),
-    queuedMessages: upsertMessage(thread.queuedMessages, message),
-  }
-}
-
-function removeQueuedMessage(thread: AgentThread, id: string): AgentThread {
-  return {
-    ...thread,
-    queuedMessages: thread.queuedMessages?.filter(
-      (message) => message.id !== id
-    ),
+    pendingMessages: [
+      ...(thread.pendingMessages ?? []).filter(
+        (item) => item.id !== message.id
+      ),
+      message,
+    ],
   }
 }
 
@@ -70,13 +45,22 @@ export function describeSendError(error: unknown): string {
   return String(error)
 }
 
-/** Submit user messages through the active-run queue or a new stream run. */
+/**
+ * Send a user message as a `run.start`. The server starts a run on an idle
+ * thread and steers the live run otherwise, so the client never has to know
+ * which; holding a message back until a boundary is the queue's job.
+ *
+ * The start is not awaited: the SDK stream's promise settles only when the
+ * run ends. The optimistic row stands in until the message shows up in the
+ * transcript or the queue. A rejected start marks that row failed.
+ */
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const source = useThreadSource()
 
   return useMutation({
-    mutationFn: async (vars: SendAgentMessageVariables) => {
+    meta: { errorTitle: "Couldn't send message" },
+    mutationFn: async (vars: SubmitAgentMessageVariables) => {
       if (vars.content.trim() === "/offload") {
         if (source.isRunning) {
           throw new Error(
@@ -86,84 +70,41 @@ export function useSubmitAgentMessage(threadId: string) {
         if (vars.images?.length) {
           throw new Error("Offloading does not accept attachments.")
         }
+        setAgentThreadStatus(queryClient, threadId, "running")
         void source
           .startRun({ configurable: { offload_conversation: true } })
           .catch(() => setAgentThreadStatus(queryClient, threadId, "error"))
         return
       }
-      const createdAt = Date.now()
       const id = vars.client_message_id ?? crypto.randomUUID()
-      const queuedMessage = {
+      const pendingMessage: PendingThreadMessage = {
         id,
         content: vars.content.trim(),
         images: vars.images,
-        createdAt,
-      }
-      const pendingMessage = {
-        ...queuedMessage,
-        status: "sending" as const,
+        createdAt: Date.now(),
+        status: "sending",
+        ...(vars.enqueue ? { queued: true } : {}),
       }
       const updateThread = (update: (thread: AgentThread) => AgentThread) =>
         queryClient.setQueryData<AgentThread>(
           agentThreadKeys.detail(threadId),
           (prev) => (prev ? update(prev) : prev)
         )
-      const queue = async () => {
-        await agentsApi.queueMessage(threadId, {
-          content: vars.content,
-          images: vars.images,
-          model_id: vars.model_id,
-          effort: vars.effort,
-          plan_mode: vars.plan_mode,
-          client_message_id: id,
-        })
-        updateThread((thread) => setQueuedMessage(thread, queuedMessage))
-      }
-
-      if (source.isRunning) {
-        updateThread((thread) => setQueuedMessage(thread, queuedMessage))
-        try {
-          await queue()
-        } catch (error) {
-          updateThread((thread) =>
-            setPendingMessage(removeQueuedMessage(thread, id), {
-              ...pendingMessage,
-              status: "failed",
-              error: describeSendError(error),
-            })
-          )
-          throw error
-        }
-        return
-      }
-
       updateThread((thread) => setPendingMessage(thread, pendingMessage))
-      try {
-        await queue()
-        return
-      } catch (error) {
-        if (!(error instanceof AgentsApiError) || error.status !== 409) {
-          updateThread((thread) =>
-            setPendingMessage(thread, {
-              ...pendingMessage,
-              status: "failed",
-              error: describeSendError(error),
-            })
-          )
-          throw error
-        }
-      }
+      // Set before the start is fired: a rejection below flips it to error and
+      // nothing may flip it back afterwards.
+      setAgentThreadStatus(queryClient, threadId, "running")
 
-      const configurable: Record<string, unknown> = modelConfigurable({
-        modelId: vars.model_id,
-        effort: vars.effort,
-      })
-      if (vars.plan_mode) configurable.plan_mode = true
+      const configurable = modelConfigurable(
+        { modelId: vars.model_id, effort: vars.effort },
+        vars.model_selection_changed
+      )
 
       void source
         .startRun({
           message: { id, text: vars.content, images: vars.images },
           configurable,
+          ...(vars.enqueue ? { enqueue: true } : {}),
         })
         .catch((error: unknown) => {
           updateThread((thread) =>
@@ -171,13 +112,16 @@ export function useSubmitAgentMessage(threadId: string) {
               ...pendingMessage,
               status: "failed",
               error: describeSendError(error),
+              // A failed enqueue never reaches the SDK's queue, so this
+              // must fall back into the normal timeline instead of
+              // rendering as a permanently pending queued row.
+              queued: false,
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
+          vars.onStartError?.()
+          reportError({ title: "Couldn't send message", error })
         })
-    },
-    onSuccess: () => {
-      setAgentThreadStatus(queryClient, threadId, "running")
     },
   })
 }

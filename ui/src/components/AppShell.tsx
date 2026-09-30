@@ -28,7 +28,7 @@ export function AppShell({
   return (
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
-      <main className="flex-1 overflow-y-auto">
+      <main className="relative flex-1 overflow-y-auto">
         <div
           className={cn(
             "mx-auto max-w-3xl px-4 pt-14 pb-16 sm:px-8 sm:py-12",

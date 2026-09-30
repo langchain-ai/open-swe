@@ -1,4 +1,4 @@
-import { useId, useState } from "react"
+import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -9,8 +9,9 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
 import { api, type WorkspaceRecord } from "@/lib/api"
+
+import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 
 const SNAPSHOT_LABEL: Record<
   NonNullable<WorkspaceRecord["snapshot_status"]>,
@@ -57,8 +58,6 @@ export function WorkspaceSandboxSection({
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
 }) {
-  const setupId = useId()
-  const updateId = useId()
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
   const dirty =
@@ -66,6 +65,7 @@ export function WorkspaceSandboxSection({
     updateScript !== (record.update_script ?? "")
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: () =>
       api.updateWorkspace(record.slug, {
         setup_script: setupScript,
@@ -74,6 +74,7 @@ export function WorkspaceSandboxSection({
     onSuccess: onSaved,
   })
   const rebuild = useMutation({
+    meta: { errorTitle: "Couldn't start the image rebuild" },
     mutationFn: () => api.refreshWorkspace(record.slug),
     onSuccess: onRebuildStarted,
   })
@@ -123,36 +124,33 @@ export function WorkspaceSandboxSection({
       )}
       <div className="space-y-3 px-4 py-3.5">
         <div className="text-sm">
-          <label htmlFor={setupId}>Setup script</label>
+          <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Selected repositories
-            are available in <WorkspaceReposPopover repos={record.repos} />.
+            Runs on the base snapshot to build the image. Bound repositories are
+            available in <WorkspaceReposPopover repos={record.repos} /> to
+            preload; runs clone any other repository on demand.
           </span>
-          <Textarea
-            id={setupId}
-            className="mt-1 font-mono text-xs"
-            placeholder="Install dependencies and build the image."
+          <WorkspaceScriptEditor
+            label="Setup script"
             value={setupScript}
-            onChange={(e) => setSetupScript(e.target.value)}
+            onChange={setSetupScript}
           />
         </div>
         <div className="text-sm">
-          <label htmlFor={updateId}>Update script</label>
+          <div>Update script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
             Runs on the current image to bring it up to date, with the same{" "}
             <WorkspaceReposPopover repos={record.repos} /> value.
           </span>
-          <Textarea
-            id={updateId}
-            className="mt-1 font-mono text-xs"
-            placeholder="Pull repositories and reinstall dependencies."
+          <WorkspaceScriptEditor
+            label="Update script"
             value={updateScript}
-            onChange={(e) => setUpdateScript(e.target.value)}
+            onChange={setUpdateScript}
           />
         </div>
-        {(save.error || rebuild.error) && (
+        {save.error && (
           <p role="alert" className="text-xs text-destructive">
-            {(save.error ?? rebuild.error)?.message}
+            {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (
@@ -172,17 +170,19 @@ export function WorkspaceSandboxSection({
             {refreshing ? "Rebuilding…" : "Rebuild image"}
           </Button>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!dirty || save.isPending}
-              onClick={() => {
-                setSetupScript(record.setup_script ?? "")
-                setUpdateScript(record.update_script ?? "")
-              }}
-            >
-              Cancel
-            </Button>
+            {dirty && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => {
+                  setSetupScript(record.setup_script ?? "")
+                  setUpdateScript(record.update_script ?? "")
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="sm"
               disabled={!dirty || save.isPending}

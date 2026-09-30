@@ -24,7 +24,7 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_thread_reply_with_ts,
 )
-from agent.slack.tools.thread_reply import build_workflow_approval_blocks
+from agent.slack.tools.reply import build_workflow_approval_blocks
 from agent.threads.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,

@@ -50,7 +50,7 @@ async def test_usage_is_exposed_without_saved_profile() -> None:
         patch("agent.dashboard.profiles.get_profile", AsyncMock(return_value=None)),
         patch("agent.dashboard.profiles.get_repository_usage", AsyncMock(return_value=usage)),
     ):
-        assert await get_my_profile({"sub": "alice"}) == {"repository_usage": usage}
+        assert (await get_my_profile({"sub": "alice"}))["repository_usage"] == usage
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_migration_preserves_and_merges_history(registry_db: None) -> None
         await conn.execute(text(f"CREATE SCHEMA {schema}"))
         try:
             migrations = postgres.load_migrations()
-            await conn.run_sync(postgres.upgrade, migrations, schema, "0026")
+            await conn.run_sync(postgres.upgrade, migrations, schema, "c1e405ab3072")
             await conn.execute(text("INSERT INTO users (id) VALUES (:id)"), {"id": user_id})
             await conn.execute(
                 text("""

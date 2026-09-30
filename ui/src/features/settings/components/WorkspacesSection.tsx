@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
@@ -127,7 +127,17 @@ function WorkspaceRow({
           </span>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
-          <span className={`text-xs ${REFRESH_CLASS[status]}`}>
+          <span
+            className={`text-xs ${REFRESH_CLASS[status]}`}
+            title={
+              status !== "refreshing" && when && workspace.refresh_finished_at
+                ? new Date(workspace.refresh_finished_at).toLocaleString(
+                    undefined,
+                    { timeZoneName: "short" }
+                  )
+                : undefined
+            }
+          >
             {refreshLabel(status, workspace.refresh_kind)}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>
@@ -190,6 +200,7 @@ export function WorkspacesSection({
         name: createDraft.name.trim(),
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
+        kitchen_channel_ids: createDraft.kitchenChannelIds,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
@@ -266,7 +277,9 @@ export function WorkspacesSection({
                     setCreateError(null)
                   }}
                 >
-                  Cancel
+                  {JSON.stringify(createDraft) !== JSON.stringify(EMPTY_DRAFT)
+                    ? "Cancel"
+                    : "Close"}
                 </Button>
                 <Button
                   size="sm"

@@ -6,7 +6,9 @@ import {
   fromSnapshot,
   isOffloading,
   prependTurns,
+  queuedTurns,
   routedNotice,
+  subagentMessages,
   toMessages,
 } from "./reducer"
 import type { TranscriptState } from "./reducer"
@@ -37,7 +39,14 @@ function turn(
   requestedAt: string,
   state: TranscriptTurnRow["state"] = "completed"
 ): TranscriptTurnRow {
-  return { turn_id: turnId, state, requested_at: requestedAt, error: null }
+  return {
+    turn_id: turnId,
+    run_id: null,
+    state,
+    requested_at: requestedAt,
+    started_at: state === "requested" ? null : requestedAt,
+    error: null,
+  }
 }
 
 function messageRow(
@@ -170,6 +179,25 @@ function chunkKinds(entry: Message): Array<string> {
 }
 
 describe("transcript snapshot", () => {
+  it("projects a subagent's namespace as its own transcript", () => {
+    const state = fromSnapshot(twoTurnSnapshot())
+
+    const messages = subagentMessages(state, ["task-1"])
+    expect(messages.map((entry) => [entry.author, entry.id])).toEqual([
+      ["agent", "ai-nested"],
+    ])
+    expect(chunkKinds(messages[0]!)).toEqual(["text", "tool-execution"])
+    const call = messages[0]!.chunks[1] as ToolExecutionChunk
+    expect(call.toolCallId).toBe("grep-1")
+    // The same state still renders the root without the subagent's rows.
+    const rootCalls = toMessages(state).flatMap((entry) =>
+      entry.chunks.flatMap((chunk) =>
+        chunk.kind === "tool-execution" ? [chunk.toolCallId] : []
+      )
+    )
+    expect(rootCalls).toEqual(["read-1", "task-1"])
+  })
+
   it("renders a turn as one human message followed by one agent message", () => {
     const messages = toMessages(fromSnapshot(twoTurnSnapshot()))
 
@@ -294,6 +322,103 @@ describe("transcript events", () => {
     })
 
     expect(requested.status).toBe("running")
+  })
+
+  it("keeps a queued follow-up out of the record until its run starts", () => {
+    const requested = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "third ask",
+        attachments: [],
+      },
+    })
+    const queued = applyEvent(requested, {
+      ...appended(12, {}),
+      event_type: "turn.queued",
+      payload: { turn_id: "turn-3", run_id: "run-3" },
+    })
+    const inRecord = (state: TranscriptState) =>
+      toMessages(state).some((message) => message.id === "human-3")
+
+    expect(queuedTurns(queued).map((entry) => entry.runId)).toEqual(["run-3"])
+    expect(queuedTurns(queued)[0]?.message.id).toBe("human-3")
+    expect(inRecord(queued)).toBe(false)
+
+    // Withdrawn before it ran: gone from the queue and never in the record.
+    const withdrawn = applyEvent(queued, {
+      ...appended(13, {}),
+      event_type: "turn.interrupted",
+      payload: { turn_id: "turn-3" },
+    })
+    expect(queuedTurns(withdrawn)).toEqual([])
+    expect(inRecord(withdrawn)).toBe(false)
+    // turn-2 is still running in the fixture: withdrawing a queued follow-up
+    // never idles the thread.
+    expect(withdrawn.status).toBe("running")
+
+    // Started: an ordinary turn from here on.
+    const started = applyEvent(queued, {
+      ...appended(13, {}),
+      event_type: "turn.started",
+      payload: { turn_id: "turn-3" },
+    })
+    expect(queuedTurns(started)).toEqual([])
+    expect(inRecord(started)).toBe(true)
+  })
+
+  it("stays running while a queued follow-up waits behind the turn that ended", () => {
+    const base = fromSnapshot(twoTurnSnapshot())
+    const running = applyEvent(base, {
+      ...appended(11, {}),
+      event_type: "turn.started",
+      payload: { turn_id: "turn-3" },
+    })
+    const queued = applyEvent(
+      applyEvent(running, {
+        ...appended(12, {}),
+        event_type: "turn.requested",
+        payload: {
+          turn_id: "turn-4",
+          message_id: "human-4",
+          text: "and then this",
+          attachments: [],
+        },
+      }),
+      {
+        ...appended(13, {}),
+        event_type: "turn.queued",
+        payload: { turn_id: "turn-4", run_id: "run-4" },
+      }
+    )
+    const ended = applyEvent(queued, {
+      ...appended(14, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-3" },
+    })
+    expect(ended.status).toBe("running")
+    expect(queuedTurns(ended)).toHaveLength(1)
+  })
+
+  it("settles while a requested turn has no run that could start it", () => {
+    const orphaned = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-3",
+        text: "never started",
+        attachments: [],
+      },
+    })
+    const ended = applyEvent(orphaned, {
+      ...appended(12, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-2" },
+    })
+    expect(ended.status).toBe("idle")
   })
 })
 

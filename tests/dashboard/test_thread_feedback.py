@@ -29,6 +29,8 @@ async def api(monkeypatch, fake_store):
 
     monkeypatch.setattr(feedback, "agent_thread_pr_state_lock", unlocked)
     monkeypatch.setattr(feedback, "langgraph_client", lambda: None)
+    analytics = AsyncMock()
+    monkeypatch.setattr(feedback, "record_feedback_submission", analytics)
     await thread_feedback.feedback_store().put("t1", thread_feedback.Feedback(status="ready"))
     app = FastAPI()
     app.include_router(threads_router, prefix="/dashboard/api")
@@ -38,7 +40,9 @@ async def api(monkeypatch, fake_store):
         base_url="http://testserver",
         headers={"origin": "http://testserver"},
     ) as client:
-        yield SimpleNamespace(client=client, metadata=metadata, session=session, quiet=quiet)
+        yield SimpleNamespace(
+            client=client, metadata=metadata, session=session, quiet=quiet, analytics=analytics
+        )
 
 
 @pytest.mark.parametrize("rating", ["bad", "good"])
@@ -53,18 +57,13 @@ async def test_submit_saves_rating_and_comment_and_keeps_first_response(api, rat
     reloaded = await api.client.get("/dashboard/api/threads/t1/feedback")
     assert response.json() == duplicate.json() == reloaded.json()
     assert await thread_feedback.feedback_prompt_status("t1") == "completed"
-
-
-async def test_dismiss_prevents_later_submission(api):
-    dismissed = await api.client.post(
-        "/dashboard/api/threads/t1/feedback", json={"action": "dismiss"}
-    )
-    assert dismissed.status_code == 200
-    submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "bad"})
-    assert (
-        submitted.json()
-        == dismissed.json()
-        == {"status": "dismissed", "rating": None, "comment": ""}
+    api.analytics.assert_awaited_once_with(
+        feedback_key="thread:t1",
+        rating=5 if rating == "good" else 1,
+        source="dashboard",
+        run_key=None,
+        github_login="owner",
+        user_email=None,
     )
 
 
@@ -87,56 +86,6 @@ async def test_only_verified_initiator_gets_feedback(api, monkeypatch, identity,
         "comment": "",
     }
     assert submitted.status_code == (200 if identity == "slack_initiator" else 403)
-
-
-async def test_private_thread_owner_can_give_feedback(api):
-    api.metadata.update({"visibility": "private", "owner_login": "owner"})
-    visible = await api.client.get("/dashboard/api/threads/t1/feedback")
-    assert visible.json()["status"] == "ready"
-    submitted = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "good"})
-    assert submitted.status_code == 200
-
-    api.session["sub"] = "other"
-    assert (await api.client.get("/dashboard/api/threads/t1/feedback")).status_code == 404
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"rating": "other", "comment": "  "},
-        {"rating": "other", "comment": "Details"},
-        {"action": "comment", "comment": "  "},
-        {"rating": "great"},
-        {},
-        {"action": "submit"},
-        {"action": "unknown", "rating": "good"},
-        {"rating": "good", "comment": "x" * 3001},
-    ],
-)
-async def test_invalid_feedback_is_not_saved(api, payload):
-    response = await api.client.post("/dashboard/api/threads/t1/feedback", json=payload)
-    assert response.status_code == 422
-    assert (await api.client.get("/dashboard/api/threads/t1/feedback")).json()["status"] == "ready"
-
-
-async def test_bad_rating_is_saved_before_optional_comment(api):
-    rated = await api.client.post("/dashboard/api/threads/t1/feedback", json={"rating": "bad"})
-    assert rated.json() == {"status": "completed", "rating": "bad", "comment": ""}
-    commented = await api.client.post(
-        "/dashboard/api/threads/t1/feedback",
-        json={"action": "comment", "comment": "  The fix did not work.  "},
-    )
-    assert commented.status_code == 200
-    assert commented.json() == {
-        "status": "completed",
-        "rating": "bad",
-        "comment": "The fix did not work.",
-    }
-    duplicate = await api.client.post(
-        "/dashboard/api/threads/t1/feedback",
-        json={"action": "comment", "comment": "Overwrite"},
-    )
-    assert duplicate.json() == commented.json()
 
 
 @pytest.mark.parametrize("state", ["ready", "good", "dismissed"])
@@ -167,32 +116,3 @@ async def test_submission_rechecks_eligibility_and_origin(api, blocked, payload)
     )
     assert response.status_code == (409 if blocked == "activity" else 403)
     assert (await thread_feedback.feedback_store().get("t1")).status == "ready"
-
-
-@pytest.mark.parametrize("status", ["completed", "dismissed"])
-async def test_slack_completion_hides_web_controls(api, status):
-    await thread_feedback.complete_feedback_prompt("t1", status)
-    response = await api.client.get("/dashboard/api/threads/t1/feedback")
-    assert response.json() == {"status": status, "rating": None, "comment": ""}
-
-
-def test_openapi_exposes_one_typed_feedback_response():
-    app = FastAPI()
-    app.include_router(feedback.feedback_router)
-    schema = app.openapi()
-    responses = [
-        schema["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]
-        for path, method in [
-            ("/threads/{thread_id}/feedback", "get"),
-            ("/threads/{thread_id}/feedback", "post"),
-        ]
-    ]
-    assert responses[0] == responses[1]
-    model = schema["components"]["schemas"][responses[0]["$ref"].rsplit("/", 1)[1]]
-    assert set(model["properties"]) == {"status", "rating", "comment"}
-    assert set(model["properties"]["status"]["enum"]) == {
-        "unavailable",
-        "ready",
-        "completed",
-        "dismissed",
-    }

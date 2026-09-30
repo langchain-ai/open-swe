@@ -7,7 +7,12 @@
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+import {
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  networkError,
+  newRequestId,
+} from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
@@ -23,7 +28,10 @@ function transcriptPath(threadId: string, suffix = ""): string {
   return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
 }
 
-async function apiError(response: Response): Promise<AgentsApiError> {
+async function apiError(
+  response: Response,
+  requestId?: string
+): Promise<AgentsApiError> {
   let message = response.statusText
   try {
     const body: unknown = await response.json()
@@ -36,7 +44,7 @@ async function apiError(response: Response): Promise<AgentsApiError> {
   } catch {
     // Not a JSON error body; the status text is all we have.
   }
-  return new AgentsApiError(response.status, message)
+  return new AgentsApiError(response.status, message, requestId)
 }
 
 /** The whole thread as of `version`; 404 for threads that predate the log. */
@@ -193,6 +201,7 @@ export interface RunStartCommand {
   id: number
   method: "run.start"
   params: {
+    multitask_strategy?: "enqueue"
     input: { messages: Array<Record<string, unknown>> } | null
     config: { configurable: Record<string, unknown> }
     assistant_id: string
@@ -210,16 +219,20 @@ export function runStartCommand({
   threadId,
   message,
   configurable = {},
+  enqueue = false,
 }: {
   threadId: string
   /** Omitted for a message-less run such as `/offload`. */
   message?: RunStartMessage
   configurable?: Record<string, unknown>
+  /** Queue behind the live run instead of steering it. */
+  enqueue?: boolean
 }): RunStartCommand {
   return {
     id: 1,
     method: "run.start",
     params: {
+      ...(enqueue ? { multitask_strategy: "enqueue" as const } : {}),
       input: message
         ? {
             messages: [
@@ -261,21 +274,28 @@ export async function startRun(
   threadId: string,
   command: RunStartCommand
 ): Promise<void> {
+  const requestId = newRequestId()
   const response = await timedFetch(
     dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
     {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+      },
       body: JSON.stringify(command),
     }
-  )
-  if (!response.ok) throw await apiError(response)
+  ).catch((cause: unknown) => {
+    throw networkError(cause, requestId)
+  })
+  if (!response.ok) throw await apiError(response, requestId)
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(
       response.status,
-      payload.message ?? payload.error ?? "run.start failed"
+      payload.message ?? payload.error ?? "run.start failed",
+      requestId
     )
   }
 }

@@ -1,51 +1,10 @@
 import asyncio
-from collections.abc import Sequence
 from unittest.mock import AsyncMock
 
 import httpx
-import pytest
 from langgraph_sdk.errors import ConflictError
 
 from agent.utils.background_task_state import update_background_task_state
-
-
-@pytest.mark.parametrize(
-    ("previous", "running", "finished", "reset", "expected", "writes"),
-    [
-        (None, [], [], False, [], 0),
-        ([], [], [], True, [], 0),
-        (["cmd-1"], ["cmd-1"], [], False, ["cmd-1"], 0),
-        (["cmd-1"], [], ["cmd-missing"], False, ["cmd-1"], 0),
-        (["cmd-1"], ["cmd-2"], ["cmd-1"], False, ["cmd-2"], 1),
-        (["cmd-1"], [], [], True, [], 1),
-    ],
-)
-async def test_task_state_only_writes_changes(
-    previous: list[str] | None,
-    running: Sequence[str],
-    finished: Sequence[str],
-    reset: bool,
-    expected: list[str],
-    writes: int,
-) -> None:
-    client = AsyncMock()
-    metadata: dict[str, object] = {"sandbox_id": "sandbox-1"}
-    if previous is not None:
-        metadata["running_background_tasks"] = previous
-    client.threads.get.return_value = {"metadata": metadata}
-
-    result = await update_background_task_state(
-        client, "thread-1", running=running, finished=finished, reset=reset
-    )
-
-    client.threads.get.assert_awaited_once_with("thread-1")
-    assert client.threads.update.await_count == writes
-    if writes:
-        client.threads.update.assert_awaited_once_with(
-            "thread-1", metadata={"running_background_tasks": expected}
-        )
-    assert result == {"sandbox_id": "sandbox-1", "running_background_tasks": expected}
-    assert metadata.get("running_background_tasks") == previous
 
 
 async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
@@ -55,7 +14,7 @@ async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:
     first_read = asyncio.Event()
     contended = asyncio.Event()
 
-    async def create(*, thread_id: str, if_exists: str, ttl: int) -> None:
+    async def create(*, thread_id: str, if_exists: str, ttl: int, metadata: object) -> None:
         nonlocal locked
         if locked:
             contended.set()

@@ -1,5 +1,3 @@
-from typing import Any
-
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
@@ -14,7 +12,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
-) -> dict[str, Any]:
+) -> dict[str, object]:
     from agent.github.webhook import trigger_pr_review_from_ref as _trigger_pr_review_from_ref
 
     return await _trigger_pr_review_from_ref(
@@ -27,7 +25,7 @@ async def trigger_pr_review_from_ref(
     )
 
 
-async def request_pr_review(pr_url: str) -> dict[str, Any]:
+async def request_pr_review(pr_url: str) -> dict[str, object]:
     """Implement the `request_pr_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if not pr_ref:

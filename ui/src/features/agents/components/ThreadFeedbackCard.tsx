@@ -45,11 +45,36 @@ export function ThreadFeedbackCard({
   const [showComment, setShowComment] = useState(false)
   const [comment, setComment] = useState("")
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [optimisticDismissed, setOptimisticDismissed] = useState(false)
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
+    meta: { errorTitle: "Couldn't save feedback" },
+    onMutate: (value) => {
+      if (value.action === "dismiss") {
+        setOptimisticDismissed(true)
+      } else if ("rating" in value) {
+        setShowComment(value.rating === "bad")
+        setShowConfirmation(value.rating !== "bad")
+      } else {
+        setShowComment(false)
+        setShowConfirmation(true)
+      }
+    },
+    onError: (_error, value) => {
+      if (value.action === "dismiss") {
+        setOptimisticDismissed(false)
+      } else if ("rating" in value) {
+        setShowComment(false)
+        setShowConfirmation(false)
+      } else {
+        setShowComment(true)
+        setShowConfirmation(false)
+      }
+    },
     onSuccess: (data, value) => {
       queryClient.setQueryData(["thread-feedback", threadId, login], data)
+      if (value.action === "dismiss") return
       const shouldShowComment =
         "rating" in value &&
         value.rating === "bad" &&
@@ -63,10 +88,10 @@ export function ThreadFeedbackCard({
     },
   })
   useEffect(() => {
-    if (!showConfirmation) return
+    if (!showConfirmation || mutation.isPending) return
     const timeout = window.setTimeout(() => setShowConfirmation(false), 5000)
     return () => window.clearTimeout(timeout)
-  }, [showConfirmation])
+  }, [showConfirmation, mutation.isPending])
   const query = useQuery({
     queryKey: ["thread-feedback", threadId, login],
     queryFn: () => agentsApi.getThreadFeedback(threadId),
@@ -84,6 +109,7 @@ export function ThreadFeedbackCard({
 
   if (
     !login ||
+    optimisticDismissed ||
     (feedback?.status !== "ready" && feedback?.status !== "completed")
   ) {
     return null
@@ -166,11 +192,6 @@ export function ThreadFeedbackCard({
             Dismiss
           </Button>
         </div>
-      )}
-      {mutation.isError && (
-        <p role="alert" className="w-full text-xs text-destructive">
-          Your feedback could not be saved. Please try again.
-        </p>
       )}
       {showComment && (
         <div className="flex items-center gap-2">

@@ -147,6 +147,13 @@ async def get_github_app_installation_token(
     return token
 
 
+async def _local_dev_token() -> str | None:
+    """Under `langgraph dev`, the `gh` CLI stands in for an unconfigured App."""
+    from agent.dashboard.dev_login import gh_token
+
+    return await gh_token()
+
+
 async def get_github_app_installation_token_with_expiry(
     *,
     installation_id: str | int | None = None,
@@ -165,6 +172,9 @@ async def get_github_app_installation_token_with_expiry(
         or not resolved_installation_id.isdigit()
         or int(resolved_installation_id) <= 0
     ):
+        local_token = await _local_dev_token()
+        if local_token:
+            return local_token, None
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 

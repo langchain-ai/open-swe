@@ -17,13 +17,14 @@
 
 import {
   INTERNAL_TOOLS,
-  maybeDiffFromArgs,
   mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
+import { maybeDiffFromArgs } from "@/features/agents/lib/toolDisplay"
 import {
   collectStructuredEntities,
+  isSilentSender,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
 import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
@@ -60,6 +61,8 @@ export interface TranscriptMessageState {
   reasoning: string
   namespace: Namespace
   attachments: ReadonlyArray<TranscriptAttachment>
+  /** The GitHub login of a human message's sender, when the server knows it. */
+  senderLogin: string | null
   createdAt: string
 }
 
@@ -87,7 +90,10 @@ export type TurnItem =
 export interface TranscriptTurnState {
   turnId: string
   state: TurnState
+  /** The run serving the turn, or the one queued to; null until either exists. */
+  runId: string | null
   requestedAt: string
+  startedAt: string | null
   error: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
@@ -172,6 +178,7 @@ function indexMessages(
       reasoning: row.reasoning,
       namespace: row.namespace,
       attachments: row.attachments ?? [],
+      senderLogin: row.sender?.login ?? null,
       createdAt: row.created_at,
     }
   }
@@ -233,7 +240,9 @@ function turnStates(
     turns[row.turn_id] = {
       turnId: row.turn_id,
       state: row.state,
+      runId: row.run_id ?? null,
       requestedAt: row.requested_at,
+      startedAt: row.started_at ?? null,
       error: row.error,
       items: orderItems(
         Object.values(messages).filter(
@@ -396,7 +405,9 @@ function ensureTurn(
   const turn: TranscriptTurnState = {
     turnId,
     state,
+    runId: null,
     requestedAt: occurredAt,
+    startedAt: state === "running" ? occurredAt : null,
     error: null,
     items: [],
     revision: 0,
@@ -408,6 +419,85 @@ function ensureTurn(
   }
   draft.touched.add(turnId)
   return turn
+}
+
+/**
+ * What the thread does once a turn ended: another turn still running, or one
+ * with a queued run about to start, keeps it running; otherwise `settled`. A
+ * requested turn with no run may never start, so it does not count.
+ */
+function settledStatus(
+  draft: Draft,
+  settled: TranscriptThreadStatus
+): TranscriptThreadStatus {
+  return Object.values(draft.state.turns).some(
+    (turn) =>
+      turn.state === "running" ||
+      (turn.state === "requested" && turn.runId !== null)
+  )
+    ? "running"
+    : settled
+}
+
+/**
+ * Waiting behind the live run. A requested turn is queued once its run exists,
+ * and already while another turn is running: the run id only follows the
+ * request by a moment, and the row should not change shape in between.
+ */
+function isQueuedTurn(
+  state: TranscriptState,
+  turn: TranscriptTurnState
+): boolean {
+  if (turn.state !== "requested") return false
+  if (turn.runId !== null) return true
+  return Object.values(state.turns).some(
+    (other) => other.turnId !== turn.turnId && other.state === "running"
+  )
+}
+
+/**
+ * A queued follow-up the user withdrew before it ran. Its message went back to
+ * the composer (or out as a steer), so the turn is not part of the record.
+ */
+function isCancelledBeforeStart(turn: TranscriptTurnState): boolean {
+  return (
+    turn.state === "interrupted" &&
+    turn.runId !== null &&
+    turn.startedAt === null
+  )
+}
+
+/** A follow-up waiting for the live run to end, as the queue shows it. */
+export interface QueuedTurn {
+  turnId: string
+  /** Null until the server has created the queued run; nothing to cancel yet. */
+  runId: string | null
+  /** The human message that opened the turn; its id doubles as the row key. */
+  message: Message
+  /** Its sender's GitHub login: only they may send it now or cancel it. */
+  senderLogin: string | null
+  requestedAt: string
+}
+
+/** The follow-ups queued behind the live run, oldest first. */
+export function queuedTurns(state: TranscriptState): Array<QueuedTurn> {
+  const out: Array<QueuedTurn> = []
+  for (const turnId of state.turnOrder) {
+    const turn = state.turns[turnId]
+    if (!turn || !isQueuedTurn(state, turn)) continue
+    const message = turnMessages(state, turn, []).find(
+      (entry) => entry.author === "user"
+    )
+    if (!message) continue
+    out.push({
+      turnId,
+      runId: turn.runId,
+      message,
+      senderLogin: state.messages[message.id]?.senderLogin ?? null,
+      requestedAt: turn.requestedAt,
+    })
+  }
+  return out
 }
 
 function patchTurn(
@@ -520,16 +610,26 @@ export function applyEvent(
         reasoning: "",
         namespace: [],
         attachments: payload.attachments,
+        senderLogin: payload.sender?.login ?? null,
         createdAt: at,
       })
       break
     }
     case "turn.started": {
       const payload = event.payload
-      patchTurn(draft, ensureTurn(draft, payload.turn_id, "running", at), {
+      const turn = ensureTurn(draft, payload.turn_id, "running", at)
+      patchTurn(draft, turn, {
         state: "running",
+        startedAt: turn.startedAt ?? at,
       })
       draft.state = { ...draft.state, status: "running" }
+      break
+    }
+    case "turn.queued": {
+      const payload = event.payload
+      const turn = draft.state.turns[payload.turn_id]
+      if (!turn || turn.state !== "requested") break
+      patchTurn(draft, turn, { runId: payload.run_id })
       break
     }
     case "turn.completed": {
@@ -538,7 +638,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "completed" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
     }
     case "turn.failed": {
@@ -547,7 +647,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "failed", error: payload.error })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "error" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "error") }
       break
     }
     case "turn.interrupted": {
@@ -556,7 +656,7 @@ export function applyEvent(
       if (!turn) break
       patchTurn(draft, turn, { state: "interrupted" })
       dropTransientNotices(draft, payload.turn_id)
-      draft.state = { ...draft.state, status: "idle" }
+      draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
     }
     case "message.appended": {
@@ -572,6 +672,7 @@ export function applyEvent(
         reasoning: (existing?.reasoning ?? "") + (payload.reasoning ?? ""),
         namespace: payload.namespace,
         attachments: existing?.attachments ?? [],
+        senderLogin: existing?.senderLogin ?? null,
         createdAt: existing?.createdAt ?? at,
       })
       break
@@ -589,6 +690,7 @@ export function applyEvent(
         reasoning: payload.reasoning,
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
+        senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai" && payload.namespace.length === 0) {
@@ -804,12 +906,11 @@ function buildHumanMessage(
 ): Message | null {
   const parsed = parseStructuredInput(row.text, entities)
   if (parsed.type === "entity") return null
-  if (parsed.type === "message" && parsed.sender === "system:sender-context")
-    return null
+  if (parsed.type === "message" && isSilentSender(parsed.sender)) return null
   const entity =
     parsed.type === "message" ? entities.get(parsed.sender) : undefined
   // Our own replies reach the transcript twice: once forwarded as thread
-  // context, once as the `slack_thread_reply` call that sent them.
+  // context, once as the `slack_reply` call that sent them.
   if (entity?.senderType === "self") return null
   const text = parsed.content
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
@@ -832,11 +933,11 @@ function buildHumanMessage(
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined),
           structuredSenderNote:
-            entity?.senderType === "bot"
-              ? "bot"
-              : entity?.openSweAccount === "unlinked"
-                ? "not an Open SWE user"
-                : undefined,
+            entity?.senderType !== "bot" &&
+            entity?.openSweAccount === "unlinked"
+              ? "not an Open SWE user"
+              : undefined,
+          structuredSenderIsBot: entity?.senderType === "bot",
         }
       : {}),
   }
@@ -856,18 +957,36 @@ interface TurnCacheEntry {
   messages: Array<Message>
 }
 
-const turnCache = new WeakMap<TranscriptTurnState, TurnCacheEntry>()
+// One entry per namespace projected from the turn: the root transcript and
+// any subagent view open on it read the same turn through different filters.
+const turnCache = new WeakMap<
+  TranscriptTurnState,
+  Map<string, TurnCacheEntry>
+>()
+
+function sameNamespace(left: Namespace, right: Namespace): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => right[index] === segment)
+  )
+}
 
 /**
- * The turn's rows as the transcript renders them: the human message that opened
- * it, then one agent message whose chunks interleave reasoning, prose and tool
- * calls in event order — the same shape `streamMessagesToUi` produces.
+ * The turn's rows under `namespace` as the transcript renders them: the human
+ * message that opened it, then one agent message whose chunks interleave
+ * reasoning, prose and tool calls in event order — the same shape
+ * `streamMessagesToUi` produces. The root namespace is the thread itself; a
+ * subagent's namespace yields what that subagent said and did, with anything
+ * it spawned in turn left to the `task` card that spawned it.
  */
 function turnMessages(
   state: TranscriptState,
-  turn: TranscriptTurnState
+  turn: TranscriptTurnState,
+  namespace: Namespace
 ): Array<Message> {
-  const cached = turnCache.get(turn)
+  const key = namespace.join("\u0000")
+  let perNamespace = turnCache.get(turn)
+  const cached = perNamespace?.get(key)
   if (
     cached &&
     cached.revision === turn.revision &&
@@ -912,9 +1031,7 @@ function turnMessages(
   for (const item of turn.items) {
     if (item.kind === "message") {
       const row = state.messages[item.id]
-      // Subagent output is not part of the root transcript; the subagent card
-      // that spawned it renders its activity instead.
-      if (!row || row.namespace.length) continue
+      if (!row || !sameNamespace(row.namespace, namespace)) continue
       if (row.role === "human") {
         flush()
         const message = humanMessage(state.threadId, row, state.entities)
@@ -933,13 +1050,17 @@ function turnMessages(
       continue
     }
     const call = state.toolCalls[item.id]
-    if (!call || call.namespace.length) continue
+    if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
     append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
   }
   flush()
 
-  turnCache.set(turn, {
+  if (!perNamespace) {
+    perNamespace = new Map()
+    turnCache.set(turn, perNamespace)
+  }
+  perNamespace.set(key, {
     revision: turn.revision,
     entities: state.entities,
     messages: out,
@@ -977,7 +1098,10 @@ export function toMessages(state: TranscriptState): Array<Message> {
   const messages: Array<Message> = []
   for (const turnId of state.turnOrder) {
     const turn = state.turns[turnId]
-    if (turn) messages.push(...turnMessages(state, turn))
+    // Queued follow-ups render in the queue, not the record, until they run.
+    if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
+      continue
+    messages.push(...turnMessages(state, turn, []))
   }
   messagesCache.set(state.turns, {
     turnOrder: state.turnOrder,
@@ -985,4 +1109,37 @@ export function toMessages(state: TranscriptState): Array<Message> {
     messages,
   })
   return messages
+}
+
+/**
+ * What one subagent said and did, as UI rows: every message and tool call
+ * recorded under exactly `namespace`, across every turn of the thread. Its
+ * task prompt is not among them — the `task` call's input holds it — and a
+ * nested subagent shows as a `task` card here, the way it does at the root.
+ */
+export function subagentMessages(
+  state: TranscriptState,
+  namespace: Namespace
+): Array<Message> {
+  if (!namespace.length) return []
+  const messages: Array<Message> = []
+  for (const turnId of state.turnOrder) {
+    const turn = state.turns[turnId]
+    if (!turn || isQueuedTurn(state, turn) || isCancelledBeforeStart(turn))
+      continue
+    messages.push(...turnMessages(state, turn, namespace))
+  }
+  return messages
+}
+
+/**
+ * The `task` tool call that spawned a subagent, wherever in the thread it sits,
+ * or null when the transcript holds no such call.
+ */
+export function subagentTask(
+  state: TranscriptState,
+  toolCallId: string
+): TranscriptToolCallState | null {
+  const call = state.toolCalls[toolCallId]
+  return call && toolKind(call.name) === "task" ? call : null
 }

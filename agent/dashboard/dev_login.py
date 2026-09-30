@@ -6,14 +6,18 @@ callback. The dashboard's per-user reads — the PR list, one PR's details, a PR
 preview — already run on the signed-in person's own OAuth token, and `gh` holds
 one, so the App buys nothing for them.
 
+Endpoints backed by an App installation token rather than the caller's — a
+published review, its diff, inline comment writes — read :func:`gh_token` for the
+same credentials, so every GitHub-backed page works locally.
+
 This is local-development only, and refuses to run anywhere else: `langgraph dev`
-is the only runtime that reports the ``local_dev`` API variant. Endpoints backed by
-the App (a published review and its diff) still need one.
+is the only runtime that reports the ``local_dev`` API variant.
 """
 
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ValidationError
 
@@ -22,6 +26,9 @@ from agent.config import ENV
 logger = logging.getLogger(__name__)
 
 _GH_TIMEOUT_SECONDS = 30
+_GH_TOKEN_TTL = timedelta(minutes=30)
+_gh_token_cache: tuple[str, datetime] | None = None
+_gh_token_lock = asyncio.Lock()
 
 
 class GhUnavailable(RuntimeError):
@@ -66,6 +73,30 @@ async def _gh(*args: str) -> str:
         detail = stderr.decode(errors="replace").strip() or "no output"
         raise GhUnavailable(f"`gh {' '.join(args)}` failed: {detail}")
     return stdout.decode(errors="replace").strip()
+
+
+async def gh_token() -> str | None:
+    """The `gh` CLI's token, standing in for an App installation token locally.
+
+    ``None`` anywhere but `langgraph dev`, so this can never widen a deployed
+    installation's reach.
+    """
+    global _gh_token_cache
+    if not dev_login_enabled():
+        return None
+    async with _gh_token_lock:
+        now = datetime.now(UTC)
+        if _gh_token_cache is not None and _gh_token_cache[1] > now:
+            return _gh_token_cache[0]
+        try:
+            token = await _gh("auth", "token")
+        except GhUnavailable:
+            logger.warning("local dev GitHub token unavailable", exc_info=True)
+            return None
+        if not token:
+            return None
+        _gh_token_cache = (token, now + _GH_TOKEN_TTL)
+        return token
 
 
 async def gh_credentials() -> GhCredentials:

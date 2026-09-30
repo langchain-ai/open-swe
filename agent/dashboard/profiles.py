@@ -15,8 +15,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, model_validator
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -41,6 +41,7 @@ from agent.store import (
     search_all_values,
     search_values,
 )
+from agent.users import User, UserPreferences, UserPreferencesPatch
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,17 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     model_routing_enabled: bool | None = None
-    dm_session_enabled: bool = False
+    recent_thread_context_enabled: bool = False
+    concierge_mode: bool | None = None
+    preserve_sandbox_memory: bool | None = None
+    human_review_requests: bool | None = None
+    review_channel_watch: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
+    experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
     def _normalize_stale_model_pairs(self) -> ProfileUpdate:
@@ -117,6 +126,7 @@ def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, st
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.pop("create_prs", None)
+    value.pop("dm_session_enabled", None)
     for model_field, effort_field in (
         ("default_model", "reasoning_effort"),
         ("default_subagent_model", "subagent_reasoning_effort"),
@@ -179,15 +189,25 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if "model_routing_enabled" in update.model_fields_set
             else existing.get("model_routing_enabled")
         ),
-        "dm_session_enabled": (
-            update.dm_session_enabled
-            if "dm_session_enabled" in update.model_fields_set
-            else existing.get("dm_session_enabled", False)
+        "recent_thread_context_enabled": (
+            update.recent_thread_context_enabled
+            if "recent_thread_context_enabled" in update.model_fields_set
+            else existing.get("recent_thread_context_enabled", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
+        "experimental_assistant_ui": (
+            update.experimental_assistant_ui
+            if update.experimental_assistant_ui is not None
+            else existing.get("experimental_assistant_ui")
+        ),
+        "slack_onboarding_dismissed": (
+            update.slack_onboarding_dismissed
+            if "slack_onboarding_dismissed" in update.model_fields_set
+            else existing.get("slack_onboarding_dismissed", False)
+        ),
         "updated_at": now_iso(),
     }
     for stale_field in (
@@ -398,10 +418,15 @@ _SESSION_DEP = Depends(require_session)
 async def get_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    profile = await get_profile(session["sub"]) or {}
+    profile, preferences, usage = await asyncio.gather(
+        get_profile(session["sub"]),
+        User.preferences_for_login(session["sub"]),
+        get_repository_usage(session["sub"]),
+    )
     return {
-        **normalize_profile_for_response(profile),
-        "repository_usage": await get_repository_usage(session["sub"]),
+        **(normalize_profile_for_response(profile) if profile else {}),
+        **preferences.model_dump(),
+        "repository_usage": usage,
     }
 
 
@@ -411,5 +436,26 @@ async def put_my_profile(
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
     update.validate_pairing()
-    profile = await upsert_profile(session["sub"], session.get("email") or "", update)
-    return {**profile, "repository_usage": await get_repository_usage(session["sub"])}
+    login = session["sub"]
+    preferences = await User.update_preferences(
+        login,
+        UserPreferencesPatch(
+            concierge_mode=update.concierge_mode,
+            preserve_sandbox_memory=update.preserve_sandbox_memory,
+            human_review_requests=update.human_review_requests,
+            review_channel_watch=update.review_channel_watch,
+        ),
+    )
+    if preferences is None and (
+        update.concierge_mode
+        or update.preserve_sandbox_memory
+        or update.human_review_requests
+        or update.review_channel_watch
+    ):
+        raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
+    profile = await upsert_profile(login, session.get("email") or "", update)
+    return {
+        **normalize_profile_for_response(profile),
+        **(preferences or UserPreferences()).model_dump(),
+        "repository_usage": await get_repository_usage(login),
+    }

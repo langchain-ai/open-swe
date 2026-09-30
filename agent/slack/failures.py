@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel
 
-from agent.slack.client import post_slack_thread_reply
+from agent.slack.client import post_slack_thread_reply, set_slack_thread_status
 from agent.slack.responses import WebhookResponse, failed
 from agent.utils.user_messages import warning
 
@@ -68,6 +68,11 @@ async def report_slack_failure(target: SlackRequestTarget, exc: BaseException) -
     except Exception:  # noqa: BLE001
         logger.exception("Could not post Slack failure reply", extra=fields)
         return error_id
+    finally:
+        try:
+            await set_slack_thread_status(target.channel_id, target.thread_ts, "")
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not clear Slack failure status", extra=fields)
     if not posted:
         logger.error("Slack failure reply was not delivered", extra=fields)
     return error_id

@@ -1,8 +1,11 @@
 """Render a pull request's diff as a syntax-highlighted PNG for Slack."""
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from io import BytesIO
+from itertools import accumulate, groupby
 from pathlib import Path
 from typing import Literal
 
@@ -38,6 +41,8 @@ class DiffTheme:
     muted: str = "#8b949e"
     add_background: str = "#12261e"
     remove_background: str = "#25171c"
+    add_highlight: str = "#245b35"
+    remove_highlight: str = "#743039"
     add_marker: str = "#3fb950"
     remove_marker: str = "#f85149"
     hunk_background: str = "#161b22"
@@ -130,6 +135,35 @@ class DiffFile:
             new_number += 1
         return cls(file.filename, file.additions, file.deletions, lines)
 
+    def changed_ranges(self) -> dict[int, list[tuple[int, int]]]:
+        ranges: dict[int, list[tuple[int, int]]] = {}
+        for changed, group in groupby(
+            enumerate(self.lines), key=lambda item: item[1].kind in ("add", "remove", "meta")
+        ):
+            lines = [(index, line) for index, line in group if line.kind != "meta"]
+            if not changed or [line.kind for _, line in lines] != ["remove", "add"]:
+                continue
+            if max(len(line.text) for _, line in lines) > 4096:
+                continue
+            tokens = [re.findall(r"\w+|\s+|[^\w\s]", line.text) for _, line in lines]
+            if len(tokens[0]) * len(tokens[1]) > 250_000:
+                continue
+            offsets = [
+                list(accumulate((len(token.replace("\t", "    ")) for token in side), initial=0))
+                for side in tokens
+            ]
+            for tag, old_start, old_stop, new_start, new_stop in SequenceMatcher(
+                None, tokens[0], tokens[1], autojunk=False
+            ).get_opcodes():
+                if tag == "equal":
+                    continue
+                for side, start, stop in ((0, old_start, old_stop), (1, new_start, new_stop)):
+                    if start != stop:
+                        ranges.setdefault(lines[side][0], []).append(
+                            (offsets[side][start], offsets[side][stop])
+                        )
+        return ranges
+
     @staticmethod
     def _records(patch: str) -> list[str]:
         """Patch records, split on LF only.
@@ -162,9 +196,10 @@ class Span:
     color: str
     bold: bool = False
     italic: bool = False
+    changed: bool = False
 
     def slice(self, start: int, stop: int) -> Span:
-        return Span(self.text[start:stop], self.color, bold=self.bold, italic=self.italic)
+        return replace(self, text=self.text[start:stop])
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +232,8 @@ class Highlighter:
             return None
 
     def _span(self, token: _TokenType, value: str) -> Span:
+        while not self._style.styles_token(token) and token.parent is not None:
+            token = token.parent
         style = self._style.style_for_token(token)
         color = style.get("color")
         return Span(
@@ -297,13 +334,23 @@ class DiffImageRenderer:
     def _flow(self, file: DiffFile) -> list[Row]:
         highlighter = Highlighter(file.filename, self._theme)
         rows: list[Row] = []
-        for line in file.lines:
+        changes = file.changed_ranges()
+        for line_index, line in enumerate(file.lines):
             text = line.text.replace("\t", "    ")
             spans = (
                 [Span(text, self._theme.hunk_text)]
                 if line.kind in ("hunk", "meta")
                 else highlighter.spans(text)
             )
+            marked: list[Span] = []
+            cursor = 0
+            for start, stop in changes.get(line_index, []):
+                marked.extend(self._spans_between(spans, cursor, start))
+                marked.extend(
+                    replace(span, changed=True) for span in self._spans_between(spans, start, stop)
+                )
+                cursor = stop
+            spans = [*marked, *self._spans_between(spans, cursor, len(text))]
             offset = 0
             for index, piece in enumerate(self._wrapper.slices(text)):
                 rows.append(
@@ -426,10 +473,22 @@ class DiffImageRenderer:
             )
 
         x = marker_x + self._char_width * 2
-        for span in row.spans:
-            font = self._fonts.pick(bold=span.bold, italic=span.italic)
-            draw.text((x, text_y), span.text, font=font, fill=span.color)
-            x += font.getlength(span.text)
+        for (color, bold, italic), group in groupby(
+            row.spans, key=lambda span: (span.color, span.bold, span.italic)
+        ):
+            font = self._fonts.pick(bold=bold, italic=italic)
+            text = ""
+            for span in group:
+                start = font.getlength(text)
+                text += span.text
+                stop = font.getlength(text)
+                if span.changed:
+                    draw.rectangle(
+                        (x + start, y, x + max(stop, start + 1) - 1, y + metrics.line_height - 1),
+                        fill=theme.add_highlight if row.kind == "add" else theme.remove_highlight,
+                    )
+            draw.text((x, text_y), text, font=font, fill=color)
+            x += font.getlength(text)
 
 
 def render_diff_png(files: list[ChangedFile]) -> bytes:

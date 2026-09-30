@@ -113,7 +113,7 @@ test.describe("my pull requests", () => {
     await card(page, mine)
       .getByRole("button", { name: "Close", exact: true })
       .click();
-    const dialog = page.getByRole("alertdialog");
+    const dialog = page.getByRole("dialog");
     await expect(
       dialog.getByRole("heading", { name: `Close ${DEMO}#${mine.number}?` }),
     ).toBeVisible();
@@ -126,7 +126,7 @@ test.describe("my pull requests", () => {
       .getByRole("button", { name: "Close", exact: true })
       .click();
     await page
-      .getByRole("alertdialog")
+      .getByRole("dialog")
       .getByRole("button", { name: "Close pull request" })
       .click();
 

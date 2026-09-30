@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 const composerControlClassName =
   "h-7 min-h-7 gap-1.5 px-2 text-muted-foreground/70 transition-none hover:text-foreground/80"
 
-/** A button in the composer's bottom control row (model, plan mode, attach). */
+/** A button in the composer's bottom control row (model, attach). */
 export function ComposerControl({
   className,
   size = "sm",
