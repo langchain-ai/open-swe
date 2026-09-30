@@ -6,6 +6,7 @@ import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import { expiresInBrowser } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
@@ -127,7 +128,7 @@ export function MyPullRequests({
     queries: reviewChunks.map((refs) => ({
       queryKey: ["my-pr-review-summaries", login, refs],
       queryFn: () => api.reviewSummaries(refs),
-      staleTime: Infinity,
+      ...expiresInBrowser,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       retry: false,
