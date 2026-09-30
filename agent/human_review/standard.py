@@ -229,6 +229,7 @@ async def record_pull_request(
     details = PullRequestPayload.model_validate(payload)
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
     pull_request.title = details.title
+    pull_request.body = details.body or ""
     pull_request.head_ref = details.head_ref
     pull_request.base_ref = details.base_ref
     pull_request.author = details.author
