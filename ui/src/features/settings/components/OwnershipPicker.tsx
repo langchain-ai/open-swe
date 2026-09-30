@@ -258,14 +258,16 @@ export function OwnershipPicker({
         {triggerLabel}
       </DialogTrigger>
       <DialogPopup className="w-full max-w-[520px]">
-        <DialogTitle className="px-3 pt-3">{title}</DialogTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-3">
+          <DialogTitle>{title}</DialogTitle>
+          {actions}
+        </div>
         {description && (
           <DialogDescription className="px-3 pt-1">
             {description}
           </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-          {actions}
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
               className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"
