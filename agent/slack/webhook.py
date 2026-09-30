@@ -378,6 +378,13 @@ def _slack_sender(
     return person["id"], person, "human"
 
 
+def _mentions_open_swe(text: object, bot_user_id: str) -> bool:
+    return isinstance(text, str) and bool(
+        (bot_user_id and f"<@{bot_user_id}>" in text)
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+
+
 def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
     forwarded = common.format_slack_messages_for_prompt(
         [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
@@ -406,6 +413,7 @@ def _slack_context_input(
     run_described_person_ids: set[str] | None = None,
     visible_context_hashes: set[str] | None = None,
     trigger_bot: AllowedSlackBot | None = None,
+    explicit_mention: bool = False,
 ) -> RunInput:
     channel_entity_id = channel["id"]
     already_dispatched = dispatched_timestamps or set()
@@ -468,7 +476,12 @@ def _slack_context_input(
             "channel_id": channel_entity_id,
             "surface": "slack",
             "kind": kind,
-            "data": {"timestamp": timestamp},
+            "data": {
+                "timestamp": timestamp,
+                "explicit_bot_mention": str(
+                    _mentions_open_swe(message.get("text"), bot_user_id)
+                ).lower(),
+            },
         }
         text = _slack_message_text(message, bot_user_id)
         run_messages.append(
@@ -485,7 +498,12 @@ def _slack_context_input(
                     "channel_id": channel_entity_id,
                     "surface": "slack",
                     "kind": "human",
-                    "data": {"timestamp": event_ts},
+                    "data": {
+                        "timestamp": event_ts,
+                        "explicit_bot_mention": str(
+                            _mentions_open_swe(prior_message_text, bot_user_id)
+                        ).lower(),
+                    },
                 },
             )
         )
@@ -537,7 +555,10 @@ def _slack_context_input(
                 "channel_id": channel_entity_id,
                 "surface": "slack",
                 "kind": trigger_kind,
-                "data": {"timestamp": event_ts},
+                "data": {
+                    "timestamp": event_ts,
+                    "explicit_bot_mention": str(explicit_mention).lower(),
+                },
             },
         )
     )
@@ -1176,6 +1197,7 @@ async def _process_slack_mention_impl(
         },
         visible_context_hashes=visible_context_hashes,
         trigger_bot=allowed_bot,
+        explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")
