@@ -5,7 +5,7 @@ This document records the design and operating constraints of expedited Slack re
 ## Summary
 
 The agent posts a tiny PR's full diff in the Slack thread. For a draft, the PR's
-author first marks it ready from an author-only ephemeral Slack prompt. Then one person other than the author
+author first marks it ready from an author-only Slack DM. Then one person other than the author
 approves, and the click submits that person's GitHub review at once. Once checks and
 reviews are clean, the agent calls a merge tool that merges. The approval survives a
 later commit only if it leaves the diff shown on the card unchanged.
@@ -41,8 +41,8 @@ are already in the Slack thread.
   test-only or test lines are the majority, because otherwise there would be nothing
   to look at; when tests are the minority of a mostly-source change it names them
   instead, so the thing being voted on stays readable.
-- A draft stays a draft. **Mark ready for review** is sent as an ephemeral message
-  in the card's thread, visible only to the PR's linked Slack author. It undrafts
+- A draft stays a draft. **Mark ready for review** is sent by DM
+  to the PR's linked Slack author, rather than an ephemeral thread message. It undrafts
   the PR with the author's own GitHub token and then opens the shared card for approval.
   Calling the tool again retries this private prompt. If Slack delivery fails or the
   author is not linked, the tool reports that they must mark it ready on GitHub;

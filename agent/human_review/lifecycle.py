@@ -32,12 +32,12 @@ from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
     get_slack_permalink,
-    post_slack_ephemeral_message,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
 )
+from agent.slack.dm import send_dm
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -160,13 +160,10 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         if pr.author_user_id
         else await User.for_login("github", pr.author)
     )
-    location = approval.slack_location
-    if author is None or not author.slack_user_id or location is None:
+    if author is None or not author.slack_user_id:
         return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
     text, blocks = expedited_card.readiness_prompt(approval)
-    if not await post_slack_ephemeral_message(
-        location[0], author.slack_user_id, text, location[1], blocks=block_payload(blocks)
-    ):
+    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     return None
 

@@ -203,13 +203,13 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    private_messages: list[tuple[str, str, object]] = []
+    private_messages: list[tuple[str, object]] = []
 
-    async def deliver(channel: str, user: str, text: str, thread: str, *, blocks: object) -> bool:
-        private_messages.append((channel, user, blocks))
+    async def deliver(user: str, text: str, *, blocks: object) -> bool:
+        private_messages.append((user, blocks))
         return True
 
-    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", deliver)
+    monkeypatch.setattr(lifecycle, "send_dm", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     current = await _stored(approval)
 
@@ -217,8 +217,8 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     _, shared_blocks = await lifecycle.render(current, None)
 
     assert len(private_messages) == 1
-    channel, recipient, private_blocks = private_messages[0]
-    assert (channel, recipient) == ("C1", "U_ADA")
+    recipient, private_blocks = private_messages[0]
+    assert recipient == "U_ADA"
     assert "open_swe_option_select_ready" in str(private_blocks)
     assert "open_swe_option_select_ready" not in str(shared_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
@@ -233,7 +233,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
     open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", AsyncMock(return_value=False))
+    monkeypatch.setattr(lifecycle, "send_dm", AsyncMock(return_value=False))
 
     problem = await lifecycle.prompt_author_ready(await _stored(approval))
 
