@@ -37,6 +37,7 @@ from agent.slack.payloads import (
     SlackInteractionMessage,
     parse_json_object,
 )
+from agent.slack.pr_links import SlackPullRequestLink
 from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
@@ -316,6 +317,8 @@ async def slack_webhook(
     raw_event = payload.get("event")
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
+
+    await SlackPullRequestLink.record(envelope)
 
     from agent.incidents import channels as incidents
 
