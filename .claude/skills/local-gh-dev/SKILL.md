@@ -1,9 +1,16 @@
 ---
 name: local-gh-dev
-description: Run the Open SWE dashboard locally against real GitHub data, signed in with the `gh` CLI instead of a per-machine GitHub App. Use when asked to run the app locally, test a dashboard change against real PRs, reproduce something a screenshot shows, or when local login fails with "GITHUB_APP_CLIENT_ID not configured".
+description: Run the Open SWE dashboard locally against real GitHub data, signed in with the `gh` CLI instead of a per-machine GitHub App. Use when asked to run the app locally or when local login fails with "GITHUB_APP_CLIENT_ID not configured". Use ONLY on a developer's own machine (`local_checkout` runs); never follow this skill in a hosted or cloud sandbox run.
 ---
 
 # Local dashboard on real GitHub data
+
+This skill is for human-operated local checkouts only. In a hosted sandbox, `gh` is
+already proxy-authenticated: never run `gh auth login` or `gh auth status`, never ask
+the user for a GitHub token, and never write credentials to disk. If a hosted run
+reports `503 GitHub App token unavailable`, report the blocker and link
+`docs/INSTALLATION.md`; `agent/resources/prompts/system/shared-base.md` requires this
+instead of re-authenticating.
 
 The dashboard's per-user reads — the PR list, one PR's details, a PR preview — run on
 the signed-in person's own OAuth token. `gh` already holds one, so local development
@@ -13,7 +20,8 @@ session. It is refused unless `langgraph dev` is the runtime, and the
 
 ## Start it
 
-1. Confirm `gh` is logged in. `gh auth status` — if not, `gh auth login`.
+1. Human operator step on the local machine: confirm `gh` is logged in with
+   `gh auth status`; if not, the human operator runs `gh auth login` outside the agent.
 
 2. Check the ports. The backend wants 2024 and Vite wants 3000:
 
@@ -25,7 +33,8 @@ session. It is refused unless `langgraph dev` is the runtime, and the
    without asking. Use another port instead and point Vite at it — every command below
    takes `PORT` for exactly that reason.
 
-3. Make sure `.env` has these. The GitHub App keys are *not* needed; these are:
+3. Human operator setup on the local machine: make sure `.env` has these. The GitHub
+   App keys are *not* needed; these are:
 
    | Key | Why |
    |---|---|
@@ -71,8 +80,8 @@ It binds `127.0.0.1:5433`, so `POSTGRES_URI=postgresql://postgres:postgres@127.0
 Code paths that want an App installation token rather than the caller's — a published
 review and its diff, inline review comments, the reviewer trigger — fall back to the
 `gh` CLI's token under `langgraph dev` (`agent/github/app.py::_local_dev_token`). So
-they work locally, and `503 GitHub App token unavailable` means `gh` is logged out,
-not that the feature needs an App.
+they work locally. In a hosted run, `503 GitHub App token unavailable` is a blocker to
+report with a link to `docs/INSTALLATION.md`, not a reason to re-authenticate.
 
 The fallback is gated on the runtime being `langgraph dev`, so it never widens a
 deployed installation's reach. **That gate is why a standalone script cannot trigger
@@ -85,8 +94,9 @@ those paths over HTTP instead (below).
 Agent and reviewer runs work locally against real models and real sandboxes. Nothing
 is stubbed; runs cost money and take minutes.
 
-1. `.env` needs a model key — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. With both set,
-   `DEFAULT_MODEL_ID` resolves to the OpenAI model; with only Anthropic, to Claude.
+1. Human operator setup on the local machine: `.env` needs a model key —
+   `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. With both set, `DEFAULT_MODEL_ID` resolves
+   to the OpenAI model; with only Anthropic, to Claude.
 
 2. Set `SANDBOX_TYPE=local`. `langsmith` sandboxes **cannot work from a laptop**: the
    run PATCHes a proxy config whose `match_hosts` is the hostname of your
@@ -100,6 +110,10 @@ is stubbed; runs cost money and take minutes.
 3. Get a session cookie, then post the trigger. Mutations are CSRF-checked against
    `DASHBOARD_BASE_URL`, so send a matching `Origin` — without it you get
    `403 CSRF check failed`:
+
+   The `/tmp/osw.txt` file holds a live session credential. Delete it after use, and
+   never create it in a sandbox that could be captured by `publish_workspace`;
+   `agent/bundled_skills/workspaces/SKILL.md` explains this at lines 33 and 56.
 
    ```bash
    curl -sS -c /tmp/osw.txt -o /dev/null 'http://127.0.0.1:2026/dashboard/api/auth/dev-login?redirect_to=/review'
