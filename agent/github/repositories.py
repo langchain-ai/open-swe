@@ -6,11 +6,12 @@ case-insensitively. ``full_name`` keeps the casing GitHub reported for display.
 """
 
 import logging
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import case, func, select
+from sqlalchemy import BigInteger, case, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -32,6 +33,10 @@ class Repository(Base):
     default_branch: Mapped[str] = mapped_column(server_default="", default="")
     first_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_activity_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    # GitHub's numeric id survives renames. ``github_checked_at`` is when the App
+    # installation's listing last looked for this name, whether or not it matched.
+    github_id: Mapped[int | None] = mapped_column(BigInteger, default=None, init=False)
+    github_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.full_name = normalize_repo_full_name(self.full_name)
@@ -48,6 +53,26 @@ class Repository(Base):
     async def all(cls) -> list[Self]:
         async with postgres.session() as session:
             return list(await session.scalars(select(cls).order_by(cls.key)))
+
+    @classmethod
+    async def by_keys(cls, keys: Iterable[str]) -> dict[str, Self]:
+        """The stored rows among ``keys`` (lowercased ``owner/name``), by key."""
+        async with postgres.session() as session:
+            rows = await session.scalars(select(cls).where(cls.key.in_(list(keys))))
+            return {row.key: row for row in rows}
+
+    @classmethod
+    async def record_github_ids(
+        cls, github_ids: Mapping[str, int | None], *, checked_at: datetime
+    ) -> None:
+        """Store what a lookup found for each key; keys without a row are skipped."""
+        async with postgres.session() as session:
+            for key, github_id in github_ids.items():
+                await session.execute(
+                    update(cls)
+                    .where(cls.key == key)
+                    .values(github_id=github_id, github_checked_at=checked_at)
+                )
 
     @property
     def owner(self) -> str:

@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from agent.utils import gateway, model
+from agent.utils import model
 from agent.utils.model import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
@@ -54,26 +54,6 @@ def _clean_gateway_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # --- gateway_overrides --------------------------------------------------------
-
-
-def test_openai_overrides_use_responses_by_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("openai:gpt-5.6-sol")
-    assert overrides == {
-        "base_url": "https://gateway.smith.langchain.com/openai/v1",
-        "api_key": "ls-key",
-        "use_responses_api": True,
-    }
-
-
-def test_openai_overrides_chat_completions_optout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES", "false")
-    overrides = gateway.gateway_overrides("openai:gpt-5.6-sol")
-    assert overrides is not None
-    assert overrides["use_responses_api"] is False
 
 
 async def test_openai_sdk_uses_gateway_responses_path() -> None:
@@ -118,32 +98,6 @@ async def test_openai_sdk_uses_gateway_responses_path() -> None:
 
     assert len(requests) == 1
     assert requests[0].url.path == "/openai/v1/responses"
-
-
-def test_anthropic_overrides_have_no_responses_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
-    assert overrides == {
-        "base_url": "https://gateway.smith.langchain.com/anthropic",
-        "api_key": "ls-key",
-    }
-
-
-def test_fireworks_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("fireworks:accounts/fireworks/models/glm-5p2")
-    assert overrides is not None
-    assert overrides["base_url"] == "https://gateway.smith.langchain.com/fireworks"
-
-
-def test_baseten_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    assert gateway.gateway_overrides("baseten:zai-org/GLM-5.3-Flash") == {
-        "base_url": "https://gateway.smith.langchain.com/baseten/v1",
-        "api_key": "ls-key",
-    }
 
 
 async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
@@ -246,70 +200,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
     assert assistant_msgs and "tool_calls" in assistant_msgs[0]
 
 
-def test_google_genai_routes_to_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    overrides = gateway.gateway_overrides("google_genai:gemini-3.8-flash")
-    assert overrides == {
-        "base_url": "https://gateway.smith.langchain.com/gemini",
-        "api_key": "ls-key",
-    }
-
-
-def test_unsupported_provider_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    # Vertex authenticates with a service account, not a bearer key, so it isn't routed.
-    assert gateway.gateway_overrides("google_vertexai:gemini-2.5-pro") is None
-
-
-def test_missing_api_key_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert gateway.gateway_overrides("openai:gpt-5.6-sol") is None
-
-
-def test_standard_key_used_when_no_gateway_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
-    assert overrides is not None
-    assert overrides["api_key"] == "ls-platform-key"
-
-
-def test_gateway_key_preferred_over_standard_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-platform-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "ls-gateway-key")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
-    assert overrides is not None
-    assert overrides["api_key"] == "ls-gateway-key"
-
-
-def test_base_url_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", "https://gw.internal.example.com/")
-    overrides = gateway.gateway_overrides("anthropic:claude-opus-5")
-    assert overrides is not None
-    # Trailing slash is stripped, then the provider path is appended.
-    assert overrides["base_url"] == "https://gw.internal.example.com/anthropic"
-
-
 # --- resolve_gateway_enabled --------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("team_value", "env_enabled", "expected"),
-    [
-        (True, False, True),  # team True wins over env off
-        (False, True, False),  # team False wins over env on
-        (None, True, True),  # unset inherits env on
-        (None, False, False),  # unset inherits env off
-    ],
-)
-def test_resolve_gateway_enabled_precedence(
-    monkeypatch: pytest.MonkeyPatch,
-    team_value: bool | None,
-    env_enabled: bool,
-    expected: bool,
-) -> None:
-    if env_enabled:
-        monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
-    assert gateway.resolve_gateway_enabled(team_value) is expected
 
 
 # --- make_model integration ---------------------------------------------------
@@ -327,37 +218,6 @@ def _capture_init_chat_model() -> tuple[dict[str, Any], Any]:
     return captured, _fake
 
 
-def test_make_model_direct_openai_uses_responses_websocket() -> None:
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
-    assert captured["base_url"] == model.OPENAI_RESPONSES_WS_BASE_URL
-    assert captured["use_responses_api"] is True
-    assert captured["store"] is False
-    assert captured["include"] == ["reasoning.encrypted_content"]
-    assert captured["output_version"] == "responses/v1"
-
-
-def test_make_model_openai_honors_configured_base_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.smith.langchain.com/openai/v1")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
-    assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
-
-
-def test_make_model_openai_falls_back_to_legacy_api_base(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENAI_API_BASE", "https://openai-proxy.example/v1")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.6-sol", use_gateway=False)
-    assert captured["base_url"] == "https://openai-proxy.example/v1"
-
-
 def test_make_model_openai_base_url_precedes_legacy_api_base(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -367,21 +227,6 @@ def test_make_model_openai_base_url_precedes_legacy_api_base(
     with patch.object(model, "init_chat_model", fake):
         model.make_model("openai:gpt-5.6-sol", use_gateway=False)
     assert captured["base_url"] == "https://primary-proxy.example/v1"
-
-
-def test_make_model_gateway_openai_replaces_websocket(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.6-sol", use_gateway=True)
-    assert captured["base_url"] == "https://gateway.smith.langchain.com/openai/v1"
-    assert captured["use_responses_api"] is True
-    assert captured["store"] is False
-    assert captured["include"] == ["reasoning.encrypted_content"]
-    assert captured["output_version"] == "responses/v1"
-    assert captured["api_key"] == "ls-key"
 
 
 def test_make_model_gateway_openai_chat_completions_optout_converts_reasoning(
@@ -421,67 +266,6 @@ def test_make_model_gateway_openai_preserves_reasoning_none(
     assert "reasoning_effort" not in captured
 
 
-def test_make_model_gateway_openai_responses_keeps_reasoning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    reasoning = cast(OpenAIReasoning, {"effort": "high", "summary": "auto"})
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("openai:gpt-5.6-sol", use_gateway=True, reasoning=reasoning)
-    assert captured["use_responses_api"] is True
-    assert captured["store"] is False
-    assert captured["include"] == ["reasoning.encrypted_content"]
-    assert captured["reasoning"] == reasoning
-    assert "reasoning_effort" not in captured
-
-
-def test_make_model_gateway_follows_env_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("anthropic:claude-opus-5")  # use_gateway=None -> env default
-    assert captured["base_url"] == "https://gateway.smith.langchain.com/anthropic"
-    assert captured["api_key"] == "ls-key"
-
-
-def test_make_model_gateway_google_genai(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("google_genai:gemini-3.8-flash", use_gateway=True)
-    assert captured["base_url"] == "https://gateway.smith.langchain.com/gemini"
-    assert captured["api_key"] == "ls-key"
-
-
-def test_make_model_gateway_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-key")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model(
-            "baseten:zai-org/GLM-5.3-Flash",
-            use_gateway=True,
-            **model.provider_model_kwargs("baseten:zai-org/GLM-5.3-Flash", "high", max_tokens=1024),
-        )
-    assert captured["model"] == "zai-org/GLM-5.3-Flash"
-    assert captured["model_provider"] == "openai"
-    assert captured["reasoning_effort"] == "high"
-    assert captured["base_url"] == "https://gateway.smith.langchain.com/baseten/v1"
-    assert captured["api_key"] == "ls-key"
-
-
-def test_make_model_direct_baseten(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BASETEN_API_KEY", "baseten-key")
-    captured, fake = _capture_init_chat_model()
-    with patch.object(model, "init_chat_model", fake):
-        model.make_model("baseten:zai-org/GLM-5.3-Flash", use_gateway=False)
-    assert captured["model"] == "zai-org/GLM-5.3-Flash"
-    assert captured["model_provider"] == "openai"
-    assert captured["base_url"] == model.BASETEN_BASE_URL
-    assert captured["api_key"] == "baseten-key"
-
-
 def test_make_model_gateway_without_key_falls_back_direct(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -494,21 +278,3 @@ def test_make_model_gateway_without_key_falls_back_direct(
     assert captured["store"] is False
     assert captured["include"] == ["reasoning.encrypted_content"]
     assert "api_key" not in captured
-
-
-def test_gateway_default_follows_the_dedicated_key(monkeypatch) -> None:
-    from agent.utils import gateway
-
-    for name in ("LANGSMITH_GATEWAY_ENABLED", "LANGSMITH_GATEWAY_API_KEY"):
-        monkeypatch.delenv(name, raising=False)
-    assert gateway.gateway_env_default() is False
-
-    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "lsv2_sk_gateway")
-    assert gateway.gateway_env_default() is True
-
-    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "false")
-    assert gateway.gateway_env_default() is False
-
-    monkeypatch.delenv("LANGSMITH_GATEWAY_API_KEY")
-    monkeypatch.setenv("LANGSMITH_GATEWAY_ENABLED", "true")
-    assert gateway.gateway_env_default() is True

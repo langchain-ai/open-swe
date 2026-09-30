@@ -1,7 +1,6 @@
-Publish a self-contained HTML plan artifact from the sandbox.
+Publish a self-contained HTML artifact from the sandbox.
 
-Use this in plan mode once the artifact is ready. Outside plan mode, use it
-to share a long response without switching the thread into plan mode. Write
+Use this to share a plan, report, or long response as an ordinary artifact. Write
 one ``.html`` file directly under ``/workspace/plans/`` and pass that path
 here. Read the ``html-artifacts`` skill for the authoring rules: write the
 page content and omit ``<html>``/``<head>``/``<body>`` — they are added

@@ -20,7 +20,10 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
       api.getReview(owner as string, repo as string, number as number),
     enabled,
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 5000 : false,
+      query.state.data?.status === "running" ||
+      query.state.data?.walkthrough_running
+        ? 5000
+        : false,
   })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, number],
@@ -46,7 +49,7 @@ export function ReviewTab({ thread }: { thread: AgentThread }) {
   if (detail.error || !detail.data) {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
-        No review for this pull request yet.
+        {detail.error?.message ?? "Could not load this pull request."}
       </div>
     )
   }

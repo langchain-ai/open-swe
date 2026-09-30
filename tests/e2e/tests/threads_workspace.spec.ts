@@ -6,7 +6,10 @@ import {
   type Page,
 } from "@playwright/test";
 
-import { dismissOnboardingIfShown } from "./helpers/dashboard";
+import {
+  dismissOnboardingIfShown,
+  waitForThreadIdle,
+} from "./helpers/dashboard";
 
 const USER = {
   login: "threads-workspace-e2e",
@@ -481,10 +484,10 @@ test.describe("threads workspace", () => {
     );
 
     await page.goto("/agents");
+    await profileStarted.promise;
     await expect(
       page.getByRole("heading", { name: "What should we build?" }),
-    ).toBeVisible();
-    await profileStarted.promise;
+    ).toHaveCount(0);
 
     await page.evaluate(() => {
       const seen = { value: false };
@@ -727,6 +730,7 @@ test.describe("automation run history", () => {
     };
     expect(triggered.status).toBe("started");
     createdThreadIds.add(triggered.thread_id);
+    await waitForThreadIdle(page, triggered.thread_id);
 
     const producedHistoryResponse = await page.request.get(
       `/dashboard/api/threads/page?scope=automation&automation_id=${SCHEDULE_IDS.daily}&limit=100&offset=0`,
@@ -746,7 +750,7 @@ test.describe("automation run history", () => {
     expect(producedHistory.items).toContainEqual(
       expect.objectContaining({
         id: triggered.thread_id,
-        title: "Test: E2E Daily Health",
+        title: "Add greet() helper",
         triggerKind: "schedule_test",
         automationId: SCHEDULE_IDS.daily,
       }),
@@ -797,7 +801,7 @@ test.describe("automation run history", () => {
     const producedRun = daily.locator(
       `a[href="/agents/${triggered.thread_id}"]`,
     );
-    await expect(producedRun).toContainText("Test: E2E Daily Health");
+    await expect(producedRun).toContainText("Add greet() helper");
     await expect(producedRun).toContainText("Test run");
 
     const scheduledRun = daily.getByRole("link").filter({
@@ -842,7 +846,7 @@ test.describe("automation run history", () => {
     const recentProducedRun = page.locator(
       `a[href="/agents/${triggered.thread_id}"]`,
     );
-    await expect(recentProducedRun).toContainText("Test: E2E Daily Health");
+    await expect(recentProducedRun).toContainText("Add greet() helper");
 
     await recentProducedRun.click();
     await expect(page).toHaveURL(new RegExp(`/agents/${triggered.thread_id}$`));

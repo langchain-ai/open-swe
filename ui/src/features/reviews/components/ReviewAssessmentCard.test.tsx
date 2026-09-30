@@ -1,19 +1,29 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { QueryClientProvider } from "@tanstack/react-query"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type {
   PublishedReviewAssessment,
   ReviewAssessmentFeedbackInput,
 } from "@/lib/api"
+import { makeQueryClient } from "@/lib/query"
 import { ReviewAssessmentCard } from "./ReviewAssessmentCard"
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   save: vi.fn(),
+  reportError: vi.fn(),
   login: "alice",
 }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: mocks.reportError }))
 vi.mock("@/lib/api", () => ({
   api: { getAssessmentFeedback: mocks.get, saveAssessmentFeedback: mocks.save },
 }))
@@ -30,9 +40,8 @@ const assessment: PublishedReviewAssessment = {
 }
 
 function renderCard() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   const card = (reviewId: number) => (
     <QueryClientProvider client={client}>
       <ReviewAssessmentCard
@@ -104,7 +113,11 @@ it("retains the draft after a failed save and supports retry", async () => {
     target: { value: "Missed a migration" },
   })
   fireEvent.click(screen.getByRole("button", { name: "Save feedback" }))
-  await screen.findByRole("alert")
+  await waitFor(() =>
+    expect(mocks.reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Couldn't save feedback" })
+    )
+  )
   expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
     "Missed a migration"
   )

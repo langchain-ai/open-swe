@@ -53,6 +53,10 @@ export function blockerLabel(pr: OpenPullRequest): string {
     return pr.failingChecks.length === 1
       ? `${pr.failingChecks[0]} failing`
       : `${pr.failingChecks.length} checks failing`
+  if (pr.missingChecks.length)
+    return pr.missingChecks.length === 1
+      ? `${pr.missingChecks[0]} not reported`
+      : `${pr.missingChecks.length} required checks not reported`
   if (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
     return pr.unresolvedThreads === 1
       ? "1 unresolved comment"
@@ -85,6 +89,7 @@ export function blockerTone(pr: OpenPullRequest): string {
   if (pr.reviewDecision === "changes_requested") return "text-destructive"
   if (
     pr.ci === "pending" ||
+    pr.missingChecks.length > 0 ||
     pr.reviewRequired ||
     (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
   )
@@ -125,12 +130,20 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
+// A conflicted branch cannot be updated by GitHub; the Fix action covers it.
+export function canUpdateBranch(pr: OpenPullRequest) {
+  return (
+    Boolean(pr.headSha) && pr.mergeable !== false && pr.mergeState !== "dirty"
+  )
+}
+
 // Offer the merge unless GitHub has already refused it. It enforces rules the
 // dashboard cannot see — an unresolved conversation, say — so an attempt that
 // only might fail is still worth offering, and its refusal is the answer. A
-// conflict, a draft, or a missing required approval is not a guess: those
-// merges are certain to be rejected.
+// conflict, a draft, a missing required approval, or a required check that
+// never reported is not a guess: those merges are certain to be rejected.
 export function canAttemptMerge(pr: OpenPullRequest) {
-  if (pr.draft === true || pr.reviewRequired) return false
+  if (pr.draft === true || pr.reviewRequired || pr.missingChecks.length)
+    return false
   return pr.mergeable !== false && pr.mergeState !== "dirty"
 }

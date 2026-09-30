@@ -61,9 +61,18 @@ export interface TranscriptThreadRow {
 
 export interface TranscriptTurnRow {
   turn_id: string
+  /** Set once a run serves the turn, or as soon as one is queued for it. */
+  run_id: string | null
   state: TurnState
   requested_at: string
+  started_at: string | null
   error: string | null
+}
+
+/** Who sent a human message; null on AI messages. */
+export interface TranscriptSender {
+  login: string
+  kind: string
 }
 
 export interface TranscriptMessageRow {
@@ -73,6 +82,7 @@ export interface TranscriptMessageRow {
   text: string
   reasoning: string
   namespace: Namespace
+  sender?: TranscriptSender | null
   attachments: ReadonlyArray<TranscriptAttachment> | null
   /** Set on AI messages the provider reported usage for; null otherwise. */
   usage: TranscriptUsage | null
@@ -137,11 +147,17 @@ export interface TurnRequestedPayload {
   turn_id: string
   message_id: string
   text: string
+  sender?: TranscriptSender
   attachments: ReadonlyArray<TranscriptAttachment>
 }
 
 export interface TurnPayload {
   turn_id: string
+}
+
+/** A requested turn now has a run waiting behind the live one. */
+export interface TurnQueuedPayload extends TurnPayload {
+  run_id: string
 }
 
 export interface TurnFailedPayload extends TurnPayload {
@@ -165,6 +181,7 @@ export interface MessageCompletedPayload {
   role: MessageRole
   text: string
   reasoning: string
+  sender?: TranscriptSender | null
   attachments: ReadonlyArray<TranscriptAttachment> | null
   usage: TranscriptUsage | null
   created_at: string
@@ -212,6 +229,7 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 export type StoredEvent =
   | Stored<"turn.requested", TurnRequestedPayload>
   | Stored<"turn.started", TurnPayload>
+  | Stored<"turn.queued", TurnQueuedPayload>
   | Stored<"turn.completed", TurnPayload>
   | Stored<"turn.failed", TurnFailedPayload>
   | Stored<"turn.interrupted", TurnPayload>

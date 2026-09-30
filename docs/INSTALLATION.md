@@ -2,7 +2,7 @@
 
 This guide deploys Open SWE for a team. To run it on your own machine while developing, use the [development guide](DEVELOPMENT.md) instead.
 
-Open SWE is one deployment: a LangGraph server that runs the graphs (`agent`, `reviewer`, `analyzer`, `chat`, `scheduler`), the FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API, and the web dashboard, served from the same origin at `/`. Webhooks, the dashboard, GitHub login, and the API all share the deployment's URL, so there is no second frontend deploy and no cross-origin cookie or CORS setup.
+Open SWE is one deployment: a LangGraph server that runs the graphs declared in [`langgraph.json`](../langgraph.json), the FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API, and the web dashboard, served from the same origin at `/`. Webhooks, the dashboard, GitHub login, and the API all share the deployment's URL, so there is no second frontend deploy and no cross-origin cookie or CORS setup.
 
 What a deployment needs:
 
@@ -274,6 +274,8 @@ Open a section when you want that feature; everything above keeps working withou
 
 **"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **My settings**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, Slack senders stay unlinked until they connect from **My settings**; **Admin → Users** shows who has. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
+**Kitchen channels.** Admins turn kitchen mode on per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to be a kitchen channel, and Open SWE must have joined it. In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run. Other channels still require mentions. To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope). Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
+
 **Code channels (early access).** To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it. In a code channel the whole channel is one Open SWE session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases. This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint. If your workspace is not enrolled, leave the toggle off.
 
 </details>
@@ -295,6 +297,62 @@ Ordinary channel messages, including bot alerts, are queued as context and analy
 The agent stores its latest postmortem summary as Markdown in the existing LangGraph Store. The **Postmortem** tab renders it and **Copy incident** copies the text and source links for use elsewhere. **History** searches retained incident metadata and summaries, including incidents whose raw context has expired. There is no document editor or revision-history UI.
 
 Public status-page publishing is not implemented. Authorized responders can ask the agent to edit code, open a PR as the GitHub App, or use configured integrations for a specified action. Automatic turns investigate and propose mitigation; alerts and ordinary channel messages do not authorize external changes. Personal integrations remain unavailable in these system-owned threads.
+
+</details>
+
+<details id="api-keys">
+<summary><strong>Machine callers: API keys and GitHub Actions</strong></summary>
+
+Two kinds of machine can start Open SWE threads without a browser session. Both post the same command the dashboard posts, to `POST /dashboard/api/threads/<thread_id>/commands`, and both may only start **system** threads: owned by a workspace rather than a person, public, and carrying no GitHub user, so nothing they do borrows anyone's credentials.
+
+Every creating command names the kind of thread it wants in `config.configurable.thread_type`:
+
+| `thread_type` | Who may ask for it |
+|---|---|
+| `system` | API keys, federated workflows, and admins |
+| `workspace` | any signed-in person |
+| `private` | any signed-in person |
+
+**API keys.** Only `CONFIGURED_ADMINS` mint, list, or revoke them, and a key is scoped to one workspace with a required expiry at most 365 days out:
+
+```bash
+curl -X POST "<URL>/dashboard/api/admin/api-keys" \
+  -H 'Content-Type: application/json' -b osw_session=<your session cookie> \
+  -d '{"workspace": "core", "name": "release CI", "expires_at": "2027-01-01T00:00:00Z"}'
+```
+
+The response is the only place the secret appears. The server stores the SHA-256 digest of the secret and its last six characters, so a lost key cannot be recovered: mint a new one and revoke the old. `GET /dashboard/api/admin/api-keys?workspace=core` lists keys with `last_used_at`, `revoked_at` and a `status` of `active`, `expired` or `revoked`; `DELETE /dashboard/api/admin/api-keys/<id>` revokes one. Deleting a workspace deletes its keys, because a slug can be reused.
+
+```bash
+curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
+  -H 'Authorization: Bearer osk_…' -H 'Content-Type: application/json' \
+  -d '{"id": 1, "method": "run.start", "params": {
+        "input": {"messages": [{"type": "human", "content": "Upgrade the linter and open a PR"}]},
+        "config": {"configurable": {"thread_type": "system", "repo": "acme/api"}}}}'
+```
+
+**GitHub Actions, with no stored secret.** A workflow asks GitHub for an OIDC token naming its repository, ref and workflow, and presents that instead of a key. Open SWE verifies GitHub's signature against its published keys, checks the audience, and then checks its own trust policy: the repository must be bound to a workspace *and* granted the right to start threads there. Grant it per repository under **Repository permissions** on the workspace's settings page, or with the `configure_repository` agent tool. Binding a repository never implies the grant.
+
+Set `GITHUB_OIDC_AUDIENCE` to the value your workflows request; it defaults to `DASHBOARD_BASE_URL`.
+
+```yaml
+permissions:
+  id-token: write
+steps:
+  - id: token
+    run: |
+      echo "value=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=<URL>" | jq -r .value)" >> "$GITHUB_OUTPUT"
+  - run: |
+      curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
+        -H "Authorization: Bearer ${{ steps.token.outputs.value }}" \
+        -H 'Content-Type: application/json' \
+        -d '{"id": 1, "method": "run.start", "params": {
+              "input": {"messages": [{"type": "human", "content": "Nightly build failed, investigate"}]},
+              "config": {"configurable": {"thread_type": "system"}}}}'
+```
+
+A workflow that names no `repo` works in its own repository. A machine caller reads back only the threads it started, through `GET /dashboard/api/threads` and `GET /dashboard/api/threads/<id>`; unknown, revoked and expired credentials all answer `401`.
 
 </details>
 
@@ -390,8 +448,8 @@ Authorship is bound to the publishing run, not inferred from conversation text.
 Slack follow-ups carry their own requester identity whether they interrupt or
 queue behind an active run. Dashboard messages and Slack edits injected into an
 existing run do not change its identity. A collaborator must start a new run to
-publish under their own account. Plan approval, revision requests, and workflow
-push approval start runs with the authenticated actor's identity. Background-task
+publish under their own account. Workflow push approval starts a run with the
+authenticated actor's identity. Background-task
 completion runs cannot reliably identify the launching requester, so PR creation
 from user-owned threads is blocked in those runs. Start a direct user-triggered
 run to publish. System-owned and legacy unowned threads retain bot authorship.

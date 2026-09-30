@@ -79,7 +79,7 @@ def _middleware(config: dict[str, Any], *, credential_login: str | None = None) 
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        plan_mode=False,
+        recent_thread_context_enabled=False,
         admin_workspaces=False,
         credential_login=credential_login,
     )
@@ -115,7 +115,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
     monkeypatch.setattr(server, "_workspace_admin", _async_false)
-    monkeypatch.setattr(server, "construct_sender_context", lambda *args, **kwargs: "sender")
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:
@@ -224,43 +223,3 @@ async def test_public_scope_resolves_profile_via_installation_token(
         "https://api.github.com/user",
     ]
     assert prepare_harness["recorded"]["github_user_id"] == 99
-
-
-@pytest.mark.parametrize(
-    ("status", "slack_name", "expected_id", "expected_name", "expected_source"),
-    [
-        (200, "Mason Slack", 99, "Mason Slack", "slack"),
-        (200, "", 4321, None, None),
-        (404, "Mason Slack", 4321, "Mason Slack", "slack"),
-    ],
-)
-async def test_public_scope_name_fallback(
-    prepare_harness,
-    github_client,
-    monkeypatch,
-    status,
-    slack_name,
-    expected_id,
-    expected_name,
-    expected_source,
-) -> None:
-    prepare_harness["thread_metadata"] = {"visibility": "public"}
-
-    async def fake_token(**kwargs: object) -> str:
-        return _INSTALLATION_TOKEN
-
-    monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
-    github_client._responses.extend(
-        [
-            _FakeResponse(401),
-            _FakeResponse(status, {"id": expected_id, "login": "mason-gh", "name": None}),
-        ]
-    )
-    config = _slack_config(github_user_id=4321)
-    config["configurable"]["slack_thread"]["triggering_user_name"] = slack_name
-    await _prepare(_middleware(config))
-
-    recorded = prepare_harness["recorded"]
-    assert recorded["github_user_id"] == expected_id
-    assert recorded["display_name"] == expected_name
-    assert recorded["display_name_source"] == expected_source

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   act,
   cleanup,
@@ -12,17 +12,27 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { ThreadFeedbackCard } from "./ThreadFeedbackCard"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 
 const api = vi.hoisted(() => ({
   getThreadFeedback: vi.fn(),
   submitThreadFeedback: vi.fn(),
 }))
 vi.mock("@/features/agents/lib/api", () => ({ agentsApi: api }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
+
+const expectFailureReported = () =>
+  waitFor(() =>
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Couldn't save feedback" })
+    )
+  )
 
 const ready = { status: "ready", rating: null, comment: "" }
 
 function renderCard() {
-  const client = new QueryClient()
+  const client = makeQueryClient()
   const card = (active: boolean) => (
     <QueryClientProvider client={client}>
       {!active && <ThreadFeedbackCard threadId="thread-1" login="owner" />}
@@ -92,7 +102,7 @@ it("saves Bad before offering an optional comment and keeps the draft on failure
   fireEvent.change(comment, { target: { value: " More detail please. " } })
   api.submitThreadFeedback.mockRejectedValueOnce(new Error("Temporary outage"))
   fireEvent.click(screen.getByRole("button", { name: "Submit comment" }))
-  await screen.findByRole("alert")
+  await expectFailureReported()
   expect((comment as HTMLTextAreaElement).value).toBe(" More detail please. ")
   fireEvent.click(screen.getByRole("button", { name: "Submit comment" }))
   await screen.findByText("Thanks for your feedback.")
@@ -101,6 +111,29 @@ it("saves Bad before offering an optional comment and keeps the draft on failure
     comment: "More detail please.",
   })
   expect(screen.queryByRole("textbox")).toBeNull()
+})
+
+it("confirms a comment immediately and restores its draft on failure", async () => {
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Bad" }))
+  const comment = await screen.findByRole("textbox", {
+    name: "Comment (optional)",
+  })
+  fireEvent.change(comment, { target: { value: "More detail please." } })
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Submit comment" }))
+  expect(screen.queryByText("Thanks for your feedback.")).not.toBeNull()
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await expectFailureReported()
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "More detail please."
+  )
 })
 
 it("allows skipping the comment without undoing the Bad rating", async () => {
@@ -118,7 +151,7 @@ it("keeps the rating controls available when saving the rating fails", async () 
   api.submitThreadFeedback.mockRejectedValueOnce(new Error("Temporary outage"))
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Bad" }))
-  await screen.findByRole("alert")
+  await expectFailureReported()
   expect(screen.queryByRole("textbox")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Bad" }))
   await screen.findByRole("textbox")
@@ -138,13 +171,38 @@ it("does not show a confirmation for previously completed feedback", async () =>
   expect(screen.queryByRole("textbox")).toBeNull()
 })
 
+it("dismisses immediately and restores the card with an error toast on failure", async () => {
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
+  expect(screen.queryByRole("form")).toBeNull()
+  await waitFor(() =>
+    expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith(
+      "thread-1",
+      { action: "dismiss" }
+    )
+  )
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await expectFailureReported()
+  expect(screen.getByRole("button", { name: "Dismiss" })).not.toBeNull()
+})
+
 it("dismisses the card without saving a rating", async () => {
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
-  await waitFor(() => expect(screen.queryByRole("form")).toBeNull())
-  expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1", {
-    action: "dismiss",
-  })
+  expect(screen.queryByRole("form")).toBeNull()
+  await waitFor(() =>
+    expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith(
+      "thread-1",
+      { action: "dismiss" }
+    )
+  )
 })
 
 it("hides during activity and rechecks eligibility before showing a cached prompt", async () => {
@@ -163,4 +221,21 @@ it("hides during activity and rechecks eligibility before showing a cached promp
   expect(screen.queryByRole("form")).toBeNull()
   await act(async () => resolve({ ...ready, status: "unavailable" }))
   expect(screen.queryByRole("form")).toBeNull()
+})
+
+it("confirms Good before the request resolves and restores the rating on failure", async () => {
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Good" }))
+  expect(screen.queryByText("Thanks for your feedback.")).not.toBeNull()
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await expectFailureReported()
+  expect(screen.queryByText("Thanks for your feedback.")).toBeNull()
+  expect(screen.getByRole("button", { name: "Good" })).not.toBeNull()
 })

@@ -14,7 +14,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import {
+  api,
+  isGithubReauthError,
+  loginUrl,
+  type AgentInstructions,
+} from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 
@@ -44,12 +49,15 @@ export function AgentInstructionsPanel() {
     enabled: !!selected,
   })
 
+  const loadedRepo = detail.data?.full_name
+  const loadedInstructions = detail.data?.instructions
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    if (detail.data) setDraft(detail.data.instructions)
-  }, [detail.data?.instructions, detail.data?.full_name])
+    if (loadedInstructions !== undefined) setDraft(loadedInstructions)
+  }, [loadedInstructions, loadedRepo])
 
   const create = useMutation({
+    meta: { silent: true },
     mutationFn: (full_name: string) => api.createAgentInstructions(full_name),
     onSuccess: (record) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
@@ -60,27 +68,49 @@ export function AgentInstructionsPanel() {
   })
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: ({ full_name, value }: { full_name: string; value: string }) =>
       api.saveAgentInstructions(full_name, value),
-    onSuccess: () => {
+    onSuccess: (_saved, { full_name }) => {
       void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
-      void qc.invalidateQueries({ queryKey: ["agentInstruction", selected] })
+      void qc.invalidateQueries({ queryKey: ["agentInstruction", full_name] })
       setError(null)
     },
     onError: (e: Error) => setError(formatMutationError(e)),
   })
 
   const remove = useMutation({
+    meta: { errorTitle: "Couldn't remove repository instructions" },
     mutationFn: (full_name: string) => api.deleteAgentInstructions(full_name),
-    onSuccess: (_data, full_name) => {
-      void qc.invalidateQueries({ queryKey: ["agentInstructions"] })
-      if (selected === full_name) {
+    onMutate: async (full_name) => {
+      await qc.cancelQueries({ queryKey: ["agentInstructions"] })
+      const removed = qc
+        .getQueryData<Array<AgentInstructions>>(["agentInstructions"])
+        ?.find((s) => s.full_name === full_name)
+      qc.setQueryData<Array<AgentInstructions>>(
+        ["agentInstructions"],
+        (current) => current?.filter((s) => s.full_name !== full_name)
+      )
+      const wasSelected = selected === full_name
+      if (wasSelected) {
         setSelected(null)
         setDraft("")
       }
-      setError(null)
+      return { removed, wasSelected }
     },
-    onError: (e: Error) => setError(formatMutationError(e)),
+    onError: (_e, full_name, context) => {
+      if (context?.wasSelected) setSelected(full_name)
+      const removed = context?.removed
+      if (removed)
+        qc.setQueryData<Array<AgentInstructions>>(
+          ["agentInstructions"],
+          (current) =>
+            current && !current.some((s) => s.full_name === removed.full_name)
+              ? [...current, removed]
+              : current
+        )
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["agentInstructions"] }),
   })
 
   if (instructions.isLoading) {
@@ -102,10 +132,7 @@ export function AgentInstructionsPanel() {
 
   const handleAdd = () => {
     if (!normalizedAddRepo || !canAdd) return
-    void create
-      .mutateAsync(normalizedAddRepo)
-      .then(() => setAddRepo(""))
-      .catch(() => undefined)
+    create.mutate(normalizedAddRepo, { onSuccess: () => setAddRepo("") })
   }
 
   const githubReauth =
@@ -228,7 +255,7 @@ export function AgentInstructionsPanel() {
                 size="sm"
                 disabled={!dirty || save.isPending}
                 onClick={() =>
-                  void save.mutateAsync({
+                  save.mutate({
                     full_name: active.full_name,
                     value: draft,
                   })
@@ -245,7 +272,6 @@ export function AgentInstructionsPanel() {
                 size="sm"
                 variant="destructive"
                 className="ml-auto"
-                disabled={remove.isPending}
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -254,7 +280,7 @@ export function AgentInstructionsPanel() {
                   ) {
                     return
                   }
-                  void remove.mutateAsync(active.full_name)
+                  remove.mutate(active.full_name)
                 }}
               >
                 Remove

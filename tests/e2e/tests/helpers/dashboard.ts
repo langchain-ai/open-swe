@@ -3,8 +3,16 @@ import { expect, type Page } from "@playwright/test";
 // Shared fixtures for the specs that drive the REAL built ui/ app (served
 // same-origin from the harness). Only the LLM/GitHub/Slack/token boundaries
 // are faked.
-export const SAME_USER = { login: "alice", email: "alice@example.com" };
-export const OTHER_USER = { login: "bob", email: "bob@example.com" };
+export const SAME_USER = {
+  login: "alice",
+  email: "alice@example.com",
+  name: "Alice",
+};
+export const OTHER_USER = {
+  login: "bob",
+  email: "bob@example.com",
+  name: "Bob",
+};
 
 // The dashboard's mutating routes enforce same-origin, which a browser sets for
 // itself but APIRequestContext does not.
@@ -20,21 +28,16 @@ export async function loginAs(
 ) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
-  await setTranscriptStreaming(page, true);
 }
 
-// Reading a thread from the transcript event log is opt-in per user while it
-// rolls out, and the suite asserts that path, so signing in turns it on. Pass
-// `false` to cover a user who has not opted in and reads LangGraph state.
-export async function setTranscriptStreaming(page: Page, enabled: boolean) {
-  const current = await page.request.get("/dashboard/api/me/preferences");
-  expect(current.ok(), await current.text()).toBeTruthy();
-  const preferences = (await current.json()) as Record<string, unknown>;
-  const saved = await page.request.put("/dashboard/api/me/preferences", {
+export async function optIntoQueue(page: Page) {
+  const saved = await page.request.get("/dashboard/api/me/preferences");
+  expect(saved.ok()).toBeTruthy();
+  const res = await page.request.put("/dashboard/api/me/preferences", {
+    data: { ...(await saved.json()), follow_up_behavior: "queue" },
     headers: SAME_ORIGIN_HEADERS,
-    data: { ...preferences, transcript_streaming: enabled },
   });
-  expect(saved.ok(), await saved.text()).toBeTruthy();
+  expect(res.ok()).toBeTruthy();
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
@@ -163,6 +166,8 @@ export interface SeedPullRequestOptions {
   reviews?: FakeReview[];
   review_threads?: FakeReviewThread[];
   review_decision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+  // Committed to `head` off the base branch, so the PR carries a real diff.
+  files?: Record<string, string>;
 }
 
 export interface SeededPullRequest {

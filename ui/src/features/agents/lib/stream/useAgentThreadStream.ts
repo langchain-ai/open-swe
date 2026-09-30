@@ -15,6 +15,7 @@ import {
 import { RunTracker } from "@/lib/perf/streaming"
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./connection"
 import { useReconnectNotice } from "./useReconnectNotice"
+import { createRunAcceptanceTracker } from "./runAcceptance"
 import type {
   AgentStream,
   AgentThreadTransport,
@@ -27,6 +28,7 @@ const AGENT_ASSISTANT_ID = "agent"
 export interface AgentThreadStream {
   stream: AgentStream
   connection: StreamConnection
+  trackRunAcceptance: (messageId: string) => () => Promise<boolean>
 }
 
 /**
@@ -43,12 +45,15 @@ export function useAgentThreadStream({
 }): AgentThreadStream {
   const queryClient = useQueryClient()
   const cloud = transport === "cloud"
+  const [runAcceptance] = useState(() =>
+    createRunAcceptanceTracker(dashboardFetch)
+  )
   const client = useMemo(
     () =>
       cloud
-        ? createDashboardClient(agentsApi.langGraphApiUrl)
+        ? createDashboardClient(agentsApi.langGraphApiUrl, runAcceptance.fetch)
         : createLocalGraphClient(),
-    [cloud]
+    [cloud, runAcceptance]
   )
   const { connection, onReconnect, onConnected } = useReconnectNotice()
   const [runTracker] = useState(() => new RunTracker({ transport, threadId }))
@@ -60,7 +65,10 @@ export function useAgentThreadStream({
     client,
     assistantId: AGENT_ASSISTANT_ID,
     threadId,
-    fetch: dashboardFetch,
+    fetch: cloud ? runAcceptance.fetch : dashboardFetch,
+    // Only affects "stream"-kind threads; transcript threads never call
+    // useStream() at all.
+    queue: "server",
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect,
@@ -128,7 +136,8 @@ export function useAgentThreadStream({
     () => ({
       stream: { ...stream, submit, isOffloading, routed },
       connection,
+      trackRunAcceptance: runAcceptance.track,
     }),
-    [connection, isOffloading, routed, stream, submit]
+    [connection, isOffloading, routed, runAcceptance, stream, submit]
   )
 }

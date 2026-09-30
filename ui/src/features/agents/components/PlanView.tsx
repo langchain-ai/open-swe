@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
@@ -9,7 +10,55 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
+import { pageTitle } from "@/lib/pageTitle"
 import { cn } from "@/lib/utils"
+
+const DEFAULT_TITLE = pageTitle("Artifact")
+
+/** Publishes the artifact's own `<title>` as the document title. */
+function artifactTitle(html: string, markdown: string): string | null {
+  const source = html.trim() ? html : markdown
+  const found = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(source)
+  const raw = found
+    ?.at(1)
+    ?.replace(/<[^>]*>/g, " ")
+    .trim()
+  if (!raw) return null
+  // The server escapes the title, so decode entities ("a &amp; b" → "a & b").
+  const decoded = new DOMParser()
+    .parseFromString(raw, "text/html")
+    .body.textContent?.replace(/\s+/g, " ")
+    .trim()
+  return decoded || null
+}
+
+function usePlanDocumentTitle(threadId: string) {
+  const query = useQuery({
+    queryKey: ["plan", threadId],
+    queryFn: () => getPlan(threadId),
+    refetchInterval: (q) =>
+      q.state.data?.html || q.state.data?.markdown ? false : 2000,
+    retry: (count, error) =>
+      !(
+        error instanceof PlanApiError &&
+        (error.status === 401 || error.status === 404)
+      ) && count < 3,
+  })
+  const title = query.data
+    ? artifactTitle(query.data.html, query.data.markdown)
+    : null
+
+  useEffect(() => {
+    if (!title) return
+    const documentTitle = pageTitle(title)
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle) document.title = DEFAULT_TITLE
+    }
+  }, [title])
+
+  return query
+}
 
 function Centered({
   children,
@@ -50,7 +99,7 @@ export function planSignInHref(): string {
 export function PlanSignInButton() {
   return (
     <a href={planSignInHref()} className={buttonVariants({ size: "sm" })}>
-      Sign in to view this plan
+      Sign in to view this artifact
     </a>
   )
 }
@@ -58,25 +107,13 @@ export function PlanSignInButton() {
 export function PlanView({
   threadId,
   standalone = false,
-  onApprove,
 }: {
   threadId: string
   standalone?: boolean
-  onApprove?: (runId: string) => void
 }) {
   const mounted = useIsHydrated()
 
-  const query = useQuery({
-    queryKey: ["plan", threadId],
-    queryFn: () => getPlan(threadId),
-    refetchInterval: (q) =>
-      q.state.data?.html || q.state.data?.markdown ? false : 2000,
-    retry: (count, error) =>
-      !(
-        error instanceof PlanApiError &&
-        (error.status === 401 || error.status === 404)
-      ) && count < 3,
-  })
+  const query = usePlanDocumentTitle(threadId)
   const backLink = standalone ? <BackLink threadId={threadId} /> : null
 
   if (!mounted || query.isLoading) {
@@ -94,8 +131,8 @@ export function PlanView({
         <div className="space-y-3 text-center text-sm text-muted-foreground/70">
           <p>
             {status === 401
-              ? "Please sign in to view this plan."
-              : "This plan could not be found."}
+              ? "Please sign in to view this artifact."
+              : "This artifact could not be found."}
           </p>
           {status === 401 ? <PlanSignInButton /> : null}
           {backLink}
@@ -126,7 +163,7 @@ export function PlanView({
           {backLink}
         </div>
       )}
-      <PlanReview plan={plan} onApprove={onApprove} />
+      <PlanReview plan={plan} />
     </div>
   )
 }
