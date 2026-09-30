@@ -21,8 +21,13 @@ class Region(StrEnum):
 
     @property
     def issuer(self) -> str:
-        prefix = "" if self == Region.US else f"{self.value}."
-        return f"https://{prefix}api.smith.langchain.com"
+        match self:
+            case Region.US:
+                return "https://api.smith.langchain.com"
+            case Region.EU:
+                return "https://eu.api.smith.langchain.com"
+            case Region.APAC:
+                return "https://apac.api.smith.langchain.com"
 
 
 class ConnectionError(Exception):

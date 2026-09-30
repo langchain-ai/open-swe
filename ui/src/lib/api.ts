@@ -1815,7 +1815,10 @@ export function connectService(
 ) {
   const pending = window.openSweDesktop?.connectService(provider, region)
   if (!pending) {
-    const query = provider === "langsmith" && region ? `?region=${region}` : ""
+    const query =
+      provider === "langsmith" && region
+        ? `?region=${encodeURIComponent(region)}`
+        : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`
     )
