@@ -47,6 +47,37 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const profileAfter = await page.request.get("/dashboard/api/profile");
     expect(profileAfter.ok()).toBeTruthy();
     expect(await profileAfter.json()).not.toHaveProperty("default_model");
+
+    await page.unroute("**/dashboard/api/me");
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: { ...session, slack_oauth_enabled: true, slack_user_id: null },
+      });
+    });
+    await page.reload();
+    await page.clock.setFixedTime(Date.now() + 61_000);
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("visibilitychange")),
+    );
+    await expect(
+      page.getByRole("button", { name: "Don't ask again" }),
+    ).toBeVisible();
+    const saved = page.waitForResponse(
+      "**/dashboard/api/profile/slack-onboarding-dismissal",
+    );
+    await page.getByRole("button", { name: "Don't ask again" }).click();
+    expect((await saved).ok()).toBeTruthy();
+    const dismissed = await (
+      await page.request.get("/dashboard/api/profile")
+    ).json();
+    expect(dismissed.slack_onboarding_dismissed).toBe(true);
+    expect(dismissed).not.toHaveProperty("default_model");
+    expect(dismissed).not.toHaveProperty("reasoning_effort");
+    await page.reload();
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
   test("the SAME user continues the conversation in the web app", async ({

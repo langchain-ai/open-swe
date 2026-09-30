@@ -1,30 +1,17 @@
 import { Dialog } from "@base-ui/react/dialog"
-import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { connectService } from "@/lib/api"
-import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
+import { useDismissSlackOnboarding, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 /** Prompt unlinked users to connect Slack. */
 export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
-  const options = useOptions()
-  const save = usePatchProfile()
-  const [dismissed, setDismissed] = useState(false)
+  const dismiss = useDismissSlackOnboarding()
 
-  const defaultModels = options.data?.models.filter(
-    (model) => model.can_be_default !== false
-  )
-  const firstModel: ModelOption | undefined = defaultModels?.[0]
-  const defaultModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
-  const defaultEffort =
-    options.data?.default_agent_reasoning_effort ??
-    firstModel?.default_effort ??
-    ""
   const slackEnabled = session.data?.slack_oauth_enabled ?? false
   const slackConnected = !!session.data?.slack_user_id
   const needsSlack =
@@ -34,22 +21,11 @@ export function OnboardingDialog() {
     !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
-  const open = !dismissed && needsSlack
-
-  const dismiss = () => {
-    setDismissed(true)
-    save.patch(
-      { slack_onboarding_dismissed: true },
-      defaultModel,
-      defaultEffort
-    )
-  }
-
   return (
     <Dialog.Root
-      open={open}
+      open={needsSlack}
       onOpenChange={(next) => {
-        if (!next) dismiss()
+        if (!next) dismiss.mutate()
       }}
     >
       <Dialog.Portal>
@@ -68,7 +44,11 @@ export function OnboardingDialog() {
               Linear mentions resolve to you.
             </Dialog.Description>
             <div className="mt-2 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={dismiss}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => dismiss.mutate()}
+              >
                 Don't ask again
               </Button>
               <Button
