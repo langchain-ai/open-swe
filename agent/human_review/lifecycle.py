@@ -205,16 +205,6 @@ async def render(
     files = await _files_for(request, token) if token else []
     diff_image_id = request.slack_diff_file_id or None
     author = await request.author_mention()
-    if outcome is None and copy:
-        # The diff image was shared into the thread's channel only, so the copy draws text.
-        return expedited_card.open_card(
-            request,
-            title=pr.title,
-            author=author,
-            files=files,
-            thread_url=await get_slack_permalink(request.slack_channel_id, request.slack_thread_ts)
-            or "",
-        )
     if outcome is None:
         return expedited_card.open_card(
             request,
@@ -222,7 +212,12 @@ async def render(
             author=author,
             files=files,
             diff_image_id=diff_image_id,
-            choices=await _channel_choices(request),
+            choices=[] if copy else await _channel_choices(request),
+            thread_url=(
+                await get_slack_permalink(request.slack_channel_id, request.slack_thread_ts) or ""
+            )
+            if copy
+            else None,
         )
     return expedited_card.closed_card(
         request,

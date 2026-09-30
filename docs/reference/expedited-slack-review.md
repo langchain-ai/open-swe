@@ -78,8 +78,7 @@ one channel, once:
   the card as a thread reply also sent to the channel.
 - Only a voter (see below) may send it to another channel, since that shows the diff
   to new people. The card is posted at the top of that channel with a link back to
-  the thread, and votes work from either copy. The copy draws the diff as text,
-  because the diff image is shared in the thread's channel only.
+  the thread, and votes work from either copy.
 
 When the card is approved or closes for any reason, both the broadcast and the copy in
 the other channel are deleted, and the card stays in the thread only. So no channel
