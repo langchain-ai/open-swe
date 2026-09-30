@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
@@ -510,6 +511,16 @@ async def slack_webhook(
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
         or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    leading_mention = re.match(r"\s*<@([^>]+)>", text)
+    if (
+        not in_code_channel
+        and not in_dm_channel
+        and allowed_bot is None
+        and leading_mention
+        and leading_mention.group(1) != bot_user_id
+    ):
+        return ignored("Message addressed to another user")
+
     solo_followup = False
     if (
         not is_message_update

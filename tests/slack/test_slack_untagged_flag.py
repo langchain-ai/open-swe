@@ -160,6 +160,26 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
     assert request.kitchen_channel is True
 
 
+@pytest.mark.parametrize("kitchen", [False, True])
+@pytest.mark.parametrize(
+    "text", ["<@OTHER> shots fired", "  <@OTHER> shots fired", "<@OTHER> ask <@BOT> later"]
+)
+async def test_leading_other_user_mention_does_not_trigger(
+    monkeypatch: pytest.MonkeyPatch, kitchen: bool, text: str
+) -> None:
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=kitchen))
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=True))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_payload(text, "Ev-other-mention"))),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response["status"] == "ignored"
+    assert background_tasks.tasks == []
+
+
 async def test_kitchen_name_without_opt_in_does_not_trigger(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

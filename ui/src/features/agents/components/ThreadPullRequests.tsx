@@ -301,12 +301,14 @@ function PullRequestLink({
   healthUnavailable,
   onFix,
   fixDisabled,
+  compact = false,
 }: {
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
   onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
   fixDisabled: boolean
+  compact?: boolean
 }) {
   const [fixing, setFixing] = useState(false)
   const [fixFailed, setFixFailed] = useState(false)
@@ -346,12 +348,20 @@ function PullRequestLink({
           <span className={cn("shrink-0 font-medium", tone)}>
             #{pullRequest.number}
           </span>
-          <span className="min-w-0 truncate text-muted-foreground">
-            {pullRequest.repoFullName}
-          </span>
-          <span className="hidden min-w-0 truncate text-muted-foreground/70 sm:block">
-            {pullRequest.headRef}
-          </span>
+          {compact ? (
+            <span className="min-w-0 truncate text-muted-foreground">
+              {pullRequest.title}
+            </span>
+          ) : (
+            <>
+              <span className="min-w-0 truncate text-muted-foreground">
+                {pullRequest.repoFullName}
+              </span>
+              <span className="hidden min-w-0 truncate text-muted-foreground/70 sm:block">
+                {pullRequest.headRef}
+              </span>
+            </>
+          )}
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             <HealthSummary health={health} />
             <span className="hidden sm:inline-flex">
@@ -376,7 +386,7 @@ function PullRequestLink({
           />
         </HoverCardPopup>
       </HoverCard>
-      {actionable && onFix && (
+      {actionable && onFix && !compact && (
         <Button
           variant="destructive"
           aria-label={`Fix PR #${pullRequest.number} issues`}
@@ -398,12 +408,15 @@ export function ThreadPullRequests({
   healthUnavailable = false,
   onFix,
   fixDisabled = false,
+  compact = false,
 }: {
   pullRequests: Array<AgentPullRequest>
   health?: Array<AgentPullRequestHealth>
   healthUnavailable?: boolean
   onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
   fixDisabled?: boolean
+  /** One-line row above the composer: title instead of repo and branch. */
+  compact?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   if (pullRequests.length === 0) return null
@@ -429,6 +442,7 @@ export function ThreadPullRequests({
           healthUnavailable={healthUnavailable}
           onFix={onFix}
           fixDisabled={fixDisabled}
+          compact={compact}
         />
       ))}
       {hiddenCount > 0 && (

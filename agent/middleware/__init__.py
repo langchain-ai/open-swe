@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "deliver_event_matches_before_model": ".deliver_event_matches",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -60,6 +61,7 @@ __all__ = [
     "WorkflowPushGuardMiddleware",
     "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
+    "deliver_event_matches_before_model",
     "notify_step_limit_reached",
     "record_run_usage",
     "refresh_github_proxy_before_model",
@@ -70,6 +72,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from agent.middleware.check_message_queue import check_message_queue_before_model
+    from agent.middleware.deliver_event_matches import deliver_event_matches_before_model
     from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
