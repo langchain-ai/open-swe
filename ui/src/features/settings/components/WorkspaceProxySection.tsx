@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
 
@@ -21,7 +22,29 @@ export function WorkspaceProxySection({
     2
   )
   const [draft, setDraft] = useState(original)
+  const [view, setView] = useState<"form" | "json">("form")
   const dirty = draft !== original
+  let config: Record<string, JsonValue> | null = null
+  let parseError: string | null = null
+  try {
+    const parsed: JsonValue = JSON.parse(draft)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Proxy configuration must be a JSON object.")
+    }
+    if ("rules" in parsed && !Array.isArray(parsed.rules)) {
+      throw new Error("Proxy rules must be a JSON array.")
+    }
+    config = parsed
+  } catch (error) {
+    parseError = error instanceof Error ? error.message : "Invalid JSON"
+  }
+  const rules = config && Array.isArray(config.rules) ? config.rules : []
+  const changeRules = (next: JsonValue[]) =>
+    setDraft(JSON.stringify({ ...config, rules: next }, null, 2))
+  const changeRule = (index: number, next: Record<string, JsonValue>) =>
+    changeRules(
+      rules.map((rule, position) => (position === index ? next : rule))
+    )
   const save = useMutation({
     meta: { errorTitle: "Couldn't save sandbox proxy configuration" },
     mutationFn: () => {
@@ -45,18 +68,324 @@ export function WorkspaceProxySection({
       description="Configure host-matched headers and sandbox environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged."
     >
       <div className="space-y-3 px-4 py-3.5">
-        <label htmlFor="workspace-proxy-config" className="text-sm">
-          Proxy configuration (JSON)
-        </label>
-        <Textarea
-          id="workspace-proxy-config"
-          className="min-h-64 font-mono text-xs"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          disabled={!canEdit || save.isPending}
-          spellCheck={false}
-          aria-describedby="workspace-proxy-help"
-        />
+        <div
+          role="tablist"
+          aria-label="Proxy editor view"
+          className="flex gap-2"
+        >
+          {(["form", "json"] as const).map((tab) => (
+            <Button
+              key={tab}
+              role="tab"
+              aria-selected={view === tab}
+              aria-controls={`proxy-${tab}`}
+              id={`proxy-tab-${tab}`}
+              variant={view === tab ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setView(tab)}
+            >
+              {tab === "form" ? "Rules" : "JSON"}
+            </Button>
+          ))}
+        </div>
+        <div
+          role="tabpanel"
+          id={`proxy-${view}`}
+          aria-labelledby={`proxy-tab-${view}`}
+        >
+          {view === "json" ? (
+            <>
+              <label htmlFor="workspace-proxy-config" className="text-sm">
+                Proxy configuration (JSON)
+              </label>
+              <Textarea
+                id="workspace-proxy-config"
+                className="min-h-64 font-mono text-xs"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                disabled={!canEdit || save.isPending}
+                spellCheck={false}
+                aria-describedby="workspace-proxy-help"
+              />
+            </>
+          ) : parseError ? (
+            <p role="alert" className="text-xs text-destructive">
+              {parseError} Fix the configuration in the JSON tab to use the
+              form.
+            </p>
+          ) : (
+            <fieldset
+              disabled={!canEdit || save.isPending}
+              className="space-y-4"
+            >
+              {rules.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No custom proxy rules configured.
+                </p>
+              )}
+              {rules.map((ruleValue, index) => {
+                if (
+                  !ruleValue ||
+                  typeof ruleValue !== "object" ||
+                  Array.isArray(ruleValue)
+                )
+                  return (
+                    <p key={index} role="alert">
+                      Rule {index + 1} is not an object. Edit it in the JSON
+                      tab.
+                    </p>
+                  )
+                const rule = ruleValue
+                const headers = Array.isArray(rule.headers) ? rule.headers : []
+                const env =
+                  rule.env_vars &&
+                  typeof rule.env_vars === "object" &&
+                  !Array.isArray(rule.env_vars)
+                    ? rule.env_vars
+                    : {}
+                return (
+                  <div
+                    key={index}
+                    className="space-y-3 rounded-md border border-border p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">
+                        Rule {index + 1}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          changeRules(
+                            rules.filter((_, position) => position !== index)
+                          )
+                        }
+                      >
+                        Remove rule {index + 1}
+                      </Button>
+                    </div>
+                    <label className="block space-y-1 text-xs">
+                      Rule name
+                      <Input
+                        value={typeof rule.name === "string" ? rule.name : ""}
+                        placeholder="custom-service"
+                        onChange={(event) =>
+                          changeRule(index, {
+                            ...rule,
+                            name: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="block space-y-1 text-xs">
+                      Matching hosts
+                      <Input
+                        value={
+                          Array.isArray(rule.match_hosts)
+                            ? rule.match_hosts.join(", ")
+                            : ""
+                        }
+                        placeholder="api.example.com, *.example.com"
+                        onChange={(event) =>
+                          changeRule(index, {
+                            ...rule,
+                            match_hosts: event.target.value
+                              .split(",")
+                              .map((host) => host.trim()),
+                          })
+                        }
+                      />
+                    </label>
+                    <div className="text-xs font-medium">Headers</div>
+                    {headers.map((header, position) => {
+                      if (
+                        !header ||
+                        typeof header !== "object" ||
+                        Array.isArray(header)
+                      )
+                        return (
+                          <p key={position} role="alert">
+                            Invalid header. Edit it in the JSON tab.
+                          </p>
+                        )
+                      const update = (next: Record<string, JsonValue>) =>
+                        changeRule(index, {
+                          ...rule,
+                          headers: headers.map((item, i) =>
+                            i === position ? next : item
+                          ),
+                        })
+                      return (
+                        <div
+                          key={position}
+                          className="flex flex-wrap items-end gap-2"
+                        >
+                          <label className="min-w-32 flex-1 space-y-1 text-xs">
+                            Header name
+                            <Input
+                              value={
+                                typeof header.name === "string"
+                                  ? header.name
+                                  : ""
+                              }
+                              placeholder="X-Custom-Header"
+                              onChange={(event) =>
+                                update({ ...header, name: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="min-w-32 flex-1 space-y-1 text-xs">
+                            Header value
+                            <Input
+                              value={
+                                typeof header.value === "string"
+                                  ? header.value
+                                  : ""
+                              }
+                              onChange={(event) =>
+                                update({ ...header, value: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="space-y-1 text-xs">
+                            Type
+                            <select
+                              className="block h-9 rounded-md border border-input bg-background px-2"
+                              value={
+                                typeof header.type === "string"
+                                  ? header.type
+                                  : "plaintext"
+                              }
+                              onChange={(event) =>
+                                update({ ...header, type: event.target.value })
+                              }
+                            >
+                              <option value="plaintext">Plaintext</option>
+                              <option value="opaque">Opaque</option>
+                            </select>
+                          </label>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Remove header ${position + 1} from rule ${index + 1}`}
+                            onClick={() =>
+                              changeRule(index, {
+                                ...rule,
+                                headers: headers.filter(
+                                  (_, i) => i !== position
+                                ),
+                              })
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      )
+                    })}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        changeRule(index, {
+                          ...rule,
+                          headers: [
+                            ...headers,
+                            { name: "", type: "plaintext", value: "" },
+                          ],
+                        })
+                      }
+                    >
+                      Add header
+                    </Button>
+                    <div className="text-xs font-medium">
+                      Environment variables
+                    </div>
+                    {Object.entries(env).map(([name, value], position) => (
+                      <div key={position} className="flex items-end gap-2">
+                        <label className="flex-1 space-y-1 text-xs">
+                          Variable name
+                          <Input
+                            value={name}
+                            onChange={(event) =>
+                              changeRule(index, {
+                                ...rule,
+                                env_vars: Object.fromEntries(
+                                  Object.entries(env).map(([key, val]) =>
+                                    key === name
+                                      ? [event.target.value, val]
+                                      : [key, val]
+                                  )
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="flex-1 space-y-1 text-xs">
+                          Variable value
+                          <Input
+                            value={typeof value === "string" ? value : ""}
+                            onChange={(event) =>
+                              changeRule(index, {
+                                ...rule,
+                                env_vars: {
+                                  ...env,
+                                  [name]: event.target.value,
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Remove variable ${position + 1} from rule ${index + 1}`}
+                          onClick={() =>
+                            changeRule(index, {
+                              ...rule,
+                              env_vars: Object.fromEntries(
+                                Object.entries(env).filter(
+                                  ([key]) => key !== name
+                                )
+                              ),
+                            })
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        let name = "NEW_VARIABLE"
+                        while (name in env) name += "_"
+                        changeRule(index, {
+                          ...rule,
+                          env_vars: { ...env, [name]: "" },
+                        })
+                      }}
+                    >
+                      Add environment variable
+                    </Button>
+                  </div>
+                )
+              })}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  changeRules([
+                    ...rules,
+                    { name: "", match_hosts: [], headers: [], env_vars: {} },
+                  ])
+                }
+              >
+                Add rule
+              </Button>
+            </fieldset>
+          )}
+        </div>
         <p id="workspace-proxy-help" className="text-xs text-muted-foreground">
           Use rules with name, match_hosts, headers (name, type, value), and
           env_vars. Headers match hosts; environment variables are sandbox-wide.

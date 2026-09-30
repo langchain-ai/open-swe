@@ -430,13 +430,12 @@ describe("WorkspaceSettingsPanel", () => {
         },
       ],
     }
-    const update = vi
-      .spyOn(api, "updateWorkspace")
-      .mockResolvedValue({
-        ...record,
-        create_params: { ...record.create_params, proxy_config: proxy },
-      })
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...record,
+      create_params: { ...record.create_params, proxy_config: proxy },
+    })
     renderPage()
+    fireEvent.click(await screen.findByRole("tab", { name: "JSON" }))
     const editor = await screen.findByLabelText("Proxy configuration (JSON)")
     fireEvent.change(editor, { target: { value: "[]" } })
     fireEvent.click(
@@ -447,12 +446,33 @@ describe("WorkspaceSettingsPanel", () => {
     )
     expect(update).not.toHaveBeenCalled()
     fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("Rule name"), {
+      target: { value: "updated-service" },
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }))
+    expect(
+      JSON.parse(
+        (
+          screen.getByLabelText(
+            "Proxy configuration (JSON)"
+          ) as HTMLTextAreaElement
+        ).value
+      ).rules[0].name
+    ).toBe("updated-service")
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
-        create_params: { _internal_runtime: "v2", proxy_config: proxy },
+        create_params: {
+          _internal_runtime: "v2",
+          proxy_config: {
+            ...proxy,
+            rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+        },
       })
     )
     await waitFor(() =>
