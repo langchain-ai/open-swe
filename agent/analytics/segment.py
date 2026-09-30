@@ -7,6 +7,7 @@ from langgraph.config import get_config
 
 from agent.config import ENV
 from agent.run_config import RunConfig
+from agent.webhooks.event_log import LoggedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,48 @@ async def record_usage(
             response.raise_for_status()
     except Exception:
         logger.warning("Segment usage delivery failed", exc_info=True)
+
+
+async def record_webhook(event: LoggedEvent) -> None:
+    key = ENV.SEGMENT_WRITE_KEY.get()
+    if not key:
+        return
+    action = event.payload.get("action") if isinstance(event.payload, dict) else None
+    properties: dict[str, object] = {
+        "source": event.source,
+        "event_type": event.event_type,
+        "action": action if isinstance(action, str) else "",
+        "product": "open-swe",
+        "surface": "webhook",
+        "environment": ENV.ANALYTICS_ENVIRONMENT.get(),
+        **{
+            field: str(value) if value else None
+            for field, value in {
+                "workspace_id": event.workspace_id,
+                "repository_id": event.repository_id,
+                "pull_request_id": event.pull_request_id,
+            }.items()
+        },
+    }
+    payload: dict[str, object] = {
+        "event": "Webhook Received",
+        "messageId": f"webhook:{event.source}:{event.delivery_id}:{event.received_at.isoformat()}",
+        "timestamp": event.received_at.isoformat(),
+        "properties": properties,
+        "context": {"ip": "0.0.0.0"},
+    }
+    if event.user_id:
+        payload["userId"] = str(event.user_id)
+    else:
+        payload["anonymousId"] = f"open-swe:webhook:{event.source}"
+    try:
+        async with httpx.AsyncClient(
+            base_url="https://api.segment.io/v1/", auth=(key, ""), timeout=2.0
+        ) as client:
+            response = await client.post("track", json=payload)
+            response.raise_for_status()
+    except Exception:
+        logger.warning("Segment webhook delivery failed", exc_info=True)
 
 
 async def record_mcp_tool(tool: str, is_error: bool) -> None:

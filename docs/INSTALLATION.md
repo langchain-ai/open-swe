@@ -25,6 +25,8 @@ Create a Segment HTTP API source and set its write key as the backend's `SEGMENT
 
 Authenticated dashboard navigation sends Segment `page` events with a normalized `page_name`. Agent MCP executions send `MCP Tool Called` events with the tool name and `is_error`. Both identify users by GitHub login with their email trait and `product: open-swe`. Tool arguments/results, page URLs, query strings, and thread identifiers are excluded. Configure the Segment warehouse destination separately to query these events in Hex.
 
+Every newly persisted GitHub, Slack, and Linear event-log delivery also sends `Webhook Received`, including events without a resolved user. Properties include source, event type, action, environment, and resolved workspace/repository/PR IDs; the raw webhook payload stays in the local event log. Resolved users use the event log's internal user UUID; unresolved events use a source-specific anonymous ID. This is best-effort delivery, not a historical backfill or durable export.
+
 ## 1. Create the deployment
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.

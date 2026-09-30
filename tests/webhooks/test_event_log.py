@@ -1,7 +1,8 @@
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
+import httpx
 import pytest
 from sqlalchemy import text
 from starlette.requests import Request
@@ -9,6 +10,44 @@ from starlette.requests import Request
 from agent.database import transaction
 from agent.webhooks import event_log
 from agent.webhooks.event_log import EventLog, EventRefs
+
+
+async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
+    from agent.analytics import segment
+    from agent.webhooks.event_log import LoggedEvent
+
+    monkeypatch.setenv("SEGMENT_WRITE_KEY", "test-key")
+    requests: list[dict[str, object]] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200)
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        segment.httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(**kwargs, transport=httpx.MockTransport(respond)),
+    )
+    event = LoggedEvent(
+        source="github",
+        event_type="issue_comment",
+        delivery_id="delivery-1",
+        received_at=datetime.now(UTC),
+        user_id=None,
+        workspace_id=None,
+        repository_id=None,
+        pull_request_id=None,
+        payload={"action": "created", "comment": {"body": "private content"}},
+    )
+    await segment.record_webhook(event)
+    assert requests[0]["anonymousId"] == "open-swe:webhook:github"
+    assert requests[0]["event"] == "Webhook Received"
+    assert "private content" not in json.dumps(requests)
+    assert requests[0]["properties"]["action"] == "created"
+    monkeypatch.delenv("SEGMENT_WRITE_KEY")
+    await segment.record_webhook(event)
+    assert len(requests) == 1
 
 
 async def _partitions() -> set[str]:

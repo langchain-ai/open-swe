@@ -241,7 +241,11 @@ class EventLog:
                 exc_info=True,
             )
             return
-        await EventSubscription.deliver(LoggedEvent.model_validate({**row, "payload": payload}))
+        from agent.analytics.segment import record_webhook
+
+        event = LoggedEvent.model_validate({**row, "payload": payload})
+        await record_webhook(event)
+        await EventSubscription.deliver(event)
 
     @classmethod
     async def kinds(
