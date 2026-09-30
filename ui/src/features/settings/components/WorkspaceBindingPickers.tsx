@@ -75,8 +75,8 @@ export function RepositoryPicker({
   return (
     <OwnershipPicker
       triggerLabel="Choose repositories"
-      title="Repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is preferred by one workspace."
+      title="Bound repositories"
+      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
       noun="repository"
       pluralNoun="repositories"
       items={items}
@@ -84,6 +84,10 @@ export function RepositoryPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search repositories"
+      filters={[
+        { label: "Public", matches: (item) => item.meta === "public" },
+        { label: "Internal", matches: (item) => item.meta === "private" },
+      ]}
       manual={{
         label: "Add a repository by name",
         placeholder: "owner/repo",

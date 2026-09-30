@@ -1,8 +1,13 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Literal, NotRequired
+from typing import Annotated, Literal, NotRequired
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    OmitFromOutput,
+)
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
@@ -66,7 +71,7 @@ async def _select_jev_route(task: str) -> SelectedRoute:
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
-    requested_model: NotRequired[str | None]
+    requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
 def normalize_route(route: PersistedRoute) -> SelectedRoute:

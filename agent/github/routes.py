@@ -114,6 +114,8 @@ async def github_webhook(
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action == "closed":
             background_tasks.add_task(service.settle_human_review_on_close, payload)
+        elif action in common.GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(service.settle_human_reviews, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action

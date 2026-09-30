@@ -31,6 +31,26 @@ export function HumanReviewPreference() {
           />
         }
       />
+      <SettingsRow
+        label="Watch pull requests I post for review"
+        htmlFor="review-channel-watch"
+        description="When you link a pull request in its repository's Slack review channel, Open SWE reacts once it is approved and once it merges. If it sits green without an approval for 30 minutes, Open SWE bumps it and picks a reviewer."
+        control={
+          <Switch
+            id="review-channel-watch"
+            checked={profile.data?.review_channel_watch ?? false}
+            disabled={disabled}
+            onCheckedChange={(value) => {
+              if (!defaults) return
+              save.patch(
+                { review_channel_watch: value },
+                defaults.default_agent_model,
+                defaults.default_agent_reasoning_effort
+              )
+            }}
+          />
+        }
+      />
       {(profile.error || options.error) && (
         <p role="alert" className="px-4 py-2 text-xs text-destructive">
           Could not load the human review preference. Please try again.
