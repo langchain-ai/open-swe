@@ -117,7 +117,7 @@ def _channel_option(
     )
 
 
-async def list_slack_channels() -> SlackChannelDirectory:
+async def list_slack_channels(*, refresh: bool = False) -> SlackChannelDirectory:
     """The unarchived channels the bot can see, by name.
 
     The channels the bot belongs to come first, from ``users.conversations``:
@@ -175,4 +175,8 @@ async def list_slack_channels() -> SlackChannelDirectory:
                 )
             return directory
 
+        if refresh:
+            directory = await load()
+            ttl_cache.set_cached(key, directory, DIRECTORY_TTL_SECONDS)
+            return directory
         return await ttl_cache.cached_stale_while_revalidate(key, DIRECTORY_TTL_SECONDS, load)

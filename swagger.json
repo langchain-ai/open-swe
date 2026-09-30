@@ -9172,6 +9172,35 @@
         ]
       }
     },
+    "/dashboard/api/profile/slack-onboarding-dismissal": {
+      "post": {
+        "operationId": "dismiss_slack_onboarding_dashboard_api_profile_slack_onboarding_dismissal_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dismiss Slack Onboarding Dashboard Api Profile Slack Onboarding Dismissal Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Dismiss Slack Onboarding",
+        "tags": [
+          "dashboard",
+          "profiles"
+        ]
+      }
+    },
     "/dashboard/api/pull-requests": {
       "get": {
         "operationId": "api_list_pull_requests_dashboard_api_pull_requests_get",
@@ -13264,6 +13293,18 @@
       "get": {
         "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
         "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13274,6 +13315,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

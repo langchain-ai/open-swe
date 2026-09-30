@@ -169,6 +169,30 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
     set_meta.assert_not_awaited()
 
 
+async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() -> None:
+    from agent.review.findings import (
+        REVIEWER_EVAL_PUBLICATION_KEY,
+        append_finding,
+        start_run_scoped_findings,
+    )
+    from agent.tools.publish_review import publish_review
+
+    start_run_scoped_findings("tid")
+    await append_finding(
+        "tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
+    )
+    with (
+        patch("agent.tools.publish_review.get_config", return_value=_eval_config()),
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+    ):
+        result = await publish_review(ranking=["f_one"])
+
+    assert result["surfaced_count"] == 1
+    publication = set_meta.await_args.kwargs["extra"][REVIEWER_EVAL_PUBLICATION_KEY]
+    assert [finding["id"] for finding in publication["findings"]] == ["f_one"]
+
+
 @pytest.mark.asyncio
 async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerpt() -> None:
     """A non-dict GitHub response body must surface status code + body excerpt
