@@ -64,8 +64,8 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
     prompt: workspace.prompt,
-    setupScript: workspace.setup_script ?? "",
-    updateScript: workspace.update_script ?? "",
+    setupScript: "",
+    updateScript: "",
   }
 }
 
