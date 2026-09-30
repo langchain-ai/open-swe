@@ -15,10 +15,14 @@ class UserPreferences(BaseModel):
     # Pull requests this person links in a repository's review channel get approved and
     # merged reactions, and a bump with a picked reviewer once they sit green unapproved.
     review_channel_watch: bool = False
+    approved_pr_dm_reminders: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
     concierge_mode: bool | None = None
+    approved_pr_dm_reminders: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     preserve_sandbox_memory: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
