@@ -33,7 +33,8 @@ are already in the Slack thread.
   GitHub cannot show a patch for are refused, because the card could not show the
   voters what they are approving. 20 is what the agent is told; 25 is what is
   enforced, since bouncing a change that lands a few lines over costs more than the
-  slack costs the voters.
+  slack costs the voters. A PR touching 100 or more files is refused however few
+  lines it changes.
 - Test files sit outside both gates: they do not count toward the limit and they may
   arrive without a patch. CI judges tests, and counting them would price a small fix
   out of shipping with its tests.
