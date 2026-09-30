@@ -1,4 +1,8 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
+import type {
+  WorkspaceFileIndex,
+  WorkspacePath,
+} from "@/features/agents/lib/workspaceFiles"
 import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
@@ -154,7 +158,12 @@ export interface DesktopTerminalBridge {
 }
 
 declare global {
+  const __OPEN_SWE_BUNDLE_COMMIT__: string | null
+  const __OPEN_SWE_BUNDLE_BUILT_AT__: string
+
   interface Window {
+    /** This bundle's own build identity, stamped by vite.config.ts at build time. */
+    __OPEN_SWE_BUNDLE__?: { commit: string | null; built_at: string }
     openSweDesktop?: {
       isDesktop: true
       writeClipboard: (value: string) => Promise<void>
@@ -233,6 +242,13 @@ declare global {
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
+      readWorkspacePath: (input: {
+        localSessionId: string
+        relativePath: string
+      }) => Promise<WorkspacePath>
+      listWorkspaceFiles: (
+        localSessionId: string
+      ) => Promise<WorkspaceFileIndex>
       terminal: DesktopTerminalBridge
     }
   }

@@ -15,6 +15,7 @@ from agent.analytics.events import (
     FindingObservedPayload,
     FindingStatePayload,
     FindingSurfacedPayload,
+    PRDistanceMeasuredPayload,
     PRObservedPayload,
     PROpenedPayload,
     PRRunLinkedPayload,
@@ -301,6 +302,24 @@ async def pr_state(
     )
 
 
+async def pr_distance_measured(
+    payload: PRDistanceMeasuredPayload, *, measured_at: datetime
+) -> bool:
+    """Enqueue verified evidence without emitting or reordering a lifecycle transition."""
+    repository = payload.repository_full_name
+    pr_key = f"{repository}#{payload.pr_number}"
+    digest = sha256(payload.model_dump_json().encode()).hexdigest()
+    return await enqueue_event(
+        EventName.PR_DISTANCE_MEASURED,
+        f"pr:{pr_key}:distance:{digest}",
+        payload,
+        occurred_at=measured_at,
+        source="github",
+        pr_id=opaque_id("pr", pr_key),
+        repository_id=opaque_id("repository", repository),
+    )
+
+
 @fail_soft
 async def task_marked_complete(thread_key: str, *, source: str, auto: bool = False) -> None:
     await emit(
@@ -346,16 +365,21 @@ async def task_rework(
 
 @fail_soft
 async def feedback_submitted(
-    *, run_key: str, person_key: str, rating: int, producer_version: str
+    *,
+    feedback_key: str,
+    rating: int,
+    source: str,
+    run_key: str | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     sentiment = "negative" if rating <= 2 else "neutral" if rating == 3 else "positive"
     await emit(
         EventName.FEEDBACK_SUBMITTED,
-        f"feedback:{run_key}:{person_key}:{producer_version}",
+        f"feedback:{feedback_key}",
         FeedbackSubmittedPayload(sentiment=sentiment, rating=rating),
-        source="slack",
+        source=source,
         run_id=opaque_id("run", run_key),
-        user_id=opaque_person("slack", person_key),
+        user_id=user_id,
     )
 
 

@@ -43,6 +43,7 @@ class EventName(StrEnum):
     PR_OBSERVED = "pr.observed"
     PR_RUN_LINKED = "pr.run_linked"
     PR_MERGED = "pr.merged"
+    PR_DISTANCE_MEASURED = "pr.distance_measured"
     PR_CLOSED_WITHOUT_MERGE = "pr.closed_without_merge"
     PR_REOPENED = "pr.reopened"
     REVIEW_PUBLISHED = "review.published"
@@ -158,6 +159,22 @@ class PRStatePayload(StrictPayload):
     distance_basis_points: int | None = Field(default=None, ge=0, le=10_000)
 
 
+GitCommitSHA = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+
+
+class PRDistanceMeasuredPayload(StrictPayload):
+    repository_full_name: str = Field(pattern=r"^[a-z0-9_.-]+/[a-z0-9_.-]+$", max_length=300)
+    pr_number: int = Field(strict=True, gt=0)
+    distance_basis_points: int = Field(strict=True, ge=0, le=10_000)
+    opening_base_sha: GitCommitSHA
+    opening_head_sha: GitCommitSHA
+    final_base_sha: GitCommitSHA
+    final_head_sha: GitCommitSHA
+    algorithm_revision: Literal["myers-line-v1"]
+    opening_evidence_ref: UUID
+    final_evidence_ref: UUID
+
+
 class ReviewPublishedPayload(StrictPayload):
     finding_count: int = Field(ge=0)
 
@@ -187,6 +204,7 @@ EventPayload = Annotated[
     | FindingObservedPayload
     | PRRunLinkedPayload
     | PRStatePayload
+    | PRDistanceMeasuredPayload
     | ReviewPublishedPayload
     | FindingSurfacedPayload
     | FindingStatePayload,
@@ -209,6 +227,7 @@ _PAYLOAD_MODELS: dict[EventName, type[StrictPayload]] = {
     EventName.FINDING_OBSERVED: FindingObservedPayload,
     EventName.PR_RUN_LINKED: PRRunLinkedPayload,
     EventName.PR_MERGED: PRStatePayload,
+    EventName.PR_DISTANCE_MEASURED: PRDistanceMeasuredPayload,
     EventName.PR_CLOSED_WITHOUT_MERGE: PRStatePayload,
     EventName.PR_REOPENED: PRStatePayload,
     EventName.REVIEW_PUBLISHED: ReviewPublishedPayload,

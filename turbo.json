@@ -21,6 +21,7 @@
       ],
       "env": [
         "DASHBOARD_API_URL",
+        "SOURCE_COMMIT",
         "VERCEL",
         "E2E_HARNESS",
         "VITE_*"

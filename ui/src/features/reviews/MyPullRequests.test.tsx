@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   cleanup,
   fireEvent,
@@ -13,12 +13,15 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 import {
   api,
   type OpenPullRequest,
   type PullRequestActionResult,
   type PullRequestThreadResult,
 } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+import { makeQueryClient } from "@/lib/query"
 import { MyPullRequests } from "./MyPullRequests"
 import type { ReviewsSearch } from "./search"
 
@@ -77,12 +80,14 @@ const pull = (
   headSha: "a".repeat(40),
   headRef: "feature/example",
   reviewDecision: "none",
+  reviewRequired: false,
   statusAvailable: true,
   createdAt: `2026-09-0${number}T00:00:00Z`,
   updatedAt: `2026-09-0${4 - number}T00:00:00Z`,
   ci: "passing",
   failingChecks: [],
   pendingChecks: [],
+  missingChecks: [],
   unresolvedThreads: 0,
   ...fields,
 })
@@ -114,16 +119,25 @@ function mount() {
       />
     )
   }
+  const client = makeQueryClient()
+  client.setDefaultOptions({ queries: { retry: false } })
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <Harness />
     </QueryClientProvider>
   )
 }
+const expectReported = (title: string, message: string) =>
+  waitFor(() =>
+    expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title,
+        error: expect.objectContaining({
+          message: expect.stringContaining(message),
+        }),
+      })
+    )
+  )
 const section = () =>
   screen.getByRole("region", { name: "My open pull requests" })
 // Anchored on the title heading: a card's own failing-check list also contains
@@ -241,8 +255,8 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Agent" }))
-    expect(await within(card).findByRole("alert")).toHaveProperty(
-      "textContent",
+    await expectReported(
+      "Couldn't open agent thread",
       "Thread backend unavailable"
     )
     expect(
@@ -255,7 +269,7 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("merges in the background and removes only confirmed merges", async () => {
+  it("merges in the background and keeps the merged card in place", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
@@ -279,8 +293,11 @@ describe("My PRs", () => {
       "squash"
     )
     finish({ action: "merge", done: true })
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-    expect(screen.getByText("Change 2")).toBeTruthy()
+    await waitFor(() =>
+      expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
+    )
+    expect(titles()).toEqual(["Change 1", "Change 2"])
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -297,27 +314,24 @@ describe("My PRs", () => {
     await screen.findByText("Change 1")
     fireEvent.change(await mergeSelect(1), { target: { value: "merge" } })
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
-    expect(await screen.findByRole("alert")).toHaveProperty(
-      "textContent",
+    await expectReported(
+      "Could not merge acme/app#1",
       "Required checks have not passed"
     )
     expect(screen.getByText("Change 1")).toBeTruthy()
-    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
-      description: "Required checks have not passed",
-    })
     expect(
       (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
         .disabled
     ).toBe(false)
   })
 
-  it("links the title to GitHub, keeps the number plain, and provides explicit destination links", async () => {
+  it("opens the preview from the title, keeps the number plain, and provides explicit destination links", async () => {
     mount()
     const title = await screen.findByText("Change 1")
     const card = title.closest("li")!
-    expect(title.closest("a")?.getAttribute("href")).toBe(
-      "https://github.com/acme/app/pull/1"
-    )
+    // The title opens the preview beside the list; GitHub stays an explicit link.
+    expect(title.closest("a")).toBeNull()
+    expect(title.closest("button")).toBeTruthy()
     expect(title.closest("h3")).toBeTruthy()
     expect(within(card).getByText("acme/app")).toBeTruthy()
     expect(screen.queryByText("feature/example")).toBeNull()
@@ -420,7 +434,7 @@ describe("My PRs", () => {
     )
   })
 
-  it("shows ten lightweight rows before their details finish and loads the next page on demand", async () => {
+  it("reads details for the first rows only, leaving the rest to scrolling", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: Array.from({ length: 12 }, (_, index) =>
@@ -441,22 +455,15 @@ describe("My PRs", () => {
     await waitFor(() =>
       expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
     )
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    await screen.findByText("Change 11")
-    expect(screen.queryByText("Change 1")).toBeNull()
-    expect(cards()).toHaveLength(2)
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(12)
-    )
-    resolve(pull(12))
+    resolve(pull(10))
     await waitFor(() =>
       expect(
-        screen.getByLabelText("12 lines added, 3 lines deleted")
+        screen.getByLabelText("10 lines added, 3 lines deleted")
       ).toBeTruthy()
     )
   })
 
-  it("loads the next GitHub page when paging past the loaded rows", async () => {
+  it("loads the next GitHub page as soon as the loaded rows run out", async () => {
     vi.mocked(api.myPullRequests).mockImplementation(
       async (_repo, _sort, _direction, page = 1) => ({
         ...payload,
@@ -477,9 +484,9 @@ describe("My PRs", () => {
       )
     )
     await screen.findByText(/10 of 20 PRs/)
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    await screen.findByText("Change 11")
-    expect(screen.queryByText("Change 1")).toBeNull()
+    expect(titles()).toEqual(
+      Array.from({ length: 10 }, (_, index) => `Change ${index + 1}`)
+    )
     expect(api.myPullRequests).toHaveBeenCalledTimes(2)
   })
 
@@ -528,6 +535,27 @@ describe("My PRs", () => {
     expect(within(card).queryByText("Status unavailable")).toBeNull()
     // The card offers the merge and lets GitHub reject it.
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+  })
+
+  it("names a required check that never reported instead of offering the merge", async () => {
+    vi.mocked(api.myPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          reviewDecision: "approved",
+          missingChecks: ["Lint Final Results"],
+        }),
+      ],
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(
+      within(card).getByText("Merge blocked: Lint Final Results never reported")
+    ).toBeTruthy()
+    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(
+      within(card).getByRole("button", { name: "Update branch" })
+    ).toBeTruthy()
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {
@@ -941,21 +969,27 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
-    const dialog = await screen.findByRole("alertdialog")
+    const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("Close acme/app#1?")).toBeTruthy()
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(api.closePullRequest).not.toHaveBeenCalled()
     expect(screen.getByText("Change 1")).toBeTruthy()
     fireEvent.click(within(card).getByRole("button", { name: "Close" }))
+    const reopened = await screen.findByRole("dialog")
+    fireEvent.change(within(reopened).getByRole("textbox"), {
+      target: { value: "  Superseded by #2  " },
+    })
     fireEvent.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", {
-        name: "Close pull request",
-      })
+      within(reopened).getByRole("button", { name: "Close pull request" })
     )
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
+    await waitFor(() =>
+      expect(within(card).getByText(/^Closed ·/)).toBeTruthy()
+    )
+    expect(within(card).queryByRole("button", { name: "Close" })).toBeNull()
     expect(api.closePullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ number: 1 })
+      expect.objectContaining({ number: 1 }),
+      "Superseded by #2"
     )
     expect(toast.success).toHaveBeenCalledWith("Closed acme/app#1")
   })
@@ -1007,12 +1041,10 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
-    expect((await within(card).findByRole("alert")).textContent).toContain(
+    await expectReported(
+      "Could not merge acme/app#1",
       "A conversation must be resolved"
     )
-    expect(toast.error).toHaveBeenCalledWith("Could not merge acme/app#1", {
-      description: expect.stringContaining("Repository rule violations found"),
-    })
     expect(within(card).getByText("Change 1")).toBeTruthy()
   })
 

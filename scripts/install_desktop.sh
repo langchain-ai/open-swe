@@ -18,6 +18,11 @@ command -v uv >/dev/null || {
   exit 1
 }
 
+command -v bun >/dev/null || {
+  echo "Missing bun. Install it from https://bun.com/docs/installation, then try again." >&2
+  exit 1
+}
+
 # Node 25 dropped the bundled corepack shim, so neither launcher is guaranteed.
 if command -v pnpm >/dev/null; then
   pnpm=(pnpm)

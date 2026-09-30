@@ -24,6 +24,7 @@ async def context(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncMock
     monkeypatch.setattr(tool, "agent_thread_pr_state_lock", unlocked)
     monkeypatch.setattr(tool, "langgraph_client", lambda: None)
     monkeypatch.setattr(tool, "create_langsmith_thread_feedback", export)
+    monkeypatch.setattr(tool, "record_feedback_submission", AsyncMock())
     return export
 
 
@@ -65,6 +66,15 @@ async def test_submits_explicit_feedback_with_run_context(context: AsyncMock) ->
             "run_id": "run-1",
             "model_route": "performance",
         },
+    )
+    tool.record_feedback_submission.assert_awaited_once_with(
+        feedback_key="thread:thread-1",
+        rating=1,
+        source="unknown",
+        run_key="run-1",
+        github_login=None,
+        user_email=None,
+        slack_user_id=None,
     )
 
 

@@ -15,7 +15,7 @@ from langgraph.runtime import Runtime
 from agent.middleware.message_content import content_to_text
 from agent.middleware.trace import scrub_middleware_inputs
 from agent.run_config import RunConfig
-from agent.slack.dm import is_dm_session
+from agent.slack.dm import is_concierge_thread
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,12 @@ async def post_concierge_reply(
     del runtime
     cfg = RunConfig.from_runtime()
     slack_thread = cfg.slack_thread
-    if slack_thread is None or not is_dm_session(
-        slack_thread.channel_context, slack_thread.thread_ts
+    if (
+        cfg.source != "slack"
+        or cfg.stop_summary is True
+        or slack_thread is None
+        or slack_thread.triggering_bot_id
+        or not is_concierge_thread(slack_thread.channel_context, slack_thread.thread_ts)
     ):
         return None
     messages = state.get("messages") or []
@@ -46,10 +50,10 @@ async def post_concierge_reply(
     if not message or _LIMIT_MARKER in message:
         return None
 
-    from agent.slack.tools.thread_reply import slack_thread_reply
+    from agent.slack.tools.reply import slack_reply
 
     try:
-        result = await slack_thread_reply(message, state=dict(state))
+        result = await slack_reply(message, "final", state=dict(state))
     except Exception:
         logger.exception("Failed to deliver the reply", extra={"agent_thread_id": cfg.thread_id})
         return None

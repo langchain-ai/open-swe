@@ -1,31 +1,8 @@
-import type { InfiniteData, QueryClient } from "@tanstack/react-query"
+import type { QueryClient } from "@tanstack/react-query"
 
-import type { OpenPullRequestsPayload } from "@/lib/api"
+import type { OpenPullRequest } from "@/lib/api"
 
 type PullRequestRef = { repo: string; number: number }
-
-export function forgetPullRequest(
-  queryClient: QueryClient,
-  login: string,
-  pr: PullRequestRef
-) {
-  queryClient.setQueryData(["my-pr-details", login, pr.repo, pr.number], null)
-  queryClient.setQueriesData<InfiniteData<OpenPullRequestsPayload>>(
-    { queryKey: ["my-pull-requests", login] },
-    (data) =>
-      data
-        ? {
-            ...data,
-            pages: data.pages.map((loaded) => ({
-              ...loaded,
-              pullRequests: loaded.pullRequests.filter(
-                (row) => row.repo !== pr.repo || row.number !== pr.number
-              ),
-            })),
-          }
-        : data
-  )
-}
 
 export function refreshPullRequest(
   queryClient: QueryClient,
@@ -35,4 +12,18 @@ export function refreshPullRequest(
   void queryClient.invalidateQueries({
     queryKey: ["my-pr-details", login, pr.repo, pr.number],
   })
+}
+
+/** Matches every login's entry because the mark-ready button is not given one. */
+export function markPullRequestReady(
+  queryClient: QueryClient,
+  pr: PullRequestRef
+) {
+  queryClient.setQueriesData<OpenPullRequest | null>(
+    {
+      predicate: ({ queryKey: [scope, , repo, number] }) =>
+        scope === "my-pr-details" && repo === pr.repo && number === pr.number,
+    },
+    (old) => (old ? { ...old, draft: false } : old)
+  )
 }

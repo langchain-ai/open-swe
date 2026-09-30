@@ -1,9 +1,17 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Messages } from "./Messages"
+
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+  }
+)
 
 vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
   WorkflowApprovalCard: ({ threadId }: { threadId: string }) => (
@@ -116,6 +124,31 @@ describe("Messages", () => {
       fold.compareDocumentPosition(groupedWork) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+
+    fireEvent.click(fold)
+    expect(screen.getByText("subagent")).toBeTruthy()
+  })
+
+  it("hides user names when disabled", () => {
+    render(
+      <Messages
+        messages={[
+          {
+            id: "user-turn",
+            author: "user",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            structuredSenderName: "Mason Daugherty",
+            structuredSenderKind: "person",
+            chunks: [{ kind: "text", text: "Ship it" }],
+          },
+        ]}
+        isStreaming={false}
+        showUserNames={false}
+      />
+    )
+
+    expect(screen.queryByText("Mason Daugherty")).toBeNull()
+    expect(screen.getByText("Ship it")).toBeTruthy()
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {

@@ -16,15 +16,15 @@ import { countLineChanges } from "@/features/agents/utils/diffStats"
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk
-  projectPath?: string
+  repoPath?: string
   onApprove?: (approvalRequestId: string) => void
   onReject?: (approvalRequestId: string) => void
   onAutoApprove?: (approvalRequestId: string) => void
 }
 
-function stripProjectPath(path: string, projectPath?: string): string {
-  if (!projectPath || !path.startsWith(projectPath)) return path
-  const relative = path.slice(projectPath.length)
+function stripRepoPath(path: string, repoPath?: string): string {
+  if (!repoPath || !path.startsWith(repoPath)) return path
+  const relative = path.slice(repoPath.length)
   return relative.startsWith("/") ? "." + relative : "./" + relative
 }
 
@@ -146,7 +146,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
 export const ToolExecution = memo(function ToolExecution({
   chunk,
-  projectPath,
+  repoPath,
 }: ToolExecutionProps) {
   const { title, toolKind, input, status, output } = chunk
   const diffs = chunk.diffs?.length
@@ -164,7 +164,7 @@ export const ToolExecution = memo(function ToolExecution({
   const isCompletedEditOp =
     isEditOp && diffData && (status === "completed" || status === "error")
   const editedFilePath = diffData
-    ? stripProjectPath(diffData.filePath, projectPath)
+    ? stripRepoPath(diffData.filePath, repoPath)
     : ""
   const editedFileName = editedFilePath ? getFileName(editedFilePath) : ""
   const diffStats = diffData
@@ -201,12 +201,12 @@ export const ToolExecution = memo(function ToolExecution({
   }
 
   if (isEditOp && status === "in_progress") {
-    const path = stripProjectPath(
+    const path = stripRepoPath(
       diffData?.filePath ||
         (input?.filePath as string) ||
         (input?.path as string) ||
         "file",
-      projectPath
+      repoPath
     )
     return (
       <div className="my-0.5 text-[12px] leading-5">
@@ -219,7 +219,7 @@ export const ToolExecution = memo(function ToolExecution({
     return <SqlResultTable output={output} />
   }
 
-  const displayName = formatToolDisplay(title, toolKind, input, projectPath)
+  const displayName = formatToolDisplay(title, toolKind, input, repoPath)
   const statusTextClass =
     status === "error"
       ? "text-red-400"

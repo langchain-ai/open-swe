@@ -41,7 +41,7 @@ def main() -> None:
         fs_capacity_bytes=args.fs_capacity,
     )
     print(f"Snapshot created: {snapshot.id}")
-    print(f"\nAdd to your .env:\n  DEFAULT_SANDBOX_SNAPSHOT_ID={snapshot.id}")
+    print("\nSet it as a workspace's base snapshot from the dashboard Workspaces page.")
 
 
 if __name__ == "__main__":

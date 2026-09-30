@@ -27,6 +27,16 @@ async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:
     return is_admin(await User.email_for_login(login), login=login)
 
 
+async def participant_is_admin(login: str) -> bool:
+    """Whether this person is a configured admin, judged on their own identity alone.
+
+    Unlike :func:`actor_is_admin`, the current run's actor plays no part: a
+    roster describes each participant, so an admin requester must not make
+    everyone else in the thread look like one.
+    """
+    return is_admin(await User.email_for_login(login), login=login)
+
+
 def is_private_admin_surface(cfg: RunConfig) -> bool:
     """Whether this run comes from a private surface stamped for admin use."""
     dashboard = cfg.source in {None, "dashboard"}

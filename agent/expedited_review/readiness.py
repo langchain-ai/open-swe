@@ -1,26 +1,38 @@
-"""When a pull request revision is ready to be voted on.
+"""When a pull request revision is ready to merge on its expedited approvals.
 
 Ready means: open, not a draft, no merge conflict, no check still running, no
-required check failing, no unresolved review thread, no standing request for
-changes, and — where Open SWE reviews the repository — an Open SWE review
-published for this exact head SHA. Silence from a reviewer is not completion.
+required check failing or yet to report, no unresolved review thread, no
+standing request for changes, and — where Open SWE reviews the repository — an
+Open SWE review completed for this exact head SHA. Silence from a reviewer is
+not completion.
 
-A failing check that GitHub does not require does not block the vote; it is
-named on the card so the voters approve with their eyes open.
+A failing check that GitHub does not require does not block the merge.
 """
 
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import httpx2
+from pydantic import BaseModel
 
 from agent.baby_sit import aggregate_check_state
-from agent.github.ci import fetch_pr, list_check_runs, list_commit_statuses
+from agent.github.ci import (
+    fetch_pr,
+    fetch_required_checks,
+    list_check_runs,
+    list_commit_statuses,
+    unreported_required_checks,
+)
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.github.pull_request_status import fetch_unresolved_review_threads
-from agent.github.pull_requests import PullRequest
+from agent.github.pull_request_status import (
+    Mergeability,
+    fetch_mergeability,
+    fetch_unresolved_review_threads,
+)
+from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.review.enabled_repos import is_review_repo_enabled
 
 logger = logging.getLogger(__name__)
@@ -41,11 +53,46 @@ class PullRequestSnapshot:
     check_state: str
     unresolved_threads: int
     failing_checks: list[str] = field(default_factory=list)
+    unreported_required_checks: list[str] = field(default_factory=list)
     failures_are_required: bool = True
     changes_requested_by: list[str] = field(default_factory=list)
     open_swe_review_required: bool = False
     open_swe_reviewed_head: bool = False
     allowed_merge_methods: list[str] = field(default_factory=list)
+    approved_review_ids: frozenset[int] = frozenset()
+    # The latest time any check or status on the head finished.
+    checks_finished_at: datetime | None = None
+
+    @property
+    def green(self) -> bool:
+        """Open, not a draft, conflict-free, and every check passed with none still to report."""
+        return (
+            self.state == "open"
+            and not self.merged
+            and not self.draft
+            and self.mergeable is not False
+            and self.mergeable_state != "dirty"
+            and self.check_state == "success"
+            and not self.unreported_required_checks
+        )
+
+
+class _ReviewState(BaseModel):
+    id: int | None = None
+    state: str = ""
+
+
+class _CheckTimes(BaseModel):
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+def _checks_finished_at(
+    check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
+) -> datetime | None:
+    stamps = [_CheckTimes.model_validate(run).completed_at for run in check_runs]
+    stamps += [_CheckTimes.model_validate(status).updated_at for status in statuses]
+    return max((stamp for stamp in stamps if stamp is not None), default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +103,6 @@ class Readiness:
     @property
     def ready(self) -> bool:
         return not self.blockers
-
-    @property
-    def terminal(self) -> bool:
-        """The PR can never become ready in its current form."""
-        return self.snapshot.state != "open" or self.snapshot.mergeable is False
 
 
 def _failed_check_blocker(snapshot: PullRequestSnapshot) -> str:
@@ -86,6 +128,9 @@ def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("checks are still running")
     elif snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
         blockers.append(_failed_check_blocker(snapshot))
+    if snapshot.unreported_required_checks:
+        names = ", ".join(snapshot.unreported_required_checks)
+        blockers.append(f"required checks have not reported yet: {names}")
     if snapshot.unresolved_threads:
         noun = "thread" if snapshot.unresolved_threads == 1 else "threads"
         blockers.append(f"{snapshot.unresolved_threads} unresolved review {noun}")
@@ -133,6 +178,28 @@ async def _fetch_reviews(
         return None
 
 
+async def latest_review_states(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
+) -> dict[str, str] | None:
+    """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
+    reviews = await _fetch_reviews(client, owner, repo, number)
+    if reviews is None:
+        return None
+    return _latest_reviews_by_user(reviews, author)
+
+
+def _resolve_mergeability(
+    pr: Mapping[str, Any], live: Mergeability | None
+) -> tuple[bool | None, str]:
+    """GraphQL's verdict where it has one, falling back to what REST returned."""
+    rest = pr.get("mergeable")
+    rest_mergeable = rest if isinstance(rest, bool) else None
+    rest_state = str(pr.get("mergeable_state") or "")
+    if live is None or live.mergeable is None:
+        return rest_mergeable, rest_state
+    return live.mergeable, live.merge_state or rest_state
+
+
 def _merge_methods(pr: Mapping[str, Any]) -> list[str]:
     base = pr.get("base")
     base_repo = base.get("repo") if isinstance(base, Mapping) else None
@@ -163,17 +230,23 @@ async def assess_readiness(
         return None
     user = pr.get("user")
     author = user.get("login") if isinstance(user, Mapping) else None
-    mergeable = pr.get("mergeable")
 
     check_runs = await list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token)
     statuses = await list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token)
     if check_runs is None or statuses is None:
         return None
+    required = await fetch_required_checks(
+        owner=owner, repo=repo, branch=PullRequestPayload.model_validate(pr).base_ref, token=token
+    )
+    if required is None:
+        return None
     async with github_client(token=token) as client:
         threads = await fetch_unresolved_review_threads(client, owner, repo, pr_number)
         reviews = await _fetch_reviews(client, owner, repo, pr_number)
+        mergeability = await fetch_mergeability(client, owner, repo, pr_number)
     if threads is None or reviews is None:
         return None
+    mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
     review_required = await is_review_repo_enabled(owner, repo)
     reviewed_head = False
@@ -193,7 +266,6 @@ async def assess_readiness(
 
     check_state, failures = aggregate_check_state(check_runs, statuses)
     author_login = author if isinstance(author, str) else ""
-    mergeable_state = str(pr.get("mergeable_state") or "")
     snapshot = PullRequestSnapshot(
         state=str(pr.get("state") or ""),
         merged=bool(pr.get("merged")) or isinstance(pr.get("merged_at"), str),
@@ -201,11 +273,12 @@ async def assess_readiness(
         head_sha=head_sha,
         title=str(pr.get("title") or ""),
         author=author_login,
-        mergeable=mergeable if isinstance(mergeable, bool) else None,
+        mergeable=mergeable,
         mergeable_state=mergeable_state,
         check_state=check_state,
         unresolved_threads=len(threads),
         failing_checks=sorted({str(failure["name"]) for failure in failures}),
+        unreported_required_checks=unreported_required_checks(required, check_runs, statuses),
         # GitHub says "unstable" when the pull request is mergeable and only
         # checks it does not require are unhappy, and "blocked" when a required
         # one is. Trusting it keeps us from having to read branch protection,
@@ -219,5 +292,11 @@ async def assess_readiness(
         open_swe_review_required=review_required,
         open_swe_reviewed_head=reviewed_head,
         allowed_merge_methods=_merge_methods(pr),
+        approved_review_ids=frozenset(
+            parsed.id
+            for parsed in map(_ReviewState.model_validate, reviews)
+            if parsed.state == "APPROVED" and parsed.id is not None
+        ),
+        checks_finished_at=_checks_finished_at(check_runs, statuses),
     )
     return Readiness(snapshot=snapshot, blockers=readiness_blockers(snapshot))

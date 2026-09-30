@@ -1,12 +1,11 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx2
+import httpx
 import pytest
-from fastapi import HTTPException
 
-from agent import store
 from agent.github import dashboard_routes, repo_cache, repos
+from tests.support.github_sdk import mock_github_sdk
 
 
 @pytest.fixture(autouse=True)
@@ -16,105 +15,79 @@ def _no_repo_cache(monkeypatch) -> None:
     monkeypatch.setattr(dashboard_routes, "write_cached_repos", AsyncMock(return_value=None))
 
 
-@pytest.mark.asyncio
-async def test_paginate_converts_github_timeout_to_503() -> None:
-    request = httpx2.Request("GET", "https://api.github.com/user/installations")
+async def test_list_repos_refreshes_expired_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        repos, "get_valid_access_token", AsyncMock(side_effect=["expired", "fresh"])
+    )
 
-    async def handler(_request: httpx2.Request) -> httpx2.Response:
-        raise httpx2.ConnectTimeout("connect timed out", request=request)
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.headers["authorization"].split()[-1] == "expired":
+            return httpx.Response(401, json={"message": "Bad credentials"})
+        assert request.headers["authorization"].split()[-1] == "fresh"
+        return httpx.Response(200, json={"installations": []})
 
-    transport = httpx2.MockTransport(handler)
-    async with httpx2.AsyncClient(transport=transport) as client:
-        with pytest.raises(HTTPException) as exc:
-            await repos._paginate(
-                client,
-                "https://api.github.com/user/installations",
-                headers={},
-                items_key="installations",
-            )
-
-    assert exc.value.status_code == 503
-    assert exc.value.detail == "github API request timed out"
+    mock_github_sdk(monkeypatch, handle)
+    assert await repos.fetch_user_installations_and_repos("octocat") == ([], [])
 
 
-@pytest.mark.asyncio
-async def test_paginate_converts_github_status_error_to_502() -> None:
-    async def handler(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(500, request=request, json={"message": "server error"})
-
-    transport = httpx2.MockTransport(handler)
-    async with httpx2.AsyncClient(transport=transport) as client:
-        with pytest.raises(HTTPException) as exc:
-            await repos._paginate(
-                client,
-                "https://api.github.com/user/installations",
-                headers={},
-                items_key="installations",
-            )
-
-    assert exc.value.status_code == 502
-    assert exc.value.detail == "github API error (500)"
-
-
-@pytest.mark.asyncio
-async def test_list_repos_propagates_repository_page_timeouts(monkeypatch) -> None:
+async def test_list_repos_follows_installation_and_repository_next_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value="token"))
-    calls = 0
 
-    async def fake_paginate(*args: object, **kwargs: object) -> list[dict[str, object]]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return [{"id": 123, "account": {"login": "acme", "type": "Organization"}}]
-        raise HTTPException(503, "github API request timed out")
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-github-api-version"] == "2022-11-28"
+        if request.url.path == "/user/installations":
+            if request.url.params.get("page") == "2":
+                return httpx.Response(200, json={"installations": [{"id": 456, "account": None}]})
+            return httpx.Response(
+                200,
+                json={"installations": [{"id": 123, "account": None}]},
+                headers={"Link": '<https://api.github.com/user/installations?page=2>; rel="next"'},
+            )
+        if request.url.path == "/user/installations/123/repositories":
+            if request.url.params.get("page") == "2":
+                return httpx.Response(
+                    200, json={"repositories": [{"full_name": "acme/later", "private": True}]}
+                )
+            return httpx.Response(
+                200,
+                json={"repositories": [{"full_name": "acme/first", "private": False}]},
+                headers={
+                    "Link": '<https://api.github.com/user/installations/123/repositories?page=2>; rel="next"'
+                },
+            )
+        return httpx.Response(
+            200, json={"repositories": [{"full_name": "other/api", "private": True}]}
+        )
 
-    monkeypatch.setattr(repos, "_paginate", fake_paginate)
-
-    with pytest.raises(HTTPException) as exc:
-        await dashboard_routes.list_repos(session={"sub": "octocat"})
-
-    assert exc.value.status_code == 503
-    assert exc.value.detail == "github API request timed out"
-
-
-@pytest.mark.asyncio
-async def test_list_repos_skips_inaccessible_installations(monkeypatch) -> None:
-    monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value="token"))
-    calls = 0
-
-    async def fake_paginate(*args: object, **kwargs: object) -> list[dict[str, object]]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return [{"id": 123, "account": {"login": "acme", "type": "Organization"}}]
-        raise HTTPException(403, "github API forbidden")
-
-    monkeypatch.setattr(repos, "_paginate", fake_paginate)
-
-    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
-
-    assert result == {
-        "installations": [{"id": 123, "account": "acme", "account_type": "Organization"}],
-        "repositories": [],
+    mock_github_sdk(monkeypatch, handle)
+    assert await repos.accessible_repo_full_names("octocat") == {
+        "acme/first",
+        "acme/later",
+        "other/api",
     }
 
 
-@pytest.mark.asyncio
-async def test_list_repos_serves_fresh_cache_without_calling_github(monkeypatch) -> None:
-    cached = {"installations": [], "repositories": [{"full_name": "acme/api", "private": True}]}
-    monkeypatch.setattr(
-        dashboard_routes, "read_cached_repos", AsyncMock(return_value=(cached, 1_000))
-    )
-    fetch = AsyncMock(return_value=([], []))
-    monkeypatch.setattr(repos, "fetch_user_installations_and_repos", fetch)
-    schedule = MagicMock()
-    monkeypatch.setattr(dashboard_routes, "schedule_repo_cache_refresh", schedule)
+async def test_access_checks_observe_removed_repositories_without_http_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repos, "get_valid_access_token", AsyncMock(return_value="token"))
+    allowed = True
 
-    result = await dashboard_routes.list_repos(session={"sub": "octocat"})
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/user/installations":
+            return httpx.Response(200, json={"installations": [{"id": 123, "account": None}]})
+        return httpx.Response(
+            200,
+            json={"repositories": [{"full_name": "Acme/API", "private": True}] if allowed else []},
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
-    assert result == cached
-    fetch.assert_not_awaited()
-    schedule.assert_not_called()
+    mock_github_sdk(monkeypatch, handle)
+    assert await repos.accessible_repo_full_names("octocat") == {"acme/api"}
+    allowed = False
+    assert await repos.accessible_repo_full_names("octocat") == set()
 
 
 @pytest.mark.asyncio
@@ -135,68 +108,6 @@ async def test_list_repos_serves_stale_cache_and_schedules_refresh(monkeypatch) 
     assert result == cached
     fetch.assert_not_awaited()
     assert schedule.call_args.args[0] == "octocat"
-
-
-@pytest.mark.asyncio
-async def test_list_repos_refresh_bypasses_cache_and_writes_it(monkeypatch) -> None:
-    read = AsyncMock(return_value=({"installations": [], "repositories": []}, 0))
-    monkeypatch.setattr(dashboard_routes, "read_cached_repos", read)
-    write = AsyncMock(return_value=None)
-    monkeypatch.setattr(dashboard_routes, "write_cached_repos", write)
-    monkeypatch.setattr(
-        repos,
-        "fetch_user_installations_and_repos",
-        AsyncMock(
-            return_value=(
-                [{"id": 123, "account": {"login": "acme", "type": "Organization"}}],
-                [{"full_name": "acme/api", "private": True}],
-            )
-        ),
-    )
-
-    result = await dashboard_routes.list_repos(refresh=True, session={"sub": "octocat"})
-
-    read.assert_not_awaited()
-    assert result == {
-        "installations": [{"id": 123, "account": "acme", "account_type": "Organization"}],
-        "repositories": [{"full_name": "acme/api", "private": True}],
-    }
-    write.assert_awaited_once_with("octocat", result)
-
-
-@pytest.mark.asyncio
-async def test_read_cached_repos_rejects_expired_and_malformed_entries(monkeypatch) -> None:
-    now_ms = store.now_ms()
-
-    async def fake_get_item(namespace: list[str], key: str) -> dict[str, object]:
-        assert namespace == repo_cache.REPO_LIST_CACHE_NAMESPACE
-        return {"value": values[key]}
-
-    values: dict[str, object] = {
-        "fresh": {"payload": {"repositories": []}, "cached_at_ms": now_ms - 500},
-        "expired": {
-            "payload": {"repositories": []},
-            "cached_at_ms": now_ms - repo_cache.REPO_LIST_MAX_AGE_MS - 1,
-        },
-        "malformed": {"payload": "nope", "cached_at_ms": now_ms},
-    }
-    fake_store = MagicMock()
-    fake_store.get_item = fake_get_item
-    monkeypatch.setattr(store, "store_client", lambda: MagicMock(store=fake_store))
-
-    fresh = await repo_cache.read_cached_repos("fresh")
-    assert fresh is not None and fresh[0] == {"repositories": []}
-    assert await repo_cache.read_cached_repos("expired") is None
-    assert await repo_cache.read_cached_repos("malformed") is None
-
-
-@pytest.mark.asyncio
-async def test_read_cached_repos_swallows_store_failures(monkeypatch) -> None:
-    fake_store = MagicMock()
-    fake_store.get_item = AsyncMock(side_effect=RuntimeError("store down"))
-    monkeypatch.setattr(store, "store_client", lambda: MagicMock(store=fake_store))
-
-    assert await repo_cache.read_cached_repos("octocat") is None
 
 
 @pytest.mark.asyncio

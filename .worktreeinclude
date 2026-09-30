@@ -1,2 +1,3 @@
-# Seed local Codex worktrees with persisted LangGraph development state.
+# Seed new worktrees with the local environment and persisted LangGraph development state.
+/.env
 /.langgraph_api/

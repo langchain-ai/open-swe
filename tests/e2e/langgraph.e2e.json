@@ -4,6 +4,8 @@
   "dependencies": ["."],
   "graphs": {
     "agent": "./tests/e2e/agent_entrypoint.py:traced_agent",
+    "chat": "./tests/e2e/chat_entrypoint.py:traced_chat_agent",
+    "review-scout": "./tests/e2e/review_scout_entrypoint.py:traced_review_scout",
     "scheduler": "./tests/e2e/scheduler_entrypoint.py:get_scheduler"
   },
   "http": {

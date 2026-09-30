@@ -1,52 +1,17 @@
 import importlib
 from typing import Any
+from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
 import pytest
 
 from agent import thread_feedback
+from agent.slack import thinking as slack_thinking
+from agent.users import User
 
 dispatch = importlib.import_module("agent.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
-
-
-def test_is_loopback_webhook_relative() -> None:
-    assert dispatch._is_loopback_webhook("/webhooks/run-complete") is True
-
-
-def test_is_loopback_webhook_localhost() -> None:
-    assert dispatch._is_loopback_webhook("http://localhost:2024/webhooks/run-complete") is True
-    assert dispatch._is_loopback_webhook("http://127.0.0.1:8000/webhooks/run-complete") is True
-
-
-def test_is_loopback_webhook_absolute() -> None:
-    assert dispatch._is_loopback_webhook(_ABSOLUTE) is False
-
-
-def test_resolve_no_secret_attaches_nothing() -> None:
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, None) is None
-    assert dispatch._resolve_completion_webhook_url(_ABSOLUTE, "") is None
-
-
-def test_resolve_relative_url_degrades_to_none() -> None:
-    # Secret set but a loopback URL would 422 every run — attach nothing instead.
-    assert dispatch._resolve_completion_webhook_url("/webhooks/run-complete", "s3cret") is None
-
-
-def test_resolve_localhost_url_degrades_to_none() -> None:
-    assert dispatch._resolve_completion_webhook_url("http://localhost/x", "s3cret") is None
-
-
-def test_resolve_absolute_url_appends_token() -> None:
-    assert (
-        dispatch._resolve_completion_webhook_url(_ABSOLUTE, "s3cret") == f"{_ABSOLUTE}?token=s3cret"
-    )
-
-
-def test_resolve_absolute_url_with_existing_query_left_as_is() -> None:
-    url = f"{_ABSOLUTE}?token=preset"
-    assert dispatch._resolve_completion_webhook_url(url, "s3cret") == url
 
 
 class _FakeRuns:
@@ -93,6 +58,7 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         "agent",
         input={"messages": [{"role": "user", "content": "hi"}]},
         source="test",
+        thread_title=None,
         config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
         client=client,
     )
@@ -131,28 +97,6 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("is_im", "conversation_type"),
-    [(True, "dm"), (False, "channel")],
-)
-async def test_create_durable_run_records_slack_conversation_type(
-    is_im: bool, conversation_type: str
-) -> None:
-    client = _FakeClient()
-
-    await dispatch.create_durable_run(
-        "thread-1",
-        "agent",
-        input={"messages": []},
-        source="slack",
-        config={"configurable": {"slack_thread": {"channel_context": {"is_im": is_im}}}},
-        client=client,
-    )
-
-    assert client.runs.created[0]["metadata"]["slack_conversation_type"] == conversation_type
-
-
-@pytest.mark.asyncio
 async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -164,6 +108,7 @@ async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_op
         "agent",
         input={"messages": []},
         source="schedule",
+        thread_title=None,
         config={"configurable": {"prepare_run_id": "existing"}},
         stream_resumable=False,
         client=client,
@@ -190,34 +135,6 @@ def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:
         )
 
 
-def test_prepare_run_config_marks_every_run_as_protocol_v3() -> None:
-    # The marker is fixed per run by the server: a caller cannot opt a run out of
-    # v3 by passing its own `configurable`, or the dashboard silently loses `tools`.
-    run_config = dispatch.prepare_run_config(
-        {"configurable": {"__event_streaming_v2": False, "thread_id": "t"}}, None
-    )
-
-    assert run_config["configurable"]["__event_streaming_v2"] is True
-    assert run_config["configurable"]["thread_id"] == "t"
-
-
-@pytest.mark.asyncio
-async def test_dispatch_accepts_prebuilt_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _FakeClient()
-    run_input = {"messages": [{"role": "user", "content": "structured"}]}
-
-    await dispatch.dispatch_agent_run(
-        "thread-1",
-        None,
-        {},
-        source="github",
-        input=run_input,
-        client=client,
-    )
-
-    assert client.runs.created[0]["input"] == run_input
-
-
 @pytest.mark.asyncio
 async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
     monkeypatch: pytest.MonkeyPatch,
@@ -228,41 +145,81 @@ async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
 
     with pytest.raises(RuntimeError, match="dispatch failed"):
         await dispatch.dispatch_agent_run(
-            "thread-1", "Please revise the plan.", {}, source="dashboard", client=client
+            "thread-1",
+            "Please revise the plan.",
+            {},
+            source="dashboard",
+            thread_title=None,
+            client=client,
         )
 
     assert client.threads.metadata[thread_feedback.ACTIVITY_KEY] == 123000
 
 
-def test_dispatch_slack_identity_includes_verified_context() -> None:
-    run_input = dispatch._dispatch_input(
+@pytest.mark.usefixtures("registry_db")
+async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "mason-gh")
+    user = await User.sign_in("github", "2001", login="mason-gh")
+    await user.link("slack", "U123", team_id="T1")
+
+    run_input = await dispatch._dispatch_input(
         "hello",
         "slack",
-        {
-            "github_login": "mason-gh",
-            "user_email": "mason@example.com",
-            "slack_thread": {
-                "triggering_user_id": "U123",
-                "triggering_user_name": "Mason",
-                "triggering_user_timezone": "America/New_York",
-                "channel_id": "C123",
-                "thread_ts": "123.45",
-                "channel_context": {
-                    "name": "eng",
-                    "topic": "Ship <safely>",
-                    "purpose": "Engineering work",
-                },
-            },
-        },
+        {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
     )
 
-    person = ElementTree.fromstring(run_input["messages"][0]["content"])
-    channel = ElementTree.fromstring(run_input["messages"][1]["content"])
-    assert person.findtext("display_name") == "Mason"
-    assert person.findtext("timezone") == "America/New_York"
-    assert channel.findtext("name") == "eng"
-    assert channel.findtext("topic") == "Ship <safely>"
-    topic = channel.find("topic")
-    assert topic is not None
-    assert topic.attrib["trust"] == "untrusted"
-    assert channel.findtext("purpose") == "Engineering work"
+    envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
+    assert envelope.attrib["sender"] == f"user:{user.id}"
+
+
+async def test_dispatch_uses_moved_slack_destination_from_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+    client.threads.get.return_value = {
+        "metadata": {"source_context": {"slack_thread": {"channel_id": "C2", "thread_ts": "2.0"}}}
+    }
+    set_status = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
+
+
+async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+    client.runs.create.return_value = {"run_id": "run-1"}
+    client.runs.list.return_value = []
+    client.threads.get.return_value = {
+        "metadata": {
+            "running_background_tasks": ["cmd-1"],
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}},
+        }
+    }
+    set_status = AsyncMock()
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        client=client,
+        config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
+    )
+    client.threads.get.assert_awaited_once_with("thread-1")
+    set_status.assert_awaited_once_with("C1", "1.0", "Waiting for background tasks…")

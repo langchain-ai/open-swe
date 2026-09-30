@@ -9,6 +9,7 @@ from sqlalchemy import BigInteger, Uuid, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from agent.analytics.events import EventEnvelope, EventName, PROpenedPayload
+from agent.analytics.measurements import restore_pr_distance, retain_pr_distance
 from agent.analytics.summaries import mark_dirty
 from agent.config import ENV
 from agent.database import transaction
@@ -63,9 +64,23 @@ async def ingest(event: EventEnvelope) -> bool:
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
                 {"subject": f"analytics:{event.workspace_id}:{lock_id}"},
             )
-        inserted = await conn.scalar(
-            _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
-        )
+        if event.event_name == EventName.PR_DISTANCE_MEASURED:
+            async with conn.begin_nested() as claim:
+                inserted = await conn.scalar(
+                    _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
+                )
+                duplicate_measurement = not await retain_pr_distance(
+                    conn, event, new_event=inserted is not None
+                )
+                if duplicate_measurement:
+                    await claim.rollback()
+            if duplicate_measurement:
+                await _project(conn, event)
+                return False
+        else:
+            inserted = await conn.scalar(
+                _INSERT_ID, {"event_id": event.event_id, "occurred_at": event.occurred_at}
+            )
         if inserted is None:
             return False
         await conn.execute(_INSERT_EVENT, _params(event))
@@ -281,6 +296,9 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "event_id": event.event_id,
             },
         )
+    elif name == EventName.PR_DISTANCE_MEASURED:
+        if event.pr_id is not None:
+            await restore_pr_distance(conn, workspace_id=event.workspace_id, pr_id=event.pr_id)
     elif name == EventName.PR_OBSERVED:
         await _project_pr_usage(conn, event)
     elif name == EventName.FINDING_OBSERVED:
@@ -429,7 +447,8 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
             text(
                 "UPDATE pr_projection SET current_state = :state, outcome_at = CASE WHEN "
                 ":state = 'open' THEN NULL ELSE :occurred_at END, source_version = :source_version, "
-                "distance_basis_points = CASE WHEN :state = 'merged' THEN :distance ELSE NULL END, "
+                "distance_basis_points = CASE WHEN :state = 'merged' "
+                "THEN COALESCE(distance_basis_points, :distance) ELSE NULL END, "
                 "latest_transition_at = :occurred_at, updated_at = clock_timestamp() "
                 "WHERE workspace_id = :workspace_id AND pr_id = :pr_id "
                 "AND ((:source_version IS NOT NULL AND (source_version IS NULL OR :source_version > source_version)) "
@@ -448,6 +467,8 @@ async def _project(conn: AsyncConnection, event: EventEnvelope) -> None:
                 "pr_id": event.pr_id,
             },
         )
+        if event.pr_id is not None:
+            await restore_pr_distance(conn, workspace_id=event.workspace_id, pr_id=event.pr_id)
     elif name == EventName.REVIEW_PUBLISHED:
         await conn.execute(
             text(
@@ -588,6 +609,8 @@ async def _reconcile_outcomes(conn: AsyncConnection, event: EventEnvelope) -> No
     )
     for row in result.mappings():
         await _project(conn, EventEnvelope.model_validate(dict(row)))
+    if event.pr_id is not None:
+        await restore_pr_distance(conn, workspace_id=event.workspace_id, pr_id=event.pr_id)
 
 
 async def _project_run_terminal(conn: AsyncConnection, event: EventEnvelope) -> None:

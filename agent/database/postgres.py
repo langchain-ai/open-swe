@@ -8,7 +8,7 @@ from pathlib import Path
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, make_url, text
+from sqlalchemy import Connection, bindparam, make_url, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -109,6 +109,28 @@ async def read_only_transaction() -> AsyncIterator[AsyncConnection]:
 
 
 @asynccontextmanager
+async def snapshot_transaction() -> AsyncIterator[AsyncConnection]:
+    """A read-only transaction whose every statement sees one database snapshot.
+
+    ``read_only_transaction`` runs at READ COMMITTED, where each statement takes
+    its own snapshot: a multi-statement read can observe rows written after the
+    head version it already read, which is exactly the inconsistency a client
+    reducing a snapshot plus a live event stream would double-apply.
+    """
+    async with engine().connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
+            yield conn
+        finally:
+            # Both settings are transaction-scoped, so the rollback is what
+            # resets them and the connection goes back to the pool.
+            if transaction.is_active:
+                await transaction.rollback()
+
+
+@asynccontextmanager
 async def session() -> AsyncIterator[AsyncSession]:
     """An ORM session joined to one ``transaction()``, flushed before it commits."""
     async with transaction() as conn:
@@ -145,7 +167,7 @@ def upgrade(
     conn: Connection,
     migrations: ScriptDirectory,
     schema: str = SCHEMA,
-    revision: str = "head",
+    revision: str = "heads",
 ) -> None:
     conn.exec_driver_sql(f"SET LOCAL search_path TO {schema}, public")
     upgrade_revisions = attrgetter("_upgrade_revs")(migrations)
@@ -157,8 +179,38 @@ def upgrade(
             "transaction_per_migration": True,
         },
     )
+    if ENV.OPENSWE_ENV.optional() == "preview":
+        drop_superseded_revisions(conn, context, migrations, schema)
     with Operations.context(context):
         context.run_migrations()
+
+
+def drop_superseded_revisions(
+    conn: Connection,
+    context: MigrationContext,
+    migrations: ScriptDirectory,
+    schema: str,
+) -> None:
+    """Forget stamped revisions that a rebased preview branch now chains beneath another."""
+    current = set(context.get_current_heads())
+    superseded = current & {
+        script.revision
+        for head in current
+        for script in migrations.walk_revisions(head=head)
+        if script.revision != head
+    }
+    if not superseded:
+        return
+    logger.warning(
+        "Dropping superseded migration revisions",
+        extra={"superseded_revisions": sorted(superseded)},
+    )
+    conn.execute(
+        text(f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions").bindparams(
+            bindparam("revisions", expanding=True)
+        ),
+        {"revisions": sorted(superseded)},
+    )
 
 
 def execute_revision(conn: Connection, migrations: ScriptDirectory, revision: str) -> None:

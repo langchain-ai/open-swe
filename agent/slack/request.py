@@ -24,11 +24,14 @@ class SlackRequest(BaseModel):
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
     reply_thread_ts: str = ""
+    # Another Slack thread whose whole transcript becomes this run's context.
+    context_thread_ts: str = ""
+    context_channel_id: str = ""
     treat_all_messages_as_mentions: bool = False
-    untagged_reply: bool = False
+    kitchen_channel: bool = False
     message_update: bool = False
     code_channel: bool = False
-    dm_session: bool = False
+    concierge_mode: bool = False
     explicit_request: bool = False
 
     @property

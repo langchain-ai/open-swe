@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from agent.config import ENV
 from agent.dashboard.profiles import get_valid_access_token
-from agent.threads.summary import _assert_thread_readable
+from agent.threads.summary import assert_thread_readable
 from agent.users import User
 from agent.utils.json_types import ThreadLike, thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -49,7 +49,7 @@ async def _authorized_thread(thread_id: str, login: str, *, email: str | None = 
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     return thread
 
 
@@ -70,7 +70,7 @@ async def _readable_thread(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    _assert_thread_readable(metadata, login, email)
+    assert_thread_readable(metadata, login, email)
     return thread
 
 

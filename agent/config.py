@@ -173,6 +173,11 @@ ENV.var(
     default="https://api.host.langchain.com",
 )
 ENV.var(
+    "TYPESAFE_API_KEY",
+    "TypeSafe key for direct Jev model routing when available.",
+    secret=True,
+)
+ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
     secret=True,
@@ -207,6 +212,14 @@ ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(
+    "LANGSMITH_LANGGRAPH_GIT_REF_SHA",
+    "Resolved source commit injected by LangSmith for Git-backed deployments.",
+)
+ENV.var(
+    "OPEN_SWE_BUILD_INFO_DIR",
+    "Directory of the backend's build-identity sidecar; image builds stamp /opt/open-swe-backend.",
+)
+ENV.var(
     "LANGSMITH_TRACING",
     "Enables LangSmith tracing; read by the LangSmith SDK and injected by LangGraph Platform.",
 )
@@ -235,6 +248,10 @@ ENV.var(
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
+ENV.var(
+    "GITHUB_OIDC_AUDIENCE",
+    "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
+)
 ENV.var(
     "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
 )
@@ -311,8 +328,6 @@ ENV.var(
     secret=True,
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
-ENV.var("ADMIN_OIDC_SUBJECTS", "Comma-separated GitHub Actions OIDC subjects allowed as admins.")
-ENV.var("ADMIN_OIDC_AUDIENCE", "Audience required on admin OIDC tokens.", default="open-swe")
 ENV.var(
     "NOTION_MCP_CLIENT_NAME",
     "Client name registered with the Notion MCP OAuth server.",
@@ -329,6 +344,10 @@ ENV.var(
     "LANGSMITH_LANGGRAPH_API_VARIANT",
     "LangGraph API runtime variant.",
     default="",
+)
+ENV.var(
+    "OPENSWE_ENV",
+    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
 )
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
@@ -374,7 +393,6 @@ ENV.var(
     "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
     default="langsmith",
 )
-ENV.var("DEFAULT_SANDBOX_SNAPSHOT_ID", "Base LangSmith snapshot new sandboxes boot from.")
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_VCPUS", "vCPUs for new sandboxes.")
 ENV.var("DEFAULT_SANDBOX_MEM_BYTES", "Memory for new sandboxes.")

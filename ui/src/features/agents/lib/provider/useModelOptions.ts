@@ -53,8 +53,9 @@ export function persistModelSelection(
   } catch {}
 }
 
-export function useModelOptions(): ModelOptionsResult {
-  const optionsQuery = useOptions()
+/** ``workspace`` is the workspace being composed in, whose defaults these are. */
+export function useModelOptions(workspace?: string | null): ModelOptionsResult {
+  const optionsQuery = useOptions(workspace)
   const session = useSession()
   const models = optionsQuery.data?.models ?? []
   const defaultSelection = optionsQuery.data

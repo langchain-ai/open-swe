@@ -34,19 +34,19 @@ function stubFetch() {
 async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
-  projectMode = true,
+  repoMode = true,
   sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
-  projectMode?: boolean
+  repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
   const spy = stubFetch()
   await agentsApi
     .listThreadsPage({
       ...sidebarRecentsParams({
-        projectMode,
+        repoMode,
         includeAutomations,
         includeResolved,
         sort,
@@ -154,7 +154,7 @@ describe("apiWarmupScript", () => {
     },
     {
       name: "list mode",
-      expected: { projectMode: false },
+      expected: { repoMode: false },
       prefs: { organize: "list" },
     },
     {

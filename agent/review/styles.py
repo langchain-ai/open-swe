@@ -17,8 +17,13 @@ REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
 
+
+# What a positive approval assessment does; a repository with no mode set is ``dry_run``.
+ApprovalMode = Literal["off", "dry_run", "approve"]
+
+
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
-_TERMINAL_FAILURE = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
+TERMINAL_RUN_FAILURES = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
 
 
 def normalize_repo_full_name(raw: str) -> str:
@@ -46,12 +51,13 @@ class ReviewStyleCreate(BaseModel):
 
 
 class ReviewStylePromptUpdate(BaseModel):
-    custom_prompt: str
+    custom_prompt: str | None = None
+    approval_mode: ApprovalMode | None = None
 
     @field_validator("custom_prompt")
     @classmethod
-    def _non_empty(cls, v: str) -> str:
-        if not v.strip():
+    def _non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
             raise ValueError("custom_prompt cannot be empty")
         return v
 
@@ -64,6 +70,7 @@ class ReviewStyle(BaseModel):
     name: str = ""
     status: AnalysisStatus = "idle"
     custom_prompt: str | None = None
+    approval_mode: ApprovalMode | None = None
     analysis_summary: str | None = None
     top_reviewers: list[str] = Field(default_factory=list)
     prs_sampled: int = 0
@@ -94,6 +101,10 @@ class ReviewStyle(BaseModel):
         return bool(self.custom_prompt and self.custom_prompt.strip())
 
 
+def effective_approval_mode(record: ReviewStyle | None) -> ApprovalMode:
+    return (record.approval_mode if record else None) or "dry_run"
+
+
 class ReviewStyleStore(TypedStore[ReviewStyle]):
     def __init__(self) -> None:
         super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle)
@@ -117,11 +128,19 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
         return await self.put(full_name, ReviewStyle.seed(full_name, created_by))
 
     async def set_custom_prompt(self, full_name: str, custom_prompt: str) -> ReviewStyle:
+        return await self.update_prompts(
+            full_name, ReviewStylePromptUpdate(custom_prompt=custom_prompt)
+        )
+
+    async def update_prompts(self, full_name: str, update: ReviewStylePromptUpdate) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
-        record.custom_prompt = custom_prompt
-        if record.status == "running":
-            record.status = "completed"
-            record.error = None
+        if update.custom_prompt is not None:
+            record.custom_prompt = update.custom_prompt
+            if record.status == "running":
+                record.status = "completed"
+                record.error = None
+        if "approval_mode" in update.model_fields_set:
+            record.approval_mode = update.approval_mode
         return await self.save(record)
 
     async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:
@@ -205,6 +224,7 @@ async def reconcile_running_status(
     *,
     run_status: str | None,
     run_missing: bool = False,
+    run_error: str | None = None,
 ) -> ReviewStyle:
     """Clear stale ``running`` when the analyzer run is done or unreachable."""
     if record.status != "running":
@@ -218,10 +238,15 @@ async def reconcile_running_status(
             "Analysis finished without saving a prompt. Please retry.",
         )
 
-    if run_status in _TERMINAL_FAILURE:
+    if run_status in TERMINAL_RUN_FAILURES:
         if record.has_saved_prompt:
             return await REVIEW_STYLES.mark_completed(full_name)
-        return await REVIEW_STYLES.mark_failed(full_name, "Analysis run ended. Please retry.")
+        return await REVIEW_STYLES.mark_failed(
+            full_name,
+            f"Analysis run failed: {run_error}. Please retry."
+            if run_error
+            else "Analysis run ended. Please retry.",
+        )
 
     if run_missing:
         if record.has_saved_prompt:

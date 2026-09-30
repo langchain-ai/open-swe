@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from agent.dashboard.deps import ADMIN_DEP
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.slack.allowed_bots import (
     ALLOWED_SLACK_BOTS,
     AllowedSlackBot,
@@ -13,6 +13,7 @@ from agent.slack.allowed_bots import (
     allow_slack_bot,
     list_slack_bots,
 )
+from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
 from agent.slack.connect import router as connect_router
 
 router = APIRouter(tags=["slack"])
@@ -24,6 +25,22 @@ async def api_list_slack_bots(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> list[SlackBotOption]:
     return await list_slack_bots()
+
+
+@router.get("/slack/channels")
+async def api_list_slack_channels(
+    session: dict[str, Any] = SESSION_DEP,
+) -> SlackChannelDirectory:
+    """Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.
+
+    Private channels are listed for admins only.
+    """
+    directory = await list_slack_channels()
+    if session_is_admin(session):
+        return directory
+    return directory.model_copy(
+        update={"channels": [channel for channel in directory.channels if not channel.is_private]}
+    )
 
 
 @router.get("/slack/allowed-bots")

@@ -13,7 +13,7 @@ def test_bindable_config_drops_langgraph_internal_keys() -> None:
         "recursion_limit": 7,
         "configurable": {
             "thread_id": "t1",
-            "model": "anthropic:claude-opus-5",
+            "model": "anthropic:claude-opus-5-5",
             "__pregel_runtime": _ReadOnlyRuntime(),
             "__pregel_checkpointer": object(),
             "__pregel_store": object(),
@@ -23,7 +23,7 @@ def test_bindable_config_drops_langgraph_internal_keys() -> None:
     bound = bindable_config(config)
 
     assert bound["recursion_limit"] == 7
-    assert bound["configurable"] == {"thread_id": "t1", "model": "anthropic:claude-opus-5"}
+    assert bound["configurable"] == {"thread_id": "t1", "model": "anthropic:claude-opus-5-5"}
     # The caller's config is left alone.
     assert "__pregel_runtime" in config["configurable"]
 

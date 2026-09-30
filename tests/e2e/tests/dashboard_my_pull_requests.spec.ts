@@ -113,7 +113,7 @@ test.describe("my pull requests", () => {
     await card(page, mine)
       .getByRole("button", { name: "Close", exact: true })
       .click();
-    const dialog = page.getByRole("alertdialog");
+    const dialog = page.getByRole("dialog");
     await expect(
       dialog.getByRole("heading", { name: `Close ${DEMO}#${mine.number}?` }),
     ).toBeVisible();
@@ -126,12 +126,15 @@ test.describe("my pull requests", () => {
       .getByRole("button", { name: "Close", exact: true })
       .click();
     await page
-      .getByRole("alertdialog")
+      .getByRole("dialog")
       .getByRole("button", { name: "Close pull request" })
       .click();
 
     await expect(page.getByText(`Closed ${DEMO}#${mine.number}`)).toBeVisible();
-    await expect(card(page, mine)).toHaveCount(0);
+    await expect(card(page, mine)).toContainText("Closed ·");
+    await expect(
+      card(page, mine).getByRole("button", { name: "Close", exact: true }),
+    ).toHaveCount(0);
 
     expect(
       (await readPullRequest(page, "fakeorg", "demo", mine.number)).state,
@@ -202,8 +205,10 @@ test.describe("my pull requests", () => {
     await expect(
       card(page, conflict).getByRole("button", { name: "Fix", exact: true }),
     ).toBeEnabled();
+    // Exact, like the assertions above: the title is a button that opens the
+    // preview, and "Nothing to fix" would match a substring search for "Fix".
     await expect(
-      card(page, ok).getByRole("button", { name: "Fix" }),
+      card(page, ok).getByRole("button", { name: "Fix", exact: true }),
     ).toHaveCount(0);
 
     // The fix opens a thread and dispatches a real run, so wait on the
@@ -261,7 +266,10 @@ test.describe("my pull requests", () => {
       .click();
 
     await expect(page.getByText(`Merged ${DEMO}#${mine.number}`)).toBeVisible();
-    await expect(card(page, mine)).toHaveCount(0);
+    await expect(card(page, mine)).toContainText("Merged ·");
+    await expect(
+      card(page, mine).getByRole("button", { name: "Merge", exact: true }),
+    ).toHaveCount(0);
 
     const merged = await readPullRequest(page, "fakeorg", "demo", mine.number);
     expect(merged.merged).toBe(true);

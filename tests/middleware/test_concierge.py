@@ -8,12 +8,13 @@ from agent.middleware.concierge import post_concierge_reply
 
 _CONCIERGE_CONFIG = {
     "configurable": {
+        "source": "slack",
         "slack_thread": {
             "channel_id": "D123",
             "thread_ts": "0",
             "reply_thread_ts": "171.123",
             "channel_context": {"is_im": True},
-        }
+        },
     }
 }
 _CHANNEL_CONFIG = {
@@ -35,7 +36,7 @@ class TestPostConciergeReply:
         with (
             patch("agent.run_config.get_config", return_value=config),
             patch(
-                "agent.slack.tools.thread_reply.slack_thread_reply",
+                "agent.slack.tools.reply.slack_reply",
                 new_callable=AsyncMock,
                 return_value={"success": True},
             ) as mock_reply,
@@ -56,10 +57,18 @@ class TestPostConciergeReply:
         assert mock_reply.await_args.args[0] == "A stale cache."
 
     @pytest.mark.asyncio
-    async def test_leaves_a_channel_thread_to_its_reply_tool(self) -> None:
+    @pytest.mark.parametrize(
+        "config",
+        [
+            _CHANNEL_CONFIG,
+            {"configurable": {**_CONCIERGE_CONFIG["configurable"], "source": "dashboard"}},
+            {"configurable": {**_CONCIERGE_CONFIG["configurable"], "stop_summary": True}},
+        ],
+    )
+    async def test_leaves_other_surfaces_to_their_reply_path(self, config) -> None:
         state: AgentState = {"messages": [AIMessage(content="A stale cache.")]}
 
-        mock_reply = await self._run(state, _CHANNEL_CONFIG)
+        mock_reply = await self._run(state, config)
 
         mock_reply.assert_not_awaited()
 
@@ -90,7 +99,7 @@ class TestPostConciergeReply:
         with (
             patch("agent.run_config.get_config", return_value=_CONCIERGE_CONFIG),
             patch(
-                "agent.slack.tools.thread_reply.slack_thread_reply",
+                "agent.slack.tools.reply.slack_reply",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("slack is down"),
             ),

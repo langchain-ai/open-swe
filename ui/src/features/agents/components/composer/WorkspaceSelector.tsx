@@ -9,6 +9,10 @@ interface WorkspaceSelectorProps {
   selectedSlug: string | null
   onChange: (slug: string | null) => void
   disabled?: boolean
+  /** Render even with a single workspace, where a choice must still be made. */
+  showWithOneWorkspace?: boolean
+  /** Shown while nothing is selected. */
+  placeholder?: string
 }
 
 /**
@@ -23,6 +27,8 @@ export function WorkspaceSelector({
   selectedSlug,
   onChange,
   disabled = false,
+  showWithOneWorkspace = false,
+  placeholder = "No workspace",
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -38,9 +44,11 @@ export function WorkspaceSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  if (workspaces.length < 2) return null
+  if (workspaces.length < (showWithOneWorkspace ? 1 : 2)) return null
 
-  const selected = workspaces.find((env) => env.slug === selectedSlug)
+  const selected = workspaces.find(
+    (workspace) => workspace.slug === selectedSlug
+  )
 
   return (
     <div ref={dropdownRef} className="relative min-w-0 shrink">
@@ -53,21 +61,21 @@ export function WorkspaceSelector({
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
-          {selected?.name ?? "No workspace"}
+          {selected?.name ?? placeholder}
         </span>
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
           <div className="px-2 pt-2 pb-1 text-muted-foreground">Workspace</div>
-          {workspaces.map((env) => {
-            const isSelected = env.slug === selectedSlug
+          {workspaces.map((workspace) => {
+            const isSelected = workspace.slug === selectedSlug
             return (
               <button
-                key={env.slug}
+                key={workspace.slug}
                 type="button"
                 onClick={() => {
-                  onChange(env.slug)
+                  onChange(workspace.slug)
                   setOpen(false)
                 }}
                 className={cn(
@@ -75,8 +83,8 @@ export function WorkspaceSelector({
                   isSelected ? "text-foreground" : "text-muted-foreground"
                 )}
               >
-                <span className="truncate">{env.name}</span>
-                {!env.has_snapshot && (
+                <span className="truncate">{workspace.name}</span>
+                {!workspace.has_snapshot && (
                   <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
                     no snapshot
                   </span>
