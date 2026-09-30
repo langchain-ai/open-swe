@@ -107,7 +107,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("agent.server.load_thread_settings", new_callable=AsyncMock, return_value={}),
-        patch("agent.server.fallback_model_id_for", return_value=None),
+        patch("agent.utils.model.fallback_model_id_for", return_value=None),
         patch("agent.server.make_model", return_value=MagicMock()),
         patch("agent.server.construct_system_prompt", return_value="prompt"),
         patch("agent.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
