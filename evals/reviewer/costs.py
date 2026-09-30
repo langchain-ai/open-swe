@@ -84,12 +84,27 @@ async def _thread_cost(
     return None
 
 
-def _write_feedback(client: Client, run_id: uuid.UUID, key: str, score: float) -> None:
+def _write_feedback(
+    client: Client,
+    experiment_id: uuid.UUID,
+    run_id: uuid.UUID,
+    key: str,
+    *,
+    score: float | None = None,
+    value: int | None = None,
+) -> None:
     feedback_id = uuid.uuid5(run_id, key)
     try:
-        client.create_feedback(run_id, key, score=score, feedback_id=feedback_id)
+        client.create_feedback(
+            run_id,
+            key,
+            score=score,
+            value=value,
+            feedback_id=feedback_id,
+            session_id=experiment_id,
+        )
     except LangSmithConflictError:
-        client.update_feedback(feedback_id, score=score)
+        client.update_feedback(feedback_id, score=score, value=value)
 
 
 async def record_experiment_costs(experiment: str, reviewer_project: str) -> CostSummary:
@@ -116,8 +131,18 @@ async def record_experiment_costs(experiment: str, reviewer_project: str) -> Cos
         if priced is None:
             return pr_url
         cost_usd, total_tokens = priced
-        await asyncio.to_thread(_write_feedback, client, run.id, "cost_usd", cost_usd)
-        await asyncio.to_thread(_write_feedback, client, run.id, "total_tokens", total_tokens)
+        await asyncio.to_thread(
+            _write_feedback, client, experiment_project.id, run.id, "cost_usd", score=cost_usd
+        )
+        # LangSmith caps feedback scores below 100k, which one review's tokens exceed.
+        await asyncio.to_thread(
+            _write_feedback,
+            client,
+            experiment_project.id,
+            run.id,
+            "total_tokens",
+            value=total_tokens,
+        )
         return PrCost(run.id, pr_url, thread_id, cost_usd, total_tokens)
 
     results = await asyncio.gather(*(_price(run) for run in runs))
