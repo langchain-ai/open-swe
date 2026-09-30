@@ -13,7 +13,7 @@ from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
@@ -28,7 +28,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
-    ModelFallbackMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
@@ -58,12 +57,7 @@ from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
 from agent.tools.record_human_input import record_human_input
 from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    make_fallback_model,
-    make_model,
-    provider_model_kwargs,
-)
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -247,10 +241,9 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    use_gateway = settings.effective_gateway_enabled
     model = _make_model_or_defer(
         model_id,
-        use_gateway=use_gateway,
+        use_gateway=settings.effective_gateway_enabled,
         **provider_model_kwargs(
             model_id,
             effort,
@@ -282,11 +275,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
-                ModelFallbackMiddleware(
-                    make_fallback_model(
-                        model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                    )
-                ),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 StoreWalkthroughMiddleware(thread_id=thread_id, config=config),

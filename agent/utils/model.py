@@ -1,19 +1,14 @@
-import logging
 from typing import Any, Literal, TypedDict, Unpack, cast
 
 from langchain.chat_models import init_chat_model
-from langchain_core.language_models import BaseChatModel
 
 from agent.config import ENV
 from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
-from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.gateway import gateway_env_default, gateway_overrides
 from agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
     desktop_openai_oauth_available,
 )
-
-logger = logging.getLogger(__name__)
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -184,29 +179,6 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     if primary_model_id.startswith("openai:"):
         return "anthropic:claude-opus-5-5"
     return None
-
-
-def make_fallback_model(
-    primary_model_id: str, *, use_gateway: bool, max_tokens: int
-) -> BaseChatModel | None:
-    """Build the fallback model for ``primary_model_id``, deferring setup errors to call time."""
-    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
-        primary_model_id
-    )
-    if not fallback_model_id or fallback_model_id == primary_model_id:
-        return None
-    kwargs: ModelKwargs = {"max_tokens": max_tokens}
-    if fallback_model_id.startswith("openai:"):
-        kwargs["reasoning"] = DEFAULT_LLM_REASONING
-    logger.info(
-        "Configured model fallback",
-        extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback_model_id},
-    )
-    try:
-        return make_model(fallback_model_id, use_gateway=use_gateway, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring model setup failure for %s", fallback_model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=fallback_model_id)
 
 
 def is_gemini_3_family(model_id: str) -> bool:

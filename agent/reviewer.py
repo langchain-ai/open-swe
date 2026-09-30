@@ -35,7 +35,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -47,7 +47,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
-    ModelFallbackMiddleware,
     RepairOrphanedToolCallsMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
@@ -109,17 +108,12 @@ from agent.utils import ttl_cache
 from agent.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from agent.utils.api_standards_skill import fetch_api_standards_skill
 from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    make_fallback_model,
-    make_model,
-    provider_model_kwargs,
-)
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
 
 
-def _reviewer_subagent(model: BaseChatModel, fallback: BaseChatModel | None = None) -> SubAgent:
+def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": "reviewer",
         "description": load_prompt("reviewer/subagent-description.md"),
@@ -131,7 +125,7 @@ def _reviewer_subagent(model: BaseChatModel, fallback: BaseChatModel | None = No
             list[AgentMiddleware[Any, Any, Any]],
             [
                 SanitizeOpenAIResponsesMiddleware(),
-                ModelFallbackMiddleware(fallback),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
@@ -1007,14 +1001,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 http_request,
             ]
         ),
-        subagents=[
-            _reviewer_subagent(
-                reviewer_subagent_model,
-                make_fallback_model(
-                    subagent_model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                ),
-            )
-        ],
+        subagents=[_reviewer_subagent(reviewer_subagent_model)],
         backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -1035,11 +1022,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
-                ModelFallbackMiddleware(
-                    make_fallback_model(
-                        model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                    )
-                ),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,

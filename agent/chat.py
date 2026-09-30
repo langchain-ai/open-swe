@@ -44,7 +44,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
     ModelCallTimeoutMiddleware,
-    ModelFallbackMiddleware,
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
@@ -70,12 +69,7 @@ from agent.tools import (
 from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
 from agent.utils.deferred_model import make_deferred_error_model
-from agent.utils.model import (
-    DEFAULT_LLM_REASONING,
-    make_fallback_model,
-    make_model,
-    provider_model_kwargs,
-)
+from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +206,6 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
-                ModelFallbackMiddleware(
-                    make_fallback_model(
-                        model_id, use_gateway=use_gateway, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                    )
-                ),
                 ModelCallTimeoutMiddleware(),
             ],
         ),
