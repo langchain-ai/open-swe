@@ -7,11 +7,21 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agent.analytics.queries import InvalidUsageCursor, SortDirection, UsageSort, usage_leaderboard
+from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analytics"])
+
+
+class TelemetryConfig(BaseModel):
+    environment: str
+
+
+@router.get("/analytics/config")
+async def api_telemetry_config() -> TelemetryConfig:
+    return TelemetryConfig(environment=ENV.DD_ENV.get())
 
 
 class PageView(BaseModel):

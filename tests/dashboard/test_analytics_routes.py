@@ -39,6 +39,20 @@ async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_telemetry_config_is_public_and_excludes_credentials(monkeypatch) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+    monkeypatch.setenv("DD_ENV", "staging")
+    monkeypatch.setenv("SEGMENT_WRITE_KEY", "private-key")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/analytics/config")
+    assert response.status_code == 200
+    assert response.json() == {"environment": "staging"}
+
+
+@pytest.mark.asyncio
 async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
     app = FastAPI()
     app.include_router(routes.router)
