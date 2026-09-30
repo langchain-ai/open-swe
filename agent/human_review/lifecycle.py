@@ -196,14 +196,16 @@ async def _render_standard(
     request: HumanReviewRequest, outcome: str | None, token: str | None
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
-    if outcome is not None:
-        return standard_card.closed_card(request, title=pr.title, outcome=outcome)
     states: dict[str, str] = {}
-    if token is not None:
+    if token is not None and outcome in (None, "merged"):
         async with github_client(token=token) as client:
             states = (
                 await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
             )
+    if outcome is not None:
+        return standard_card.closed_card(
+            request, title=pr.title, outcome=outcome, review_states=states
+        )
     requester = request.requested_by
     return standard_card.open_card(
         request,
