@@ -1435,7 +1435,10 @@ export const api = {
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  listSlackChannels: (refresh = false) =>
+    request<SlackChannelDirectory>(
+      `/slack/channels${refresh ? "?refresh=true" : ""}`
+    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {

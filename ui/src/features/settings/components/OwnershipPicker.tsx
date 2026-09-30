@@ -61,6 +61,7 @@ export interface OwnershipPickerProps {
   filters?: Array<PickerFilter>
   manual?: ManualEntry
   loading?: boolean
+  actions?: ReactNode
   loadError?: string | null
   /** A caveat about the directory itself, shown above the rows. */
   notice?: string | null
@@ -99,6 +100,7 @@ export function OwnershipPicker({
   filters,
   manual,
   loading = false,
+  actions,
   loadError = null,
   notice = null,
   disabled = false,
@@ -262,6 +264,7 @@ export function OwnershipPicker({
           </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+          {actions}
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
               className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"

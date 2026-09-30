@@ -30,12 +30,13 @@ async def api_list_slack_bots(
 @router.get("/slack/channels")
 async def api_list_slack_channels(
     session: dict[str, Any] = SESSION_DEP,
+    refresh: bool = False,
 ) -> SlackChannelDirectory:
     """Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.
 
     Private channels are listed for admins only.
     """
-    directory = await list_slack_channels()
+    directory = await list_slack_channels(refresh=refresh)
     if session_is_admin(session):
         return directory
     return directory.model_copy(

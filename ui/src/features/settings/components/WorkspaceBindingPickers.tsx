@@ -6,6 +6,7 @@ import {
   LockSimpleIcon,
 } from "@phosphor-icons/react"
 
+import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import {
@@ -191,6 +192,12 @@ export function SlackChannelPicker({
         normalize: normalizeSlackChannelId,
         invalidHint: "Channel IDs start with C or G.",
       }}
+      actions={
+        <RefreshSlackChannels
+          refresh={directory.refresh}
+          isRefreshing={directory.isLoading || directory.isRefreshing}
+        />
+      }
       loading={directory.isLoading}
       loadError={
         directory.isError
