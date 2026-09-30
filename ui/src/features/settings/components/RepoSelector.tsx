@@ -25,6 +25,7 @@ interface RepoSelectorProps {
   dropdownClassName?: string
   side?: "top" | "bottom"
   disabled?: boolean
+  allowArchived?: boolean
 }
 
 export function RepoSelector({
@@ -41,6 +42,7 @@ export function RepoSelector({
   dropdownClassName,
   side = "bottom",
   disabled = false,
+  allowArchived = false,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -51,10 +53,10 @@ export function RepoSelector({
     const q = query.trim().toLowerCase()
     return (repos ?? []).filter(
       (repo) =>
-        (showArchived || !repo.archived) &&
+        ((allowArchived && showArchived) || !repo.archived) &&
         repo.full_name.toLowerCase().includes(q)
     )
-  }, [repos, query, showArchived])
+  }, [repos, query, showArchived, allowArchived])
 
   return (
     <Popover
@@ -112,7 +114,7 @@ export function RepoSelector({
               />
             </button>
           </div>
-          {repos?.some((repo) => repo.archived) && (
+          {allowArchived && repos?.some((repo) => repo.archived) && (
             <label className="flex cursor-pointer items-center gap-2 border-b border-border px-2 py-1.5 text-muted-foreground">
               <input
                 type="checkbox"

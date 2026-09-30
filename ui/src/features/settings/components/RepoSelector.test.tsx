@@ -11,10 +11,27 @@ vi.mock("@/lib/profile", () => ({
 
 afterEach(cleanup)
 
+it("never offers archived choices or an archive toggle by default", async () => {
+  render(
+    <RepoSelector
+      repos={[
+        { full_name: "org/active", private: false, archived: false },
+        { full_name: "org/legacy", private: false, archived: true },
+      ]}
+      onRepoChange={vi.fn()}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
+  expect(await screen.findByText("org/active")).toBeTruthy()
+  expect(screen.queryByText("org/legacy")).toBeNull()
+  expect(screen.queryByRole("checkbox", { name: "Show archived" })).toBeNull()
+})
+
 it("hides archives even in search until opted in, without clearing the selection", async () => {
   const onRepoChange = vi.fn()
   render(
     <RepoSelector
+      allowArchived
       repos={[
         { full_name: "org/active", private: false, archived: false },
         { full_name: "org/legacy", private: false, archived: true },

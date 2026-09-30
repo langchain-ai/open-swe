@@ -300,9 +300,7 @@ export function WorkspaceSettingsPanel({
       />
       <DefaultRepoSection
         scope={scope}
-        repositories={(repositories.data?.repositories ?? []).map(
-          (repo) => repo.full_name
-        )}
+        repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
