@@ -14,6 +14,7 @@ from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -45,7 +46,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
 from openswe.runtime import (
@@ -304,7 +305,13 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=model,
-        system_prompt="",
+        system_prompt=common_prompt(),
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            },
+        ],
         tools=apply_tool_descriptions(
             [
                 walkthrough_plan_chunk,

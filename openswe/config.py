@@ -385,7 +385,7 @@ ENV.var(
 ENV.var(
     "OPENSWE_ENV",
     "Agent prompt deployment environment (production, staging, preview, or local); "
-    "`preview` also lets startup drop superseded migration revisions.",
+    "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
 ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
 ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
