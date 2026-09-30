@@ -19,6 +19,12 @@ What a deployment needs:
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `agent/config.py` with its description and default; that file is the complete reference.
 
+### Optional Segment usage tracking
+
+Create a Segment HTTP API source and set its write key as the backend's `SEGMENT_WRITE_KEY` secret. Set `ANALYTICS_ENVIRONMENT` to distinguish deployments. Without a key, no events are sent; no frontend key or additional dependency is needed.
+
+Authenticated dashboard navigation sends Segment `page` events with a normalized `page_name`. Agent MCP executions send `MCP Tool Called` events with the tool name and `is_error`. Both identify users by GitHub login with their email trait and `product: open-swe`. Tool arguments/results, page URLs, query strings, and thread identifiers are excluded. Configure the Segment warehouse destination separately to query these events in Hex.
+
 ## 1. Create the deployment
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.
