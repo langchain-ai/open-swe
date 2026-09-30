@@ -77,6 +77,24 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 
 @pytest.mark.asyncio
+async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
+    from deepagents.backends.store import StoreBackend
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+
+    captured = await _capture_create_deep_agent_kwargs()
+    blobs = captured["backend"].routes["/blobs/"]
+    assert isinstance(blobs, StoreBackend)
+    assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
+    filesystem = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, FilesystemMiddleware)
+    )
+    assert filesystem.backend is captured["backend"]
+    assert filesystem._offload_binary_content
+
+
+@pytest.mark.asyncio
 async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (
         patch("agent.server.private_credential_login", side_effect=TimeoutError),
