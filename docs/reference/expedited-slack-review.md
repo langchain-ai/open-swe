@@ -63,10 +63,26 @@ the card says who approved. Once merged or cancelled, the whole card becomes one
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
 the PR link. Reactions are never votes.
 
-The card is posted in the thread only. Once it is open for approval it has
-**Broadcast in #channel**, which anyone in the thread may click. Broadcasting reposts the card as a thread reply also sent to the channel.
-When the card closes for any reason, the broadcast copy is deleted and the closed card
-is posted in the thread only, so the channel keeps no finished cards.
+The card is posted in the thread only. Once it is open for approval it can be sent to
+one channel, once:
+
+- When the card is posted, it lists its thread's channel, then the public, not
+  externally shared channels where the PR author's non-private Open SWE threads ran
+  in the last 14 days, then channels the author's cards were sent to in the last
+  90 days. There are at most 10.
+- With only the thread's channel on the list, the card shows **Broadcast in #channel**
+  and **Other channel…**. With more, it shows a dropdown (thread's channel preselected,
+  **Other…** last) and **Send**. **Other** opens a picker of public channels, and a
+  channel picked there is on the list for the author's later cards.
+- Anyone in the thread may send the card to the thread's own channel. This reposts
+  the card as a thread reply also sent to the channel.
+- Only a voter (see below) may send it to another channel, since that shows the diff
+  to new people. The card is posted at the top of that channel with a link back to
+  the thread, and votes work from either copy.
+
+When the card is approved or closes for any reason, both the broadcast and the copy in
+the other channel are deleted, and the card stays in the thread only. So no channel
+keeps a finished card.
 
 ### Voting
 
