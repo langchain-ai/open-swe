@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 ASK_COMMAND = "/oswe"
 BY_THE_WAY_COMMAND = "/btw"
 _BY_THE_WAY_RE = re.compile(r"/btw(?:\s+(?P<question>.*))?", re.DOTALL | re.IGNORECASE)
+_CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
 CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
 CHANNEL_CONTEXT_MAX_TOKENS = 5000
@@ -136,8 +137,10 @@ async def _thread_context(channel_id: str, thread_ts: str) -> str:
 
 async def _request_context(request: SlackAskRequest) -> str:
     if request.in_slack_thread:
-        return await _thread_context(request.channel_id, request.reply_thread_ts)
-    return await _channel_context(request.channel_id)
+        context = await _thread_context(request.channel_id, request.reply_thread_ts)
+    else:
+        context = await _channel_context(request.channel_id)
+    return _CONTEXT_FENCE_RE.sub(r"&lt;\1", context)
 
 
 async def _budgeted_transcript(messages: list[SlackMessage]) -> str:
