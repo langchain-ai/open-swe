@@ -1,11 +1,35 @@
 import { useState } from "react"
+import { InfoIcon } from "@phosphor-icons/react"
 import { useMutation } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
+
+function FieldHelp({
+  label,
+  description,
+}: {
+  label: string
+  description: string
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span role="button" tabIndex={0} />}
+        aria-label={`About ${label.toLowerCase()}`}
+        className="ml-1 inline-flex align-middle text-muted-foreground hover:text-foreground"
+        onClick={(event) => event.preventDefault()}
+      >
+        <InfoIcon aria-hidden="true" className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup className="max-w-80">{description}</TooltipPopup>
+    </Tooltip>
+  )
+}
 
 export function WorkspaceProxySection({
   record,
@@ -97,9 +121,14 @@ export function WorkspaceProxySection({
             <>
               <label htmlFor="workspace-proxy-config" className="text-sm">
                 Proxy configuration (JSON)
+                <FieldHelp
+                  label="Proxy configuration (JSON)"
+                  description="Advanced view of the same proxy configuration. Switching tabs preserves edits, including fields not exposed in the Rules form. Other sandbox create parameters are preserved on save."
+                />
               </label>
               <Textarea
                 id="workspace-proxy-config"
+                aria-label="Proxy configuration (JSON)"
                 className="min-h-64 font-mono text-xs"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -166,6 +195,10 @@ export function WorkspaceProxySection({
                     </div>
                     <label className="block space-y-1 text-xs">
                       Rule name
+                      <FieldHelp
+                        label="Rule name"
+                        description="Required name identifying this proxy rule. Use a descriptive name such as custom-service; avoid Open SWE’s built-in rule names such as github and github-api."
+                      />
                       <Input
                         value={typeof rule.name === "string" ? rule.name : ""}
                         placeholder="custom-service"
@@ -179,6 +212,10 @@ export function WorkspaceProxySection({
                     </label>
                     <label className="block space-y-1 text-xs">
                       Matching hosts
+                      <FieldHelp
+                        label="Matching hosts"
+                        description="Comma-separated bare hostnames, without a scheme, port, or path. Use api.example.com for an exact host or *.example.com for subdomains. The wildcard does not match example.com itself. Bare * and public-suffix wildcards such as *.com are rejected."
+                      />
                       <Input
                         value={
                           Array.isArray(rule.match_hosts)
@@ -222,6 +259,10 @@ export function WorkspaceProxySection({
                         >
                           <label className="min-w-32 flex-1 space-y-1 text-xs">
                             Header name
+                            <FieldHelp
+                              label="Header name"
+                              description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Open SWE workspace settings reject authentication headers such as Authorization and X-Api-Key."
+                            />
                             <Input
                               value={
                                 typeof header.name === "string"
@@ -236,6 +277,10 @@ export function WorkspaceProxySection({
                           </label>
                           <label className="min-w-32 flex-1 space-y-1 text-xs">
                             Header value
+                            <FieldHelp
+                              label="Header value"
+                              description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Open SWE workspace settings."
+                            />
                             <Input
                               value={
                                 typeof header.value === "string"
@@ -249,6 +294,10 @@ export function WorkspaceProxySection({
                           </label>
                           <label className="space-y-1 text-xs">
                             Type
+                            <FieldHelp
+                              label="Type"
+                              description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."
+                            />
                             <select
                               className="block h-9 rounded-md border border-input bg-background px-2"
                               value={
@@ -304,6 +353,10 @@ export function WorkspaceProxySection({
                       <div key={position} className="flex items-end gap-2">
                         <label className="flex-1 space-y-1 text-xs">
                           Variable name
+                          <FieldHelp
+                            label="Variable name"
+                            description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Open SWE workspace settings."
+                          />
                           <Input
                             value={name}
                             onChange={(event) =>
@@ -322,6 +375,10 @@ export function WorkspaceProxySection({
                         </label>
                         <label className="flex-1 space-y-1 text-xs">
                           Variable value
+                          <FieldHelp
+                            label="Variable value"
+                            description="Plaintext value available inside the sandbox. A dummy value can satisfy tools that require an environment variable while the proxy injects a header on the wire. Explicit sandbox environment variables override rule variables; provider-managed AWS/GCP variables take precedence. Never enter credentials."
+                          />
                           <Input
                             value={typeof value === "string" ? value : ""}
                             onChange={(event) =>
