@@ -223,6 +223,18 @@ def _slack_conversation_type(source: str, config: LangGraphRunConfig | None) -> 
     return "dm" if is_im else "channel"
 
 
+def _slack_channel_metadata(configurable: object) -> dict[str, str]:
+    slack_thread = RunConfig.parse(configurable).slack_thread
+    if slack_thread is None:
+        return {}
+    channel = slack_thread.channel_context
+    values = {
+        "slack_channel_id": slack_thread.channel_id,
+        "slack_channel_name": channel.label if channel else "",
+    }
+    return {key: value for key, value in values.items() if value}
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -234,16 +246,7 @@ def prepare_run_config(
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
         merged_metadata.update(metadata)
-    slack_thread = configurable.get("slack_thread")
-    if isinstance(slack_thread, dict):
-        channel_id = slack_thread.get("channel_id")
-        if isinstance(channel_id, str) and channel_id:
-            merged_metadata["slack_channel_id"] = channel_id
-        channel_context = slack_thread.get("channel_context")
-        if isinstance(channel_context, dict):
-            channel_name = channel_context.get("name") or channel_context.get("name_normalized")
-            if isinstance(channel_name, str) and channel_name:
-                merged_metadata["slack_channel_name"] = channel_name
+    merged_metadata.update(_slack_channel_metadata(configurable))
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
