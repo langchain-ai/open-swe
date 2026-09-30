@@ -1,15 +1,24 @@
 """Tool for explicitly rebinding the current thread to a fresh sandbox."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SandboxSource
-from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.access import Policy, access
 
 logger = logging.getLogger(__name__)
 
 
+def _switches_workspace(args: Mapping[str, object]) -> Policy | None:
+    workspace = args.get("workspace")
+    if workspace is None or workspace == RunConfig.from_runtime().workspace_slug:
+        return None
+    return Policy(trusted="admin_surface", actor="admin")
+
+
+@access(Policy(trusted="anywhere"), per_call=_switches_workspace)
 async def recreate_sandbox(
     source: SandboxSource = "workspace",
     workspace: str | None = None,
@@ -23,10 +32,6 @@ async def recreate_sandbox(
     from agent.server import workspace_slug
 
     thread_workspace = workspace_slug(cfg)
-    if workspace is not None and workspace != thread_workspace:
-        if error := await require_private_admin_surface("boot another workspace's sandbox image"):
-            return {"success": False, "error": error}
-
     try:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
 

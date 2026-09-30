@@ -559,7 +559,9 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\)"
+    r"| • \+(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -570,25 +572,26 @@ def format_slack_session_cost(cost: float) -> str:
     return f"${cost:.2f}"
 
 
-def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+def _replace_slack_session_cost(text: str, label: str, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return (
-        f"{cleaned} • {format_slack_session_cost(cost)}"
-        if cleaned
-        else format_slack_session_cost(cost)
-    )
+    return f"{cleaned} • {label}" if cleaned else label
 
 
 def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    run_cost: float | None = None,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
-    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    """Replace cumulative and optional per-run costs in a live Slack footer."""
+    label = format_slack_session_cost(cost)
+    if run_cost is not None and run_cost < cost:
+        label += f" • +{format_slack_session_cost(run_cost)}"
+    updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
 
@@ -621,7 +624,7 @@ def with_slack_session_cost(
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
         target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
+            str(target.get("text") or ""), label, require_web_link=False
         )
     elif (
         updated_text != text
@@ -634,7 +637,7 @@ def with_slack_session_cost(
             {
                 "type": "context",
                 "block_id": "open_swe_usage_footer",
-                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+                "elements": [{"type": "mrkdwn", "text": label}],
             }
         )
     return updated_text, updated_blocks
@@ -1403,8 +1406,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch messages for a Slack thread, keeping the most recent window."""
+async def fetch_slack_thread_messages(
+    channel_id: str, thread_ts: str, *, complete: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch messages for a Slack thread, keeping the most recent window.
+
+    With ``complete``, a failed page raises instead of returning the pages fetched so far.
+    """
     if not SLACK_BOT_TOKEN:
         return []
 
@@ -1429,6 +1437,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 )
             except SLACK_REQUEST_ERRORS as exc:
                 logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                if complete:
+                    raise
                 break
 
             batch = payload.get("messages", [])

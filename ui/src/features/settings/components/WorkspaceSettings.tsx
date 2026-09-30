@@ -95,7 +95,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, the repositories it prefers, and its Slack channels. A repository is preferred by, and a Slack channel belongs to, exactly one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -113,14 +113,16 @@ function GeneralSection({
           </p>
         )}
         <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(draftFromWorkspace(record))}
-          >
-            Cancel
-          </Button>
+          {dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setDraft(draftFromWorkspace(record))}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={!dirty || saving || !draft.name.trim()}
@@ -204,6 +206,7 @@ export function WorkspaceSettingsPanel({
     )
   }
 
+  const buildAction = record.data.snapshot_id ? "Rebuild" : "Build"
   const onSaved = (saved: WorkspaceRecord) => {
     const previousRepos = new Set(
       record.data.repos.map((repo) => repo.toLowerCase())
@@ -255,11 +258,11 @@ export function WorkspaceSettingsPanel({
             >
               <CircleNotchIcon
                 aria-hidden="true"
-                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
-                ? "Rebuilding sandbox image…"
-                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+                ? `${buildAction}ing sandbox image…`
+                : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
               Existing runs keep their current image.
             </p>
           ) : awaitingRepositoryRebuild(record.data) ? (
@@ -267,8 +270,9 @@ export function WorkspaceSettingsPanel({
               role="alert"
               className="min-w-48 flex-1 text-xs text-destructive"
             >
-              Repositories saved, but the image rebuild could not be confirmed.
-              Check the sandbox image status or retry Rebuild image.
+              Repositories saved, but the image {buildAction.toLowerCase()}{" "}
+              could not be confirmed. Check the sandbox image status or retry{" "}
+              {buildAction} image.
             </p>
           ) : repositoryRebuild?.slug === slug ? (
             <p
@@ -278,8 +282,8 @@ export function WorkspaceSettingsPanel({
               className="min-w-48 flex-1 text-xs text-muted-foreground"
             >
               {record.data.refresh_status === "failed"
-                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
-                : "Sandbox image rebuilt with the saved repositories."}
+                ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
+                : "Sandbox image built with the saved repositories."}
             </p>
           ) : null
         }
@@ -298,9 +302,7 @@ export function WorkspaceSettingsPanel({
       />
       <DefaultRepoSection
         scope={scope}
-        repositories={(repositories.data?.repositories ?? []).map(
-          (repo) => repo.full_name
-        )}
+        repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
       <LLMGatewaySection scope={scope} />
@@ -312,8 +314,7 @@ export function WorkspaceSettingsPanel({
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-        >
-          <div className="px-4 py-3.5">
+          action={
             <Button
               size="sm"
               variant="destructive"
@@ -322,8 +323,8 @@ export function WorkspaceSettingsPanel({
             >
               Delete
             </Button>
-          </div>
-        </SettingsSection>
+          }
+        />
       )}
       {canEdit && deleting && (
         <AlertDialog

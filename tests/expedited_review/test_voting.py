@@ -1,13 +1,17 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from agent.expedited_review import lifecycle, voting
-from agent.expedited_review.approvals import ApprovalVote, ExpeditedApproval
+from agent.expedited_review import voting
+from agent.human_review import lifecycle, people
+from agent.human_review.people import Outcome
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from agent.slack import cards
 from agent.users import User
 from tests.expedited_review.conftest import OpenApproval
 
@@ -21,7 +25,7 @@ class _Harness:
         self.review_error: str | None = None
         self.diff_unchanged = True
 
-    async def notify_agent(self, approval: ExpeditedApproval, prompt: str) -> bool:
+    async def notify_agent(self, approval: HumanReviewRequest, prompt: str) -> bool:
         self.agent_prompts.append(prompt)
         return self.wake_succeeds
 
@@ -29,7 +33,7 @@ class _Harness:
         self.marked_ready.append(token)
 
     async def submit_approval(
-        self, approval: ExpeditedApproval, vote: ApprovalVote, head_sha: str
+        self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
     ) -> str | None:
         if self.review_error is not None:
             return self.review_error
@@ -43,7 +47,8 @@ class _Harness:
 def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     h = _Harness()
     monkeypatch.setattr(voting, "repo_token", AsyncMock(return_value="app-token"))
-    monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=True))
+    monkeypatch.setattr(people, "repo_token", AsyncMock(return_value="app-token"))
+    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=True))
 
     async def user_token(login: str) -> str:
         return f"token-{login}"
@@ -81,19 +86,23 @@ class _FakeSlack:
 @pytest.fixture
 def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     fake = _FakeSlack()
-    monkeypatch.setattr(lifecycle, "_broadcast_channel", AsyncMock(return_value="#eng"))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
-    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", fake.post)
+    monkeypatch.setattr(
+        lifecycle, "own_choices", AsyncMock(return_value=[{"id": "C1", "name": "eng"}])
+    )
     monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
+    monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://t"))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
+    monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
     return fake
 
 
 async def _click(
-    approval: ExpeditedApproval,
+    approval: HumanReviewRequest,
     slack_user: str,
     decision: voting.VoteAction = "approve",
-) -> voting.VoteOutcome:
-    current = await ExpeditedApproval.get(approval.id)
+) -> Outcome:
+    current = await HumanReviewRequest.get(approval.id)
     assert current is not None
     return await voting.handle_vote(
         current,
@@ -102,8 +111,8 @@ async def _click(
     )
 
 
-async def _stored(approval: ExpeditedApproval) -> ExpeditedApproval:
-    stored = await ExpeditedApproval.get(approval.id)
+async def _stored(approval: HumanReviewRequest) -> HumanReviewRequest:
+    stored = await HumanReviewRequest.get(approval.id)
     assert stored is not None
     return stored
 
@@ -121,7 +130,7 @@ async def test_each_approval_reaches_github_on_click_and_wakes_the_agent_once(
     assert sorted(stored.approvers) == ["grace", "linus"]
     assert grace.message == ""
     assert harness.reviews == [("grace", "def456"), ("linus", "def456")]
-    assert sorted((v.github_review_id, v.github_review_sha) for v in stored.votes) == [
+    assert sorted((v.github_review_id, v.github_review_sha) for v in stored.participants) == [
         (101, "def456"),
         (102, "def456"),
     ]
@@ -141,7 +150,7 @@ async def test_a_click_on_a_card_whose_diff_changed_records_the_vote_without_a_r
     assert "changed the diff" in outcome.message
     assert stored.approvers == ["grace"]
     assert harness.reviews == []
-    assert stored.votes[0].github_review_id is None
+    assert stored.participants[0].github_review_id is None
 
 
 async def test_a_review_github_refuses_stays_recorded_for_the_merge(
@@ -155,7 +164,7 @@ async def test_a_review_github_refuses_stays_recorded_for_the_merge(
     stored = await _stored(approval)
     assert "422 nope" in outcome.message and "when it merges" in outcome.message
     assert stored.approvers == ["grace"]
-    assert stored.votes[0].github_review_id is None
+    assert stored.participants[0].github_review_id is None
     assert len(harness.agent_prompts) == 1
 
 
@@ -190,11 +199,53 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     assert stored.approvers == ["grace"]
 
 
+async def test_readiness_button_is_delivered_only_to_the_author(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    private_messages: list[tuple[str, object]] = []
+
+    async def deliver(user: str, text: str, *, blocks: object) -> bool:
+        private_messages.append((user, blocks))
+        return True
+
+    monkeypatch.setattr(lifecycle, "send_dm", deliver)
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
+    current = await _stored(approval)
+
+    assert await lifecycle.prompt_author_ready(current) is None
+    _, shared_blocks = await lifecycle.render(current, None)
+
+    assert len(private_messages) == 1
+    recipient, private_blocks = private_messages[0]
+    assert recipient == "U_ADA"
+    assert "open_swe_option_select_ready" in str(private_blocks)
+    assert "open_swe_option_select_ready" not in str(shared_blocks)
+    assert "open_swe_option_select_approve" not in str(shared_blocks)
+    current.awaiting_ready = False
+    _, ready_blocks = await lifecycle.render(current, None)
+    assert "open_swe_option_select_approve" in str(ready_blocks)
+    assert await lifecycle.prompt_author_ready(current) is None
+    assert len(private_messages) == 1
+
+
+async def test_author_only_prompt_delivery_failure_is_reported(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    monkeypatch.setattr(lifecycle, "send_dm", AsyncMock(return_value=False))
+
+    problem = await lifecycle.prompt_author_ready(await _stored(approval))
+
+    assert problem is not None and "mark it ready on GitHub" in problem
+    assert (await _stored(approval)).awaiting_ready
+
+
 async def test_a_fork_author_without_write_access_can_mark_their_draft_ready(
     harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
 
     outcome = await _click(approval, "U_ADA", decision="ready")
 
@@ -248,13 +299,13 @@ async def test_unlinked_read_only_or_tokenless_users_cannot_vote(
     unlinked = await _click(approval, "U_NOBODY")
     monkeypatch.setattr(voting, "get_valid_access_token", AsyncMock(return_value=None))
     tokenless = await _click(approval, "U_GRACE")
-    monkeypatch.setattr(voting, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
     read_only = await _click(approval, "U_LINUS")
 
     assert "not linked" in unlinked.message
     assert "no GitHub token" in tokenless.message
     assert "write access" in read_only.message
-    assert (await _stored(approval)).votes == []
+    assert (await _stored(approval)).participants == []
 
 
 async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
@@ -262,8 +313,8 @@ async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
 
-    first = await voting.dismiss(await _stored(approval), "U_NOBODY")
-    again = await voting.dismiss(await _stored(approval), "U_GRACE")
+    first = await lifecycle.dismiss_request(await _stored(approval), "U_NOBODY")
+    again = await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
 
     stored = await _stored(approval)
     assert first.message == "Dismissed."
@@ -280,11 +331,11 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_closes(
 
     sent = await voting.request_broadcast(await _stored(approval))
     again = await voting.request_broadcast(await _stored(approval))
-    await voting.dismiss(await _stored(approval), "U_GRACE")
+    await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
 
     stored = await _stored(approval)
     assert sent.message == "Sent to the channel."
-    assert "already in the channel" in again.message
+    assert "already sent to a channel" in again.message
     assert slack.broadcasts == [True, False]
     assert slack.deleted == ["2.0", "3.0"]
     assert stored.state == "cancelled"
@@ -309,10 +360,44 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
     assert stored.slack_message_ts == "4.0"
 
 
+class _OtherChannel:
+    id = "C_OTHER"
+
+    async def post(self, text: str, *, blocks: object = None) -> tuple[str, None]:
+        return "9.0", None
+
+
+async def test_a_copied_card_leaves_the_other_channel_once_it_closes_and_is_offered_again(
+    harness: _Harness,
+    open_approval: OpenApproval,
+    slack: _FakeSlack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
+    monkeypatch.setattr(voting, "still_internal", AsyncMock(return_value=True))
+    approval = await open_approval()
+    grace = await User.for_person({"id": "slack:U_GRACE", "platform": "slack"})
+
+    sent = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
+    again = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
+    await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
+
+    stored = await _stored(approval)
+    assert sent.message == "Sent to <#C_OTHER>."
+    assert "already sent to a channel" in again.message
+    assert slack.deleted == ["9.0"]
+    assert stored.slack_copy is None
+    assert await HumanReviewRequest.copy_channels_for_author(
+        "ADA", since=datetime.now(UTC) - timedelta(days=1)
+    ) == ["C_OTHER"]
+
+
 async def test_only_one_open_approval_per_pull_request(open_approval: OpenApproval) -> None:
     approval = await open_approval()
 
-    duplicate = ExpeditedApproval(pull_request_id=approval.pull_request_id, head_sha="zzz")
+    duplicate = HumanReviewRequest(
+        pull_request_id=approval.pull_request_id, head_sha="zzz", kind="standard"
+    )
     with pytest.raises(IntegrityError):
         await duplicate.save()
-    assert await ExpeditedApproval.active_for("lc", "repo", 7) is not None
+    assert await HumanReviewRequest.active_for("lc", "repo", 7) is not None

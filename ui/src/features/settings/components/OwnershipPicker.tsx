@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export interface PickerOwner {
@@ -58,8 +59,10 @@ export interface OwnershipPickerProps {
   onChange: (ids: Array<string>) => void
   searchPlaceholder: string
   filter?: PickerFilter
+  filters?: Array<PickerFilter>
   manual?: ManualEntry
   loading?: boolean
+  actions?: ReactNode
   loadError?: string | null
   /** A caveat about the directory itself, shown above the rows. */
   notice?: string | null
@@ -95,8 +98,10 @@ export function OwnershipPicker({
   onChange,
   searchPlaceholder,
   filter,
+  filters,
   manual,
   loading = false,
+  actions,
   loadError = null,
   notice = null,
   disabled = false,
@@ -105,6 +110,10 @@ export function OwnershipPicker({
   const [draft, setDraft] = useState<Array<string>>(selected)
   const [search, setSearch] = useState("")
   const [filterOn, setFilterOn] = useState(true)
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
+  const categoryFilter = filters?.find(
+    (option) => option.label === activeFilter
+  )
   const [extras, setExtras] = useState<Array<PickerItem>>([])
   const [manualValue, setManualValue] = useState("")
   const [manualError, setManualError] = useState<string | null>(null)
@@ -122,7 +131,8 @@ export function OwnershipPicker({
     !!item.owner && item.owner.slug !== workspaceSlug
   const filterActive = !!filter && filterOn
   const passesFilter = (item: PickerItem) =>
-    !filterActive || filter.matches(item)
+    (!filterActive || filter.matches(item)) &&
+    (!categoryFilter || categoryFilter.matches(item))
 
   const inThis = draft
     .map((id) => rows.get(id))
@@ -136,9 +146,7 @@ export function OwnershipPicker({
   const owned = rest.filter(
     (item) => ownedElsewhere(item) && passesFilter(item)
   )
-  const hiddenCount = filterActive
-    ? rest.filter((item) => !filter.matches(item)).length
-    : 0
+  const hiddenCount = rest.filter((item) => !passesFilter(item)).length
 
   const toggle = (id: string) =>
     setDraft((current) =>
@@ -257,6 +265,7 @@ export function OwnershipPicker({
           </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+          {actions}
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
               className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"
@@ -279,6 +288,29 @@ export function OwnershipPicker({
             </label>
           )}
         </div>
+        {filters && (
+          <div
+            role="group"
+            aria-label={`${title} filter`}
+            className="flex gap-1 px-3 pb-2"
+          >
+            {[null, ...filters].map((option) => (
+              <Button
+                key={option?.label ?? "All"}
+                size="sm"
+                variant={
+                  activeFilter === (option?.label ?? null)
+                    ? "secondary"
+                    : "ghost"
+                }
+                aria-pressed={activeFilter === (option?.label ?? null)}
+                onClick={() => setActiveFilter(option?.label ?? null)}
+              >
+                {option?.label ?? "All"}
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-border pb-2">
           {notice && (
             <p className="flex items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
@@ -344,7 +376,21 @@ export function OwnershipPicker({
         )}
         <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
           <span className="text-xs text-muted-foreground">
-            {hiddenCount > 0 ? `${hiddenCount} hidden by the filter` : ""}
+            {hiddenCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">
+                  {hiddenCount} hidden by the filter
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-64">
+                  Hidden by{" "}
+                  {[filterActive && filter.label, categoryFilter?.label]
+                    .filter(Boolean)
+                    .map((label) => `“${label}”`)
+                    .join(" and ")}
+                  . Change the filters above to show more {pluralNoun}.
+                </TooltipPopup>
+              </Tooltip>
+            )}
           </span>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>

@@ -5,10 +5,11 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ import pytest
 from agent import store as agent_store
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
+from agent.tools import access as tool_access
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
@@ -107,6 +109,17 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+@pytest.fixture
+def grant_tool_access(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Resolve every gated tool call to ``Access(**fields)`` for this test."""
+
+    def grant(**fields: bool) -> None:
+        resolved = tool_access.Access(**fields)
+        monkeypatch.setattr(tool_access, "resolve_access", AsyncMock(return_value=resolved))
+
+    return grant
 
 
 def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:

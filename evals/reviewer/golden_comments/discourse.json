@@ -6,15 +6,23 @@
     "comments": [
       {
         "comment": "The downsize method is defined twice. The second definition, which expects a single dimensions string parameter, overrides the first, which expected separate max_width and max_height parameters. This makes the original method unreachable and breaks existing code that calls it with separate width and height arguments.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "Hardcoding maxSizeKB = 10 * 1024 ignores Discourse.SiteSettings['max_' + type + '_size_kb'], so the client-side limit can diverge from server-side and per-type settings (also applies to the 413 handler below).",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
       },
       {
         "comment": "Passing 80% as the dimensions can fail for animated GIFs when allow_animated_thumbnails is true, since the animated path uses gifsicle --resize-fit which expects WxH geometry, not a percentage; downsizing would then silently fail.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "data"
+      },
+      {
+        "comment": "The loop checking `tempfile.size` may never terminate correctly due to stale cached size, leading to potential infinite loops or incorrect file handling after modifications.",
+        "severity": "Medium",
+        "category": "bug"
       }
     ]
   },
@@ -25,11 +33,13 @@
     "comments": [
       {
         "comment": "logic: Potential nil pointer exception - if no TopicUser record exists, tu will be nil and calling methods on it will crash",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "Typo in property name: 'stopNotificiationsText' should be 'stopNotificationsText' (missing 'n' in 'Notifications')",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "style"
       }
     ]
   },
@@ -40,11 +50,18 @@
     "comments": [
       {
         "comment": "BlockedEmail.should_block_email? method has side effects during a read operation - it updates statistics even when just checking if an email should be blocked. This could cause race conditions in concurrent environments and makes the method name misleading.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "concurrency"
       },
       {
-        "comment": "Regex pattern @(#{domains}) only matches domain suffixes, not full domains. evil.example.com would match whitelist entry example.com.",
-        "severity": "Medium"
+        "comment": "The regex pattern @(#{domains}) in email_in_restriction_setting? method only matches domain suffixes, not full domains with proper boundary anchoring. An attacker can register evil.example.com to bypass a whitelist entry for example.com.",
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "The case-sensitive email lookup in `BlockedEmail.should_block?` creates a bypass risk, allowing 'User@Example.com' to bypass a block on 'user@example.com'. This can lead to unauthorized access to blocked users.",
+        "severity": "Critical",
+        "category": "security"
       }
     ]
   },
@@ -54,28 +71,44 @@
     "original_url": "https://github.com/discourse/discourse/commit/4f8aed295a29954023b2849c060ef4fb299d1b5d",
     "comments": [
       {
-        "comment": "SSRF vulnerability using open(url) without validation",
-        "severity": "Critical"
+        "comment": "The PollFeed job calls open(SiteSetting.feed_polling_url) without validating the URL, allowing an attacker who controls the feed_polling_url site setting to make the server fetch arbitrary internal or external URLs.",
+        "severity": "Critical",
+        "category": "security"
       },
       {
         "comment": "The current origin validation using indexOf is insufficient and can be bypassed. An attacker could use a malicious domain like evil-discourseUrl.com to pass this check.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "security"
       },
       {
         "comment": "postMessage targetOrigin should be the origin (scheme+host+port), not the full referrer URL; using the full URL will cause the message to be dropped and prevent resizing.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "security"
       },
       {
         "comment": "The code sets X-Frame-Options: ALLOWALL which completely disables clickjacking protection. The referer validation can be bypassed (referer headers are easily spoofed), and the fallback to empty string for nil referer masks validation failures.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "security"
       },
       {
         "comment": "The TopicEmbed.import method is susceptible to a NoMethodError if the contents parameter is nil when attempting to append a string, and an XSS vulnerability due to unescaped url interpolation in the generated HTML.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "The ERB block closes with end if, which is invalid Ruby/ERB and will raise at render; it should just be end to close the if block.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "Calling `i.content.scrub` assumes that `i.content` is always populated. However, many RSS feeds do not provide a `content` field, leading to a potential nil pointer exception when `i.content` is nil. A fallback to `description` should be implemented to prevent crashes.",
+        "severity": "High",
+        "category": "bug"
+      },
+      {
+        "comment": "An unescaped request header (request.referer) is interpolated into JavaScript without proper escaping, which can lead to XSS vulnerabilities if the referer contains malicious content. This issue can allow attackers to execute arbitrary scripts in the context of the application.",
+        "severity": "Critical",
+        "category": "security"
       }
     ]
   },
@@ -86,11 +119,18 @@
     "comments": [
       {
         "comment": "Mixing float: left with flexbox causes layout issues. Further this PR removes the float-based right alignment for .d-header .panel, which may cause the login panel in the non-Ember/noscript header (where .panel is nested inside .row and not a flex item) to stack under the title instead of remaining right-aligned.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
       },
       {
         "comment": "-ms-align-items never existed in any version of IE/Edge; the correct legacy property is -ms-flex-align.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
+      },
+      {
+        "comment": "-webkit-box-ordinal-group and -moz-box-ordinal-group require values starting from 1, not 0. If $val is 0, this will cause incorrect rendering in older browsers, leading to layout issues.",
+        "severity": "Medium",
+        "category": "bug"
       }
     ]
   },
@@ -101,7 +141,8 @@
     "comments": [
       {
         "comment": "The include_website_name method is missing the required ? suffix. Rails serializers expect include_ methods to end with ? for conditional attribute inclusion, a convention followed by other methods in this serializer. Without it, the website_name attribute may not be conditionally included as intended. Additionally, the '.' << website_host string concatenation should be replaced with '.' + website_host or '.#{website_host}' to avoid mutating string literals, which can lead to issues.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "api"
       }
     ]
   },
@@ -112,15 +153,28 @@
     "comments": [
       {
         "comment": "In .topic-meta-data h5 a, the original code had color: scale-color($primary, $lightness: 30%) but was changed to dark-light-choose(scale-color($primary, $lightness: 70%), scale-color($secondary, $lightness: 30%)). The lightness for the light theme changed from 30% to 70%, which is a dramatic inversion",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "style"
       },
       {
         "comment": "This change for desktop/user.css changes $primary from 30% to 50% for the light theme; most other changes preserve the original $primary value and move the complement to $secondary for dark. Consider reviewing this (also applies to a similar .name change in the mobile variant).",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "speculative"
       },
       {
         "comment": "In topic-post.css the original code used $lightness: 70% but the replacement uses $lightness: 30% for the light theme. This makes the text significantly darker than intended.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
+      },
+      {
+        "comment": "The light theme color for `.topic-meta-data h5 a` was changed from `scale-color($primary, $lightness: 30%)` to `scale-color($primary, $lightness: 70%)`, which may unintentionally reduce contrast and affect readability. This change should be reviewed to ensure it aligns with design intentions.",
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "In mobile/user.scss line 497, the lightness value for dark themes should be inverted to 70% instead of being changed to 50%. This change may lead to unintended visual regressions in light themes.",
+        "severity": "Medium",
+        "category": "bug"
       }
     ]
   },
@@ -131,15 +185,33 @@
     "comments": [
       {
         "comment": " The findMembers() call is now asynchronous and unhandled. The controller may not have member data immediately available, creating a race condition.",
-        "severity": "High"
+        "severity": "High",
+        "category": "concurrency"
       },
       {
         "comment": "In the next action, capping the next offset at user_count can produce an empty page (e.g., total equal to limit results in offset == total, showing 2/2 with no members). This can cause confusing UX on the last page.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
-        "comment": "HTTP method mismatch in .remove_member - test uses PUT but remove_member action expects DELETE",
-        "severity": "Medium"
+        "comment": "The remove_member test uses xhr :put to call the remove_member action, but the route defines delete 'members' => 'groups#remove_member' requiring DELETE method.",
+        "severity": "Medium",
+        "category": "api"
+      },
+      {
+        "comment": "The `totalPages` calculation using `Math.floor(user_count / limit) + 1` produces an extra page when `user_count` is an exact multiple of `limit`, leading to incorrect pagination. For example, with 100 users and a limit of 50, it reports 3 pages instead of 2, allowing navigation to an empty page.",
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "Expected to return a value at the end of function - code paths without explicit returns will return undefined",
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "The route provides the group's ID in params[:id], but the code attempts to read it from params[:group_id], causing the action to fail. This results in a broken feature when trying to access group memberships.",
+        "severity": "High",
+        "category": "bug"
       }
     ]
   },
@@ -149,12 +221,14 @@
     "original_url": "https://github.com/discourse/discourse/commit/ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293",
     "comments": [
       {
-        "comment": "Thread-safety issue with lazy @loaded_locales",
-        "severity": "Low"
+        "comment": "The @loaded_locales instance variable in translate_accelerator.rb is lazily initialized and accessed by multiple concurrent threads without synchronization.",
+        "severity": "Low",
+        "category": "concurrency"
       },
       {
         "comment": "Consider normalizing the input locale (e.g., to a symbol) when checking/loading here to avoid double-loading if the same locale is passed as a String vs Symbol (also applies to other locations in the PR).",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "perf"
       }
     ]
   },
@@ -164,20 +238,39 @@
     "original_url": "https://github.com/discourse/discourse/commit/d1c69189f3c90ecf56013a8da904da9bff9a8e19",
     "comments": [
       {
-        "comment": "NoMethodError before_validation in EmbeddableHost",
-        "severity": "Critical"
+        "comment": "The EmbeddableHost model's before_validation callback calls self.host.sub! to strip http://, https://, and path segments, but if self.host is nil, this raises NoMethodError.",
+        "severity": "Critical",
+        "category": "bug"
       },
       {
         "comment": "The update and destroy methods in Admin::EmbeddableHostsController do not validate the existence of the EmbeddableHost record retrieved by ID. If EmbeddableHost.where(id: params[:id]).first returns nil (i.e., the host does not exist), attempting to call methods on the nil object (e.g., save_host or destroy) will result in a NoMethodError.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "record_for_host compares lower(host) = ? but does not normalize the parameter’s case, so mixed‑case referer hosts may fail to match even though comparison intends to be case‑insensitive.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "Because this migration inserts embeddable_hosts rows with raw SQL, any existing embeddable_hosts values that include http:// or /https:// or path segments won’t go through the EmbeddableHost model’s normalization, so the new host lookup (which compares only the bare host) may fail for migrated data. Consider ensuring that migrated hosts are normalized to the same format as newly created EmbeddableHost records so existing embedding configurations keep working.",
-        "severity": "High"
+        "severity": "High",
+        "category": "data"
+      },
+      {
+        "comment": "The contents of `category_fabricator.rb` and `embeddable_host_fabricator.rb` have been swapped, resulting in the loss of original category fabricators and potentially causing errors in fabricator usage.",
+        "severity": "High",
+        "category": "bug"
+      },
+      {
+        "comment": "The SQL query in the `app/controllers/admin/embeddable_hosts_controller.rb` file uses string interpolation (`'#{h}'`) to insert values, which is vulnerable to SQL injection. It should use parameter binding or proper quoting to prevent this security vulnerability.",
+        "severity": "Critical",
+        "category": "security"
+      },
+      {
+        "comment": "The migration accesses execute(...)[0]['id'] without checking if the query returned any rows, which causes a crash when no embed_category setting exists. This can lead to a broken feature when attempting to edit category/host relationships.",
+        "severity": "High",
+        "category": "bug"
       }
     ]
   }

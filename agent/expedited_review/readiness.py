@@ -12,6 +12,7 @@ A failing check that GitHub does not require does not block the merge.
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import httpx2
@@ -59,11 +60,39 @@ class PullRequestSnapshot:
     open_swe_reviewed_head: bool = False
     allowed_merge_methods: list[str] = field(default_factory=list)
     approved_review_ids: frozenset[int] = frozenset()
+    # The latest time any check or status on the head finished.
+    checks_finished_at: datetime | None = None
+
+    @property
+    def green(self) -> bool:
+        """Open, not a draft, conflict-free, and every check passed with none still to report."""
+        return (
+            self.state == "open"
+            and not self.merged
+            and not self.draft
+            and self.mergeable is not False
+            and self.mergeable_state != "dirty"
+            and self.check_state == "success"
+            and not self.unreported_required_checks
+        )
 
 
 class _ReviewState(BaseModel):
     id: int | None = None
     state: str = ""
+
+
+class _CheckTimes(BaseModel):
+    completed_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+def _checks_finished_at(
+    check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
+) -> datetime | None:
+    stamps = [_CheckTimes.model_validate(run).completed_at for run in check_runs]
+    stamps += [_CheckTimes.model_validate(status).updated_at for status in statuses]
+    return max((stamp for stamp in stamps if stamp is not None), default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +176,16 @@ async def _fetch_reviews(
             page += 1
     except httpx2.HTTPError, ValueError:
         return None
+
+
+async def latest_review_states(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
+) -> dict[str, str] | None:
+    """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
+    reviews = await _fetch_reviews(client, owner, repo, number)
+    if reviews is None:
+        return None
+    return _latest_reviews_by_user(reviews, author)
 
 
 def _resolve_mergeability(
@@ -258,5 +297,6 @@ async def assess_readiness(
             for parsed in map(_ReviewState.model_validate, reviews)
             if parsed.state == "APPROVED" and parsed.id is not None
         ),
+        checks_finished_at=_checks_finished_at(check_runs, statuses),
     )
     return Readiness(snapshot=snapshot, blockers=readiness_blockers(snapshot))
