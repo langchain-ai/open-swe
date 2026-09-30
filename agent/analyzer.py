@@ -33,7 +33,6 @@ from agent.middleware import (
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeToolInputsMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
 from agent.prompts import apply_tool_descriptions, prompt
@@ -167,7 +166,6 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
                     exit_behavior="end",
                 ),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),

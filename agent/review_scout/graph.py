@@ -34,7 +34,6 @@ from agent.middleware import (
     SanitizeThinkingBlocksMiddleware,
     SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
@@ -269,7 +268,6 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
                 SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
