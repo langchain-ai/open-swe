@@ -215,7 +215,7 @@ async def read_required_checks(
             if len(page_rules) < 100:
                 break
             page += 1
-    except httpx2.HTTPError, ValueError, ValidationError:
+    except (httpx2.HTTPError, ValueError, ValidationError):
         logger.warning(
             "Failed to read required checks",
             extra={"repo_full_name": f"{owner}/{repo}", "branch": branch},

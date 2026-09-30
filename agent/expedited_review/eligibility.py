@@ -139,5 +139,5 @@ async def fetch_changed_files(
             response.raise_for_status()
             payload: object = response.json()
         return _CHANGED_FILES.validate_python(payload)
-    except httpx2.HTTPError, ValueError, ValidationError:
+    except (httpx2.HTTPError, ValueError, ValidationError):
         return None

@@ -40,7 +40,7 @@ class MCPTransport(httpx.AsyncBaseTransport):
             )
             try:
                 return await self._transport.handle_async_request(pinned)
-            except httpx.ConnectError, httpx.ConnectTimeout:
+            except (httpx.ConnectError, httpx.ConnectTimeout):
                 if index == len(public_ips) - 1:
                     raise
         raise httpx.ConnectError("MCP server has no public addresses")

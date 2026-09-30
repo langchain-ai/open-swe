@@ -135,7 +135,7 @@ async def _github_account(login: str, token: str) -> _GithubAccount | None:
             response = await github_request(client, "GET", url)
             response.raise_for_status()
             return _GithubAccount.model_validate(response.json())
-    except httpx2.HTTPError, ValueError, ValidationError:
+    except (httpx2.HTTPError, ValueError, ValidationError):
         logger.warning(
             "Could not look up a GitHub account for a legacy user mapping",
             extra={"github_login": login},

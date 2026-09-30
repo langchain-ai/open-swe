@@ -36,7 +36,7 @@ def _timestamp(value: object) -> datetime | None:
     if isinstance(value, int | float) and math.isfinite(value) and value > 0:
         try:
             return datetime.fromtimestamp(value / 1000 if value > 10_000_000_000 else value, UTC)
-        except OverflowError, OSError, ValueError:
+        except (OverflowError, OSError, ValueError):
             return None
     if isinstance(value, str) and value.strip():
         try:

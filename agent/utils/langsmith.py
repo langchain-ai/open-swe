@@ -255,7 +255,7 @@ async def get_open_swe_thread_id_from_langsmith(locator: str) -> str | None:
     if parsed is None:
         try:
             run_id = str(uuid.UUID(locator.strip()))
-        except ValueError, AttributeError:
+        except (ValueError, AttributeError):
             return None
         parsed = LangSmithLocator(kind="run", id=run_id)
     if parsed.kind == "thread":
@@ -378,7 +378,7 @@ async def get_langsmith_thread_cost(
         return None
     try:
         total_cost = float(raw_cost)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     last_end_time = _parse_langsmith_time(_langsmith_value(stats, "last_end_time"))
     target_end_time = max(matched_roots.values())

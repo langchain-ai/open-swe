@@ -150,7 +150,7 @@ class MergeAction(_PullRequestActionBase):
             response = await github_request(client, "GET", f"{GITHUB_API_BASE}/user")
             response.raise_for_status()
             merger = GitHubUser.model_validate(response.json()).login
-        except httpx2.HTTPError, ValueError, ValidationError:
+        except (httpx2.HTTPError, ValueError, ValidationError):
             logger.warning(
                 "Could not read the merging user; keeping them as a co-author",
                 extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
@@ -326,7 +326,7 @@ async def _resolve_review_thread(client: httpx2.AsyncClient, thread_id: str) -> 
             json={"query": _RESOLVE_THREAD_MUTATION, "variables": {"threadId": thread_id}},
         )
         payload = response.json()
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError):
         logger.warning(
             "Failed to resolve review thread",
             extra={"review_thread_id": thread_id},

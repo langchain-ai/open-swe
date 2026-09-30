@@ -219,7 +219,7 @@ async def _fetch_public_github_profile(login: str) -> GitHubPublicProfile | None
             )
             return None
         payload = response.json()
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError):
         logger.debug("Failed to resolve GitHub public profile for %s", login, exc_info=True)
         return None
     user_id = _positive_int(payload.get("id"))

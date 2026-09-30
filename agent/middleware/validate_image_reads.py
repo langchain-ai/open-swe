@@ -50,7 +50,7 @@ def _image_block_head(block: Any) -> bytes | None:
         return None
     try:
         return base64.b64decode(encoded[:24] + "==")[:12]
-    except binascii.Error, ValueError:
+    except (binascii.Error, ValueError):
         return b""
 
 

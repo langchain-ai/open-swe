@@ -184,7 +184,7 @@ class DiffFile:
             old_part, new_part = ranges.split(" ")
             old = int(old_part.lstrip("-").split(",")[0])
             new = int(new_part.lstrip("+").split(",")[0])
-        except IndexError, ValueError:
+        except (IndexError, ValueError):
             logger.warning("Unparsable diff hunk header", extra={"hunk_header": header})
             return 1, 1
         return old, new

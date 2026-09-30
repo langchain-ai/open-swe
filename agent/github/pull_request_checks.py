@@ -163,7 +163,7 @@ async def get_pull_request_check_states(
             )
             response.raise_for_status()
             payload = response.json()
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError):
         payload = None
 
     data = payload.get("data") if isinstance(payload, Mapping) else None

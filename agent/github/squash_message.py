@@ -80,7 +80,7 @@ class SquashSource(BaseModel):
                 commits.extend(listed)
                 if len(listed) < _COMMITS_PER_PAGE:
                     break
-        except httpx2.HTTPError, ValueError, ValidationError:
+        except (httpx2.HTTPError, ValueError, ValidationError):
             logger.warning(
                 "Could not build squash commit message; using GitHub's default",
                 extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},

@@ -161,7 +161,7 @@ async def request_with_safe_redirects(
                         **request_kwargs,
                     )
                 break
-            except httpx2.ConnectError, httpx2.ConnectTimeout:
+            except (httpx2.ConnectError, httpx2.ConnectTimeout):
                 if address_index == len(pinned_ips) - 1:
                     raise
 

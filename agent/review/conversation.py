@@ -112,7 +112,7 @@ def _error_message(response: httpx2.Response) -> str:
     fallback = f"GitHub request failed ({response.status_code})"
     try:
         error = _GitHubError.model_validate(response.json())
-    except ValueError, ValidationError:
+    except (ValueError, ValidationError):
         return fallback
     details = "; ".join(
         str(item["message"]) if isinstance(item, dict) and "message" in item else str(item)

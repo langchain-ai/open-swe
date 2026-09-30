@@ -45,7 +45,7 @@ def decode_turn_cursor(encoded: str) -> TurnPageCursor | None:
     padded = encoded + "=" * (-len(encoded) % 4)
     try:
         parsed = json.loads(base64.urlsafe_b64decode(padded.encode()))
-    except binascii.Error, UnicodeDecodeError, ValueError:
+    except (binascii.Error, UnicodeDecodeError, ValueError):
         return None
     if not isinstance(parsed, dict):
         return None

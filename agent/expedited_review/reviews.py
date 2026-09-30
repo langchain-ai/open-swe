@@ -67,7 +67,7 @@ async def submit_approval(
             data = response.json()
     except httpx2.HTTPStatusError as exc:
         return f"GitHub rejected @{login}'s review: {github_error(exc.response)}"
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError):
         return f"GitHub did not answer when submitting @{login}'s review."
     review_id = data.get("id") if isinstance(data, dict) else None
     if not isinstance(review_id, int):

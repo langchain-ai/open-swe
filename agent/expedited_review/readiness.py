@@ -174,7 +174,7 @@ async def _fetch_reviews(
             if len(data) < 100:
                 return collected
             page += 1
-    except httpx2.HTTPError, ValueError:
+    except (httpx2.HTTPError, ValueError):
         return None
 
 
