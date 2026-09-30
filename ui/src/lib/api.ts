@@ -713,7 +713,6 @@ export interface WorkspaceCreate {
   kitchen_channel_ids?: Array<string>
 }
 
-/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export type JsonValue =
   | string
   | number
@@ -722,6 +721,7 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
+/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
   create_params?: Record<string, JsonValue>
   name?: string
