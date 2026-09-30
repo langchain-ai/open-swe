@@ -1,8 +1,6 @@
 import logging
-import re
 from importlib import resources
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from agent.config import ENV
 from agent.prompts import prompt
@@ -112,32 +110,13 @@ def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
 
 
 def _deployment_context() -> tuple[str, str]:
-    """Identify the agent service deployment from explicit configuration or known hosts."""
+    """Identify the agent service deployment from explicit configuration."""
     if configured := ENV.OPENSWE_ENV.optional():
         environment = configured.lower()
         return "production" if environment == "prod" else environment, "OPENSWE_ENV"
     if ENV.LANGSMITH_LANGGRAPH_API_VARIANT.optional() == "local_dev":
         return "local", "LANGSMITH_LANGGRAPH_API_VARIANT"
-    for variable in (ENV.LANGGRAPH_URL, ENV.DASHBOARD_API_BASE_URL, ENV.DASHBOARD_BASE_URL):
-        if not (value := variable.optional()):
-            continue
-        try:
-            hostname = urlsplit(value).hostname or ""
-        except ValueError:
-            logger.warning("Invalid deployment URL", extra={"env_var": variable.name})
-            continue
-        if hostname in {"localhost", "127.0.0.1", "::1"}:
-            return "local", variable.name
-        for deployment, environment in (
-            ("open-swe-preview", "preview"),
-            ("open-swe-staging-v2", "staging"),
-            ("open-swe-v3", "production"),
-        ):
-            if re.fullmatch(rf"{deployment}-[a-f0-9]+\.us\.langgraph\.app", hostname):
-                return environment, variable.name
-        if hostname == "openswe.langchain.dev":
-            return "production", variable.name
-    return "unknown", "no explicit environment or recognized deployment host"
+    return "unknown", "no explicit environment or local runtime marker"
 
 
 def construct_system_prompt(

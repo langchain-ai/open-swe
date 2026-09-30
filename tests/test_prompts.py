@@ -10,32 +10,14 @@ from agent.prompts import apply_tool_descriptions, load_prompt, prompt
     ("environ", "expected"),
     [
         (
-            {"OPENSWE_ENV": " preview ", "LANGGRAPH_URL": "https://openswe.langchain.dev"},
+            {"OPENSWE_ENV": " preview ", "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev"},
             ("preview", "OPENSWE_ENV"),
         ),
         (
-            {
-                "LANGGRAPH_URL": "https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app",
-                "DASHBOARD_BASE_URL": "https://openswe.langchain.dev",
-            },
-            ("staging", "LANGGRAPH_URL"),
-        ),
-        (
-            {
-                "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev",
-                "DASHBOARD_BASE_URL": "https://openswe.langchain.dev",
-            },
+            {"LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev"},
             ("local", "LANGSMITH_LANGGRAPH_API_VARIANT"),
         ),
-        (
-            {"DASHBOARD_BASE_URL": "https://openswe.langchain.dev"},
-            ("production", "DASHBOARD_BASE_URL"),
-        ),
-        (
-            {"LANGGRAPH_URL": "https://open-swe-preview-abc.us.langgraph.app.example.com"},
-            ("unknown", "no explicit environment or recognized deployment host"),
-        ),
-        ({}, ("unknown", "no explicit environment or recognized deployment host")),
+        ({}, ("unknown", "no explicit environment or local runtime marker")),
     ],
 )
 def test_deployment_context(
