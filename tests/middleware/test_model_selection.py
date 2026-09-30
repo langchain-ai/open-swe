@@ -1,6 +1,6 @@
 import json
 from typing import Any, Literal, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
@@ -250,3 +250,48 @@ async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.M
     assert state["model_route"] == "default"
     assert (await _invoke(middleware, dict(state))).model is default
     jev.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_before_model_tags_the_route_on_the_root_run() -> None:
+    """The route must be queryable from the ROOT run of the deciding turn.
+
+    `abefore_model` returns the route as a state update, which only reaches the
+    root run's metadata on SUBSEQUENT turns — so a thread's first turn, and
+    therefore every single-turn thread, had no route on its root run.
+    Single-turn threads were 43% of routed traffic, so their per-tier cost was
+    missing from every `is_root=true` analysis.
+    """
+    middleware, _ = _middleware(routing_mode="fast")
+    tagged: list[dict[str, str]] = []
+    with patch(
+        "agent.middleware.model_selection.tag_root_run_metadata",
+        side_effect=tagged.append,
+    ):
+        update = await middleware.abefore_model(
+            cast(Any, {"messages": [HumanMessage(content="hi")]}), MagicMock()
+        )
+    assert update == {"model_route": "fast"}
+    assert tagged == [{"open_swe_model_route": "fast"}]
+
+
+@pytest.mark.asyncio
+async def test_unexpected_route_is_not_tagged() -> None:
+    """Only allowlisted route values reach telemetry."""
+    middleware, _ = _middleware(routing_mode="auto")
+    tagged: list[dict[str, str]] = []
+    with (
+        patch.object(middleware, "select_route", new=AsyncMock(return_value="not-a-route")),
+        patch(
+            "agent.middleware.model_selection._emit_routed_model",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "agent.middleware.model_selection.tag_root_run_metadata",
+            side_effect=tagged.append,
+        ),
+    ):
+        await middleware.abefore_model(
+            cast(Any, {"messages": [HumanMessage(content="hi")]}), MagicMock()
+        )
+    assert tagged == []
