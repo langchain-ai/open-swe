@@ -415,6 +415,50 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("saves sandbox sizes in bytes and clears inherited sizes", async () => {
+    mockApis()
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(RECORD)
+    renderPage()
+    fireEvent.change(await screen.findByLabelText("vCPUs"), {
+      target: { value: "8" },
+    })
+    fireEvent.change(screen.getByLabelText("Memory (GiB)"), {
+      target: { value: "32" },
+    })
+    fireEvent.change(screen.getByLabelText("Disk (GiB)"), {
+      target: { value: "256" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: 8,
+        mem_bytes: 32 * 1024 ** 3,
+        fs_capacity_bytes: 256 * 1024 ** 3,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Save sandbox configuration" })
+          .hasAttribute("disabled")
+      ).toBe(false)
+    )
+    for (const label of ["vCPUs", "Memory (GiB)", "Disk (GiB)"])
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: null,
+        mem_bytes: null,
+        fs_capacity_bytes: null,
+      })
+    )
+  })
+
   it("edits proxy configuration without losing other sandbox create parameters", async () => {
     const record = {
       ...RECORD,
