@@ -22,7 +22,7 @@ TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
 OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
-OPENAI_API_KEY_PLACEHOLDER = "open-swe-sandbox"
+OPENAI_API_KEY_PLACEHOLDER = "sk-7kP9mT2vR5xN8qL4bH6wC3jF1dS0aG9uE2zY5rV8nM4pQ6tK"
 SANDBOX_HOST_THREAD_KEY = "sandbox_host_thread_id"
 SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
