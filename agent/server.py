@@ -1161,7 +1161,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 attribution_route = (
                     "default"
                     if requested_model
-                    else await self._model_selection.select_route(routing_state)
+                    else await self._model_selection.aselect_route(routing_state)
                 )
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[

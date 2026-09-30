@@ -1,16 +1,14 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Literal, NotRequired, cast
 
 from langchain.agents.middleware import (
     ModelRoutingConfig,
     ModelRoutingInput,
     ModelRoutingMiddleware,
+    ModelRoutingState,
 )
 from langchain.agents.middleware.types import (
-    AgentState,
-    ModelRequest,
-    ModelResponse,
     OmitFromOutput,
 )
 from langchain_core.language_models import BaseChatModel
@@ -20,7 +18,7 @@ from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from agent.input_messages import input_message_text, message_sender_id
-from agent.middleware.trace import OpenSWEMiddleware
+from agent.middleware.trace import SCRUBBED_TRACE_POLICY
 from agent.prompts import prompt
 from agent.utils.jev import select_jev_choice
 
@@ -71,20 +69,11 @@ async def _classify_route(inputs: ModelRoutingInput) -> str:
     )
 
 
-def _routing_messages(request: ModelRequest) -> list[HumanMessage]:
-    return [HumanMessage(content=_latest_human_task(request.messages)[-8_000:])]
+def _routing_messages(state: ModelRoutingState) -> list[HumanMessage]:
+    return [HumanMessage(content=_latest_human_task(state["messages"])[-8_000:])]
 
 
-class _TurnModelRouter(ModelRoutingMiddleware):
-    async def aselect_route(self, request: ModelRequest) -> str:
-        if route := request.state.get("model_route"):
-            normalized = normalize_route(cast(PersistedRoute, route))
-            return normalized if normalized in self.models else "default"
-        return await super().aselect_route(request)
-
-
-class ModelSelectionState(AgentState):
-    model_route: NotRequired[PersistedRoute]
+class ModelSelectionState(ModelRoutingState):
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
@@ -111,9 +100,9 @@ async def _emit_routed_model(
         logger.debug("Failed to emit model_routed event", exc_info=True)
 
 
-class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
+class ModelSelectionMiddleware(ModelRoutingMiddleware):
     state_schema = ModelSelectionState
-    transformers = ModelRoutingMiddleware.transformers
+    trace_policy = SCRUBBED_TRACE_POLICY
 
     def __init__(
         self,
@@ -132,14 +121,13 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             for route in ROUTES
         }
         configs["default"] = {"model": default_model, "criteria": ""}
-        self._router = _TurnModelRouter(
+        super().__init__(
             models=configs,
             decision_model=RunnableLambda(_classify_route),
             system_prompt=prompt("model-selection/instructions"),
             input_extractor=_routing_messages,
             fallback_route="default",
         )
-        self._models = self._router.models
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
         self._requested_model_factory = requested_model_factory
@@ -150,48 +138,26 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             raise ValueError("Requested model selection is not enabled")
         if model_id not in self._requested_models:
             self._requested_models[model_id] = self._requested_model_factory(model_id)
-        self._models["default"] = self._requested_models[model_id]
+        self.models["default"] = self._requested_models[model_id]
         self._route_model_ids["default"] = model_id
 
-    async def select_route(
-        self,
-        state: ModelSelectionState,
-    ) -> SelectedRoute:
-        """Select the model route for a turn."""
-        if requested_model := state.get("requested_model"):
-            if self._requested_model_factory is not None:
-                self.use_requested_model(requested_model)
-                return "default"
+    async def aselect_route(self, state: ModelRoutingState) -> str:
+        requested_model = state.get("requested_model")
+        if isinstance(requested_model, str) and self._requested_model_factory is not None:
+            self.use_requested_model(requested_model)
+            return "default"
         if self._routing_mode is None:
             return "default"
-        if model_route := state.get("model_route"):
-            return normalize_route(model_route)
-        if self._routing_mode == "fast":
+        if state.get("model_route") == "fast_alt":
             return "fast"
-        request = ModelRequest(
-            model=self._models["default"],
-            messages=state.get("messages", []),
-            state=state,
-        )
-        return cast(SelectedRoute, await self._router.aselect_route(request))
+        if self._routing_mode == "fast" and not state.get("model_route"):
+            return "fast"
+        return await super().aselect_route(state)
 
-    async def abefore_model(
-        self,
-        state: ModelSelectionState,
-        runtime: Runtime,
-    ) -> dict[str, SelectedRoute]:
-        del runtime
-        route = await self.select_route(state)
+    async def abefore_model(self, state: ModelRoutingState, runtime: Runtime) -> dict[str, str]:
+        update = await super().abefore_model(state, runtime)
         if self._routing_mode == "auto" or state.get("requested_model"):
-            await _emit_routed_model(self._models, self._route_model_ids, route)
-        return {"model_route": route}
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        if request.state.get("model_route"):
-            return await self._router.awrap_model_call(request, handler)
-        state = cast(ModelSelectionState, {**request.state, "model_route": "default"})
-        return await self._router.awrap_model_call(request.override(state=state), handler)
+            await _emit_routed_model(
+                self.models, self._route_model_ids, cast(SelectedRoute, update["model_route"])
+            )
+        return update

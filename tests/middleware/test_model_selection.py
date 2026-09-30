@@ -186,7 +186,7 @@ async def test_jev_routes_or_falls_back(
     )
     middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
-    route = await middleware.select_route(state)
+    route = await middleware.aselect_route(state)
     assert route == ("default" if failure else "fast")
     assert len(requests) == 1
     assert requests[0].url == (
@@ -202,7 +202,7 @@ async def test_jev_routes_or_falls_back(
     assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")
     assert payload["questions"]["route"]["type"] == "choice"
     state["model_route"] = route
-    assert await middleware.select_route(state) == route
+    assert await middleware.aselect_route(state) == route
     assert len(requests) == 1
 
 

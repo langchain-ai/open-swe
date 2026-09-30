@@ -263,10 +263,10 @@ async def test_router_failure_uses_same_model_as_routing_off() -> None:
         for item in cast(list[object], agent["middleware"])
         if type(item).__name__ == "ModelSelectionMiddleware"
     )
-    route = await model_selection.select_route({"messages": []})
+    route = await model_selection.aselect_route({"messages": []})
 
     assert route == "default"
-    assert model_selection._models[route] is agent["model"]
+    assert model_selection.models[route] is agent["model"]
     assert agent["make_model_calls"][0][0] == "anthropic:claude-opus-5-5"
 
 
@@ -690,8 +690,8 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     for agent in (captured, followup_agent):
         middleware = cast(list[object], agent["middleware"])
         selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
-        assert await selection.select_route({"messages": []}) == "default"
-        assert selection._models["default"] is agent["model"]
+        assert await selection.aselect_route({"messages": []}) == "default"
+        assert selection.models["default"] is agent["model"]
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
