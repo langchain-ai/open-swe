@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "APIKeyInput": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "format": "password",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string",
+            "writeOnly": true
+          },
+          "region": {
+            "$ref": "#/components/schemas/Region",
+            "default": "us"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "APIKeyInput",
+        "type": "object"
+      },
       "AddressCommentIntent": {
         "properties": {
           "comment_url": {
@@ -2932,6 +2966,15 @@
         "title": "RefreshStep",
         "type": "object"
       },
+      "Region": {
+        "enum": [
+          "us",
+          "eu",
+          "apac"
+        ],
+        "title": "Region",
+        "type": "string"
+      },
       "RepositoryConfiguration": {
         "description": "Settings to change on one repository. Anything left out keeps its value.",
         "properties": {
@@ -3908,6 +3951,75 @@
           "text"
         ],
         "title": "SlashCommandResponse",
+        "type": "object"
+      },
+      "Status": {
+        "properties": {
+          "connected": {
+            "default": false,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "enum": [
+                  "oauth",
+                  "api_key"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "reconnect_required": {
+            "default": false,
+            "title": "Reconnect Required",
+            "type": "boolean"
+          },
+          "region": {
+            "$ref": "#/components/schemas/Region",
+            "default": "us"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          }
+        },
+        "title": "Status",
         "type": "object"
       },
       "SubmittedReview": {
@@ -7504,6 +7616,196 @@
         ]
       }
     },
+    "/dashboard/api/langsmith/callback": {
+      "get": {
+        "operationId": "callback_dashboard_api_langsmith_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Callback",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/desktop/exchange": {
+      "post": {
+        "operationId": "desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/login": {
+      "get": {
+        "operationId": "login_dashboard_api_langsmith_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Region",
+              "default": "us"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -8003,6 +8305,88 @@
         "tags": [
           "dashboard",
           "user-preferences"
+        ]
+      }
+    },
+    "/dashboard/api/my-credentials/langsmith": {
+      "delete": {
+        "operationId": "disconnect_dashboard_api_my_credentials_langsmith_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Disconnect",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      },
+      "get": {
+        "operationId": "get_status_dashboard_api_my_credentials_langsmith_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      },
+      "put": {
+        "operationId": "save_api_key_dashboard_api_my_credentials_langsmith_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIKeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Api Key",
+        "tags": [
+          "dashboard",
+          "langsmith"
         ]
       }
     },
