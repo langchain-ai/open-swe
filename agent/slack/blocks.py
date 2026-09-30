@@ -23,6 +23,7 @@ CODE_TEXT_MAX_CHARS = 4000
 MARKDOWN_TEXT_MAX_CHARS = 12000
 MESSAGE_MAX_BLOCKS = 50
 BUTTON_TEXT_MAX_CHARS = 75
+OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
 
@@ -94,9 +95,42 @@ class ButtonElement(TypedDict):
     style: NotRequired[ButtonStyle]
 
 
+class SelectOption(TypedDict):
+    text: PlainText
+    value: str
+
+
+class StaticSelect(TypedDict):
+    type: Literal["static_select"]
+    action_id: str
+    options: list[SelectOption]
+    initial_option: NotRequired[SelectOption]
+    placeholder: NotRequired[PlainText]
+
+
+type ConversationKind = Literal["public", "private", "im", "mpim"]
+
+
+class ConversationFilter(TypedDict, total=False):
+    include: list[ConversationKind]
+    exclude_external_shared_channels: bool
+    exclude_bot_users: bool
+
+
+class ConversationsSelect(TypedDict):
+    type: Literal["conversations_select"]
+    action_id: str
+    filter: NotRequired[ConversationFilter]
+    placeholder: NotRequired[PlainText]
+
+
+type ActionElement = ButtonElement | StaticSelect
+
+
 class ActionsBlock(TypedDict):
     type: Literal["actions"]
-    elements: list[ButtonElement]
+    elements: list[ActionElement]
+    block_id: NotRequired[str]
 
 
 class FeedbackButton(TypedDict):
@@ -129,7 +163,7 @@ class InputBlock(TypedDict):
     type: Literal["input"]
     block_id: str
     label: PlainText
-    element: PlainTextInput
+    element: PlainTextInput | ConversationsSelect
     optional: NotRequired[bool]
 
 
@@ -236,8 +270,54 @@ def button(
     return element
 
 
-def actions(*elements: ButtonElement) -> ActionsBlock:
-    return {"type": "actions", "elements": list(elements)}
+def actions(*elements: ActionElement, block_id: str | None = None) -> ActionsBlock:
+    block: ActionsBlock = {"type": "actions", "elements": list(elements)}
+    if block_id is not None:
+        block["block_id"] = block_id
+    return block
+
+
+def option(text: str, value: str) -> SelectOption:
+    return {"text": plain_text(text[:OPTION_TEXT_MAX_CHARS]), "value": value}
+
+
+def static_select(
+    *,
+    action_id: str,
+    options: Sequence[SelectOption],
+    initial: SelectOption | None = None,
+    placeholder: str | None = None,
+) -> StaticSelect:
+    element: StaticSelect = {
+        "type": "static_select",
+        "action_id": action_id,
+        "options": list(options),
+    }
+    if initial is not None:
+        element["initial_option"] = initial
+    if placeholder is not None:
+        element["placeholder"] = plain_text(placeholder)
+    return element
+
+
+def conversation_input(
+    *, block_id: str, label: str, action_id: str, include: Sequence[ConversationKind]
+) -> InputBlock:
+    """A required channel picker for a modal; external shared channels are never offered."""
+    return {
+        "type": "input",
+        "block_id": block_id,
+        "label": plain_text(label),
+        "element": {
+            "type": "conversations_select",
+            "action_id": action_id,
+            "filter": {
+                "include": list(include),
+                "exclude_external_shared_channels": True,
+                "exclude_bot_users": True,
+            },
+        },
+    }
 
 
 def text_input(

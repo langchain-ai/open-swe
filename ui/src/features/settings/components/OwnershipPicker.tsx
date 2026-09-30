@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export interface PickerOwner {
@@ -61,6 +62,7 @@ export interface OwnershipPickerProps {
   filters?: Array<PickerFilter>
   manual?: ManualEntry
   loading?: boolean
+  actions?: ReactNode
   loadError?: string | null
   /** A caveat about the directory itself, shown above the rows. */
   notice?: string | null
@@ -99,6 +101,7 @@ export function OwnershipPicker({
   filters,
   manual,
   loading = false,
+  actions,
   loadError = null,
   notice = null,
   disabled = false,
@@ -262,6 +265,7 @@ export function OwnershipPicker({
           </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+          {actions}
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
               className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"
@@ -372,7 +376,21 @@ export function OwnershipPicker({
         )}
         <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
           <span className="text-xs text-muted-foreground">
-            {hiddenCount > 0 ? `${hiddenCount} hidden by the filter` : ""}
+            {hiddenCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">
+                  {hiddenCount} hidden by the filter
+                </TooltipTrigger>
+                <TooltipPopup className="max-w-64">
+                  Hidden by{" "}
+                  {[filterActive && filter.label, categoryFilter?.label]
+                    .filter(Boolean)
+                    .map((label) => `“${label}”`)
+                    .join(" and ")}
+                  . Change the filters above to show more {pluralNoun}.
+                </TooltipPopup>
+              </Tooltip>
+            )}
           </span>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>

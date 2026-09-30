@@ -357,6 +357,10 @@ export function AgentsHome({
   }
 
   const handleSelectLocalRepo = (cwd: string) => {
+    if (cwd !== localRepoPath) {
+      setLocalRepoBranch(null)
+      setLocalRepoBranches([])
+    }
     setLocalRepoPath(cwd)
     setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_REPO_KEY, cwd)

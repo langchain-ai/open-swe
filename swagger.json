@@ -845,6 +845,19 @@
         "title": "ConversationCommentCreate",
         "type": "object"
       },
+      "ConversationRef": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ConversationRef",
+        "type": "object"
+      },
       "ConversationReview": {
         "properties": {
           "author": {
@@ -905,6 +918,140 @@
           "inline_comment_count"
         ],
         "title": "ConversationReview",
+        "type": "object"
+      },
+      "CreateResponseRequest": {
+        "properties": {
+          "background": {
+            "default": false,
+            "title": "Background",
+            "type": "boolean"
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ConversationRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InputItem"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Input"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "model": {
+            "default": "open-swe",
+            "title": "Model",
+            "type": "string"
+          },
+          "previous_response_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Response Id"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasoningParam"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stream": {
+            "default": false,
+            "title": "Stream",
+            "type": "boolean"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/RequestTool"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "CreateResponseRequest",
+        "type": "object"
+      },
+      "CustomToolCallItem": {
+        "properties": {
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input": {
+            "title": "Input",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "const": "completed",
+            "default": "completed",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "custom_tool_call",
+            "default": "custom_tool_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "call_id",
+          "name",
+          "input"
+        ],
+        "title": "CustomToolCallItem",
         "type": "object"
       },
       "DashboardImageBody": {
@@ -1068,6 +1215,47 @@
         "title": "FixIntent",
         "type": "object"
       },
+      "FunctionCallItem": {
+        "description": "A call the client runs itself and answers with a ``function_call_output``.",
+        "properties": {
+          "arguments": {
+            "title": "Arguments",
+            "type": "string"
+          },
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "const": "completed",
+            "default": "completed",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "function_call",
+            "default": "function_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "call_id",
+          "name",
+          "arguments"
+        ],
+        "title": "FunctionCallItem",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1207,6 +1395,139 @@
         ],
         "title": "IncidentSettingsBody",
         "type": "object"
+      },
+      "IncompleteDetails": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "IncompleteDetails",
+        "type": "object"
+      },
+      "InputContentPart": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "InputContentPart",
+        "type": "object"
+      },
+      "InputItem": {
+        "properties": {
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InputContentPart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InputContentPart"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "default": "message",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "InputItem",
+        "type": "object"
+      },
+      "InputTokensDetails": {
+        "properties": {
+          "cached_tokens": {
+            "default": 0,
+            "title": "Cached Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "InputTokensDetails",
+        "type": "object"
+      },
+      "ItemStatus": {
+        "enum": [
+          "in_progress",
+          "completed",
+          "incomplete"
+        ],
+        "type": "string"
       },
       "JsonValue": {},
       "MCPConnectionPublic": {
@@ -1473,6 +1794,74 @@
         "title": "MarkReadyAction",
         "type": "object"
       },
+      "McpCallItem": {
+        "properties": {
+          "arguments": {
+            "title": "Arguments",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "server_label": {
+            "default": "open-swe",
+            "title": "Server Label",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpCallStatus",
+            "default": "in_progress"
+          },
+          "type": {
+            "const": "mcp_call",
+            "default": "mcp_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "arguments"
+        ],
+        "title": "McpCallItem",
+        "type": "object"
+      },
+      "McpCallStatus": {
+        "enum": [
+          "in_progress",
+          "completed",
+          "failed"
+        ],
+        "type": "string"
+      },
       "MergeAction": {
         "properties": {
           "action": {
@@ -1501,6 +1890,42 @@
           "merge_method"
         ],
         "title": "MergeAction",
+        "type": "object"
+      },
+      "MessageItem": {
+        "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/OutputText"
+            },
+            "title": "Content",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "const": "assistant",
+            "default": "assistant",
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ItemStatus",
+            "default": "in_progress"
+          },
+          "type": {
+            "const": "message",
+            "default": "message",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "MessageItem",
         "type": "object"
       },
       "MessageRole": {
@@ -1687,6 +2112,57 @@
           "secret"
         ],
         "title": "MintedApiKey",
+        "type": "object"
+      },
+      "ModelList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelObject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ModelList",
+        "type": "object"
+      },
+      "ModelObject": {
+        "properties": {
+          "created": {
+            "default": 0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "const": "model",
+            "default": "model",
+            "title": "Object",
+            "type": "string"
+          },
+          "owned_by": {
+            "default": "open-swe",
+            "title": "Owned By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelObject",
         "type": "object"
       },
       "OpenPullRequest": {
@@ -1937,6 +2413,70 @@
           "title"
         ],
         "title": "OpenThreadIntent",
+        "type": "object"
+      },
+      "OutputItem": {
+        "discriminator": {
+          "mapping": {
+            "custom_tool_call": "#/components/schemas/CustomToolCallItem",
+            "function_call": "#/components/schemas/FunctionCallItem",
+            "mcp_call": "#/components/schemas/McpCallItem",
+            "message": "#/components/schemas/MessageItem",
+            "web_search_call": "#/components/schemas/WebSearchCallItem"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MessageItem"
+          },
+          {
+            "$ref": "#/components/schemas/McpCallItem"
+          },
+          {
+            "$ref": "#/components/schemas/WebSearchCallItem"
+          },
+          {
+            "$ref": "#/components/schemas/FunctionCallItem"
+          },
+          {
+            "$ref": "#/components/schemas/CustomToolCallItem"
+          }
+        ]
+      },
+      "OutputText": {
+        "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "output_text",
+            "default": "output_text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "OutputText",
+        "type": "object"
+      },
+      "OutputTokensDetails": {
+        "properties": {
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "OutputTokensDetails",
         "type": "object"
       },
       "PendingReview": {
@@ -2425,6 +2965,17 @@
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
           },
+          "review_channel_watch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Watch"
+          },
           "review_draft_prs": {
             "anyOf": [
               {
@@ -2859,6 +3410,23 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "ReasoningParam": {
+        "properties": {
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effort"
+          }
+        },
+        "title": "ReasoningParam",
+        "type": "object"
+      },
       "RefreshStep": {
         "description": "One stage of a refresh \u2014 booting the builder, a script, the capture.\n\nRecorded as it happens so a poll mid-rebuild can say how far it got. A\nrebuild is minutes to an hour, and a single terminal status at the end is\nnot enough to tell slow from wedged.",
         "properties": {
@@ -3022,6 +3590,69 @@
         "title": "RequestResult",
         "type": "object"
       },
+      "RequestTool": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "RequestTool",
+        "type": "object"
+      },
       "ResolveReviewThreads": {
         "properties": {
           "thread_ids": {
@@ -3063,6 +3694,155 @@
         ],
         "title": "ResolveReviewThreadsResult",
         "type": "object"
+      },
+      "Response": {
+        "properties": {
+          "background": {
+            "default": false,
+            "title": "Background",
+            "type": "boolean"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/ConversationRef"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "incomplete_details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncompleteDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "response",
+            "default": "response",
+            "title": "Object",
+            "type": "string"
+          },
+          "output": {
+            "items": {
+              "$ref": "#/components/schemas/OutputItem"
+            },
+            "title": "Output",
+            "type": "array"
+          },
+          "parallel_tool_calls": {
+            "default": false,
+            "title": "Parallel Tool Calls",
+            "type": "boolean"
+          },
+          "previous_response_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Response Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ResponseStatus"
+          },
+          "store": {
+            "default": true,
+            "title": "Store",
+            "type": "boolean"
+          },
+          "tool_choice": {
+            "const": "auto",
+            "default": "auto",
+            "title": "Tool Choice",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "status",
+          "model",
+          "conversation"
+        ],
+        "title": "Response",
+        "type": "object"
+      },
+      "ResponseError": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ResponseError",
+        "type": "object"
+      },
+      "ResponseStatus": {
+        "enum": [
+          "queued",
+          "in_progress",
+          "completed",
+          "failed",
+          "incomplete",
+          "cancelled"
+        ],
+        "type": "string"
       },
       "ReviewCommentUpdate": {
         "properties": {
@@ -3459,6 +4239,15 @@
         ],
         "title": "ReviewSummaryRef",
         "type": "object"
+      },
+      "Role": {
+        "enum": [
+          "user",
+          "assistant",
+          "system",
+          "developer"
+        ],
+        "type": "string"
       },
       "ScheduleCreateBody": {
         "properties": {
@@ -4422,6 +5211,33 @@
         "title": "UpdateBranchAction",
         "type": "object"
       },
+      "Usage": {
+        "properties": {
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "input_tokens_details": {
+            "$ref": "#/components/schemas/InputTokensDetails"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "output_tokens_details": {
+            "$ref": "#/components/schemas/OutputTokensDetails"
+          },
+          "total_tokens": {
+            "default": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "Usage",
+        "type": "object"
+      },
       "UserInstructionsUpdate": {
         "properties": {
           "instructions": {
@@ -4539,6 +5355,53 @@
           "dismissed"
         ],
         "title": "WalkthroughDismissed",
+        "type": "object"
+      },
+      "WebSearchAction": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "type": {
+            "const": "search",
+            "default": "search",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "WebSearchAction",
+        "type": "object"
+      },
+      "WebSearchCallItem": {
+        "description": "A tool call shown to clients such as Codex that render no server tool but web search.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/WebSearchAction"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/McpCallStatus",
+            "default": "in_progress"
+          },
+          "type": {
+            "const": "web_search_call",
+            "default": "web_search_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action"
+        ],
+        "title": "WebSearchCallItem",
         "type": "object"
       },
       "WebhookResponse": {
@@ -5398,6 +6261,18 @@
               }
             ],
             "title": "Review Trace Links"
+          },
+          "sandbox_openai_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Openai Enabled"
           }
         },
         "title": "WorkspaceSettingsUpdate",
@@ -9161,6 +10036,35 @@
         ]
       }
     },
+    "/dashboard/api/profile/slack-onboarding-dismissal": {
+      "post": {
+        "operationId": "dismiss_slack_onboarding_dashboard_api_profile_slack_onboarding_dismissal_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dismiss Slack Onboarding Dashboard Api Profile Slack Onboarding Dismissal Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Dismiss Slack Onboarding",
+        "tags": [
+          "dashboard",
+          "profiles"
+        ]
+      }
+    },
     "/dashboard/api/pull-requests": {
       "get": {
         "operationId": "api_list_pull_requests_dashboard_api_pull_requests_get",
@@ -12258,6 +13162,172 @@
         ]
       }
     },
+    "/dashboard/api/sandbox-openai/v1/models": {
+      "get": {
+        "operationId": "list_models_dashboard_api_sandbox_openai_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Models",
+        "tags": [
+          "sandbox-openai"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-openai/v1/responses": {
+      "post": {
+        "operationId": "create_response_dashboard_api_sandbox_openai_v1_responses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Response",
+        "tags": [
+          "sandbox-openai"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-openai/v1/responses/{response_id}": {
+      "get": {
+        "operationId": "get_response_dashboard_api_sandbox_openai_v1_responses__response_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "response_id",
+            "required": true,
+            "schema": {
+              "title": "Response Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stream",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Stream",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Response",
+        "tags": [
+          "sandbox-openai"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-openai/v1/responses/{response_id}/cancel": {
+      "post": {
+        "operationId": "cancel_response_dashboard_api_sandbox_openai_v1_responses__response_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "response_id",
+            "required": true,
+            "schema": {
+              "title": "Response Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Response",
+        "tags": [
+          "sandbox-openai"
+        ]
+      }
+    },
     "/dashboard/api/sandbox-tools": {
       "get": {
         "operationId": "list_tools_dashboard_api_sandbox_tools_get",
@@ -13253,6 +14323,18 @@
       "get": {
         "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
         "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13263,6 +14345,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -13397,6 +14489,60 @@
         "tags": [
           "dashboard",
           "slack",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/users/{user_id}/name": {
+      "get": {
+        "operationId": "api_slack_user_name_dashboard_api_slack_users__user_id__name_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "pattern": "^[UW][A-Z0-9]{2,}$",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Slack User Name Dashboard Api Slack Users  User Id  Name Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Slack User Name",
+        "tags": [
+          "dashboard",
           "slack"
         ]
       }

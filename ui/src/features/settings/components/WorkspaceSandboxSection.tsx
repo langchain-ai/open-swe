@@ -58,6 +58,7 @@ export function WorkspaceSandboxSection({
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
 }) {
+  const buildAction = record.snapshot_id ? "Rebuild" : "Build"
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
   const dirty =
@@ -74,7 +75,9 @@ export function WorkspaceSandboxSection({
     onSuccess: onSaved,
   })
   const rebuild = useMutation({
-    meta: { errorTitle: "Couldn't start the image rebuild" },
+    meta: {
+      errorTitle: `Couldn't start the image ${buildAction.toLowerCase()}`,
+    },
     mutationFn: () => api.refreshWorkspace(record.slug),
     onSuccess: onRebuildStarted,
   })
@@ -92,7 +95,7 @@ export function WorkspaceSandboxSection({
   return (
     <SettingsSection
       title="Sandbox image"
-      description="Every run in this workspace boots from this image. The setup script rebuilds it nightly from the base snapshot; the update script refreshes it while it is in use."
+      description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
       <SettingsRow
         label="Image"
@@ -155,7 +158,7 @@ export function WorkspaceSandboxSection({
         )}
         {rebuild.isSuccess && (
           <p className="text-xs text-muted-foreground">
-            Rebuild started; the image state above follows its progress.
+            {buildAction} started; the image state above follows its progress.
           </p>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -167,7 +170,7 @@ export function WorkspaceSandboxSection({
             }
             onClick={() => rebuild.mutate()}
           >
-            {refreshing ? "Rebuilding…" : "Rebuild image"}
+            {refreshing ? `${buildAction}ing…` : `${buildAction} image`}
           </Button>
           <div className="flex gap-2">
             {dirty && (

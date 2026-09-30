@@ -16,7 +16,15 @@ from agent.expedited_review.eligibility import (
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.token import resolve_github_token
-from agent.human_review.lifecycle import post_card, remove_superseded_cards, reopen, retire
+from agent.human_review.lifecycle import (
+    post_card,
+    prompt_author_ready,
+    refresh_card,
+    remove_superseded_cards,
+    reopen,
+    retire,
+    transition,
+)
 from agent.human_review.requests import HumanReviewRequest
 from agent.prompts import prompt
 from agent.run_config import RunConfig
@@ -157,9 +165,9 @@ async def expedite_pr_approval(
 
     payload = PullRequestPayload.model_validate(pr)
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    standard: HumanReviewRequest | None = None
-    if active is not None and active.kind == "standard":
-        standard, active = active, None
+    displaced: HumanReviewRequest | None = None
+    if active is not None and active.kind != "expedited":
+        displaced, active = active, None
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
     if (
@@ -167,14 +175,22 @@ async def expedite_pr_approval(
         and active.slack_message_ts
         and fingerprint_matches(files, active.diff_fingerprint)
     ):
+        if active.awaiting_ready and not payload.draft:
+            updated = await transition(active.id, expected=("open",), awaiting_ready=False)
+            if updated is not None:
+                active = updated
+                await refresh_card(active)
+        readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
+            "readiness_warning": readiness_warning,
             "approval_id": str(active.id),
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "approvers": active.approvers,
             "slack_channel_id": active.slack_channel_id,
-            "next": _next_step(
+            "next": readiness_warning
+            or _next_step(
                 reused=True,
                 elsewhere=active.slack_channel_id != channel_id,
                 in_thread=False,
@@ -202,10 +218,10 @@ async def expedite_pr_approval(
         pull_request.author = payload.author
         pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
-    # One open request per PR, so the standard one closes before this row is written;
+    # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
-    if standard is not None and (
-        await retire(standard, "superseded", "replaced by an expedited review") is None
+    if displaced is not None and (
+        await retire(displaced, "superseded", "replaced by an expedited review") is None
     ):
         return _failure("The pull request's review request changed meanwhile. Try again.")
     approval = await HumanReviewRequest(
@@ -223,26 +239,29 @@ async def expedite_pr_approval(
         message_ts, error = await post_card(approval, title=payload.title, files=files)
     except BaseException:
         await _discard(approval)
-        if standard is not None:
-            await reopen(standard)
+        if displaced is not None:
+            await reopen(displaced)
         raise
     if not message_ts:
         await _discard(approval)
-        if standard is not None:
-            await reopen(standard)
+        if displaced is not None:
+            await reopen(displaced)
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
     await remove_superseded_cards(approval)
+    readiness_warning = await prompt_author_ready(approval)
     return {
         "success": True,
+        "readiness_warning": readiness_warning,
         "approval_id": str(approval.id),
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
         "slack_channel_id": channel_id,
-        "next": _next_step(
+        "next": readiness_warning
+        or _next_step(
             reused=False,
             elsewhere=False,
             in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),

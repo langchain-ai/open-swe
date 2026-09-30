@@ -294,6 +294,7 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
+    thread_id = str(uuid.uuid4())
     details_ts: str | None = None
     details_error: str | None = None
     for attempt in range(2):
@@ -301,6 +302,7 @@ async def slack_start_new_thread(
             clean_channel_id,
             message_ts,
             _thread_details(clean_instructions, repo),
+            agent_thread_id=thread_id,
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -318,7 +320,6 @@ async def slack_start_new_thread(
             "hint": _failure_hint(details_error),
         }
 
-    thread_id = str(uuid.uuid4())
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
         cfg.slack_thread.dump(),

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 _TOOL_MODULES = {
     "add_finding": ".add_finding",
     "assign_human_reviewer": ".request_human_review",
+    "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "create_automation": ".automations",
@@ -19,6 +20,8 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
+    "list_event_types": ".listen_events",
+    "listen_events": ".listen_events",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -70,13 +73,13 @@ _TOOL_MODULES = {
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
-    "upload_pr_attachment": ".open_pull_request",
     "web_search": ".web_search",
 }
 
 __all__ = [
     "add_finding",
     "assign_human_reviewer",
+    "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
     "create_automation",
@@ -91,6 +94,8 @@ __all__ = [
     "get_thread",
     "http_request",
     "list_automations",
+    "list_event_types",
+    "listen_events",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -142,7 +147,6 @@ __all__ = [
     "trigger_automation",
     "update_automation",
     "update_finding",
-    "upload_pr_attachment",
     "web_search",
 ]
 
@@ -179,14 +183,11 @@ if TYPE_CHECKING:
     from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
+    from agent.tools.listen_events import list_event_types, listen_events
     from agent.tools.manage_baby_sit import manage_baby_sit
     from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
-    from agent.tools.open_pull_request import (
-        link_pull_request,
-        open_pull_request,
-        upload_pr_attachment,
-    )
+    from agent.tools.open_pull_request import link_pull_request, open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
@@ -198,6 +199,7 @@ if TYPE_CHECKING:
     from agent.tools.report_platform_issue import report_platform_issue
     from agent.tools.request_human_review import (
         assign_human_reviewer,
+        auto_assign_human_reviewer,
         dismiss_human_review_request,
         request_human_review,
     )
