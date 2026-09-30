@@ -612,9 +612,9 @@ function configureDesktopIpc() {
     return removed;
   });
 
-  ipcMain.handle("desktop:connect-service", async (event, provider) => {
+  ipcMain.handle("desktop:connect-service", async (event, provider, region) => {
     requireTrustedDesktopIpc(event);
-    return startConnectFlow(provider);
+    return startConnectFlow(provider, region);
   });
 
   ipcMain.handle("desktop:open-external", async (event, value) => {
@@ -1324,8 +1324,10 @@ async function startExternalLogin() {
  * browser only to the provider, and redeems the loopback handoff under its own
  * session, which is also what decides whose account the connection lands on.
  */
-async function startConnectFlow(provider) {
+async function startConnectFlow(provider, region) {
   if (!backendUrl || !isConnectProvider(provider)) return false;
+  if (region !== undefined && !["us", "eu", "apac"].includes(region))
+    return false;
   connectFlows.get(provider)?.cancel();
   connectFlows.delete(provider);
 
@@ -1342,7 +1344,7 @@ async function startConnectFlow(provider) {
   connectFlows.set(provider, flow);
   try {
     const started = await backendFetch(
-      connectLoginUrl(backendUrl, provider, flow),
+      connectLoginUrl(backendUrl, provider, { ...flow, region }),
       { redirect: "manual" },
     );
     const location = started.headers.get("location");

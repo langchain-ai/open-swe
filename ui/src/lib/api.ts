@@ -353,6 +353,18 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
+export type LangSmithRegion = "us" | "eu" | "apac"
+
+export interface LangSmithCredentialStatus {
+  connected: boolean
+  method: "oauth" | "api_key" | null
+  region: LangSmithRegion
+  email: string | null
+  name: string | null
+  workspace_id: string | null
+  reconnect_required: boolean
+}
+
 export interface NotionCredentialStatus {
   connected: boolean
   token_expires_at?: string | null
@@ -1517,6 +1529,21 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  getMyLangSmithStatus: () =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith"),
+  connectLangSmithKey: (body: {
+    region: LangSmithRegion
+    api_key: string
+    workspace_id: string | null
+  }) =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectLangSmith: () =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -1782,10 +1809,16 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function connectService(provider: "slack" | "notion") {
-  const pending = window.openSweDesktop?.connectService(provider)
+export function connectService(
+  provider: "slack" | "notion" | "langsmith",
+  region?: LangSmithRegion
+) {
+  const pending = window.openSweDesktop?.connectService(provider, region)
   if (!pending) {
-    window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)
+    const query = provider === "langsmith" && region ? `?region=${region}` : ""
+    window.location.assign(
+      `${API_BASE}/dashboard/api/${provider}/login${query}`
+    )
   }
   return pending
 }

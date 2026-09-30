@@ -356,6 +356,17 @@ A workflow that names no `repo` works in its own repository. A machine caller re
 
 </details>
 
+<details id="personal-langsmith">
+<summary><strong>Personal LangSmith accounts</strong></summary>
+
+Under **My settings → Personal connections → LangSmith**, select US, EU, or APAC and authorize your account, or choose **Use API key instead**. For API keys spanning multiple workspaces, enter the workspace UUID. The connection is validated before replacing any existing credential; **Disconnect** removes it.
+
+OAuth uses LangSmith's dynamic client registration, S256 PKCE, and a verified OIDC identity token, requesting access to the regional `/mcp` resource. This needs no deployment-specific client secret. An identity-only OIDC token cannot call MCP, and sandbox service-URL browser login is a separate flow. The desktop app hands authorization back through its existing PKCE-protected loopback flow.
+
+Tokens and API keys are encrypted at rest. Personal LangSmith MCP tools load only in the account owner's private cloud threads, with ownership and credentials checked again on each call. OAuth tokens refresh automatically; revoked refresh tokens require reconnection. This does not replace deployment tracing or sandbox credentials, and does not enable personal credentials in workspace/system threads or local desktop runs. Self-hosted and BYOC LangSmith endpoints are not supported by this connection.
+
+</details>
+
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 

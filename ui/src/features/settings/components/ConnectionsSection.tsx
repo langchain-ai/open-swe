@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
+import { LangSmithConnection } from "./LangSmithConnection"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -150,6 +151,7 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
     >
       <SlackRow user={user} />
       <NotionRow />
+      <LangSmithConnection />
     </SettingsSection>
   )
 }
