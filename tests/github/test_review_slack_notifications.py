@@ -1,12 +1,15 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from itertools import chain, repeat
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent.github import notifications, webhook
 from agent.github.pull_requests import PullRequest
+from agent.slack import thinking
 from agent.users import User
 from agent.webhooks import common
 
@@ -24,6 +27,8 @@ def review_notice(monkeypatch: pytest.MonkeyPatch, fake_store) -> tuple[MagicMoc
             }
         }
     )
+    client.runs.list = AsyncMock(return_value=[])
+    monkeypatch.setattr(thinking, "set_slack_thread_status", AsyncMock(return_value=True))
     lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -140,6 +145,45 @@ async def test_review_wakeup_posts_one_linked_notice(
         )
 
 
+@pytest.mark.parametrize("run_status", ["pending", "running", "completed"])
+async def test_review_notice_preserves_current_run_status(
+    monkeypatch: pytest.MonkeyPatch,
+    review_notice: tuple[MagicMock, AsyncMock],
+    run_status: Literal["pending", "running", "completed"],
+) -> None:
+    client, post = review_notice
+    slack_status = "Thinking..."
+
+    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+        nonlocal slack_status
+        assert (channel_id, thread_ts) == ("C123", "1700000000.123456")
+        slack_status = status
+        return True
+
+    async def list_runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
+        return [{"run_id": "run-1"}] if status == run_status else []
+
+    async def post_notice(*args: object, **kwargs: object) -> tuple[str, None]:
+        nonlocal slack_status
+        slack_status = ""
+        client.runs.list.side_effect = list_runs
+        return "1700000001.123456", None
+
+    client.runs.list.return_value = [{"run_id": "run-1"}]
+    post.side_effect = post_notice
+    monkeypatch.setattr(thinking, "set_slack_thread_status", set_status)
+
+    await notifications.notify_slack_review(
+        "agent-thread",
+        reviewer="octo",
+        pr_label="o/r#7",
+        review_url="https://github.com/o/r/pull/7#pullrequestreview-42",
+    )
+
+    post.assert_awaited_once()
+    assert slack_status == ("" if run_status == "completed" else "Thinking...")
+
+
 @pytest.mark.parametrize("detached", [False, True])
 async def test_reviews_do_not_create_slack_threads(review_notice, detached: bool) -> None:
     client, post = review_notice
@@ -200,11 +244,9 @@ async def test_review_rechecks_destination_after_concurrent_move(
             }
         }
     }
-    client.threads.get.side_effect = [
-        original,
-        {"metadata": {}} if detached else destination,
-        destination,
-    ]
+    client.threads.get.side_effect = chain(
+        [original, {"metadata": {}} if detached else destination], repeat(destination)
+    )
     await notifications.notify_slack_review(
         "agent-thread",
         reviewer="octo",

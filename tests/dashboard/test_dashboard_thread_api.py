@@ -26,9 +26,9 @@ from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
-_VISION_MODEL = "openai:gpt-6-sol"
+_VISION_MODEL = "openai:gpt-6.1-sol"
 _FABLE = "anthropic:claude-fable-5-1"
-_PAIR = ("openai:gpt-6-sol", "medium")
+_PAIR = ("openai:gpt-6.1-sol", "medium")
 
 
 @asynccontextmanager
@@ -230,10 +230,50 @@ async def test_private_threads_created_by_admins_get_admin_permissions(
     assert (configurable.get("admin_thread") is True) is expected_admin
 
 
-async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
-    monkeypatch,
+@pytest.mark.parametrize("selection_changed", [False, True])
+async def test_enrich_run_start_command_preserves_explicit_auto_intent(
+    monkeypatch: pytest.MonkeyPatch, selection_changed: bool
 ) -> None:
-    created: dict[str, object] = {}
+    metadata = {
+        "model": _TEXT_ONLY_MODEL,
+        "effort": "high",
+        "model_selection": "auto",
+        "model_selection_changed": True,
+    }
+    created: dict[str, object] = {"metadata": metadata}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the typo"}]},
+            "config": {
+                "configurable": {
+                    "model_selection": "auto",
+                    **({"model_selection_changed": True} if selection_changed else {}),
+                }
+            },
+        },
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid", "octocat", command, metadata=metadata
+    )
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["model_selection"] == "auto"
+    assert configurable["model_selection_changed"] is selection_changed
+
+
+@pytest.mark.parametrize("creating", [False, True])
+async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model(
+    monkeypatch: pytest.MonkeyPatch,
+    creating: bool,
+) -> None:
+    metadata = {
+        "model": _TEXT_ONLY_MODEL,
+        "effort": "high",
+        "model_selection": "auto",
+    }
+    created: dict[str, object] = {} if creating else {"metadata": metadata}
     _patch_new_thread_deps(
         monkeypatch,
         profile={"default_model": _TEXT_ONLY_MODEL, "reasoning_effort": "high"},
@@ -267,8 +307,8 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
         "new-tid",
         "octocat",
         command,
-        metadata={},
-        creating=True,
+        metadata={} if creating else metadata,
+        creating=creating,
     )
 
     stamped = created["metadata"]
@@ -280,6 +320,7 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
+    assert configurable["model_override_reason"] == "image_input"
 
 
 async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:

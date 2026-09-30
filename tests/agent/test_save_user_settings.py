@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from copy import deepcopy
 from importlib import import_module
 from types import SimpleNamespace
@@ -19,16 +20,14 @@ def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "source": "dashboard",
         "github_login": "Alice",
     }
-    monkeypatch.setattr(
-        import_module("agent.tools.save_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
-    monkeypatch.setattr(
-        import_module("agent.tools.read_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
+    for module in (
+        "agent.run_config",
+        "agent.tools.save_user_settings",
+        "agent.tools.read_user_settings",
+    ):
+        monkeypatch.setattr(
+            import_module(module), "get_config", lambda: {"configurable": configurable}
+        )
     return configurable
 
 
@@ -59,7 +58,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
 ) -> None:
     requester["source"] = source
     profile = {
-        "default_model": "openai:gpt-6-sol",
+        "default_model": "openai:gpt-6.1-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
@@ -167,7 +166,7 @@ async def test_invalid_patch_rejects_all_changes(
     settings: dict[str, SettingValue],
 ) -> None:
     fake_store.seed(
-        ["profiles"], "Alice", {"default_model": "openai:gpt-6-sol", "reasoning_effort": "high"}
+        ["profiles"], "Alice", {"default_model": "openai:gpt-6.1-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
     assert (await save_user_settings(settings))["ok"] is False
@@ -276,6 +275,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "preserve_sandbox_memory": False,
                 "human_review_requests": False,
+                "review_channel_watch": False,
             },
             "preferences": {
                 "default_workspace": "mine",
@@ -298,5 +298,21 @@ async def test_private_read_rejects_unverified_requesters(
 ) -> None:
     requester["github_login"] = login
     with patch("agent.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
-        assert (await read_user_settings())["success"] is False
+        assert "error" in await read_user_settings()
     profile.assert_not_awaited()
+
+
+async def test_sole_writer_save_does_not_publish_stored_settings(
+    fake_store: FakeStore,
+    requester: dict[str, object],
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(sole=True, direct=True)
+    fake_store.seed(
+        ["profiles"],
+        "Alice",
+        {"default_model": "openai:gpt-6-sol", "reasoning_effort": "secret-effort"},
+    )
+    result = await save_user_settings({"default_model": "anthropic:claude-opus-5-5"})
+    assert result == {"ok": True}
+    assert fake_store.values(["profiles"])["Alice"]["default_model"] == "anthropic:claude-opus-5-5"

@@ -274,7 +274,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             for msg in queued_messages
         )
         resolved_model_id: str | None = None
-        if has_images:
+        if has_images and not configurable.get("image_model_fallback_enabled"):
             # This run's own model first: thread metadata already names the
             # model of any follow-up queued behind it.
             run_model = configurable.get("resolved_agent_model_id") or configurable.get(

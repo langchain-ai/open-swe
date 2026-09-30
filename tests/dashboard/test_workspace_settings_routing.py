@@ -5,7 +5,7 @@ from agent.dashboard.workspace_settings import (
 
 _ROUTING_PAIRS = {
     "fast": ("google_genai:gemini-3.8-flash", "low"),
-    "balanced": ("openai:gpt-6-sol", "medium"),
+    "balanced": ("openai:gpt-6.1-sol", "medium"),
     "performance": ("anthropic:claude-opus-5-5", "high"),
 }
 

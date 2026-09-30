@@ -17,10 +17,11 @@ from langgraph.types import Command
 
 from agent.input_messages import human_input, person_introduction
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.middleware.require_user_reply import RequireUserReplyMiddleware
 from agent.run_config import RunConfig
-from agent.server import PrepareAgentRunMiddleware
+from agent.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
 from agent.utils import ttl_cache
 from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -153,7 +154,10 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parallel_forks_keep_prepared_context_without_overwriting_parent() -> None:
+@pytest.mark.parametrize("requested_model", [None, "openai:gpt-5.4"])
+async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
+    requested_model: str | None,
+) -> None:
     middleware = DummyPrepareMiddleware()
     fork_prompts: list[str] = []
     fingerprints: list[str] = []
@@ -164,6 +168,7 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent()
     ) -> ModelResponse | ExtendedModelResponse:
         if request.state.get("_deepagents_forked_context"):
             assert request.state.get("run_prepared") is True
+            assert request.state["requested_model"] == requested_model
             assert request.state.get("work_dir") == "/tmp/work"
             fingerprint = request.state.get("run_prepared_for")
             assert isinstance(fingerprint, str)
@@ -209,17 +214,27 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent()
         backend=backend,
         middleware=[
             middleware,
+            ModelSelectionMiddleware({}, model, routing_mode=None),
             ConversationOffloadingMiddleware(model, backend),
             RequireUserReplyMiddleware("reply", "no_reply", initial_surface="web"),
             scripted_model,
         ],
-        subagents=[{"name": "worker", "description": "worker", "mode": "fork", "model": model}],
+        subagents=[
+            {
+                "name": "worker",
+                "description": "worker",
+                "mode": "fork",
+                "model": model,
+                "middleware": [_DisableInheritedMiddleware(ModelSelectionMiddleware.__name__)],
+            }
+        ],
         checkpointer=InMemorySaver(),
     )
     config = {"configurable": {"thread_id": "parallel-forks"}}
     result = await graph.ainvoke(
         {
             "messages": [HumanMessage("delegate")],
+            "requested_model": requested_model,
             "conversation_offloading": {"status": "parent"},
         },
         config,
@@ -233,6 +248,8 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent()
     } == {"first", "second"}
     state = (await graph.aget_state(config)).values
     assert state["run_prepared"] is True
+    assert state["requested_model"] == requested_model
+    assert "requested_model" not in result
     assert fingerprints == [state["run_prepared_for"]] * 2
     assert state["work_dir"] == "/tmp/work"
     assert state["rendered_system_prompt"] == "prepared prompt"

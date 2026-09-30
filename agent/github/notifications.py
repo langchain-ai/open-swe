@@ -12,6 +12,7 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
+from agent.slack.thinking import sync_slack_background_status
 from agent.store import get_value, put_value
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,8 @@ async def notify_slack_review(
                         "Failed to post GitHub review notice to Slack",
                         extra={"agent_thread_id": thread_id, "slack_error": error},
                     )
+                else:
+                    await sync_slack_background_status(client, thread_id, resume=True)
                 return
     except Exception:
         logger.warning(

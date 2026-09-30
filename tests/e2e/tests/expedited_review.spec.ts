@@ -263,7 +263,14 @@ test.describe("Expedited Slack review", () => {
 
     // 3. Only the author can mark it ready. Their click undrafts the PR and
     //    opens the card for approval; it is not an approval.
-    await clickAs(page, author!.slack_id, "Mark ready for review");
+    await expect(
+      card(page).getByRole("button", { name: "Mark ready for review" }),
+    ).toHaveCount(0);
+    await page.locator("#user").selectOption(author!.slack_id);
+    await page
+      .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
+      .click();
+    await page.getByRole("button", { name: "Mark ready for review" }).click();
     await expect
       .poll(async () => (await latest(request)).awaiting_ready, {
         timeout: 60_000,

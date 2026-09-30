@@ -1041,6 +1041,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  model_selection_changed?: boolean
   client_message_id?: string
   /** Queue behind the live run instead of steering it. */
   enqueue?: boolean

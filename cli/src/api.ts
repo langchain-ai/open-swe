@@ -14,6 +14,13 @@ import {
   type Identity,
   type ThreadsPage,
 } from "./threads.ts"
+import {
+  humanReviewDismissSchema,
+  humanReviewRequestSchema,
+  pullRequestApiPath,
+  type HumanReviewDismissResult,
+  type HumanReviewRequestResult,
+} from "./review.ts"
 import { uploadedThreadSchema } from "./upload.ts"
 
 export class ApiError extends Error {
@@ -198,6 +205,38 @@ export class ApiClient {
     if (!parsed.success)
       throw new ProtocolError("/threads/uploads response is malformed")
     return parsed.data.id
+  }
+
+  /** Post a Slack review card for a pull request, or return (and re-summarize) the open one. */
+  async requestHumanReview(
+    prUrl: string,
+    body: { inline_summary: string; channel?: string }
+  ): Promise<HumanReviewRequestResult> {
+    const parsed = humanReviewRequestSchema.safeParse(
+      await this.json("POST", `${pullRequestApiPath(prUrl)}/human-review`, {
+        body,
+      })
+    )
+    if (!parsed.success)
+      throw new ProtocolError("human review response is malformed")
+    return parsed.data
+  }
+
+  /** Dismiss a pull request's open review request, as its card's Dismiss button does. */
+  async dismissHumanReviewRequest(
+    prUrl: string,
+    body: { reason?: string }
+  ): Promise<HumanReviewDismissResult> {
+    const parsed = humanReviewDismissSchema.safeParse(
+      await this.json(
+        "POST",
+        `${pullRequestApiPath(prUrl)}/human-review/dismiss`,
+        { body }
+      )
+    )
+    if (!parsed.success)
+      throw new ProtocolError("human review dismissal response is malformed")
+    return parsed.data
   }
 
   async createBridge(input: CreateBridgeInput): Promise<BridgeSession> {
