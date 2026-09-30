@@ -1,10 +1,17 @@
-"""Tool: ``code_channel_set_view``. Creates or replaces a view in the review guide's code channel."""
+"""Tool: ``code_channel_set_view``. Creates or replaces a view in the run's Slack code channel."""
 
 from typing import Any
 
-from agent.review_guide.context import GuideContext, GuideUnavailableError
-from agent.review_guide.git import GuideGitError, read_file
-from agent.slack.code_channels import CanvasAccessLevel, ViewType, set_view
+from agent.run_config import RunConfig
+from agent.slack.client import get_active_slack_thread
+from agent.slack.code_channels import (
+    CanvasAccessLevel,
+    ViewType,
+    is_code_channel_session,
+    set_view,
+)
+from agent.slack.tools.manage_code_channel import resolve_view_content
+from agent.utils.thread_ops import langgraph_client
 
 
 async def code_channel_set_view(
@@ -22,16 +29,19 @@ async def code_channel_set_view(
     agent_content_hash: str = "",
 ) -> dict[str, Any]:
     """Implement the `code_channel_set_view` tool."""
-    if content and file_path:
-        return {"success": False, "error": "pass content or file_path, not both"}
-    try:
-        ctx = await GuideContext.current()
-        if file_path:
-            content = await read_file(ctx.backend, file_path)
-    except (GuideUnavailableError, GuideGitError) as exc:
-        return {"success": False, "error": str(exc)}
+    cfg = RunConfig.from_runtime()
+    if not cfg.thread_id:
+        return {"success": False, "error": "Missing thread_id in config"}
+    active = await get_active_slack_thread(
+        langgraph_client(), cfg.thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
+    )
+    if not active or not is_code_channel_session(str(active.get("thread_ts") or "")):
+        return {"success": False, "error": "this conversation is not in a Slack code channel"}
+    content, content_error = await resolve_view_content(content, file_path)
+    if content_error:
+        return {"success": False, "error": content_error}
     data, error = await set_view(
-        ctx.session.slack_channel_id,
+        str(active.get("channel_id") or ""),
         view_type,
         view_key=view_key,
         content=content,

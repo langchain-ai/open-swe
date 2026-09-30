@@ -177,6 +177,7 @@ from agent.tools import (
     auto_assign_human_reviewer,
     background_execute,
     background_task,
+    code_channel_set_view,
     configure_repository,
     create_automation,
     create_sandbox_file_download_url,
@@ -304,6 +305,7 @@ STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
@@ -503,6 +505,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 
 INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
@@ -595,6 +598,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         "get_thread",
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "list_threads",
@@ -1611,6 +1615,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     slack_tools = [
         manage_code_channel,
+        code_channel_set_view,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
@@ -1661,6 +1666,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         listen_events,
         list_event_types,
         manage_code_channel,
+        code_channel_set_view,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,

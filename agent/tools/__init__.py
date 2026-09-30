@@ -8,6 +8,7 @@ _TOOL_MODULES = {
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
+    "code_channel_set_view": ".code_channel_set_view",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
@@ -83,6 +84,7 @@ __all__ = [
     "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
+    "code_channel_set_view",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
@@ -178,6 +180,7 @@ if TYPE_CHECKING:
     )
     from agent.tools.background_execute import background_execute
     from agent.tools.background_task import background_task
+    from agent.tools.code_channel_set_view import code_channel_set_view
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.expose_port import expose_port

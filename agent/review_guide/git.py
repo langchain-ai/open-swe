@@ -66,13 +66,5 @@ async def pr_diff(
     )
 
 
-async def read_file(backend: SandboxBackendProtocol, path: str) -> str:
-    """A text file anywhere in the sandbox, such as a diff the guide wrote to scratch space."""
-    result = await backend.aexecute(f"cat -- {shlex.quote(path)}", timeout=GIT_TIMEOUT_SECONDS)
-    if result.exit_code not in (0, None):
-        raise GuideGitError(result.output.strip()[-2000:])
-    return result.output
-
-
 async def head_file(backend: SandboxBackendProtocol, repo_dir: str, path: str) -> str:
     return await _run(backend, repo_dir, f"git show {_HEAD_REF}:{shlex.quote(path)}")
