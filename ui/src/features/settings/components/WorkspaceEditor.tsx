@@ -184,9 +184,11 @@ export function WorkspaceEditor({
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
-              Mentions in these channels start runs in this workspace. Turn on
-              Kitchen for a channel to let every top-level message start a
-              thread and replies continue it without mentioning Open SWE.
+              New threads in these channels use this workspace by default.
+              Kitchen lets human messages start and continue threads without
+              mentioning Open SWE. With Kitchen off, mention Open SWE to start;
+              replies need no mention while you&apos;re the thread&apos;s only
+              human participant.
             </TooltipPopup>
           </Tooltip>
         </span>

@@ -172,7 +172,7 @@ export function SlackChannelPicker({
     <OwnershipPicker
       triggerLabel="Choose channels"
       title="Slack channels"
-      description="Mentions in these channels start runs in this workspace. A channel belongs to one workspace."
+      description="New threads in these channels use this workspace by default. A channel belongs to one workspace."
       noun="channel"
       pluralNoun="channels"
       items={items}
