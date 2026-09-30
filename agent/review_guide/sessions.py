@@ -37,21 +37,29 @@ class ReviewGuideSeenLine(Base):
     pull_request_id: Mapped[UUID] = mapped_column(
         ForeignKey("pull_request.id", ondelete="CASCADE"), primary_key=True
     )
+    # sha256 of (path, sign, text): the line by content, so it stays seen across rebases.
     line_key: Mapped[str] = mapped_column(primary_key=True)
+    # Copies of that exact line approved; identical lines, such as a lone `}`, each count once.
     seen_count: Mapped[int]
 
 
 class ReviewGuideSession(Base):
     __tablename__ = "review_guide_session"
 
+    # The LangGraph thread, which is also the code channel's session id.
     thread_id: Mapped[str] = mapped_column(primary_key=True)
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
+    # The reader being walked through.
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     slack_channel_id: Mapped[str]
+    # Sandbox workspace the guide boots from; None is the default image.
     workspace_slug: Mapped[str | None] = mapped_column(default=None)
     mode: Mapped[GuideMode] = mapped_column(Text, default="reviewer")
+    # A serialized `Walk` for the head it was built at.
     walk_json: Mapped[JsonObject | None] = mapped_column("walkthrough", JSONB, default=None)
+    # Slack ts of the progress message edited in place; empty before it is posted.
     summary_message_ts: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    # Slack ts of the "pull request changed" note with its Continue button; empty when not paused.
     paused_message_ts: Mapped[str] = mapped_column(server_default="", default="", init=False)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     closed_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
