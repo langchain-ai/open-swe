@@ -30,6 +30,7 @@ export interface PickerItem {
   owner?: PickerOwner | null
   /** Shown under the row; a selected item with a warning still saves. */
   warning?: string
+  disabled?: boolean
 }
 
 export interface PickerFilter {
@@ -179,7 +180,7 @@ export function OwnershipPicker({
     const elsewhere = ownedElsewhere(item)
     const checked = draftSet.has(item.id)
     // A conflicting row that is somehow already selected stays removable.
-    const locked = elsewhere && !checked
+    const locked = (elsewhere || item.disabled) && !checked
     return (
       <label
         key={item.id}
