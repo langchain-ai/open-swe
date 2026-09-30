@@ -711,6 +711,8 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
