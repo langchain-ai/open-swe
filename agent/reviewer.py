@@ -71,7 +71,7 @@ from agent.review.diff import (
     materialize_review_diff,
     review_diff_range,
 )
-from agent.review.findings import Finding
+from agent.review.findings import Finding, start_run_scoped_findings
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
@@ -625,6 +625,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         is_re_review = bool(cfg.re_review)
         reviewer_event = cfg.reviewer_event or ""
         reviewer_eval = cfg.is_eval
+        if reviewer_eval:
+            start_run_scoped_findings(self._thread_id)
         can_fetch_pr = (
             pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
         )

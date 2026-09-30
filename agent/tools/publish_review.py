@@ -257,6 +257,7 @@ async def _publish_review_eval_dry_run_async(
     ]
     publication = {
         "finding_ids": finding_ids,
+        "findings": [finding for finding, _payload in eligible_with_payload],
         "severity_threshold": severity_threshold,
         "cap": cap,
     }
