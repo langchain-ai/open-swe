@@ -25,7 +25,7 @@ from tests.agent.test_agent_assembly_context import (
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
 _OPUS = "anthropic:claude-opus-5-5"
-_GPT = "openai:gpt-6-sol"
+_GPT = "openai:gpt-6.1-sol"
 
 
 async def _search(query: str) -> str:

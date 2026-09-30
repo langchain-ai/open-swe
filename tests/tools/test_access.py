@@ -32,14 +32,13 @@ def metadata(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 @pytest.fixture
 def slack(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     messages: list[dict[str, object]] = [{"user": "UA"}, {"user": "UBOT"}]
+    fetch = AsyncMock(side_effect=lambda *_, **__: messages)
     monkeypatch.setenv("SLACK_BOT_USER_ID", "UBOT")
-    monkeypatch.setattr(
-        tool_access, "fetch_slack_thread_messages", AsyncMock(side_effect=lambda *_: messages)
-    )
     logins = {"UA": "alice", "UB": "bob"}
     monkeypatch.setattr(
         tool_access.User, "login_for_slack", AsyncMock(side_effect=lambda user: logins.get(user))
     )
+    monkeypatch.setattr(tool_access, "fetch_slack_thread_messages", fetch)
     return messages
 
 
@@ -105,3 +104,14 @@ async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch
     assert await tool() == {"ok": True, "id": "x"}
     resolved.return_value = tool_access.Access()
     assert (await tool())["ok"] is False
+
+
+async def test_unreadable_slack_history_is_not_sole(
+    metadata: dict, slack: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch = AsyncMock(side_effect=RuntimeError("page 2 failed"))
+    monkeypatch.setattr(tool_access, "fetch_slack_thread_messages", fetch)
+    cfg = _cfg(source="slack", slack_thread=_SLACK)
+    assert (await resolve_access(cfg)).mode(_OWN) is None
+    assert fetch.await_args is not None
+    assert fetch.await_args.kwargs == {"complete": True}

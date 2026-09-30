@@ -92,7 +92,8 @@ def apply() -> None:
     # import time. Resolving an installation would reach api.github.com, and
     # without it a durable watch has no token and silently does nothing.
     from agent import baby_sit
-    from agent.expedited_review import lifecycle, merge, reviews, voting
+    from agent.expedited_review import merge, reviews, voting
+    from agent.human_review import merging, people
 
     # Same shadowing caveat as ``opr`` above: the tools package re-exports the
     # functions, so reach the modules by name.
@@ -100,7 +101,7 @@ def apply() -> None:
     expedite_tool = importlib.import_module("agent.tools.expedite_pr_approval")
     thread_tools = importlib.import_module("agent.tools.threads")
 
-    for module in (lifecycle, merge, voting, manage_baby_sit, baby_sit):
+    for module in (people, merging, merge, voting, manage_baby_sit, baby_sit):
         for name, stub in (
             ("get_github_app_installation_id_for_repo", _dummy_install_id),
             ("get_github_app_installation_token", _dummy_install_token),
@@ -171,10 +172,12 @@ def apply() -> None:
 
     slack_client.parse_github_pr_url = _parse_pr_url
     merge_tool = importlib.import_module("agent.tools.merge_expedited_pr")
+    human_review_tool = importlib.import_module("agent.tools.request_human_review")
     for module in (
         manage_baby_sit,
         expedite_tool,
         merge_tool,
+        human_review_tool,
         thread_tools,
         opr,
         request_pr_review,
@@ -247,7 +250,20 @@ def apply() -> None:
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    for module in (eligibility, readiness, reviews, merge):
+    from agent.github import repo_files
+    from agent.human_review import standard
+    from agent.threads import session_upload
+
+    for module in (
+        eligibility,
+        readiness,
+        reviews,
+        merge,
+        merging,
+        standard,
+        repo_files,
+        session_upload,
+    ):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox

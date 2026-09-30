@@ -23,10 +23,12 @@ from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from agent.sandboxes.tool_data import ToolContext
 from agent.sandboxes.tool_runtime import ToolSurface
 
+TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
+
 
 @pytest.fixture
 def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-tools-signing-key")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", TEST_SIGNING_KEY)
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://agent.example.test")
 
 
@@ -70,7 +72,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     url, token = issued
     assert url == "https://agent.example.test/dashboard/api/sandbox-tools"
     claims = jwt.decode(
-        token, "test-tools-signing-key", algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        token, TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
     )
     assert claims["thread_id"] == "thread-a"
     assert claims["sandbox_id"] == "sandbox-a"
@@ -257,12 +259,12 @@ async def test_postgres_records_round_trip_and_isolate_threads(registry_db: None
 @pytest.mark.parametrize(
     "overrides,secret,algorithm",
     [
-        ({"sandbox_id": "other"}, "wrong-signing-secret", "HS256"),
-        ({"aud": "dashboard"}, "test-tools-signing-key", "HS256"),
-        ({"thread_id": None}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": 42}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": ""}, "test-tools-signing-key", "HS256"),
-        ({}, "test-tools-signing-key", "HS384"),
+        ({"sandbox_id": "other"}, "wrong-signing-secret-" * 3, "HS256"),
+        ({"aud": "dashboard"}, TEST_SIGNING_KEY, "HS256"),
+        ({"thread_id": None}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": 42}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": ""}, TEST_SIGNING_KEY, "HS256"),
+        ({}, TEST_SIGNING_KEY, "HS384"),
     ],
 )
 async def test_invalid_claims_never_reach_thread_lookup(

@@ -113,6 +113,29 @@ it("saves Bad before offering an optional comment and keeps the draft on failure
   expect(screen.queryByRole("textbox")).toBeNull()
 })
 
+it("confirms a comment immediately and restores its draft on failure", async () => {
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Bad" }))
+  const comment = await screen.findByRole("textbox", {
+    name: "Comment (optional)",
+  })
+  fireEvent.change(comment, { target: { value: "More detail please." } })
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Submit comment" }))
+  expect(screen.queryByText("Thanks for your feedback.")).not.toBeNull()
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await expectFailureReported()
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "More detail please."
+  )
+})
+
 it("allows skipping the comment without undoing the Bad rating", async () => {
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Bad" }))
@@ -148,13 +171,38 @@ it("does not show a confirmation for previously completed feedback", async () =>
   expect(screen.queryByRole("textbox")).toBeNull()
 })
 
+it("dismisses immediately and restores the card with an error toast on failure", async () => {
+  let fail!: (error: Error) => void
+  api.submitThreadFeedback.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  renderCard()
+  fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
+  expect(screen.queryByRole("form")).toBeNull()
+  await waitFor(() =>
+    expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith(
+      "thread-1",
+      { action: "dismiss" }
+    )
+  )
+
+  await act(async () => fail(new Error("Temporary outage")))
+  await expectFailureReported()
+  expect(screen.getByRole("button", { name: "Dismiss" })).not.toBeNull()
+})
+
 it("dismisses the card without saving a rating", async () => {
   renderCard()
   fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
-  await waitFor(() => expect(screen.queryByRole("form")).toBeNull())
-  expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith("thread-1", {
-    action: "dismiss",
-  })
+  expect(screen.queryByRole("form")).toBeNull()
+  await waitFor(() =>
+    expect(api.submitThreadFeedback).toHaveBeenCalledExactlyOnceWith(
+      "thread-1",
+      { action: "dismiss" }
+    )
+  )
 })
 
 it("hides during activity and rechecks eligibility before showing a cached prompt", async () => {

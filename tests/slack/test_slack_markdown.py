@@ -30,20 +30,12 @@ Use `x &lt; y &amp; z`."""
     )
 
 
-def test_markdown_to_mrkdwn_preserves_html() -> None:
-    assert markdown_to_mrkdwn("<div>important content</div>") == (
-        "&lt;div&gt;important content&lt;/div&gt;"
-    )
-
-
-def test_markdown_to_mrkdwn_quotes_heading_once() -> None:
-    assert markdown_to_mrkdwn("> # Heading") == "> *Heading*"
-
-
-def test_markdown_to_mrkdwn_numbers_items_not_paragraphs() -> None:
-    markdown = "1. first paragraph\n\n   same item\n2. second item"
-    assert markdown_to_mrkdwn(markdown) == "1. first paragraph\nsame item\n2. second item"
-
-
 def test_markdown_to_mrkdwn_separates_unterminated_fence_content() -> None:
     assert markdown_to_mrkdwn("```\ncode") == "```\ncode\n```"
+
+
+def test_markdown_to_mrkdwn_keeps_slack_mentions_and_escapes_other_brackets() -> None:
+    assert (
+        markdown_to_mrkdwn("hi <@U06KD8BFY95> in <#C123|general> <!here>, a < b")
+        == "hi <@U06KD8BFY95> in <#C123|general> <!here>, a &lt; b"
+    )

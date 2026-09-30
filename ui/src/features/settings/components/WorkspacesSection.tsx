@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
@@ -200,6 +200,7 @@ export function WorkspacesSection({
         name: createDraft.name.trim(),
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
+        kitchen_channel_ids: createDraft.kitchenChannelIds,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
@@ -276,7 +277,9 @@ export function WorkspacesSection({
                     setCreateError(null)
                   }}
                 >
-                  Cancel
+                  {JSON.stringify(createDraft) !== JSON.stringify(EMPTY_DRAFT)
+                    ? "Cancel"
+                    : "Close"}
                 </Button>
                 <Button
                   size="sm"

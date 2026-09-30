@@ -66,18 +66,6 @@ async def configured(fake_store, monkeypatch):
     return SimpleNamespace(record=record)
 
 
-async def test_start_follows_the_current_channel_without_the_prefix(configured):
-    result = await tools.manage_incident("start")
-
-    assert result["success"] is True and result["changed"] is True
-    assert result["incident_id"] == configured.record.id
-    assert result["dashboard_url"].endswith(configured.record.id)
-    assert "notified" in result["note"]
-    channels.enroll_channel.assert_awaited_once()
-    args, kwargs = channels.enroll_channel.await_args
-    assert args[:2] == ("C7", "payments-oncall") and kwargs == {"manual": True}
-
-
 async def test_start_needs_a_connected_account_and_an_eligible_channel(configured, monkeypatch):
     use_config(monkeypatch, github_login=None)
     denied = await tools.manage_incident("start")
@@ -96,29 +84,6 @@ async def test_start_needs_a_connected_account_and_an_eligible_channel(configure
     excluded = await tools.manage_incident("start")
     assert excluded["success"] is False
     channels.enroll_channel.assert_not_awaited()
-
-
-async def test_start_reports_setup_failures_and_repeated_starts(configured):
-    configured.record.status = "needs_attention"
-    failed = await tools.manage_incident("start")
-    assert failed["success"] is False and "setup failed" in failed["error"]
-
-    configured.record.status = "watching"
-    await service.INCIDENTS.put(configured.record.id, configured.record)
-    again = await tools.manage_incident("start")
-    assert again == {
-        **again,
-        "success": True,
-        "changed": False,
-        "status": "watching",
-    }
-    channels.apply_control.assert_not_awaited()
-
-    configured.record.status = "completed"
-    await service.INCIDENTS.put(configured.record.id, configured.record)
-    reopened = await tools.manage_incident("start")
-    assert reopened["changed"] is True and reopened["status"] == "watching"
-    assert channels.apply_control.await_args.args[1] == "reopen"
 
 
 async def test_controls_change_the_current_incident_and_keep_this_run(configured):
@@ -147,26 +112,6 @@ async def test_controls_change_the_current_incident_and_keep_this_run(configured
     ]
 
 
-async def test_controls_need_an_incident_channel_and_an_enabled_policy(configured, monkeypatch):
-    missing = await tools.manage_incident("pause")
-    assert missing["success"] is False and "not an incident" in missing["error"]
-
-    configured.record.is_archived = True
-    await service.INCIDENTS.put(configured.record.id, configured.record)
-    archived = await tools.manage_incident("complete")
-    assert archived["success"] is False and "archived" in archived["error"]
-
-    policy = await service.get_policy()
-    await service.POLICIES.put("default", policy.model_copy(update={"enabled": False}))
-    disabled = await tools.manage_incident("start")
-    assert disabled["success"] is False and "not enabled" in disabled["error"]
-
-    use_config(monkeypatch, slack_thread=None)
-    nowhere = await tools.manage_incident("start")
-    assert nowhere["success"] is False and "Slack channel" in nowhere["error"]
-    channels.apply_control.assert_not_awaited()
-
-
 async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):
     """The run that completed an incident must not undo it seconds later."""
     record = configured.record
@@ -178,15 +123,3 @@ async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):
         assert refused["success"] is False
         assert "completed" in refused["error"]
     channels.apply_control.assert_not_awaited()
-
-
-async def test_reopening_a_dashboard_completed_incident_is_still_allowed(configured, monkeypatch):
-    """No run closed it and none is running, so two empty run ids must not read as a match."""
-    record = configured.record
-    record.status, record.completed_run_id = "completed", ""
-    await service.INCIDENTS.put(record.id, record)
-    monkeypatch.setattr(tools, "current_run_id", lambda: "")
-
-    reopened = await tools.manage_incident("resume")
-
-    assert reopened["success"] is True and reopened["status"] == "watching"

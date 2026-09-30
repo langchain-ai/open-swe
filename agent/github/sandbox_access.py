@@ -134,20 +134,30 @@ async def _record_github_ids(github_ids: Mapping[str, int | None]) -> None:
         logger.warning("Could not store repository ids", exc_info=True)
 
 
+async def installation_token(*, permissions: PermissionMap | None = None) -> SandboxGitHubAccess:
+    """A token for every repository the GitHub App installation can reach."""
+    token, expires_at = await get_github_app_installation_token_with_expiry(permissions=permissions)
+    if not token:
+        raise RuntimeError("GitHub installation token is unavailable")
+    return SandboxGitHubAccess(token, expires_at)
+
+
 async def workspace_token(
     workspace_slug: str | None,
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
 ) -> SandboxGitHubAccess:
-    """Resolve permissions strictly; snapshot fallback must never broaden access."""
+    """The token a workspace's sandbox gets: the whole installation unless narrowed.
+
+    A workspace's repositories are where its work is routed and what its image
+    preloads, not a limit on access. ``repositories`` narrows the token for
+    callers that must not reach anything else, such as the reviewer or a thread
+    started by an event on a public repository.
+    """
     slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
-    workspace = await WORKSPACES.get(slug)
-    if workspace is None:
-        if slug != DEFAULT_WORKSPACE_SLUG:
-            raise ValueError(f"Workspace {slug!r} does not exist")
-        return SandboxGitHubAccess()
-    allowed = {repo.lower() for repo in workspace.repos}
+    if slug != DEFAULT_WORKSPACE_SLUG and not await WORKSPACES.slug_exists(slug):
+        raise ValueError(f"Workspace {slug!r} does not exist")
     if repositories is not None:
-        allowed.intersection_update(repo.lower() for repo in repositories)
-    return await repository_token(sorted(allowed), permissions=permissions)
+        return await repository_token(sorted(repositories), permissions=permissions)
+    return await installation_token(permissions=permissions)

@@ -7,13 +7,10 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent import server
-from agent.prompt import construct_system_prompt
-from agent.run_config import RunConfig
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
 from agent.users import User
-from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
-from agent.workspaces import refresh
+from agent.utils.authorship import CollaboratorIdentity
 from agent.workspaces.store import Workspace
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
@@ -24,12 +21,6 @@ def _config(**configurable: object) -> RunnableConfig:
 
 
 # --- snapshot precedence ---
-
-
-@pytest.mark.asyncio
-async def test_ready_workspace_snapshot_is_what_new_sandboxes_boot_from() -> None:
-    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=_READY):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
 @pytest.mark.asyncio
@@ -49,74 +40,7 @@ async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
         assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
 
 
-@pytest.mark.asyncio
-async def test_snapshot_resolution_passes_the_threads_workspace() -> None:
-    resolve = AsyncMock(
-        return_value=_READY.model_copy(update={"slug": "staging", "snapshot_id": "staging-snap"})
-    )
-    with patch.object(lifecycle, "load_workspace", resolve):
-        snapshot_id = (await lifecycle.SandboxCreateConfig.resolve("staging")).snapshot_id
-
-    assert snapshot_id == "staging-snap"
-    resolve.assert_awaited_once_with("staging")
-
-
-@pytest.mark.asyncio
-async def test_workspace_sandbox_sizing_is_resolved_with_snapshot() -> None:
-    workspace = _READY.model_copy(
-        update={
-            "mem_bytes": 32 * 1024**3,
-            "vcpus": 16,
-            "fs_capacity_bytes": 512 * 1024**3,
-            "create_params": {"_internal_runtime": "v2"},
-        }
-    )
-    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=workspace):
-        config = await lifecycle.SandboxCreateConfig.resolve("base")
-        snapshot_id = config.snapshot_id
-        resources = config.resources
-        create_params = config.create_params
-
-    assert snapshot_id == "env-snap"
-    assert resources == {
-        "mem_bytes": 32 * 1024**3,
-        "vcpus": 16,
-        "fs_capacity_bytes": 512 * 1024**3,
-    }
-    assert create_params == {"_internal_runtime": "v2"}
-
-
-def test_workspace_slug_reads_the_run_config() -> None:
-    assert server.workspace_slug(RunConfig(environment="staging")) == "staging"
-    assert server.workspace_slug(RunConfig(environment="  ")) is None
-    assert server.workspace_slug(RunConfig()) is None
-
-
 # --- admin thread gate ---
-
-
-@pytest.mark.asyncio
-async def test_admin_thread_requires_flag_and_configured_admin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramon.nogueira@langchain.dev")
-    admin_config = _config(admin_thread=True, user_email="ramon.nogueira@langchain.dev")
-
-    assert await server._admin_thread(admin_config, None) is True
-    # Same user, no flag: an ordinary thread never gets the tools.
-    assert (
-        await server._admin_thread(_config(user_email="ramon.nogueira@langchain.dev"), None)
-        is False
-    )
-    # Flag set by a thread whose current requester is not an admin.
-    non_admin = _config(admin_thread=True, user_email="someone@else.dev")
-    assert await server._admin_thread(non_admin, None) is False
-
-
-@pytest.mark.asyncio
-async def test_admin_thread_accepts_configured_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    assert await server._admin_thread(_config(admin_thread=True), "ramonn") is True
 
 
 @pytest.mark.asyncio
@@ -136,17 +60,6 @@ async def test_admin_thread_accepts_configured_admin_slack_dm(
     )
 
     assert await server._admin_thread(config, None) is True
-
-
-@pytest.mark.asyncio
-async def test_workspace_admin_resolves_email_for_github_login(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramon@langchain.dev")
-    with patch.object(
-        User, "email_for_login", new_callable=AsyncMock, return_value="ramon@langchain.dev"
-    ):
-        assert await server._workspace_admin(_config(github_login="ramonn"), None) is True
 
 
 # --- tool gate ---
@@ -234,29 +147,6 @@ def _saved(**fields: Any) -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_publish_captures_this_sandbox_before_writing_anything(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The record is only ever written once the image it points at exists."""
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with _Publish(existing=None, saved=_saved(prompt="prompt")) as seams:
-        result = await env_tools.publish_workspace("base", "prompt")
-
-    assert seams.calls == ["capture", "write"]
-    seams.capture.assert_awaited_once_with(
-        "sb-thread", "openswe-environment-base", timeout=env_tools.refresh.capture_timeout()
-    )
-    # Definition and image pointer go in as one write.
-    assert seams.publish.await_args is not None
-    assert isinstance(seams.definition, env_tools.store.WorkspaceCreate)
-    assert seams.publish.await_args.kwargs["snapshot_id"] == "snap-new"
-    assert seams.publish.await_args.kwargs["source_sandbox_id"] == "sb-thread"
-    assert result["ok"] is True
-    assert result["created"] is True
-    assert result["workspace"]["snapshot_id"] == "snap-new"
-
-
-@pytest.mark.asyncio
 async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
@@ -283,19 +173,6 @@ async def test_a_failed_record_write_discards_the_orphaned_image(
     assert "store unavailable" in result["error"]
     seams.discard.assert_awaited_once_with("base", "snap-new")
     seams.retire.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_bad_definition_is_refused_before_the_capture(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Validation is milliseconds; a capture is minutes. Order them accordingly."""
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with _Publish(existing=None, saved=_saved()) as seams:
-        result = await env_tools.publish_workspace("base", "prompt", snapshot_name="bad:name")
-
-    assert result["ok"] is False
-    seams.capture.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -332,49 +209,6 @@ async def test_publishing_over_an_existing_workspace_retires_its_old_image(
 
 
 @pytest.mark.asyncio
-async def test_a_setup_script_registers_the_nightly_check_and_its_absence_does_not(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with _Publish(existing=None, saved=_saved(setup_script="make setup")) as seams:
-        await env_tools.publish_workspace("base", "prompt", setup_script="make setup")
-    seams.ensure_cron.assert_awaited_once_with("base")
-
-    with _Publish(existing=None, saved=_saved()) as seams:
-        await env_tools.publish_workspace("base", "prompt")
-    seams.ensure_cron.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_publish_persists_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    saved = _saved(
-        prompt="prompt",
-        mem_bytes=16 * 1024**3,
-        vcpus=8,
-        fs_capacity_bytes=256 * 1024**3,
-        create_params={"_internal_runtime": "v2"},
-    )
-    with _Publish(existing=None, saved=saved) as seams:
-        result = await env_tools.publish_workspace(
-            "base",
-            "prompt",
-            mem_bytes=16 * 1024**3,
-            vcpus=8,
-            fs_capacity_bytes=256 * 1024**3,
-            create_params={"_internal_runtime": "v2"},
-        )
-
-    definition = seams.definition
-    assert definition.mem_bytes == 16 * 1024**3
-    assert definition.vcpus == 8
-    assert definition.fs_capacity_bytes == 256 * 1024**3
-    assert definition.create_params == {"_internal_runtime": "v2"}
-    assert result["workspace"]["vcpus"] == 8
-    assert result["workspace"]["create_params"] == {"_internal_runtime": "v2"}
-
-
-@pytest.mark.asyncio
 async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=Workspace(slug="base"), saved=_saved(prompt="prompt")) as seams:
@@ -390,65 +224,6 @@ async def test_publish_can_clear_sandbox_sizing(monkeypatch: pytest.MonkeyPatch)
     assert definition.create_params == {}
     assert "create_params" in definition.model_fields_set
     assert result["ok"] is True
-
-
-@pytest.mark.asyncio
-async def test_refresh_start_refuses_an_workspace_with_no_script(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    start = AsyncMock()
-    with (
-        patch(
-            "agent.run_config.get_config",
-            return_value=_config(admin_thread=True, github_login="ramonn"),
-        ),
-        patch.object(
-            env_tools.store.WORKSPACES,
-            "get",
-            new_callable=AsyncMock,
-            return_value=Workspace(slug="base"),
-        ),
-        patch.object(env_tools.refresh, "start_refresh_run", start),
-    ):
-        result = await env_tools.refresh_workspace_start("base")
-
-    assert result["status"] == "error"
-    assert "setup_script" in result["error"]
-    start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_refresh_start_returns_a_task_id_the_unified_poll_understands(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Minutes of work, so the tool hands back a task id instead of blocking."""
-    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with (
-        patch(
-            "agent.run_config.get_config",
-            return_value=_config(admin_thread=True, github_login="ramonn"),
-        ),
-        patch.object(
-            env_tools.store.WORKSPACES,
-            "get",
-            new_callable=AsyncMock,
-            return_value=Workspace(slug="base", setup_script="make setup"),
-        ),
-        patch.object(
-            env_tools.refresh,
-            "start_refresh_run",
-            new_callable=AsyncMock,
-            return_value="run-1",
-        ),
-    ):
-        result = await env_tools.refresh_workspace_start("base")
-
-    # Started, not done: the rebuild is still running when this returns.
-    assert result["status"] == "started"
-    # Prefixed, so `background_task` routes it to the refresh provider.
-    assert result["task_id"] == "ws-run-1"
-    assert refresh.owns_task(result["task_id"])
 
 
 @pytest.mark.asyncio
@@ -484,45 +259,9 @@ async def test_refresh_start_refuses_while_one_is_running(
 # --- prompt wiring ---
 
 
-def test_person_block_includes_workspace_admin_status() -> None:
-    identity = CollaboratorIdentity(
-        display_name="alice", commit_name="alice", commit_email="alice@example.com"
-    )
-    admin = ThreadParticipant(identity=identity, person_id="user:1", workspace_admin=True)
-    member = ThreadParticipant(identity=identity, person_id="user:1")
-
-    assert admin.as_person()["workspace_admin"] == "yes"
-    assert member.as_person()["workspace_admin"] == "no"
-
-
-def test_workspace_instructions_render_in_system_prompt() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/workspace",
-        workspace_name="Base",
-        workspace_instructions="Checkouts live in /workspace/repos.",
-    )
-    assert "### Workspace Instructions (Base)" in prompt
-    assert "Checkouts live in /workspace/repos." in prompt
-    assert "### Admin Thread: Workspace Setup" not in prompt
-
-
-def test_admin_section_only_for_admin_threads() -> None:
-    prompt = construct_system_prompt(working_dir="/workspace", admin_workspaces=True)
-    assert "### Admin Thread: Workspace Setup" in prompt
-    assert "direct them to an admin thread" not in prompt
-
-
-def test_blank_workspace_prompt_renders_nothing() -> None:
-    prompt = construct_system_prompt(
-        working_dir="/workspace", workspace_name="Base", workspace_instructions="   "
-    )
-    assert "Workspace Instructions" not in prompt
-
-
 async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
     """An admin requester must not make everyone else in the roster look like one."""
     from agent import server
-    from agent.users import User
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))

@@ -4,11 +4,13 @@ from typing import Literal, TypedDict
 
 from fastapi import HTTPException
 
+from agent.slack.blocks import block_payload
 from agent.slack.client import (
     convert_mentions_to_slack_format,
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +114,13 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
+    blocks = markdown_blocks(message)
     message_ts, error = await post_slack_top_level_message_with_ts(
-        channel_id, message, unfurl_links=False, unfurl_media=False
+        channel_id,
+        markdown_to_mrkdwn(message),
+        unfurl_links=False,
+        unfurl_media=False,
+        blocks=block_payload(blocks) if blocks else None,
     )
     if not message_ts:
         return {"success": False, "error": error or "post_failed"}

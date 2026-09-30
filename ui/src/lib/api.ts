@@ -227,6 +227,8 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
+  review_channel_watch?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -247,6 +249,8 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
+  review_channel_watch?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -284,8 +288,6 @@ export interface WorkspaceSettings {
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
   org_guidelines?: string | null
-  review_auto_approve?: boolean
-  approval_policy?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
   default_agent_subagent_model?: string | null
@@ -495,6 +497,10 @@ export interface PRMergeRateEffort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds?: number | null
+  avg_delivery_seconds?: number | null
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRateCohort {
@@ -518,6 +524,7 @@ export interface PRMergeRateCohort {
   avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
+  mean_distance_basis_points?: number | null
   distance_sample_size?: number
 }
 
@@ -556,13 +563,20 @@ export interface ReposPayload {
 
 export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
 
+/** What a positive approval assessment does; `null` is the `dry_run` default. */
+export type ReviewApprovalMode = "off" | "dry_run" | "approve"
+
+export interface ApprovalsFileStatus {
+  found: boolean
+}
+
 export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
   status: ReviewStyleStatus
   custom_prompt: string | null
-  approval_policy?: string | null
+  approval_mode?: ReviewApprovalMode | null
   analysis_summary: string | null
   top_reviewers: Array<string>
   prs_sampled: number
@@ -652,9 +666,11 @@ export interface WorkspaceOption {
   slug: string
   name: string
   repos: Array<string>
-  /** Effective default repository, withheld when another workspace owns it. */
+  /** Effective default repository, from the workspace's settings tiers. */
   default_repo: string | null
   slack_channel_ids: Array<string>
+  /** Bound channels where untagged messages start and continue threads. */
+  kitchen_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -672,6 +688,7 @@ export interface SlackChannelOption {
   is_private: boolean
   is_member: boolean
   is_ext_shared: boolean
+  is_pending_ext_shared?: boolean
   num_members: number | null
 }
 
@@ -692,6 +709,7 @@ export interface WorkspaceCreate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
@@ -700,6 +718,7 @@ export interface WorkspaceUpdate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -717,6 +736,7 @@ export interface WorkspaceRecord {
   prompt: string
   repos: Array<string>
   slack_channel_ids: Array<string>
+  kitchen_channel_ids: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -893,6 +913,9 @@ export interface OpenPullRequest {
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
   failingChecks: string[]
   pendingChecks: string[]
+  // Required by the base branch but never reported on the head, so GitHub
+  // refuses the merge.
+  missingChecks: string[]
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
@@ -1032,6 +1055,7 @@ export interface ScoutProgress {
 
 export interface PublishedReviewAssessment {
   approved?: boolean
+  dry_run?: boolean
   review_id: number
   head_sha: string
   risk_score: number
@@ -1188,6 +1212,15 @@ export interface ReviewerEvalStatus {
   updated_at: string
 }
 
+export interface HumanReviewRequestResult {
+  success: boolean
+  error: string
+  request_id: string
+  channel: string
+  permalink: string
+  reused: boolean
+}
+
 async function pullRequestAction(
   pr: OpenPullRequest,
   body: PullRequestActionRequest
@@ -1239,14 +1272,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ custom_prompt }),
     }),
-  saveReviewApprovalPolicy: (
+  saveReviewApprovalMode: (
     full_name: string,
-    approval_policy: string | null
+    approval_mode: ReviewApprovalMode | null
   ) =>
     request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
       method: "PUT",
-      body: JSON.stringify({ approval_policy }),
+      body: JSON.stringify({ approval_mode }),
     }),
+  getApprovalsFile: (full_name: string) =>
+    request<ApprovalsFileStatus>(
+      `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
+    ),
   analyzeReviewStyle: (full_name: string) =>
     request<ReviewStyle>(
       `/review-styles/${encodeURIComponent(full_name)}/analyze`,
@@ -1587,6 +1624,11 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  requestHumanReview: (pr: OpenPullRequest) =>
+    request<HumanReviewRequestResult>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
+      { method: "POST" }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

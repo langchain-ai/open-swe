@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from agent.dashboard.oauth import (
     expires_at_from_github_response,
@@ -61,9 +61,13 @@ class ProfileUpdate(BaseModel):
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
+    human_review_requests: bool | None = None
+    review_channel_watch: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = None
+    experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -433,9 +437,16 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
+            human_review_requests=update.human_review_requests,
+            review_channel_watch=update.review_channel_watch,
         ),
     )
-    if preferences is None and (update.concierge_mode or update.preserve_sandbox_memory):
+    if preferences is None and (
+        update.concierge_mode
+        or update.preserve_sandbox_memory
+        or update.human_review_requests
+        or update.review_channel_watch
+    ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)
     return {

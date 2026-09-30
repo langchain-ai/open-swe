@@ -165,7 +165,13 @@ async def _slack_writers_are(context: SourceContext, login: str) -> bool:
     if not slack.channel_id or not slack.thread_ts:
         return False
     bot_user_id = ENV.SLACK_BOT_USER_ID.get()
-    messages = await fetch_slack_thread_messages(slack.channel_id, slack.thread_ts)
+    try:
+        messages = await fetch_slack_thread_messages(
+            slack.channel_id, slack.thread_ts, complete=True
+        )
+    except Exception:
+        logger.warning("Could not read the whole Slack thread for access", exc_info=True)
+        return False
     if not bot_user_id or not messages or len(messages) >= SLACK_THREAD_MAX_MESSAGES:
         return False
     user_ids: set[str] = set()

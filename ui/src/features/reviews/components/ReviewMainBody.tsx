@@ -1586,14 +1586,12 @@ function ReviewBodyInner({
                   className="mt-4"
                 />
                 {!embedded && (
-                  <section className="mt-6" aria-label="Conversation">
-                    <h2 className="mb-2 text-sm font-medium">Conversation</h2>
-                    <ReviewConversation
-                      owner={detail.owner}
-                      repo={detail.repo}
-                      number={detail.number}
-                    />
-                  </section>
+                  <ReviewConversation
+                    owner={detail.owner}
+                    repo={detail.repo}
+                    number={detail.number}
+                    className="mt-6"
+                  />
                 )}
 
                 <div className="mt-6">

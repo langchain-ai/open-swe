@@ -65,8 +65,6 @@ async def _analyzer_workspace(cfg: RunConfig) -> str | None:
         return cfg.workspace_slug
     from agent.workspaces.store import WORKSPACES
 
-    if WORKSPACES.repo_import_is_pending(cfg.review_style_full_name):
-        raise RuntimeError("Analyzer repository workspace has not been imported")
     return await WORKSPACES.owner_of_repo(cfg.review_style_full_name)
 
 

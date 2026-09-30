@@ -9,6 +9,8 @@ from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
 from agent.expedited_review import slack as expedited_review
+from agent.human_review import slack as human_review
+from agent.human_review.posted import watch_post
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -55,6 +57,7 @@ from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
+from agent.workspaces.routing import is_kitchen_channel
 
 router = APIRouter()
 
@@ -203,10 +206,7 @@ async def _lookup_delivered_message_update(
     user_id: str,
 ) -> tuple[str | None, JsonObject | None]:
     for delay in (*_MESSAGE_UPDATE_RETRY_DELAYS, None):
-        try:
-            thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
-        except common.SlackThreadMappingError:
-            return None, None
+        thread_id = await common.lookup_slack_thread_id(langgraph_client, channel_id, thread_ts)
         delivered_message = await common.lookup_slack_run_mapping(
             langgraph_client, channel_id, message_ts
         )
@@ -226,18 +226,24 @@ async def _lookup_delivered_message_update(
 
 
 async def _process_slack_message_update(request: SlackRequest) -> None:
-    await run_slack_task(request.target, _process_slack_message_update_impl(request))
-
-
-async def _process_slack_message_update_impl(request: SlackRequest) -> None:
-    langgraph_client = get_langgraph_client()
-    thread_id, delivered_message = await _lookup_delivered_message_update(
-        langgraph_client,
-        request.channel_id,
-        request.thread_ts,
-        request.original_message_ts,
-        request.user_id,
-    )
+    try:
+        thread_id, delivered_message = await _lookup_delivered_message_update(
+            get_langgraph_client(),
+            request.channel_id,
+            request.thread_ts,
+            request.original_message_ts,
+            request.user_id,
+        )
+    except Exception:  # noqa: BLE001
+        common.logger.exception(
+            "Failed to associate Slack message update",
+            extra={
+                "slack_channel_id": request.channel_id,
+                "slack_message_ts": request.original_message_ts,
+                "slack_event_id": request.event_id,
+            },
+        )
+        return
     if not thread_id or not delivered_message:
         common.logger.info(
             "Ignoring undelivered Slack message update channel=%s message=%s",
@@ -245,6 +251,11 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
             request.original_message_ts,
         )
         return
+    request = request.model_copy(update={"thread_id": thread_id})
+    await run_slack_task(request.target, _process_slack_message_update_impl(request))
+
+
+async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     channel_context = await common.resolve_slack_channel_context(
         request.channel_id, use_cache=False
     )
@@ -258,10 +269,10 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
         request.thread_ts,
         slack_user_id=request.user_id,
         channel_context=channel_context,
-        thread_id=thread_id,
+        thread_id=request.thread_id,
     )
     await service.process_slack_mention(
-        request.model_copy(update={"thread_id": thread_id, "channel_context": channel_context}),
+        request.model_copy(update={"channel_context": channel_context}),
         repo,
     )
 
@@ -452,6 +463,14 @@ async def slack_webhook(
     if in_code_channel:
         thread_ts = common.CODE_CHANNEL_SESSION_TS
 
+    in_kitchen_channel = (
+        not in_code_channel
+        and event.channel_type != "im"
+        and not is_dm_channel(channel_context)
+        and event.type == "message"
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
+        and await is_kitchen_channel(channel_id)
+    )
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
@@ -470,6 +489,20 @@ async def slack_webhook(
 
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
+
+    # Watching a review channel post never takes over the message's own routing.
+    if (
+        not is_message_update
+        and allowed_bot is None
+        and not in_code_channel
+        and not in_dm_channel
+        and event.type == "message"
+        and event.subtype in {"", "file_share"}
+        and not reply_thread_ts
+        and user_id
+        and "/pull/" in text
+    ):
+        background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
@@ -499,41 +532,56 @@ async def slack_webhook(
         explicit_mention
         or is_message_update
         or in_code_channel
+        or (
+            in_kitchen_channel
+            and event.type == "message"
+            and event.subtype in {"", "file_share", "thread_broadcast"}
+        )
         or allowed_bot is not None
         or is_direct_message
         or solo_followup
     ):
         return ignored("Not an app mention or DM")
 
+    if is_message_update:
+        try:
+            claimed = await common.claim_slack_event(event_id, channel_id, event_ts)
+        except Exception:  # noqa: BLE001
+            common.logger.exception(
+                "Failed to claim Slack message update",
+                extra={
+                    "slack_channel_id": channel_id,
+                    "slack_message_ts": original_message_ts,
+                    "slack_event_id": event_id,
+                },
+            )
+            return ignored("Slack update could not be claimed")
+        if not claimed:
+            return ignored("Duplicate Slack event delivery")
+        background_tasks.add_task(
+            _process_slack_message_update,
+            SlackRequest(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                event_ts=event_ts,
+                original_message_ts=original_message_ts,
+                event_id=event_id,
+                user_id=user_id,
+                text=text,
+                attachments=attachments,
+                bot_user_id=bot_user_id,
+                message_update=True,
+                code_channel=in_code_channel,
+                concierge_mode=in_concierge_mode,
+                reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
+            ),
+        )
+        return accepted("Slack update queued")
+
     # From here on the message is addressed to Open SWE: any failure is reported to the thread.
     target = SlackRequestTarget(channel_id=channel_id, thread_ts=thread_ts, event_id=event_id)
 
     async def dispatch() -> WebhookResponse:
-        if is_message_update:
-            if await common.claim_slack_event(event_id, channel_id, event_ts):
-                background_tasks.add_task(
-                    _process_slack_message_update,
-                    SlackRequest(
-                        channel_id=channel_id,
-                        thread_ts=thread_ts,
-                        event_ts=event_ts,
-                        original_message_ts=original_message_ts,
-                        event_id=event_id,
-                        user_id=user_id,
-                        text=text,
-                        attachments=attachments,
-                        bot_user_id=bot_user_id,
-                        message_update=True,
-                        code_channel=in_code_channel,
-                        concierge_mode=in_concierge_mode,
-                        reply_thread_ts=reply_thread_ts
-                        if in_code_channel or in_concierge_mode
-                        else "",
-                    ),
-                )
-                return accepted("Slack update queued")
-            return ignored("Duplicate Slack event delivery")
-
         if channel_context is None:
             return ignored("Slack channel is not eligible")
 
@@ -568,7 +616,9 @@ async def slack_webhook(
                 thread_id=thread_id,
                 treat_all_messages_as_mentions=is_direct_message
                 or in_code_channel
+                or in_kitchen_channel
                 or solo_followup,
+                kitchen_channel=in_kitchen_channel,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",
@@ -816,6 +866,8 @@ async def slack_interactivity(
     async def dispatch() -> WebhookResponse:
         if button.type == expedited_review.BUTTON_TYPE:
             return await expedited_review.handle_button(interaction, button, background_tasks)
+        if button.type == human_review.BUTTON_TYPE:
+            return await human_review.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
