@@ -403,7 +403,7 @@ async def fetch_mergeability(
 
 
 async def fetch_unresolved_review_threads(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int, *, strict: bool = False
 ) -> list[dict[str, Any]] | None:
     """Unresolved review threads on a PR, or ``None`` when GitHub could not answer."""
     unresolved: list[dict[str, Any]] = []
@@ -436,6 +436,10 @@ async def fetch_unresolved_review_threads(
             if not isinstance(threads, dict) or not isinstance(threads.get("nodes"), list):
                 return None
             for thread in threads["nodes"]:
+                if strict and (
+                    not isinstance(thread, dict) or not isinstance(thread.get("isResolved"), bool)
+                ):
+                    return None
                 if not isinstance(thread, dict) or thread.get("isResolved") is True:
                     continue
                 comments = thread.get("comments")
@@ -466,6 +470,11 @@ async def fetch_unresolved_review_threads(
                     }
                 )
             page_info = threads.get("pageInfo")
+            if strict and (
+                not isinstance(page_info, dict)
+                or not isinstance(page_info.get("hasNextPage"), bool)
+            ):
+                return None
             if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
                 return unresolved
             next_cursor = page_info.get("endCursor")

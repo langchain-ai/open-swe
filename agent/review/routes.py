@@ -13,6 +13,7 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.approval_rules import ApprovalProgram, refresh_approval_program
 from agent.review.approvals import fetch_approvals_md
 from agent.review.assessment_feedback import (
     AssessmentFeedback,
@@ -103,6 +104,19 @@ async def admin_get_reviewer_eval(
 ) -> dict[str, Any]:
     """Read-only status for the reviewer eval (triggered from the GitHub Action)."""
     return await get_reviewer_eval_status()
+
+
+@router.post("/review-approvals/{owner}/{repo}/refresh")
+async def api_refresh_approval_program(
+    owner: str,
+    repo: str,
+    admin: dict[str, object] = ADMIN_DEP,
+) -> ApprovalProgram:
+    token = await require_repo_access_for_user(str(admin["sub"]), f"{owner}/{repo}")
+    try:
+        return await refresh_approval_program(owner, repo, token=token)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/review-styles")
