@@ -591,3 +591,125 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
     result = opr._upsert_pull_request([original], updated)
     assert result[0]["slack_feedback"] == original["slack_feedback"]
     assert result[0]["state"] == "open"
+
+
+class _AttachmentClient:
+    def __init__(
+        self, *, repo: _FakeResponse, branch: _FakeResponse, base: _FakeResponse, put: _FakeResponse
+    ) -> None:
+        self.repo = repo
+        self.branch = branch
+        self.base = base
+        self.put_response = put
+        self.get_calls: list[dict[str, Any]] = []
+        self.post_calls: list[dict[str, Any]] = []
+        self.put_calls: list[dict[str, Any]] = []
+
+    async def __aenter__(self) -> _AttachmentClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def get(
+        self, url: str, *, headers: dict[str, str], params: dict[str, str] | None = None
+    ) -> _FakeResponse:
+        self.get_calls.append({"url": url, "headers": headers, "params": params})
+        if url.endswith("/git/ref/heads/open-swe%2Fpr-assets"):
+            return self.branch
+        if url.endswith("/git/ref/heads/main"):
+            return self.base
+        return self.repo
+
+    async def post(
+        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> _FakeResponse:
+        self.post_calls.append({"url": url, "headers": headers, "json": json})
+        return _FakeResponse(201, {"ref": "refs/heads/open-swe/pr-assets"})
+
+    async def put(
+        self, url: str, *, headers: dict[str, str], json: dict[str, Any]
+    ) -> _FakeResponse:
+        self.put_calls.append({"url": url, "headers": headers, "json": json})
+        return self.put_response
+
+
+@pytest.mark.parametrize(
+    ("file_path", "content_type", "expected_markdown"),
+    [
+        ("before.png", "image/png", "image"),
+        ("recording.mp4", "video/mp4", "video"),
+    ],
+)
+def test_upload_attachment_uses_commit_pinned_contents_url_and_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+    file_path: str,
+    content_type: str,
+    expected_markdown: str,
+) -> None:
+    content = b"attachment-bytes"
+    client = _AttachmentClient(
+        repo=_FakeResponse(200, {"default_branch": "main"}),
+        branch=_FakeResponse(404, {"message": "Not Found"}),
+        base=_FakeResponse(200, {"object": {"sha": "base-sha"}}),
+        put=_FakeResponse(201, {"commit": {"sha": "attachment-commit"}}),
+    )
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("token", "user")))
+    monkeypatch.setattr(opr, "private_credential_login", lambda: _coro("private"))
+    monkeypatch.setattr(opr, "_read_attachment", lambda _path: _coro((file_path, content)))
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
+
+    result = asyncio.run(opr.upload_pr_attachment("owner", "repo", file_path))
+
+    assert result["success"] is True
+    url = result["url"]
+    assert isinstance(url, str)
+    assert url.startswith("https://raw.githubusercontent.com/owner/repo/attachment-commit/")
+    assert result["markdown"] == (url if expected_markdown == "video" else f"![before]({url})")
+    assert client.post_calls[0]["json"] == {
+        "ref": "refs/heads/open-swe/pr-assets",
+        "sha": "base-sha",
+    }
+    upload = client.put_calls[0]
+    assert upload["json"]["branch"] == "open-swe/pr-assets"
+    assert upload["json"]["content"] == "YXR0YWNobWVudC1ieXRlcw=="
+
+
+def test_upload_attachment_returns_structured_error_for_unauthorized_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _AttachmentClient(
+        repo=_FakeResponse(404, {"message": "Not Found"}),
+        branch=_FakeResponse(404),
+        base=_FakeResponse(404),
+        put=_FakeResponse(404),
+    )
+    monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda: _coro(("token", "user")))
+    monkeypatch.setattr(opr, "private_credential_login", lambda: _coro("private"))
+    monkeypatch.setattr(opr, "_read_attachment", lambda _path: _coro(("image.png", b"data")))
+    monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **_kwargs: client)
+
+    result = asyncio.run(opr.upload_pr_attachment("owner", "repo", "image.png"))
+
+    assert result == {"success": False, "error": opr.ATTACHMENT_UNAVAILABLE_ERROR}
+
+
+@pytest.mark.parametrize(
+    ("file_path", "read_error"),
+    [
+        ("notes.txt", "unused"),
+        ("large.png", "file exceeds the 10 MB attachment limit"),
+    ],
+)
+def test_upload_attachment_rejects_unsupported_and_oversize_files(
+    monkeypatch: pytest.MonkeyPatch, file_path: str, read_error: str
+) -> None:
+    read_attachment = AsyncMock(side_effect=ValueError(read_error))
+    monkeypatch.setattr(opr, "_read_attachment", read_attachment)
+
+    result = asyncio.run(opr.upload_pr_attachment("owner", "repo", file_path))
+
+    expected = "unsupported file type" if file_path.endswith(".txt") else read_error
+    assert result == {"success": False, "error": expected}
+    if file_path.endswith(".txt"):
+        read_attachment.assert_not_awaited()

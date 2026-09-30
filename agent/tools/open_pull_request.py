@@ -1,9 +1,11 @@
 """Open a GitHub pull request using the thread's credential scope."""
 
 import asyncio
+import base64
 import logging
 import posixpath
 import re
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -1222,7 +1224,11 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
     return {"success": True, "url": pr.get("html_url"), "number": ref.number}
 
 
-UPLOADS_URL = "https://uploads.github.com/user-attachments/assets"
+ATTACHMENT_BRANCH = "open-swe/pr-assets"
+ATTACHMENT_UNAVAILABLE_ERROR = (
+    "attachment upload is not available for this repository's credentials; "
+    "use create_sandbox_file_download_url"
+)
 MAX_BYTES = 10 * 1024 * 1024
 ATTACHMENT_TYPES = {
     ".png": "image/png",
@@ -1239,6 +1245,10 @@ ATTACHMENT_TYPES = {
 
 def _upload_failure(error: str) -> dict[str, object]:
     return {"success": False, "error": error}
+
+
+class _AttachmentCapabilityUnavailable(Exception):
+    """Raised when repository-backed attachment uploads are unavailable."""
 
 
 async def _read_attachment(file_path: str) -> tuple[str, bytes]:
@@ -1262,25 +1272,73 @@ async def _upload_attachment(
         if await private_credential_login() is None and not await _workspace_has_repository(
             client, owner, repo
         ):
-            raise ValueError(f"{owner}/{repo} is not in the workspace GitHub App installation")
+            raise _AttachmentCapabilityUnavailable
         repo_resp = await client.get(
             f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token)
         )
+        if repo_resp.status_code in (401, 403, 404):
+            raise _AttachmentCapabilityUnavailable
         if repo_resp.status_code != 200:
             raise ValueError(f"GitHub returned {repo_resp.status_code} for {owner}/{repo}")
-        resp = await client.post(
-            UPLOADS_URL,
-            params={
-                "name": name,
-                "content_type": content_type,
-                "repository_id": repo_resp.json()["id"],
-            },
-            headers={**_auth_headers(token), "Content-Type": "application/octet-stream"},
-            content=content,
+        default_branch = repo_resp.json().get("default_branch")
+        if not isinstance(default_branch, str) or not default_branch:
+            raise ValueError(f"GitHub did not return a default branch for {owner}/{repo}")
+        branch_ref_url = (
+            f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{quote(ATTACHMENT_BRANCH, safe='')}"
         )
-    if resp.status_code not in (200, 201):
-        raise ValueError(f"GitHub upload returned {resp.status_code}: {resp.text[:500]}")
-    return resp.json()["url"]
+        branch_resp = await client.get(branch_ref_url, headers=_auth_headers(token))
+        if branch_resp.status_code == 404:
+            base_resp = await client.get(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/ref/heads/{quote(default_branch, safe='')}",
+                headers=_auth_headers(token),
+            )
+            if base_resp.status_code in (401, 403, 404):
+                raise _AttachmentCapabilityUnavailable
+            if base_resp.status_code != 200:
+                raise ValueError(f"GitHub returned {base_resp.status_code} for {owner}/{repo}")
+            create_branch_resp = await client.post(
+                f"{GITHUB_API}/repos/{owner}/{repo}/git/refs",
+                headers=_auth_headers(token),
+                json={
+                    "ref": f"refs/heads/{ATTACHMENT_BRANCH}",
+                    "sha": base_resp.json()["object"]["sha"],
+                },
+            )
+            if create_branch_resp.status_code == 422:
+                branch_resp = await client.get(branch_ref_url, headers=_auth_headers(token))
+                if branch_resp.status_code != 200:
+                    raise _AttachmentCapabilityUnavailable
+            elif create_branch_resp.status_code in (401, 403, 404):
+                raise _AttachmentCapabilityUnavailable
+            elif create_branch_resp.status_code not in (200, 201):
+                raise ValueError(
+                    f"GitHub returned {create_branch_resp.status_code} for {owner}/{repo}"
+                )
+        elif branch_resp.status_code in (401, 403):
+            raise _AttachmentCapabilityUnavailable
+        elif branch_resp.status_code != 200:
+            raise ValueError(f"GitHub returned {branch_resp.status_code} for {owner}/{repo}")
+        asset_path = f"attachments/{uuid.uuid4().hex}-{name}"
+        content_resp = await client.put(
+            f"{GITHUB_API}/repos/{owner}/{repo}/contents/{quote(asset_path, safe='/')}",
+            headers=_auth_headers(token),
+            json={
+                "message": f"Add PR attachment {name}",
+                "content": base64.b64encode(content).decode("ascii"),
+                "branch": ATTACHMENT_BRANCH,
+            },
+        )
+    if content_resp.status_code in (401, 403, 404):
+        raise _AttachmentCapabilityUnavailable
+    if content_resp.status_code not in (200, 201):
+        raise ValueError(f"GitHub returned {content_resp.status_code}: {content_resp.text[:500]}")
+    commit_sha = content_resp.json().get("commit", {}).get("sha")
+    if not isinstance(commit_sha, str) or not commit_sha:
+        raise ValueError("GitHub did not return a commit SHA for the attachment")
+    return (
+        f"https://raw.githubusercontent.com/{owner}/{repo}/{commit_sha}/"
+        f"{quote(asset_path, safe='/')}"
+    )
 
 
 async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[str, object]:
@@ -1292,6 +1350,9 @@ async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[st
         path, content = await _read_attachment(file_path)
         name = posixpath.basename(path)
         url = await _upload_attachment(owner, repo, name, content_type, content)
+    except _AttachmentCapabilityUnavailable:
+        logger.warning("PR attachment upload capability unavailable")
+        return _upload_failure(ATTACHMENT_UNAVAILABLE_ERROR)
     except ValueError as exc:
         logger.warning("PR attachment upload failed", extra={"error": str(exc)})
         return _upload_failure(str(exc))
