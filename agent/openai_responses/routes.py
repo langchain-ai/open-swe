@@ -36,6 +36,10 @@ from agent.utils.thread_ops import langgraph_client
 
 router = APIRouter(prefix=OPENAI_PATH, tags=["sandbox-openai"])
 
+# Streaming requests answer 200 with server-sent events instead of the JSON body.
+_SSE_RESPONSE: dict[int | str, dict[str, object]] = {
+    200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}
+}
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
@@ -82,7 +86,7 @@ async def list_models(_: Caller) -> ModelList:
     return ModelList(data=[ModelObject(id=model_id) for model_id in ids])
 
 
-@router.post("/responses", response_model=None)
+@router.post("/responses", response_model=Response, responses=_SSE_RESPONSE)
 async def create_response(
     body: CreateResponseRequest, caller: Caller, request: Request
 ) -> JSONResponse | StreamingResponse:
@@ -93,16 +97,16 @@ async def create_response(
         raise HTTPException(400, "input has no new user message or tool output")
     model = body.agent_model()
     client_tools = body.client_tools()
-    await caller.require_capacity(continuation.thread_id)
-    thread_id = continuation.thread_id or await caller.create_guest_thread(prompt, model)
-    after = await load_head(thread_id) or 0
-    run_id = await caller.start_run(
-        thread_id,
-        prompt=prompt,
-        tool_results=tool_results,
-        model=model,
-        client_tools=client_tools,
-    )
+    async with caller.reserve_capacity(continuation.thread_id):
+        thread_id = continuation.thread_id or await caller.create_guest_thread(prompt, model)
+        after = await load_head(thread_id) or 0
+        run_id = await caller.start_run(
+            thread_id,
+            prompt=prompt,
+            tool_results=tool_results,
+            model=model,
+            client_tools=client_tools,
+        )
     ids = OpenSweId(thread_id, run_id)
     response = Response(
         id=ids.response_id(),
@@ -148,7 +152,7 @@ async def _existing_run(caller: SandboxCaller, request: Request, response_id: st
     return ResponseRun(ids, _projection(request, response, ids, client_tools), after)
 
 
-@router.get("/responses/{response_id}", response_model=None)
+@router.get("/responses/{response_id}", response_model=Response, responses=_SSE_RESPONSE)
 async def get_response(
     response_id: str, caller: Caller, request: Request, stream: bool = False
 ) -> JSONResponse | StreamingResponse:
@@ -158,7 +162,7 @@ async def get_response(
     return _body(await run.snapshot())
 
 
-@router.post("/responses/{response_id}/cancel")
+@router.post("/responses/{response_id}/cancel", response_model=Response)
 async def cancel_response(response_id: str, caller: Caller, request: Request) -> JSONResponse:
     run = await _existing_run(caller, request, response_id)
     await langgraph_client().runs.cancel(run.thread_id, str(run.ids.run_id), wait=False)

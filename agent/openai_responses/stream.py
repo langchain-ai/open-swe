@@ -32,6 +32,7 @@ class ResponseRun:
         for event in self.projection.start():
             yield event
         cursor = self.after
+        run_ended = False
         async with listener.subscribe(self.thread_id) as notifications:
             while True:
                 page = await load_events(self.thread_id, after=cursor, limit=_PAGE)
@@ -43,15 +44,23 @@ class ResponseRun:
                         return
                 if len(page) == _PAGE:
                     continue
+                # The transcript's terminal event is best-effort; a run that ended
+                # without one would otherwise keep this stream open forever.
+                if run_ended:
+                    message = (
+                        "The run ended without finishing its response"
+                        if self.projection.started
+                        else "The run ended before it started"
+                    )
+                    for event in self.projection.abandon(message):
+                        yield event
+                    return
                 try:
                     async with asyncio.timeout(HEARTBEAT_SECONDS):
                         version = await anext(notifications)
                 except TimeoutError:
                     yield self.projection.heartbeat()
-                    if not self.projection.started and await self._run_ended():
-                        for event in self.projection.abandon("The run ended before it started"):
-                            yield event
-                        return
+                    run_ended = await self._run_ended()
                     continue
                 if version == listener.DELETED_VERSION:
                     for event in self.projection.abandon("The conversation was deleted"):

@@ -77,7 +77,7 @@ class ResponseProjection:
         self._open: set[str] = set()
         self._tools: dict[str, tuple[int, McpCallItem]] = {}
         self._searches: dict[str, tuple[int, WebSearchCallItem]] = {}
-        self._usage: MessageUsage | None = None
+        self._usage: Usage | None = None
 
     @property
     def done(self) -> bool:
@@ -190,16 +190,27 @@ class ResponseProjection:
 
     def _complete_message(self, body: MessageCompleted) -> list[StreamEvent]:
         if body.usage is not None:
-            self._usage = body.usage
+            self._add_usage(body.usage)
         if body.message_id not in self._messages and not body.text:
             return []
         events = self._open_message(body.message_id)
         _, item = self._messages[body.message_id]
-        streamed = item.content[0].text
+        # The canonical text is stripped; the streamed fragments are not.
+        streamed = item.content[0].text.lstrip()
         if body.text.startswith(streamed) and len(body.text) > len(streamed):
             events.append(self._text_delta(body.message_id, body.text[len(streamed) :]))
         item.content[0].text = body.text
         return [*events, *self._close_message(body.message_id, "completed")]
+
+    def _add_usage(self, usage: MessageUsage) -> None:
+        """Each AI message reports its own model call; a response spans all of them."""
+        total = self._usage or Usage()
+        input_tokens = usage.input_tokens or 0
+        output_tokens = usage.output_tokens or 0
+        total.input_tokens += input_tokens
+        total.output_tokens += output_tokens
+        total.total_tokens += usage.total_tokens or input_tokens + output_tokens
+        self._usage = total
 
     def _close_message(self, message_id: str, status: ItemStatus) -> list[StreamEvent]:
         if message_id not in self._open:
@@ -336,13 +347,6 @@ class ResponseProjection:
             for message_id in list(self._open)
             for event in self._close_message(message_id, "incomplete")
         ]
-        if self._usage is not None:
-            input_tokens = self._usage.input_tokens or 0
-            output_tokens = self._usage.output_tokens or 0
-            self.response.usage = Usage(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=self._usage.total_tokens or input_tokens + output_tokens,
-            )
+        self.response.usage = self._usage
         self.response.status = status
         return [*events, self._event(_TERMINAL_EVENTS[status], response=self.response)]

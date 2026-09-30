@@ -2,11 +2,15 @@
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import HTTPException, Request
+from sqlalchemy import text
 
+from agent.database import postgres
 from agent.openai_responses.client_tools import ClientToolSpec
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import CreateResponseRequest, InputItem
@@ -94,15 +98,23 @@ class SandboxCaller:
             await self.guest_thread(thread_id)
         return Continuation(thread_id=thread_id, items=tail)
 
-    async def require_capacity(self, thread_id: str | None) -> None:
-        busy = await langgraph_client().threads.search(
-            metadata={SANDBOX_HOST_THREAD_KEY: self.host_thread_id},
-            status="busy",
-            limit=MAX_ACTIVE_GUESTS + 1,
-        )
-        busy_ids = {str(thread["thread_id"]) for thread in busy}
-        if thread_id not in busy_ids and len(busy_ids) >= MAX_ACTIVE_GUESTS:
-            raise HTTPException(429, f"At most {MAX_ACTIVE_GUESTS} responses may run at once")
+    @asynccontextmanager
+    async def reserve_capacity(self, thread_id: str | None) -> AsyncIterator[None]:
+        """Hold the host's guest slots from the busy check until the body has started its run."""
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
+                {"subject": f"sandbox-openai:{self.host_thread_id}"},
+            )
+            busy = await langgraph_client().threads.search(
+                metadata={SANDBOX_HOST_THREAD_KEY: self.host_thread_id},
+                status="busy",
+                limit=MAX_ACTIVE_GUESTS + 1,
+            )
+            busy_ids = {str(thread["thread_id"]) for thread in busy}
+            if thread_id not in busy_ids and len(busy_ids) >= MAX_ACTIVE_GUESTS:
+                raise HTTPException(429, f"At most {MAX_ACTIVE_GUESTS} responses may run at once")
+            yield
 
     async def create_guest_thread(self, prompt: str, model: tuple[str, str] | None) -> str:
         thread_id = str(uuid.uuid4())
@@ -144,7 +156,9 @@ class SandboxCaller:
             "client_tools": [spec.model_dump(mode="json") for spec in client_tools]
         }
         if model:
-            overrides.update(agent_model_id=model[0], agent_effort=model[1])
+            overrides.update(
+                agent_model_id=model[0], agent_effort=model[1], model_selection="explicit"
+            )
         return await start_sandbox_guest_run(
             thread_id,
             self.owner_login,

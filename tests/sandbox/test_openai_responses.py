@@ -27,6 +27,7 @@ from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY
 from agent.transcript.events import (
     MessageAppended,
     MessageCompleted,
+    MessageUsage,
     StoredEvent,
     ToolCompleted,
     ToolStarted,
@@ -103,13 +104,25 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
     bodies: list[BaseModel] = [
         MessageAppended(turn_id=turn, message_id="early", text="before the run"),
         TurnStarted(turn_id=turn, run_id=RUN),
-        MessageAppended(turn_id=turn, message_id="ai-1", text="Hel"),
+        MessageAppended(turn_id=turn, message_id="ai-1", text=" Hel"),
         ToolStarted(turn_id=turn, tool_call_id="call-1", name="execute", input={"command": "ls"}),
         ToolStarted(turn_id=turn, tool_call_id="sub-1", name="read_file", namespace=["task:1"]),
         MessageAppended(turn_id=other_turn, message_id="ai-9", text="other turn"),
         ToolCompleted(turn_id=turn, tool_call_id="call-1", status="completed", output_preview="a"),
         MessageCompleted(
-            turn_id=turn, message_id="ai-1", role="ai", text="Hello", created_at=datetime.now(UTC)
+            turn_id=turn,
+            message_id="ai-1",
+            role="ai",
+            text="Hello",
+            usage=MessageUsage(input_tokens=100, output_tokens=20),
+            created_at=datetime.now(UTC),
+        ),
+        MessageCompleted(
+            turn_id=turn,
+            message_id="ai-2",
+            role="ai",
+            usage=MessageUsage(input_tokens=150, output_tokens=30),
+            created_at=datetime.now(UTC),
         ),
         ToolStarted(turn_id=turn, tool_call_id="call-2", name="exec_command", input={"cmd": "pwd"}),
         ToolCompleted(turn_id=turn, tool_call_id="call-2", status="completed", output_preview="-"),
@@ -120,6 +133,8 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
         events.extend(await projection.apply(stored(version, body)))
 
     assert response.status == "completed"
+    assert response.usage is not None
+    assert (response.usage.input_tokens, response.usage.total_tokens) == (250, 300)
     message, tool, client_call = response.output
     assert isinstance(client_call, FunctionCallItem)
     assert (client_call.call_id, client_call.name, client_call.arguments) == (
@@ -140,7 +155,7 @@ async def test_projection_streams_text_and_executed_tool_calls(codex: bool) -> N
             "a",
             "completed",
         )
-    assert [e.delta for e in events if e.type == "response.output_text.delta"] == ["Hel", "lo"]
+    assert [e.delta for e in events if e.type == "response.output_text.delta"] == [" Hel", "lo"]
     added = next(e for e in events if e.type == "response.output_item.added")
     assert isinstance(added.item, MessageItem) and added.item.content == []
     assert events[-1].type == "response.completed"

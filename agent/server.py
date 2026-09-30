@@ -1742,10 +1742,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
-    client_tool_specs = [spec for spec in cfg.client_tools if spec.name not in reserved_tool_names]
-    client_tools = ClientToolsMiddleware(client_tool_specs) if client_tool_specs else None
+    # A client's tool replaces any server tool of the same name, so the endpoint's
+    # view of which calls the client runs matches the graph's.
+    client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
+    client_tools = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
     if client_tools is not None:
-        excluded_tools |= CLIENT_OWNED_SERVER_TOOLS
+        excluded_tools = (excluded_tools | CLIENT_OWNED_SERVER_TOOLS) - client_tool_names
+    main_tools = [
+        tool for tool in static_tools if _registered_tool_name(tool) not in client_tool_names
+    ]
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
@@ -1889,7 +1894,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         graph = create_deep_agent(
             model=main_model,
             system_prompt="",
-            tools=static_tools,
+            tools=main_tools,
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
