@@ -71,7 +71,7 @@ def drain_thread_ids() -> set[str]:
 
 
 def get_langgraph_url() -> str:
-    return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
+    return os.getenv("LANGGRAPH_URL") or DEFAULT_LANGGRAPH_URL
 
 
 def get_reviewer_assistant_id() -> str:
