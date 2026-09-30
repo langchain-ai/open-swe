@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { ModelOption } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -9,67 +7,18 @@ import {
   DialogPopup,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { connectService } from "@/lib/api"
-import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
+import { useDismissSlackOnboarding, useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
-/**
- * First-run onboarding modal: pick a default agent model, then connect Slack.
- *
- * The model step shows until the user has saved a default model; the Slack step
- * shows (where Sign in with Slack is enabled) until their Slack account is
- * linked. Both steps live in the same dialog so a new user is walked through
- * picking a model and connecting Slack in one place. The Slack prompt can be
- * permanently dismissed on the user's profile.
- */
+/** Prompt unlinked users to connect Slack. */
 export function OnboardingDialog() {
   const session = useSession()
   const profile = useProfile()
-  const options = useOptions()
-  const save = usePatchProfile()
-  const [dismissed, setDismissed] = useState(false)
-
-  const defaultModels = options.data?.models.filter(
-    (model) => model.can_be_default !== false
-  )
-  const firstModel: ModelOption | undefined = defaultModels?.[0]
-  const defaultModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
-  const defaultEffort =
-    options.data?.default_agent_reasoning_effort ??
-    firstModel?.default_effort ??
-    ""
-  const [modelId, setModelId] = useState("")
-  const [effort, setEffort] = useState("")
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    if (!modelId && defaultModel) setModelId(defaultModel)
-  }, [modelId, defaultModel])
-
-  const currentModel: ModelOption | undefined =
-    defaultModels?.find((m) => m.id === modelId) ?? firstModel
-
-  useEffect(() => {
-    if (!currentModel) return
-    if (!effort || !currentModel.efforts.includes(effort)) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setEffort(currentModel.default_effort)
-    }
-  }, [currentModel, effort])
+  const dismiss = useDismissSlackOnboarding()
 
   const slackEnabled = session.data?.slack_oauth_enabled ?? false
   const slackConnected = !!session.data?.slack_user_id
-  const hasDefaultModel = !!profile.data?.default_model
-
-  const needsModel =
-    !profile.isLoading && profile.data !== undefined && !hasDefaultModel
   const needsSlack =
     slackEnabled &&
     !slackConnected &&
@@ -77,128 +26,45 @@ export function OnboardingDialog() {
     !profile.data.slack_onboarding_dismissed &&
     !session.isLoading &&
     !session.isError
-  const open = !dismissed && (needsModel || needsSlack)
-  const step: "model" | "slack" = needsModel ? "model" : "slack"
-
-  const dismiss = () => {
-    setDismissed(true)
-    if (step !== "slack") return
-    save.patch(
-      { slack_onboarding_dismissed: true },
-      defaultModel,
-      defaultEffort
-    )
-  }
-
-  const handleSaveModel = () => {
-    if (!modelId) return
-    save.patch(
-      { default_model: modelId, reasoning_effort: effort },
-      defaultModel,
-      defaultEffort
-    )
-  }
-
   return (
     <Dialog
-      open={open}
+      open={needsSlack}
       onOpenChange={(next) => {
-        if (!next) dismiss()
+        if (!next) dismiss.mutate()
       }}
     >
       <DialogPopup className="max-w-md p-6">
-        {step === "model" ? (
-          <div className="flex flex-col gap-4">
-            <DialogTitle>Choose your default model</DialogTitle>
-            <DialogDescription>
-              Pick the model Open SWE uses when you don't specify one. You can
-              change this anytime in your settings.
-            </DialogDescription>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-medium">Default model</span>
-                <Select
-                  value={modelId}
-                  onValueChange={(v) => v && setModelId(v)}
-                >
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Pick a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {defaultModels?.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-medium">Reasoning effort</span>
-                <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {currentModel?.efforts.map((e) => (
-                      <SelectItem key={e} value={e}>
-                        {e}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDismissed(true)}
-              >
-                Maybe later
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleSaveModel}
-                disabled={!modelId || save.isPending}
-              >
-                {save.isPending
-                  ? "Saving…"
-                  : needsSlack
-                    ? "Save & continue"
-                    : "Save"}
-              </Button>
-            </div>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
+            <DialogTitle>Connect your Slack account</DialogTitle>
           </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
-              <DialogTitle>Connect your Slack account</DialogTitle>
-            </div>
-            <DialogDescription>
-              Connect Slack so that when you tag Open SWE, it can resolve your
-              GitHub account. We use the email Slack verifies, which also lets
-              Linear mentions resolve to you.
-            </DialogDescription>
-            <div className="mt-2 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={dismiss}>
-                Don't ask again
-              </Button>
-              <Button
-                size="sm"
-                onClick={() =>
-                  void connectService("slack")?.finally(
-                    () => void session.refetch()
-                  )
-                }
-              >
-                <IoLogoSlack className="size-4" />
-                Connect Slack
-              </Button>
-            </div>
+          <DialogDescription>
+            Connect Slack so that when you tag Open SWE, it can resolve your
+            GitHub account. We use the email Slack verifies, which also lets
+            Linear mentions resolve to you.
+          </DialogDescription>
+          <div className="mt-2 flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => dismiss.mutate()}
+            >
+              Don't ask again
+            </Button>
+            <Button
+              size="sm"
+              onClick={() =>
+                void connectService("slack")?.finally(
+                  () => void session.refetch()
+                )
+              }
+            >
+              <IoLogoSlack className="size-4" />
+              Connect Slack
+            </Button>
           </div>
-        )}
+        </div>
       </DialogPopup>
     </Dialog>
   )
