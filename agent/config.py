@@ -347,7 +347,8 @@ ENV.var(
 )
 ENV.var(
     "OPENSWE_ENV",
-    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
+    "Agent prompt deployment environment (production, staging, preview, or local); "
+    "`preview` also lets startup drop superseded migration revisions.",
 )
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")

@@ -2,7 +2,61 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
+from agent.prompt import _deployment_context, construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        (
+            {"OPENSWE_ENV": " preview ", "LANGGRAPH_URL": "https://openswe.langchain.dev"},
+            ("preview", "OPENSWE_ENV"),
+        ),
+        (
+            {
+                "LANGGRAPH_URL": "https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app",
+                "DASHBOARD_BASE_URL": "https://openswe.langchain.dev",
+            },
+            ("staging", "LANGGRAPH_URL"),
+        ),
+        (
+            {
+                "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev",
+                "DASHBOARD_BASE_URL": "https://openswe.langchain.dev",
+            },
+            ("local", "LANGSMITH_LANGGRAPH_API_VARIANT"),
+        ),
+        (
+            {"DASHBOARD_BASE_URL": "https://openswe.langchain.dev"},
+            ("production", "DASHBOARD_BASE_URL"),
+        ),
+        (
+            {"LANGGRAPH_URL": "https://open-swe-preview-abc.us.langgraph.app.example.com"},
+            ("unknown", "no explicit environment or recognized deployment host"),
+        ),
+        ({}, ("unknown", "no explicit environment or recognized deployment host")),
+    ],
+)
+def test_deployment_context(
+    monkeypatch: pytest.MonkeyPatch, environ: dict[str, str], expected: tuple[str, str]
+) -> None:
+    for name in (
+        "OPENSWE_ENV",
+        "LANGSMITH_LANGGRAPH_API_VARIANT",
+        "LANGGRAPH_URL",
+        "DASHBOARD_API_BASE_URL",
+        "DASHBOARD_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+
+    assert _deployment_context() == expected
+    assert f"**{expected[0]}**" in construct_system_prompt("/root")
+
+    monkeypatch.setenv("OPENSWE_ENV", "staging")
+    assert "**staging**" in construct_system_prompt("/root")
 
 
 def sample_tool(value: str) -> str:

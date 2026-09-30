@@ -1,6 +1,8 @@
 import logging
+import re
 from importlib import resources
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from agent.config import ENV
 from agent.prompts import prompt
@@ -109,6 +111,35 @@ def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
     return "system/working-environment"
 
 
+def _deployment_context() -> tuple[str, str]:
+    """Identify the agent service deployment from explicit configuration or known hosts."""
+    if configured := ENV.OPENSWE_ENV.optional():
+        environment = configured.lower()
+        return "production" if environment == "prod" else environment, "OPENSWE_ENV"
+    if ENV.LANGSMITH_LANGGRAPH_API_VARIANT.optional() == "local_dev":
+        return "local", "LANGSMITH_LANGGRAPH_API_VARIANT"
+    for variable in (ENV.LANGGRAPH_URL, ENV.DASHBOARD_API_BASE_URL, ENV.DASHBOARD_BASE_URL):
+        if not (value := variable.optional()):
+            continue
+        try:
+            hostname = urlsplit(value).hostname or ""
+        except ValueError:
+            logger.warning("Invalid deployment URL", extra={"env_var": variable.name})
+            continue
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            return "local", variable.name
+        for deployment, environment in (
+            ("open-swe-preview", "preview"),
+            ("open-swe-staging-v2", "staging"),
+            ("open-swe-v3", "production"),
+        ):
+            if re.fullmatch(rf"{deployment}-[a-f0-9]+\.us\.langgraph\.app", hostname):
+                return environment, variable.name
+        if hostname == "openswe.langchain.dev":
+            return "production", variable.name
+    return "unknown", "no explicit environment or recognized deployment host"
+
+
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
@@ -139,6 +170,7 @@ def construct_system_prompt(
     git-identity steps a hosted sandbox needs would rewrite their checkout.
     """
     del linear_project_id, linear_issue_number
+    deployment_environment, deployment_source = _deployment_context()
     return prompt(
         "system/main",
         working_dir=working_dir,
@@ -159,6 +191,8 @@ def construct_system_prompt(
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",
+            deployment_environment=deployment_environment,
+            deployment_source=deployment_source,
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
