@@ -56,6 +56,51 @@ async def test_slack_reply_holds_mutation_lock_while_posting(
     assert lock_held is False
 
 
+async def test_freshness_conflicts_include_context_and_allow_after_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "fetch_and_format_thread",
+        AsyncMock(return_value={"human_timestamps": ["1.0", "2.0"], "formatted": "new request"}),
+    )
+    messages = [HumanMessage(content='<input-message timestamp="1.0">request</input-message>')]
+    conflict = await slack_reply_tool._stale_reply_guard(
+        {"messages": messages}, "C1", "1.0", "run-1"
+    )
+    assert conflict is not None
+    assert conflict["formatted"] == "new request"
+    assert (
+        await slack_reply_tool._stale_reply_guard(
+            {"messages": [*messages, ToolMessage(content=json.dumps(conflict), tool_call_id="a")]},
+            "C1",
+            "1.0",
+            "run-1",
+        )
+        is None
+    )
+    exhausted = {"error": "new_slack_messages", "run_id": "run-1"}
+    assert (
+        await slack_reply_tool._stale_reply_guard(
+            {
+                "messages": [
+                    *messages,
+                    *[
+                        ToolMessage(content=json.dumps(exhausted), tool_call_id=str(i))
+                        for i in range(2)
+                    ],
+                ]
+            },
+            "C1",
+            "1.0",
+            "run-1",
+        )
+        is None
+    )
+
+
 async def test_code_channel_reply_stays_in_user_started_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

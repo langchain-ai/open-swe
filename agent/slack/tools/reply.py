@@ -4,10 +4,13 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
 
+from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
+from agent.input_messages import input_message_timestamps
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
@@ -33,6 +36,7 @@ from agent.slack.orphan import (
 )
 from agent.slack.run_feedback import feedback_block
 from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.tools.read_thread_messages import fetch_and_format_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -112,6 +116,10 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+        if state and run_id:
+            conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
+            if conflict is not None:
+                return conflict
         if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
@@ -161,6 +169,51 @@ async def slack_reply(
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _stale_reply_guard(
+    state: Mapping[str, object], channel_id: str, thread_ts: str, run_id: str
+) -> dict[str, object] | None:
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        return None
+    seen: set[str] = set()
+    conflicts = 0
+    for message in messages:
+        if not isinstance(message, BaseMessage):
+            continue
+        seen.update(input_message_timestamps(message.content))
+        if isinstance(message, ToolMessage):
+            try:
+                payload = json.loads(message.content) if isinstance(message.content, str) else None
+            except ValueError:
+                continue
+            if isinstance(payload, dict):
+                timestamps = payload.get("human_timestamps")
+                if isinstance(timestamps, list):
+                    seen.update(ts for ts in timestamps if isinstance(ts, str))
+                if payload.get("error") == "new_slack_messages" and payload.get("run_id") == run_id:
+                    conflicts += 1
+    if conflicts >= 2 or not seen:
+        return None
+    try:
+        latest = await fetch_and_format_thread(channel_id, thread_ts)
+    except Exception:
+        logger.warning("Could not check Slack reply freshness", exc_info=True)
+        return None
+    timestamps = latest.get("human_timestamps")
+    if not isinstance(timestamps, list) or not any(
+        isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
+    ):
+        return None
+    return {
+        "success": False,
+        "error": "new_slack_messages",
+        "run_id": run_id,
+        "hint": prompt("tools/slack-reply-conflict"),
+        "formatted": latest.get("formatted"),
+        "human_timestamps": timestamps,
+    }
 
 
 async def _ephemeral_reply(
