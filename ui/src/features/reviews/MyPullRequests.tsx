@@ -176,7 +176,10 @@ export function MyPullRequests({
         outcome={settled[key]}
         compact={railed}
         selected={selected === key}
-        onSelect={() => onFiltersChange({ pr: key })}
+        onSelect={() => {
+          refreshPullRequest(queryClient, login, pr)
+          onFiltersChange({ pr: key })
+        }}
         review={
           summariesUnavailable ? null : (
             <PullRequestReview
