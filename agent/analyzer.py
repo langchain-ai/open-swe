@@ -32,7 +32,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
-    SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
 from agent.prompts import apply_tool_descriptions, prompt
@@ -160,7 +159,6 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
                     exit_behavior="end",
