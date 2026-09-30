@@ -8,7 +8,7 @@ constraints = [
     { name = "langgraph-runtime-inmem", specifier = ">=0.35.0rc1,<0.36" },
 ]
 overrides = [
-    { name = "deepagents", specifier = "==0.7.20" },
+    { name = "deepagents", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=cc%2Ffilesystem-blobs" },
     { name = "wcmatch", specifier = ">=11.0" },
 ]
 
@@ -690,7 +690,7 @@ wheels = [
 [[package]]
 name = "deepagents"
 version = "0.7.20"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=cc%2Ffilesystem-blobs#52b17d9ff6a867cc6b7fa647f415ed147171c527" }
 dependencies = [
     { name = "langchain" },
     { name = "langchain-anthropic" },
@@ -699,10 +699,6 @@ dependencies = [
     { name = "langsmith" },
     { name = "packaging" },
     { name = "wcmatch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/51/94/30e658151743c469bf674f6b065d161ee2adb53a42ef78f552f72de80a1f/deepagents-0.7.20.tar.gz", hash = "sha256:0920110ee817fb6401209362d4aa590f13d85b93b99ba8e72357e4630a52190d", size = 310186, upload-time = "2026-09-29T16:17:43.413Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/e0/d78c12188bef7280c9f8f58903fd20a60b81778689ee33cfc9b400f20ea4/deepagents-0.7.20-py3-none-any.whl", hash = "sha256:5a08e98ec66daed92c734f0a04d22275e0b407ede55842f9be1bedfad2821123", size = 337830, upload-time = "2026-09-29T16:17:41.751Z" },
 ]
 
 [[package]]
@@ -2217,7 +2213,7 @@ requires-dist = [
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "deepagents", specifier = "==0.7.20" },
+    { name = "deepagents", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=cc%2Ffilesystem-blobs" },
     { name = "exa-py", specifier = ">=2.18.1" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fireworks-ai", specifier = ">=1.2.9" },
