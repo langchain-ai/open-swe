@@ -53,7 +53,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jev = AsyncMock(return_value="fast")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
@@ -61,7 +61,10 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
-    jev.assert_awaited_once_with("Update the README")
+    state["model_route"] = "fast_alt"
+    assert (await _invoke(middleware, state)).model is models["fast"]
+    jev.assert_awaited_once()
+    assert jev.await_args.args[0] == "Update the README"
 
 
 @pytest.mark.asyncio
@@ -92,7 +95,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
 @pytest.mark.asyncio
 async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
     jev = AsyncMock(return_value="balanced")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
@@ -120,7 +123,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jev = AsyncMock(return_value="balanced")
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     middleware, _ = _middleware()
     state = {
         "messages": [HumanMessage(content=_HUMAN_ENVELOPE), HumanMessage(content=_PERSON_BLOCK)]
@@ -128,7 +131,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
 
     await middleware.abefore_model(cast(Any, state), MagicMock())
 
-    jev.assert_awaited_once_with("how's the weather in sf today")
+    assert jev.await_args.args[0] == "how's the weather in sf today"
 
 
 @pytest.mark.asyncio
@@ -211,7 +214,7 @@ async def test_requested_model_wins_and_emits_actual_model(
     events: list[object] = []
     monkeypatch.setattr("agent.middleware.model_selection.get_stream_writer", lambda: events.append)
     jev = AsyncMock()
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     chosen = MagicMock()
     factory = MagicMock(return_value=chosen)
     middleware = ModelSelectionMiddleware(
@@ -239,7 +242,7 @@ async def test_requested_model_wins_and_emits_actual_model(
 @pytest.mark.asyncio
 async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
     jev = AsyncMock()
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", jev)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     default = MagicMock()
     middleware = ModelSelectionMiddleware({}, default, routing_mode=None)
     state: ModelSelectionState = {

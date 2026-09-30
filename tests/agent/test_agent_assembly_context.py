@@ -665,7 +665,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 
     monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "jev")
     monkeypatch.setattr(
-        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
+        "agent.middleware.model_selection.select_jev_choice", AsyncMock(return_value="default")
     )
     config = _base_config()
     config["configurable"].update(

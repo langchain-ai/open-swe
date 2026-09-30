@@ -80,6 +80,9 @@ constraint-dependencies = [
     "langgraph-runtime-inmem>=0.35.0rc1,<0.36",
 ]
 
+[tool.uv.sources]
+langchain = { git = "https://github.com/langchain-ai/langchain", branch = "sydney-runkle/langchain/model-routing-middleware", subdirectory = "libs/langchain_v1" }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

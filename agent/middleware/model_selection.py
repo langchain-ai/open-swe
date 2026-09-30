@@ -1,7 +1,12 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Literal, NotRequired
+from typing import Annotated, Literal, NotRequired, cast
 
+from langchain.agents.middleware import (
+    ModelRoutingConfig,
+    ModelRoutingInput,
+    ModelRoutingMiddleware,
+)
 from langchain.agents.middleware.types import (
     AgentState,
     ModelRequest,
@@ -10,6 +15,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
@@ -53,20 +59,28 @@ def _latest_human_task(messages: Sequence[object]) -> str:
 ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
 
 
-def _route_criteria() -> dict[Route, str]:
-    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
-
-
-async def _select_jev_route(task: str) -> SelectedRoute:
+async def _classify_route(inputs: ModelRoutingInput) -> str:
     return (
         await select_jev_choice(
-            task,
+            inputs["messages"][0].text,
             question="route",
-            instructions=prompt("model-selection/instructions"),
-            criteria=_route_criteria(),
+            instructions=inputs["system_prompt"],
+            criteria={route: inputs["criteria"][route] for route in ROUTES},
         )
         or "default"
     )
+
+
+def _routing_messages(request: ModelRequest) -> list[HumanMessage]:
+    return [HumanMessage(content=_latest_human_task(request.messages)[-8_000:])]
+
+
+class _TurnModelRouter(ModelRoutingMiddleware):
+    async def aselect_route(self, request: ModelRequest) -> str:
+        if route := request.state.get("model_route"):
+            normalized = normalize_route(cast(PersistedRoute, route))
+            return normalized if normalized in self.models else "default"
+        return await super().aselect_route(request)
 
 
 class ModelSelectionState(AgentState):
@@ -99,6 +113,7 @@ async def _emit_routed_model(
 
 class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     state_schema = ModelSelectionState
+    transformers = ModelRoutingMiddleware.transformers
 
     def __init__(
         self,
@@ -109,7 +124,22 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         routing_mode: RoutingMode | None = "auto",
         requested_model_factory: Callable[[str], BaseChatModel] | None = None,
     ) -> None:
-        self._models = {**models, "default": default_model}
+        configs: dict[str, ModelRoutingConfig] = {
+            route: {
+                "model": models.get(route, default_model),
+                "criteria": prompt(f"model-selection/{route}"),
+            }
+            for route in ROUTES
+        }
+        configs["default"] = {"model": default_model, "criteria": ""}
+        self._router = _TurnModelRouter(
+            models=configs,
+            decision_model=RunnableLambda(_classify_route),
+            system_prompt=prompt("model-selection/instructions"),
+            input_extractor=_routing_messages,
+            fallback_route="default",
+        )
+        self._models = self._router.models
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
         self._requested_model_factory = requested_model_factory
@@ -138,9 +168,12 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
-        messages = state.get("messages", [])
-        task = _latest_human_task(messages)[-8_000:]
-        return await _select_jev_route(task)
+        request = ModelRequest(
+            model=self._models["default"],
+            messages=state.get("messages", []),
+            state=state,
+        )
+        return cast(SelectedRoute, await self._router.aselect_route(request))
 
     async def abefore_model(
         self,
@@ -158,6 +191,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "default")
-        model = self._models.get(normalize_route(route)) or self._models["default"]
-        return await handler(request.override(model=model))
+        if request.state.get("model_route"):
+            return await self._router.awrap_model_call(request, handler)
+        state = cast(ModelSelectionState, {**request.state, "model_route": "default"})
+        return await self._router.awrap_model_call(request.override(state=state), handler)

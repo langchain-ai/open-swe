@@ -212,7 +212,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     assert selection is not None
     selection._routing_mode = "auto"
     classify = AsyncMock(return_value=fresh_route)
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
         "model_route": previous_route,
@@ -226,7 +226,8 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
         "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6.1-sol"
     )
     assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
-    classify.assert_awaited_once_with("Fix the typo")
+    classify.assert_awaited_once()
+    assert classify.await_args.args[0] == "Fix the typo"
 
 
 @pytest.mark.parametrize(
