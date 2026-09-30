@@ -82,40 +82,54 @@ def session(monkeypatch: pytest.MonkeyPatch) -> _Session:
     monkeypatch.setattr(advance_module, "refresh_progress", AsyncMock())
     monkeypatch.setattr(advance_module, "start_prefetch", AsyncMock())
     monkeypatch.setattr(advance_module, "langgraph_client", lambda: AsyncMock())
+    monkeypatch.setattr(advance_module, "post_with_buttons", AsyncMock(return_value="2.0"))
+    monkeypatch.setattr(advance_module, "dispatch_guide_run", AsyncMock())
+    monkeypatch.setattr(advance_module, "_active_runs", AsyncMock(return_value=[]))
     return session
 
 
-async def test_looks_good_shows_the_next_prepared_chunk_without_a_turn(
-    session: _Session, monkeypatch: pytest.MonkeyPatch
+def _statuses(session: _Session) -> list[tuple[str, str]]:
+    return [(g.title, g.status) for g in session.walk.groups]
+
+
+async def test_looks_good_approves_and_shows_the_next_prepared_chunk_without_a_turn(
+    session: _Session,
 ) -> None:
-    post = AsyncMock(return_value="2.0")
-    monkeypatch.setattr(advance_module, "post_with_buttons", post)
-    monkeypatch.setattr(advance_module, "_active_runs", AsyncMock(return_value=[]))
-    fallback = AsyncMock()
+    await advance_module.advance("C1", "1.0")
 
-    await advance_module.advance("C1", fallback)
-
-    fallback.assert_not_awaited()
-    assert post.await_args is not None and post.await_args.args[1] == "*Two*"
-    assert [(g.title, g.status) for g in session.walk.groups] == [
-        ("One", "approved"),
-        ("Two", "shown"),
-        ("Three", "queued"),
-    ]
+    post = advance_module.post_with_buttons
+    assert isinstance(post, AsyncMock) and post.await_args is not None
+    assert post.await_args.args[1] == "*Two*"
+    assert _statuses(session) == [("One", "approved"), ("Two", "shown"), ("Three", "queued")]
     assert sum(session.seen.values()) == 1
+    assert isinstance(advance_module.dispatch_guide_run, AsyncMock)
+    advance_module.dispatch_guide_run.assert_not_awaited()
 
 
-async def test_looks_good_waits_for_a_turn_already_running(
+async def test_looks_good_with_nothing_prepared_approves_then_hands_the_guide_a_turn(
+    session: _Session,
+) -> None:
+    session.walk.keep_queue([])
+
+    await advance_module.advance("C1", "1.0")
+
+    assert _statuses(session) == [("One", "approved")]
+    assert sum(session.seen.values()) == 1
+    dispatch = advance_module.dispatch_guide_run
+    assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
+    assert dispatch.await_args.kwargs["approve_ts"] == ""
+
+
+async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
     session: _Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    post = AsyncMock(return_value="2.0")
-    monkeypatch.setattr(advance_module, "post_with_buttons", post)
     running = advance_module._Run(run_id="r1")
     monkeypatch.setattr(advance_module, "_active_runs", AsyncMock(return_value=[running]))
-    fallback = AsyncMock()
 
-    await advance_module.advance("C1", fallback)
+    await advance_module.advance("C1", "1.0")
 
-    fallback.assert_awaited_once()
-    post.assert_not_awaited()
-    assert session.walk.on_screen() is not None and session.walk.on_screen().title == "One"
+    assert _statuses(session)[0] == ("One", "shown")
+    assert sum(session.seen.values()) == 0
+    dispatch = advance_module.dispatch_guide_run
+    assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
+    assert dispatch.await_args.kwargs["approve_ts"] == "1.0"

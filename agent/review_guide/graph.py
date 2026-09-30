@@ -41,11 +41,13 @@ from agent.middleware.prepare_run import PrepareRunState
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.walkthrough import Walkthrough
 from agent.review_guide import git
+from agent.review_guide.advance import approve_click
 from agent.review_guide.context import guide_repo_dir
 from agent.review_guide.diff import parse, unseen
 from agent.review_guide.github import fetch_head
 from agent.review_guide.messages import resume, retire
 from agent.review_guide.sessions import ReviewGuideSession
+from agent.review_guide.walk import Walk
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -57,19 +59,16 @@ from agent.runtime import (
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
+from agent.slack.tools.reply import slack_reply
 from agent.tools.approve_pull_request import approve_pull_request
 from agent.tools.code_channel_set_view import code_channel_set_view
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
 from agent.tools.record_author_feedback import record_author_feedback
-from agent.tools.review_reply import review_reply
 from agent.tools.review_walkthrough import (
-    approve_review_chunk,
     edit_queue,
     end_walkthrough,
-    finish_walkthrough,
     move_to_other,
     queue_chunk,
-    read_changes,
     show_chunk,
     show_other,
     show_queued,
@@ -170,42 +169,42 @@ class PrepareReviewGuideRunMiddleware(BasePrepareRunMiddleware):
             ),
         )
         await resume(session)
-        walk = session.walk
-        if walk is None or walk.head_sha == head.head.sha:
-            return updates
         changes = parse(await git.pr_diff(backend, repo_dir))
-        moved, gone = walk.moved_to(head.head.sha, changes)
-        await session.save_walk(moved)
-        for group in gone:
-            if group.status == "shown":
-                await retire(
-                    session.slack_channel_id,
-                    group.message_ts,
-                    group.message_text,
-                    "The pull request changed these lines",
-                )
-        left = moved.left(unseen(changes, await session.seen_lines()))
-        on_screen = moved.on_screen()
-        logger.info(
-            "Review guide walkthrough carried to a newer head",
-            extra={
-                "agent_thread_id": self._thread_id,
-                "pr_number": pr.number,
-                "guide_head_sha": head.head.sha,
-                "guide_left_lines": len(left),
-            },
-        )
+        walk = session.walk
+        moved = walk is not None and walk.head_sha != head.head.sha
+        if walk is not None and moved:
+            walk, gone = walk.moved_to(head.head.sha, changes)
+            await session.save_walk(walk)
+            for group in gone:
+                if group.status == "shown":
+                    await retire(
+                        session.slack_channel_id,
+                        group.message_ts,
+                        group.message_text,
+                        "The pull request changed these lines",
+                    )
+            logger.info(
+                "Review guide walkthrough carried to a newer head",
+                extra={
+                    "agent_thread_id": self._thread_id,
+                    "pr_number": pr.number,
+                    "guide_head_sha": head.head.sha,
+                },
+            )
+        if walk is None:
+            walk = Walk.start(head.head.sha, changes)
+        approve_ts = RunConfig.from_config(self._config).review_guide_approve_ts
+        approved = await approve_click(session, walk, approve_ts) if approve_ts else None
+        status = walk.status(unseen(changes, await session.seen_lines()))
         updates["messages"] = [
             HumanMessage(
                 content=prompt(
-                    "review-guide/pr-moved",
+                    "review-guide/state",
+                    moved=moved,
                     head_sha=head.head.sha,
-                    on_screen=on_screen.title if on_screen else "",
-                    left="\n".join(
-                        change.stat([line for line in left if line.path == change.path])
-                        for change in changes
-                        if any(line.path == change.path for line in left)
-                    ),
+                    clicked=bool(approve_ts),
+                    approved=approved.title if approved else "",
+                    status=status.model_dump(),
                 )
             )
         ]
@@ -264,21 +263,18 @@ async def get_review_guide(config: RunnableConfig) -> Pregel:
         system_prompt="",
         # A prepare run works in the background, so it gets nothing that posts to the channel.
         tools=apply_tool_descriptions(
-            [read_changes, queue_chunk, edit_queue, move_to_other]
+            [queue_chunk, edit_queue, move_to_other]
             if cfg.review_guide_prefetch
             else [
-                read_changes,
                 show_chunk,
                 show_queued,
                 queue_chunk,
                 edit_queue,
                 move_to_other,
-                approve_review_chunk,
                 skip_changes,
                 show_other,
-                finish_walkthrough,
                 end_walkthrough,
-                review_reply,
+                slack_reply,
                 code_channel_set_view,
                 *closing_tools,
             ]

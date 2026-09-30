@@ -1129,6 +1129,7 @@ async def _process_slack_mention_impl(
     if review_guide:
         # The thread keeps the last run's configurable, which may be a prepare run's.
         configurable["review_guide_prefetch"] = False
+        configurable["review_guide_approve_ts"] = ""
     if mapped_login:
         configurable["github_login"] = mapped_login
         logins_by_user_id[user_id] = mapped_login

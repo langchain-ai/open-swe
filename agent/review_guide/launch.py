@@ -221,17 +221,21 @@ async def dispatch_guide_run(
     *,
     workspace_slug: str | None,
     prefetch: bool = False,
+    approve_ts: str = "",
 ) -> None:
-    """Start a guide turn no person triggered, so it cannot approve.
+    """Start a guide turn no person typed, so it cannot approve the pull request.
 
     A prefetch turn prepares chunks in the background: it shows nothing, so it
-    leaves the session's status alone.
+    leaves the session's status alone. ``approve_ts`` names a message whose
+    "Looks good" the turn records before the model runs.
     """
+    # Set every run: a thread carries its last run's configurable into the next.
     configurable: dict[str, object] = {
         "thread_id": thread_id,
         "slack_thread": location.dump(),
         "source": "slack",
         "review_guide_prefetch": prefetch,
+        "review_guide_approve_ts": approve_ts,
     }
     if workspace_slug:
         configurable["workspace"] = workspace_slug

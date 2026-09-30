@@ -1046,13 +1046,13 @@ async def slack_interactivity(
             explicit_request=in_code_channel,
         )
 
-        # A review guide shows its next prepared chunk itself, without waiting on a turn.
-        if in_code_channel and response == LOOKS_GOOD:
-
-            async def as_a_turn() -> None:
-                await service.process_slack_mention(request, repo)
-
-            background_tasks.add_task(advance, channel_id, as_a_turn)
+        # A review guide's "Looks good" is recorded by the server, never by the model.
+        if (
+            in_code_channel
+            and response == LOOKS_GOOD
+            and await ReviewGuideSession.for_channel(channel_id) is not None
+        ):
+            background_tasks.add_task(advance, channel_id, interaction.message_ts)
         else:
             background_tasks.add_task(service.process_slack_mention, request, repo)
         return accepted("Slack option queued")

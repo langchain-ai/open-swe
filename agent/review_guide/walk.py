@@ -7,6 +7,7 @@ in Other, or skipped at the reader's request; the walkthrough cannot finish
 while any line is left or on screen, or while Other has not been shown.
 """
 
+from collections.abc import Iterable
 from typing import Literal, Self
 
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ GroupStatus = Literal["queued", "shown", "approved", "skipped"]
 OtherStatus = Literal["open", "shown", "approved", "skipped"]
 LineRange = tuple[int, int]
 _MAX_ERRORS = 20
+_MAX_LEFT_FILES = 200
 
 
 class RangeError(ValueError):
@@ -37,6 +39,26 @@ class LineRef(BaseModel, frozen=True):
     @property
     def content(self) -> tuple[str, str, str]:
         return self.path, self.sign, self.text
+
+    @classmethod
+    def spans(cls, refs: Iterable[Self]) -> list[str]:
+        """One compact entry per file, such as ``a.py +3-9 -4``, in first-seen order."""
+        by_path: dict[str, list[Self]] = {}
+        for ref in refs:
+            by_path.setdefault(ref.path, []).append(ref)
+        entries: list[str] = []
+        for path, lines in by_path.items():
+            parts: list[str] = []
+            for sign in ("+", "-"):
+                runs: list[list[int]] = []
+                for number in sorted(r.lineno for r in lines if r.sign == sign):
+                    if runs and number == runs[-1][-1] + 1:
+                        runs[-1].append(number)
+                    else:
+                        runs.append([number])
+                parts += [f"{sign}{r[0]}" + (f"-{r[-1]}" if len(r) > 1 else "") for r in runs]
+            entries.append(f"{path} {' '.join(parts)}")
+        return entries
 
 
 class FileRanges(BaseModel):
@@ -62,6 +84,24 @@ class Group(BaseModel):
     message_ts: str = ""
     message_text: str = ""
     run_id: str = ""
+
+
+class QueuedChunk(BaseModel):
+    position: int
+    title: str
+    lines: list[str]
+
+
+class WalkStatus(BaseModel):
+    """Where the walkthrough stands, as the guide is told at every turn and after every tool."""
+
+    on_screen: str | None
+    queue: list[QueuedChunk]
+    other_lines: int
+    other_status: OtherStatus
+    left: str
+    left_lines: list[str]
+    more_files_left: int = 0
 
 
 class Walk(BaseModel):
@@ -146,6 +186,26 @@ class Walk(BaseModel):
         taken = set(self.other) | {ref for g in self.groups for ref in g.lines}
         return [line for line in unseen if LineRef.of(line) not in taken]
 
+    def approve(self, message_ts: str) -> Group | None:
+        """Approve the chunk or Other whose "Looks good" was clicked, if it is still on screen.
+
+        Returns what was approved, with Other as a group of its lines.
+        """
+        current = self.on_screen()
+        if current is not None and current.message_ts == message_ts:
+            current.status = "approved"
+            return current
+        if self.other_status == "shown" and self.other_message_ts == message_ts:
+            self.other_status = "approved"
+            return Group(
+                title="Other",
+                lines=self.other,
+                status="approved",
+                message_ts=self.other_message_ts,
+                message_text=self.other_message_text,
+            )
+        return None
+
     def withdraw(self) -> Group | None:
         """Put an unapproved chunk back, so its lines are left again; returns it."""
         current = self.on_screen()
@@ -158,6 +218,23 @@ class Walk(BaseModel):
             self.other += refs
             if self.other_status == "approved":
                 self.other_status = "open"
+
+    def status(self, unseen: list[ChangedLine]) -> WalkStatus:
+        left = self.left(unseen)
+        spans = LineRef.spans(LineRef.of(line) for line in left)
+        current = self.on_screen()
+        return WalkStatus(
+            on_screen=current.title if current else None,
+            queue=[
+                QueuedChunk(position=i, title=g.title, lines=LineRef.spans(g.lines))
+                for i, g in enumerate(self.queue, start=1)
+            ],
+            other_lines=len(self.other),
+            other_status=self.other_status,
+            left=summary(left) if left else "nothing left but Other",
+            left_lines=spans[:_MAX_LEFT_FILES],
+            more_files_left=max(0, len(spans) - _MAX_LEFT_FILES),
+        )
 
     def unfinished(self, unseen: list[ChangedLine]) -> list[str]:
         """What still stands between the reader and the end of the walkthrough."""
