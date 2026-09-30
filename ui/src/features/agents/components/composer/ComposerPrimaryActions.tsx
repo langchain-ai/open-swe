@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import {
-  agentThreadKeys,
-  invalidateAgentThreadLists,
-  useCancelAgentThread,
-} from "@/features/agents/lib/queries"
 import { cn } from "@/lib/utils"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 export interface ActiveRun {
   threadId: string
@@ -23,10 +17,15 @@ export interface ComposerPrimaryActionsProps {
   onSubmit: () => void
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
-  /** Direct stop handler for desktop ACP or before LangGraph assigns a thread id. */
+  /**
+   * Stop handler. Required outside a thread stream (desktop ACP, or before
+   * LangGraph assigns a thread id); inside one it replaces the source's stop.
+   */
   onStop?: () => void | Promise<void>
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
+  /** Label of the send button while a run is live. */
+  runningLabel?: string
 }
 
 function useEscapeToStop(enabled: boolean, onStop: () => void) {
@@ -146,57 +145,40 @@ function StopButton({
   )
 }
 
-function StreamPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const stream = useAgentStream()
-  const queryClient = useQueryClient()
+function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
+  const source = useThreadSource()
   const [stopping, setStopping] = useState(false)
-  const threadId = props.activeRun?.threadId ?? stream.threadId ?? ""
-  const cancelThread = useCancelAgentThread(threadId)
 
   const handleStop = async () => {
     if (stopping) return
     setStopping(true)
     try {
-      // `stream.stop()` only cancels server-side when this client dispatched the
-      // run, so cancel by thread first: a run started from Slack/Linear/GitHub
-      // (or joined after a reload) has no client-side run id to cancel.
-      let cancelledThread
-      if (threadId) {
-        try {
-          cancelledThread = await cancelThread.mutateAsync()
-        } catch {
-          // Cancellation failed (transient 5xx, or a non-owner viewer). Leave
-          // the stream and the thread's status polling untouched: presenting a
-          // stopped state here would strand the UI on a still-running run.
-          return
-        }
-      }
-      await stream.disconnect()
-      if (threadId && cancelledThread?.status !== "running") {
-        queryClient.setQueryData(agentThreadKeys.detail(threadId), (prev) =>
-          prev ? { ...prev, status: "interrupted" as const } : prev
-        )
-        invalidateAgentThreadLists(queryClient)
-      }
+      // The view may wrap the stop, e.g. to return queued follow-ups to the
+      // composer before the run is interrupted.
+      await (props.onStop ? props.onStop() : source.stop())
     } finally {
       setStopping(false)
     }
   }
 
   const running =
-    props.submitting || stream.isLoading || props.activeRun?.running
+    props.submitting || source.isRunning || props.activeRun?.running
   useEscapeToStop(
     Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()
   )
 
-  // Server truth (`activeRun.running`) matters as much as the client stream:
-  // this browser only sees `isLoading` once it observes a lifecycle event, so a
-  // run it never joined would otherwise render an unusable send button.
+  // Server truth (`activeRun.running`) matters as much as the client's view of
+  // the run: this browser only sees a run it observed events for, so a run it
+  // never joined would otherwise render an unusable send button.
   if (!running) return <SendButton {...props} />
 
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+    <SendButton
+      {...props}
+      canSubmit={!stopping}
+      label={props.runningLabel ?? "Queue message"}
+    />
   ) : (
     <StopButton
       disabled={stopping}
@@ -226,7 +208,11 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
   )
   if (!running) return <SendButton {...props} />
   return props.canSubmit ? (
-    <SendButton {...props} canSubmit={!stopping} label="Steer agent" />
+    <SendButton
+      {...props}
+      canSubmit={!stopping}
+      label={props.runningLabel ?? "Queue message"}
+    />
   ) : (
     <StopButton
       disabled={stopping}
@@ -239,6 +225,6 @@ function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
 /** The composer's send button, which becomes a stop button while a run is live. */
 export function ComposerPrimaryActions(props: ComposerPrimaryActionsProps) {
   const inAgentThreadStream = useIsInAgentThreadStream()
-  if (inAgentThreadStream) return <StreamPrimaryActions {...props} />
+  if (inAgentThreadStream) return <ThreadPrimaryActions {...props} />
   return <DirectPrimaryActions {...props} />
 }

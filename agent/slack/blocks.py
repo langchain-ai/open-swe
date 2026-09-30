@@ -17,6 +17,11 @@ from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 SECTION_TEXT_MAX_CHARS = 3000
+# Slack documents no rich-text limit; 4.5k characters is the largest block verified to render.
+CODE_TEXT_MAX_CHARS = 4000
+# Cumulative across every markdown block in one message.
+MARKDOWN_TEXT_MAX_CHARS = 12000
+MESSAGE_MAX_BLOCKS = 50
 BUTTON_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
 
@@ -40,6 +45,11 @@ class SectionBlock(TypedDict):
     text: TextObject
 
 
+class MarkdownBlock(TypedDict):
+    type: Literal["markdown"]
+    text: str
+
+
 class ContextBlock(TypedDict):
     type: Literal["context"]
     elements: list[TextObject]
@@ -59,17 +69,52 @@ class ImageBlock(TypedDict):
     alt_text: str
 
 
+class RichTextText(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class RichTextPreformatted(TypedDict):
+    type: Literal["rich_text_preformatted"]
+    elements: list[RichTextText]
+    language: NotRequired[str]
+
+
+class RichTextBlock(TypedDict):
+    type: Literal["rich_text"]
+    elements: list[RichTextPreformatted]
+
+
 class ButtonElement(TypedDict):
     type: Literal["button"]
     text: PlainText
     action_id: str
     value: NotRequired[str]
+    url: NotRequired[str]
     style: NotRequired[ButtonStyle]
 
 
 class ActionsBlock(TypedDict):
     type: Literal["actions"]
     elements: list[ButtonElement]
+
+
+class FeedbackButton(TypedDict):
+    text: PlainText
+    value: str
+    accessibility_label: str
+
+
+class FeedbackButtons(TypedDict):
+    type: Literal["feedback_buttons"]
+    action_id: str
+    positive_button: FeedbackButton
+    negative_button: FeedbackButton
+
+
+class ContextActionsBlock(TypedDict):
+    type: Literal["context_actions"]
+    elements: list[FeedbackButtons]
 
 
 class PlainTextInput(TypedDict):
@@ -88,7 +133,17 @@ class InputBlock(TypedDict):
     optional: NotRequired[bool]
 
 
-type Block = SectionBlock | ContextBlock | DividerBlock | ImageBlock | ActionsBlock | InputBlock
+type Block = (
+    SectionBlock
+    | MarkdownBlock
+    | ContextBlock
+    | DividerBlock
+    | ImageBlock
+    | RichTextBlock
+    | ActionsBlock
+    | ContextActionsBlock
+    | InputBlock
+)
 
 
 class ModalView(TypedDict):
@@ -113,6 +168,10 @@ def section(text: str) -> SectionBlock:
     return {"type": "section", "text": mrkdwn(text)}
 
 
+def markdown(text: str) -> MarkdownBlock:
+    return {"type": "markdown", "text": text}
+
+
 def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
 
@@ -121,12 +180,47 @@ def image(file_id: str, alt_text: str) -> ImageBlock:
     return {"type": "image", "slack_file": {"id": file_id}, "alt_text": alt_text}
 
 
+def split_lines(text: str, limit: int) -> list[str]:
+    """``text`` cut on line boundaries into non-blank pieces of at most ``limit`` characters."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if current and len(current) + len(line) > limit:
+            chunks.append(current)
+            current = ""
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        current += line
+    chunks.append(current)
+    return [chunk.rstrip("\n") for chunk in chunks if chunk.strip()]
+
+
+def code_blocks(body: str, *, language: str | None = None) -> list[RichTextBlock]:
+    """All of ``body`` as syntax-highlighted code; unlike mrkdwn, rich text takes it literally."""
+    blocks: list[RichTextBlock] = []
+    for chunk in split_lines(body, CODE_TEXT_MAX_CHARS):
+        preformatted: RichTextPreformatted = {
+            "type": "rich_text_preformatted",
+            "elements": [{"type": "text", "text": chunk}],
+        }
+        if language:
+            preformatted["language"] = language
+        blocks.append({"type": "rich_text", "elements": [preformatted]})
+    return blocks
+
+
 def divider() -> DividerBlock:
     return {"type": "divider"}
 
 
 def button(
-    text: str, *, action_id: str, value: str | None = None, style: ButtonStyle | None = None
+    text: str,
+    *,
+    action_id: str,
+    value: str | None = None,
+    url: str | None = None,
+    style: ButtonStyle | None = None,
 ) -> ButtonElement:
     element: ButtonElement = {
         "type": "button",
@@ -135,6 +229,8 @@ def button(
     }
     if value is not None:
         element["value"] = value
+    if url is not None:
+        element["url"] = url
     if style is not None:
         element["style"] = style
     return element

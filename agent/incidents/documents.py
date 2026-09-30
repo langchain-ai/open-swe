@@ -73,12 +73,21 @@ async def document_context(incident_id: str) -> dict[str, Any]:
     }
 
 
+_SECTIONS = (
+    ("problem", "Problem"),
+    ("previous_occurrence", "Previous occurrence"),
+    ("impact", "Impact"),
+    ("cause", "Cause"),
+)
+
+
 def _findings(report: IncidentReport) -> str:
     lines = [f"### Findings — {report.created_at}", "", report.summary]
-    if report.impact:
-        lines.extend(["", f"Impact: {report.impact}"])
+    for field, label in _SECTIONS:
+        if value := getattr(report, field):
+            lines.extend(["", f"{label}: {value}"])
     if report.next_steps:
-        lines.extend(["", "Suggested next steps:", *[f"- {item}" for item in report.next_steps]])
+        lines.extend(["", "Steps to solve:", *[f"- {item}" for item in report.next_steps]])
     if report.hypotheses:
         lines.extend(["", "Working hypotheses:"])
     for hypothesis in report.hypotheses:

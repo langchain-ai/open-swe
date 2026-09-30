@@ -100,6 +100,8 @@ def _message_update_payload(*, bot_message: bool = False) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
@@ -131,123 +133,57 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
 
 
-@pytest.mark.parametrize(
-    "text",
-    ["<@BOT> please fix this", "hey @openswe please fix this"],
-)
-async def test_tagged_thread_message_is_accepted(text: str) -> None:
-    background_tasks = _FakeBackgroundTasks()
+@pytest.mark.parametrize("reply", [False, True])
+async def test_kitchen_messages_start_and_continue_threads_without_tag(
+    monkeypatch: pytest.MonkeyPatch, reply: bool
+) -> None:
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(
+            name="team-kitchen", is_ext_shared=False, is_pending_ext_shared=False
+        )
 
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_payload(text, f"Ev-{text}"))),
-        cast(BackgroundTasks, background_tasks),
-    )
-
-    assert response["status"] == "accepted"
-    assert len(background_tasks.tasks) == 1
-
-
-@pytest.mark.parametrize("subtype", ["", "file_share"])
-async def test_untagged_thread_message_is_ignored(subtype: str) -> None:
-    payload = _message_payload("the alignment is still wrong", f"Ev-{subtype}")
-    payload["event"]["subtype"] = subtype
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
+    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}")
+    if not reply:
+        del payload["event"]["thread_ts"]
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
         cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
     )
 
-    assert response == {"status": "ignored", "reason": "Not an app mention or DM"}
-    assert background_tasks.tasks == []
+    assert response["status"] == "accepted"
+    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
+    assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
+    assert request.treat_all_messages_as_mentions is True
+    assert request.kitchen_channel is True
 
 
-async def test_message_update_queues_only_the_new_text() -> None:
+async def test_kitchen_name_without_opt_in_does_not_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
+        return SlackChannelContext(
+            name="team-kitchen", is_ext_shared=False, is_pending_ext_shared=False
+        )
+
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
+    payload = _message_payload("just talking", "Ev-kitchen-no-opt-in")
+    del payload["event"]["thread_ts"]
     background_tasks = _FakeBackgroundTasks()
 
     response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
     )
 
-    assert response["status"] == "accepted"
-    assert background_tasks.tasks[0][0] is slack_routes._process_slack_message_update
-    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
-    assert request.message_update is True
-    assert request.event_ts == "1786573400.000000"
-    assert request.original_message_ts == "1786573369.551099"
-    assert request.thread_ts == "1786573300.000000"
-    assert request.text == "new corrected text"
-    assert "old text that must not be resent" not in str(request)
+    assert response["status"] == "ignored"
+    assert background_tasks.tasks == []
 
 
 async def _run_message_update_task(background_tasks: _FakeBackgroundTasks) -> None:
     func, args = background_tasks.tasks[0]
     await func(*args)
-
-
-async def test_root_message_update_uses_original_message_as_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    payload = _message_update_payload()
-    del payload["event"]["message"]["thread_ts"]
-    del payload["event"]["previous_message"]["thread_ts"]
-    lookup_run = cast(AsyncMock, webhook_common.lookup_slack_run_mapping)
-    lookup_run.return_value = {
-        "run_id": "run-1",
-        "thread_ts": "1786573369.551099",
-        "triggering_user_id": "U1",
-        "agent_thread_id": "t1",
-    }
-    background_tasks = _FakeBackgroundTasks()
-    process = AsyncMock()
-    monkeypatch.setattr(slack_service, "process_slack_mention", process)
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(payload)),
-        cast(BackgroundTasks, background_tasks),
-    )
-    await _run_message_update_task(background_tasks)
-
-    assert response["status"] == "accepted"
-    request = cast(SlackRequest, background_tasks.tasks[0][1][0])
-    assert request.thread_ts == "1786573369.551099"
-    lookup = cast(AsyncMock, webhook_common.lookup_slack_thread_id)
-    lookup.assert_awaited_once()
-    await_args = lookup.await_args
-    assert await_args is not None
-    assert await_args.args[2] == "1786573369.551099"
-    process.assert_awaited_once()
-    process_request = cast(SlackRequest, process.await_args.args[0])
-    assert process_request.thread_ts == "1786573369.551099"
-
-
-@pytest.mark.parametrize(
-    ("patch_name", "patch_value"),
-    [
-        ("lookup_slack_thread_id", None),
-        ("thread_exists", False),
-        ("lookup_slack_run_mapping", None),
-    ],
-)
-async def test_message_update_background_task_requires_delivered_message(
-    monkeypatch: pytest.MonkeyPatch,
-    patch_name: str,
-    patch_value: object,
-) -> None:
-    monkeypatch.setattr(webhook_common, patch_name, AsyncMock(return_value=patch_value))
-    monkeypatch.setattr(slack_routes, "_MESSAGE_UPDATE_RETRY_DELAYS", ())
-    process = AsyncMock()
-    monkeypatch.setattr(slack_service, "process_slack_mention", process)
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload())),
-        cast(BackgroundTasks, background_tasks),
-    )
-    await _run_message_update_task(background_tasks)
-
-    assert response == {"status": "accepted", "message": "Slack update queued"}
-    process.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -404,42 +340,4 @@ async def test_message_update_rejects_changed_sender_identity() -> None:
     )
 
     assert response == {"status": "ignored", "reason": "Updated message identity changed"}
-    assert background_tasks.tasks == []
-
-
-async def test_message_update_from_a_bot_is_ignored() -> None:
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(_message_update_payload(bot_message=True))),
-        cast(BackgroundTasks, background_tasks),
-    )
-
-    assert response == {"status": "ignored", "reason": "Event from a bot"}
-    assert background_tasks.tasks == []
-
-
-async def test_message_update_ignores_link_unfurl_attachments() -> None:
-    """Slack unfurls a link by editing the message to add `attachments`.
-
-    Stands in for every metadata-only edit: the text the user wrote is
-    unchanged, so there is nothing new to act on whatever else moved.
-    """
-    payload = _message_update_payload()
-    payload["event"]["previous_message"]["text"] = "new corrected text"
-    payload["event"]["message"]["attachments"] = [
-        {
-            "service_name": "GitHub",
-            "title": "Fix the thing by someone · Pull Request #5888",
-            "title_link": "https://github.com/langchain-ai/deepagents/pull/5888",
-        }
-    ]
-    background_tasks = _FakeBackgroundTasks()
-
-    response = await slack_routes.slack_webhook(
-        cast(Request, _FakeRequest(payload)),
-        cast(BackgroundTasks, background_tasks),
-    )
-
-    assert response == {"status": "ignored", "reason": "No user-visible message changes"}
     assert background_tasks.tasks == []

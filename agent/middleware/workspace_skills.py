@@ -33,10 +33,12 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
     ) -> SkillsStateUpdate | None:
         scoped = self._scoped_state(cast(dict[str, Any], state))
         loaded = await super().abefore_agent(scoped, runtime, config)
-        return loaded or {
-            "skills_metadata": scoped.get("skills_metadata", []),
-            "skills_load_errors": [],
-        }
+        if loaded:
+            return loaded
+        return SkillsStateUpdate(
+            skills_metadata=scoped.get("skills_metadata") or [],
+            skills_load_errors=[],
+        )
 
     async def awrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]

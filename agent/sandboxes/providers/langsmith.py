@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from agent.config import ENV
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
+from agent.utils.startup_trace import asubphase
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ PROXY_CONFIG_ERROR_BODY_CHARS = 500
 SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
+_KILL_TIMEOUT_SECONDS = 5.0
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -189,6 +191,8 @@ class GitHubProxyRule(TypedDict):
 
 
 def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
+    if not github_token:
+        return []
     basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     # GitHub enforces repository IDs on the token, including for mixed-case URLs.
     return [
@@ -198,8 +202,8 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
             "headers": [
                 {
                     "name": "Authorization",
-                    "type": "opaque" if github_token else "plaintext",
-                    "value": f"Bearer {github_token}" if github_token else "",
+                    "type": "opaque",
+                    "value": f"Bearer {github_token}",
                 }
             ],
             # `gh` refuses to run without a token in its environment even though the
@@ -215,9 +219,7 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
                     "type": "opaque",
                     "value": f"Basic {basic_auth}",
                 }
-            ]
-            if github_token
-            else [],
+            ],
         },
     ]
 
@@ -384,26 +386,17 @@ async def _start_sandbox_best_effort(sandbox_name: str) -> None:
         await client.aclose()
 
 
-async def configure_github_proxy(
+async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
+    thread_id: str | None = None,
 ) -> None:
-    """Configure sandbox proxy to inject managed credentials for outbound traffic.
-
-    Uses the LangSmith proxy-config API to set up header injection so that
-    git operations (clone, pull, push) authenticate via the proxy rather than
-    writing credentials to disk in the sandbox.
-
-    Args:
-        sandbox_name: The sandbox name/ID returned by the LangSmith API.
-        github_token: GitHub token to inject as Authorization header.
-        base_proxy_config: Additional persisted proxy settings to preserve.
-    """
+    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
     api_key = _get_langsmith_api_key()
     if not api_key:
-        logger.warning("No LangSmith API key found, skipping GitHub proxy configuration")
+        logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
     langsmith_endpoint = _get_sandbox_endpoint()
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
@@ -417,8 +410,17 @@ async def configure_github_proxy(
         or rule.get("name")
         not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
+    from agent.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    preserved_rules = [
+        rule
+        for rule in preserved_rules
+        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
+    ]
+    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     proxy_config["rules"] = [
         *_github_proxy_rules(github_token),
+        *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}
@@ -435,7 +437,7 @@ async def configure_github_proxy(
             )
             await _start_sandbox_best_effort(sandbox_name)
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-    logger.info("Configured GitHub proxy for sandbox %s", sandbox_name)
+    logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 
 class WorkspaceServiceURL(BaseModel):
@@ -590,15 +592,20 @@ async def create_langsmith_sandbox(
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await configure_github_proxy(
+            await configure_sandbox_proxy(
                 backend.id,
                 github_token,
                 base_proxy_config=proxy_config,
             )
         else:
-            await configure_github_proxy(backend.id, github_token)
+            await configure_sandbox_proxy(backend.id, github_token)
 
     return backend
+
+
+def _log_abandoned_result(task: asyncio.Future[Any]) -> None:
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.debug("Killed sandbox command ended with an error", exc_info=exc)
 
 
 class TimeoutLangSmithSandbox(LangSmithSandbox):
@@ -654,6 +661,15 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         except Exception:  # noqa: BLE001 - best-effort cleanup of a wedged command
             logger.warning("Failed to kill timed-out sandbox command", exc_info=True)
 
+    async def _akill_and_drain(self, handle: Any, result_task: asyncio.Future[Any]) -> None:
+        """Kill the command, then release its stream, each within a bounded wait."""
+        kill = asyncio.ensure_future(self._asafe_kill(handle))
+        await asyncio.wait({kill}, timeout=_KILL_TIMEOUT_SECONDS)
+        kill.cancel()
+        result_task.add_done_callback(_log_abandoned_result)
+        result_task.cancel()
+        await asyncio.wait({result_task}, timeout=_KILL_TIMEOUT_SECONDS)
+
     async def _abase_execute(self, command: str, timeout: int | None) -> ExecuteResponse:
         return await LangSmithSandbox.aexecute(self, command, timeout=timeout)
 
@@ -695,20 +711,39 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
         # run(wait=False) opens the WS and reads the "started" frame, so
         # connect/setup failures raise here — fall back to the base path.
         try:
-            handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError):
-            return await self._abase_execute(command, timeout)
+            async with asubphase("sandbox.exec.connect", sandbox_id=self.id):
+                handle = await self._aget_sandbox().run(command, timeout=effective, wait=False)
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS, TimeoutError) as exc:
+            return await self._afallback_execute(command, timeout, exc)
         deadline = self._deadline(effective)
+        # The kill frame travels over the command's own stream, so the kill has
+        # to go out before that stream is torn down: waiting on a separate task
+        # keeps it open through a timeout or a cancelled run.
+        result_task = asyncio.ensure_future(handle.result)
         try:
-            result = await asyncio.wait_for(handle.result, timeout=deadline)
-        except TimeoutError:
-            await self._asafe_kill(handle)
+            async with asubphase("sandbox.exec.result", sandbox_id=self.id):
+                await asyncio.wait({result_task}, timeout=deadline)
+        except asyncio.CancelledError:
+            await self._akill_and_drain(handle, result_task)
+            raise
+        if not result_task.done():
+            await self._akill_and_drain(handle, result_task)
             return self._timeout_response(deadline, server_side=False)
+        try:
+            result = result_task.result()
         except CommandTimeoutError:
             return self._timeout_response(effective, server_side=True)
-        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS):
-            return await self._abase_execute(command, timeout)
+        except (*self._WS_FALLBACK_ERRORS, *SANDBOX_NOT_READY_ERRORS) as exc:
+            return await self._afallback_execute(command, timeout, exc)
         return self._result_to_response(result)
+
+    async def _afallback_execute(
+        self, command: str, timeout: int | None, cause: BaseException
+    ) -> ExecuteResponse:
+        async with asubphase(
+            "sandbox.exec.http_fallback", sandbox_id=self.id, reason=type(cause).__name__
+        ):
+            return await self._abase_execute(command, timeout)
 
 
 class SandboxProvider(ABC):

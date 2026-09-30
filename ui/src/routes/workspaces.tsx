@@ -5,10 +5,12 @@ import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WorkspacesSection } from "@/features/settings/components/WorkspacesSection"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
+  head: () => ({ meta: [{ title: pageTitle("Workspaces") }] }),
 })
 
 function WorkspacesPage() {

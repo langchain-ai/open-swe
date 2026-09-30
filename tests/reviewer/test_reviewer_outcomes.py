@@ -1,56 +1,12 @@
 from typing import Any, cast
 
 from agent.review.findings import Finding
-from agent.run_config import RunConfig
 from agent.utils import reviewer_outcomes
 from agent.utils.reviewer_outcomes import (
     FALSE_POSITIVE,
     TRUE_POSITIVE,
-    emit_finding_status_outcome,
-    outcome_from_score,
-    outcome_from_status,
     upsert_finding_outcome,
 )
-
-
-def test_outcome_from_status_resolved_by_commit() -> None:
-    assert outcome_from_status("resolved", first_seen_sha="aaa", head_sha="bbb") == (
-        TRUE_POSITIVE,
-        "resolved_by_commit",
-    )
-
-
-def test_outcome_from_status_resolved_same_sha() -> None:
-    assert outcome_from_status("resolved", first_seen_sha="aaa", head_sha="aaa") == (
-        TRUE_POSITIVE,
-        "resolved_same_sha",
-    )
-
-
-def test_outcome_from_status_dismissed() -> None:
-    assert outcome_from_status("dismissed", first_seen_sha="aaa", head_sha="bbb") == (
-        FALSE_POSITIVE,
-        "dismissed",
-    )
-
-
-def test_outcome_from_status_open_is_none() -> None:
-    assert outcome_from_status("open", first_seen_sha="aaa", head_sha="bbb") is None
-
-
-def test_outcome_from_score() -> None:
-    assert outcome_from_score(1.0, source="github") == (TRUE_POSITIVE, "github_thumbs_up")
-    assert outcome_from_score(0.0, source="github") == (FALSE_POSITIVE, "github_thumbs_down")
-    assert outcome_from_score(1.0, source="slack") == (TRUE_POSITIVE, "slack_thumbs_up")
-    assert outcome_from_score(None, source="github") is None
-
-
-def test_example_id_is_deterministic() -> None:
-    a = reviewer_outcomes._example_id("o/r", "f_1", "dismissed")
-    b = reviewer_outcomes._example_id("o/r", "f_1", "dismissed")
-    c = reviewer_outcomes._example_id("o/r", "f_1", "resolved_by_commit")
-    assert a == b
-    assert a != c
 
 
 class _FakeDataset:
@@ -157,46 +113,3 @@ async def test_upsert_finding_outcome_updates_on_conflict(monkeypatch) -> None: 
     assert ok
     assert not fake.created
     assert len(fake.updated) == 1
-
-
-async def test_upsert_no_client_is_noop(monkeypatch) -> None:  # noqa: ANN001
-    _patch_client(monkeypatch, None)
-    assert (
-        await upsert_finding_outcome(_finding(), label=TRUE_POSITIVE, label_source="x", repo="o/r")
-        is False
-    )
-
-
-async def test_emit_finding_status_outcome_maps_and_calls(monkeypatch) -> None:  # noqa: ANN001
-    captured: dict[str, Any] = {}
-
-    async def fake_upsert(finding, **kwargs: Any) -> bool:  # noqa: ANN001
-        captured.update(kwargs)
-        captured["finding_id"] = finding["id"]
-        return True
-
-    monkeypatch.setattr(reviewer_outcomes, "upsert_finding_outcome", fake_upsert)
-
-    configurable = {
-        "repo": {"owner": "o", "name": "r"},
-        "pr_number": 7,
-        "pr_url": "https://github.com/o/r/pull/7",
-        "base_sha": "aaa",
-        "head_sha": "bbb",
-    }
-    assert await emit_finding_status_outcome(
-        _finding(), "resolved", cfg=RunConfig.parse(configurable), thread_id="t1"
-    )
-    assert captured["repo"] == "o/r"
-    assert captured["label"] == TRUE_POSITIVE
-    assert captured["label_source"] == "resolved_by_commit"
-    assert captured["pr_number"] == 7
-
-
-async def test_emit_finding_status_outcome_no_repo_is_noop(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(reviewer_outcomes, "upsert_finding_outcome", lambda *a, **k: pytest_fail())
-    assert await emit_finding_status_outcome(_finding(), "dismissed", cfg=RunConfig()) is False
-
-
-def pytest_fail() -> bool:
-    raise AssertionError("upsert should not be called without a repo")

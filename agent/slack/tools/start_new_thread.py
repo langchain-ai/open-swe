@@ -7,19 +7,25 @@ from fastapi import HTTPException
 
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.run_config import RunConfig
+from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     bind_slack_thread_id,
     get_active_slack_thread,
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread
 from agent.utils.dashboard_links import dashboard_thread_url
+from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
 from agent.webhooks.common import is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
@@ -93,7 +99,7 @@ def _truncate_for_slack(text: str) -> str:
 
 
 def _visible_message(title: str) -> str:
-    return f"*Open SWE breakout thread:* {title}"
+    return f"`/breakout`: {title}"
 
 
 def _thread_details(instructions: str, repo: dict[str, str] | None) -> str:
@@ -125,8 +131,8 @@ async def _run_prompt(
     repo_text = f"{repo['owner']}/{repo['name']}" if repo else "(no repository specified)"
     channel_id = original_slack_thread.get("channel_id", "")
     thread_ts = original_slack_thread.get("thread_ts", "")
-    return render_prompt(
-        "runs/slack-breakout.md",
+    return prompt(
+        "runs/slack-breakout",
         title=title,
         repo=repo_text,
         channel_id=channel_id,
@@ -174,6 +180,12 @@ async def slack_start_new_thread(
     current_thread_ts = current_slack_thread.get("thread_ts")
     if not isinstance(channel_id, str) or not channel_id.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
+    channel = await SlackChannel.load(channel_id.strip(), use_cache=False)
+    if channel is None or not channel.public:
+        return {
+            "success": False,
+            "error": "Breakout threads can only be started in public channels; do not retry.",
+        }
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -227,10 +239,50 @@ async def slack_start_new_thread(
                 ),
             }
 
+    if not cfg.thread_id:
+        return {"success": False, "error": "Missing parent thread_id"}
+    parent_metadata = thread_metadata(await client.threads.get(cfg.thread_id))
+    visibility = parent_metadata.get("visibility", "public")
+    owner_type = parent_metadata.get("owner_type", "user")
+    if visibility not in ("public", "private") or owner_type not in ("user", "system"):
+        return {"success": False, "error": "Invalid parent thread ownership"}
+    owner_login = (cfg.github_login or "").strip().lower()
+    if owner_type == "system":
+        if visibility != "public":
+            return {"success": False, "error": "System threads cannot be private"}
+        if owner_login and not cfg.background_task_completion:
+            owner_type = "user"
+    else:
+        if cfg.background_task_completion or not owner_login:
+            return {
+                "success": False,
+                "error": "A direct authenticated user run is required to start a breakout thread",
+            }
+        if visibility == "private":
+            parent_owner = parent_metadata.get("owner_login")
+            if not isinstance(parent_owner, str) or parent_owner.strip().lower() != owner_login:
+                return {
+                    "success": False,
+                    "error": "Only the private thread owner can start a breakout",
+                }
+
     clean_channel_id = channel_id.strip()
+    source_line = (
+        await source_thread_line(
+            clean_channel_id, cfg.slack_thread.triggering_event_ts or current_thread_ts
+        )
+        if isinstance(current_thread_ts, str) and current_thread_ts
+        else ""
+    )
+    requester = cfg.slack_thread.triggering_user_id
+    root_parts = (
+        _visible_message(clean_title),
+        source_line,
+        f"<@{requester}>" if requester else "",
+    )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        _visible_message(clean_title),
+        " · ".join(part for part in root_parts if part),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -269,19 +321,22 @@ async def slack_start_new_thread(
     thread_id = str(uuid.uuid4())
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(
-        current_slack_thread,
+        cfg.slack_thread.dump(),
         channel_id=clean_channel_id,
         thread_ts=message_ts,
     )
     breakout_from = {
         "channel_id": clean_channel_id,
         "thread_ts": current_thread_ts or "",
-        "message_ts": current_slack_thread.get("triggering_event_ts", ""),
+        "message_ts": cfg.slack_thread.triggering_event_ts,
     }
 
+    thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "title": clean_title[:80],
+        "title": thread_title,
+        "visibility": visibility,
+        "owner_type": owner_type,
         "source_context": SourceContext.parse(
             {"slack_thread": new_slack_thread, "breakout_from": breakout_from}
         ).dump(),
@@ -294,6 +349,9 @@ async def slack_start_new_thread(
                 "repo_name": repo["name"],
             }
         )
+    if owner_type == "user":
+        metadata["owner_login"] = owner_login
+        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(None, owner_login)
     if cfg.github_login:
         metadata["github_login"] = cfg.github_login
     if cfg.user_email:
@@ -302,6 +360,7 @@ async def slack_start_new_thread(
     new_configurable: dict[str, Any] = {
         "slack_thread": new_slack_thread,
         "source": "slack",
+        "slack_breakout": True,
     }
     if repo:
         new_configurable["repo"] = repo
@@ -310,7 +369,9 @@ async def slack_start_new_thread(
         if value:
             new_configurable[key] = value
 
-    await client.threads.create(thread_id=thread_id, if_exists="do_nothing", metadata=metadata)
+    await create_thread(
+        client, thread_id, title=thread_title, if_exists="do_nothing", metadata=metadata
+    )
     await client.threads.update(thread_id=thread_id, metadata=metadata)
 
     run = await dispatch_agent_run(
@@ -318,6 +379,7 @@ async def slack_start_new_thread(
         await _run_prompt(clean_title, clean_instructions, repo, current_slack_thread, thread_id),
         new_configurable,
         source="slack",
+        thread_title=None,
         client=client,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else None
@@ -330,10 +392,22 @@ async def slack_start_new_thread(
             message_ts=message_ts,
             triggering_user_id=new_slack_thread.get("triggering_user_id") or None,
         )
-
-    return {
+    slack_url = await get_slack_permalink(clean_channel_id, message_ts)
+    result: dict[str, Any] = {
         "success": True,
         "thread_id": thread_id,
         "thread_ts": message_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
+        "slack_url": slack_url
+        or f"https://slack.com/archives/{clean_channel_id}/p{message_ts.replace('.', '')}",
     }
+    if isinstance(current_thread_ts, str) and current_thread_ts:
+        request_ts = breakout_from["message_ts"]
+        if request_ts:
+            await mark_broken_out(
+                clean_channel_id, current_thread_ts, request_ts, clean_channel_id, message_ts
+            )
+        result["next_step"] = (
+            "End the turn with slack_no_reply_needed; do not reply in the current thread."
+        )
+    return result

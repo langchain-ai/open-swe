@@ -16,12 +16,13 @@ import {
   RefreshCw,
   RotateCcw,
 } from "lucide-react"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
 import type { IncidentAction } from "./api"
@@ -94,6 +95,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     refetchInterval: 5000,
     retry: false,
   })
+  const incidentTitle = detail.data?.incident.title
+  const documentTitle = pageTitle(incidentTitle ?? "Incident")
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   const command = useMutation({
     mutationFn: ({
       action,
@@ -112,6 +118,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         text
       )
     },
+    meta: { errorTitle: "Couldn't send incident request" },
     onSuccess: (_result, variables) => {
       setNotice(variables.action)
       requestIdentity.current = null
@@ -212,14 +219,6 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           {detail.error.message}
         </p>
       )}
-      {command.error && (
-        <div
-          role="alert"
-          className="mb-5 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive-foreground"
-        >
-          {command.error.message}
-        </div>
-      )}
       {notice && (
         <div
           role="status"
@@ -272,10 +271,32 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                         evidence={report.evidence}
                       />
                     </p>
+                    {(
+                      [
+                        ["Problem", report.problem],
+                        ["Previous occurrence", report.previous_occurrence],
+                        ["Cause", report.cause],
+                      ] as const
+                    ).map(
+                      ([label, value]) =>
+                        value && (
+                          <div key={label} className="mt-4">
+                            <h3 className="mb-1 text-xs font-medium text-muted-foreground">
+                              {label}
+                            </h3>
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                              <CitedText
+                                text={value}
+                                evidence={report.evidence}
+                              />
+                            </p>
+                          </div>
+                        )
+                    )}
                     {Boolean(report.next_steps?.length) && (
                       <div className="mt-5 rounded-lg border border-info/20 bg-info/5 p-4">
                         <h3 className="mb-2 text-xs font-medium">
-                          Suggested next steps
+                          Steps to solve
                         </h3>
                         <ul className="space-y-2 text-sm leading-relaxed">
                           {report.next_steps!.map((step, index) => (

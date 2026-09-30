@@ -3,13 +3,15 @@ import {
   IoArrowBackOutline,
   IoCloudOutline,
   IoCubeOutline,
+  IoFlaskOutline,
   IoGitPullRequestOutline,
   IoOptionsOutline,
   IoSettingsOutline,
   IoStatsChartOutline,
 } from "react-icons/io5"
-import type { ComponentType, SVGProps } from "react"
+import { Fragment, type ComponentType, type SVGProps } from "react"
 
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import {
@@ -18,7 +20,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
-import { getLastAppLocation } from "@/lib/appLocation"
+import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -36,6 +38,11 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
       { to: "/my-settings", label: "Profile", icon: IoOptionsOutline },
       { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
       { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+      {
+        to: "/feature-flags",
+        label: "Feature Flags",
+        icon: IoFlaskOutline,
+      },
     ],
   },
   {
@@ -60,8 +67,35 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
 const LINK_CLASS =
   "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 
+const ACTIVE_LINK_PROPS = {
+  className: "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+}
+
+function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
+  const options = useWorkspaceOptions()
+  const workspaces = options.data?.workspaces ?? []
+  if (workspaces.length === 0) return null
+  return (
+    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-border pl-2">
+      {workspaces.map((workspace) => (
+        <Link
+          key={workspace.slug}
+          to="/workspaces/$slug"
+          params={{ slug: workspace.slug }}
+          onClick={onNavigate}
+          className={cn(LINK_CLASS, "py-1")}
+          activeProps={ACTIVE_LINK_PROPS}
+        >
+          <span className="truncate">{workspace.name}</span>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
+  const hrefLinkOptions = useHrefLinkOptions()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -77,7 +111,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       >
         <Link
-          to={getLastAppLocation()}
+          {...hrefLinkOptions(getLastAppLocation())}
           className={cn(LINK_CLASS, "-mx-2.5 font-medium")}
           onClick={layout.closeOnMobile}
         >
@@ -98,20 +132,24 @@ export function AppSidebar({ user }: { user: SessionUser }) {
               </span>
               {items.map((item) => {
                 const Icon = item.icon
+                const withWorkspaces =
+                  item.to === "/workspaces" && user.is_admin
                 return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={layout.closeOnMobile}
-                    className={LINK_CLASS}
-                    activeProps={{
-                      className:
-                        "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-                    }}
-                  >
-                    <Icon className="size-4" />
-                    <span>{item.label}</span>
-                  </Link>
+                  <Fragment key={item.to}>
+                    <Link
+                      to={item.to}
+                      onClick={layout.closeOnMobile}
+                      className={LINK_CLASS}
+                      activeOptions={{ exact: withWorkspaces }}
+                      activeProps={ACTIVE_LINK_PROPS}
+                    >
+                      <Icon className="size-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                    {withWorkspaces && (
+                      <WorkspaceNavItems onNavigate={layout.closeOnMobile} />
+                    )}
+                  </Fragment>
                 )
               })}
             </div>

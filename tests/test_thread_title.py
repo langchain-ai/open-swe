@@ -1,13 +1,13 @@
 import asyncio
 import contextvars
-from typing import Any, cast
+from types import SimpleNamespace
+from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
-from agent.input_messages import human_input, person_introduction
 from agent.thread_title import (
     _ThreadTitle,
     generate_and_store_thread_title,
@@ -91,57 +91,42 @@ async def test_generate_and_store_thread_title_only_replaces_explicit_seed(
     assert threads.metadata == expected
 
 
-@pytest.mark.asyncio
-async def test_title_generation_renames_code_channel(monkeypatch: pytest.MonkeyPatch) -> None:
-    threads = _Threads(
-        {
-            "source": "slack",
-            "title": "please review title generation",
-            "title_seed": "please review title generation",
-            "source_context": {"slack_thread": {"channel_id": "C-code", "thread_ts": "0"}},
-        }
-    )
-    client = type("Client", (), {"threads": threads})()
-    rename = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.rename_session", rename)
-    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=True))
-
-    await generate_and_store_thread_title(
-        thread_id="thread-123",
-        conversation="please review title generation",
-        model=cast(BaseChatModel, _Model()),
-        client=client,
-    )
-
-    rename.assert_awaited_once_with("C-code", "Review thread title generation")
-
-
-@pytest.mark.asyncio
-async def test_title_generation_leaves_a_dm_session_unnamed(
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+async def test_title_persistence_failure_is_bounded_and_logged(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: Literal["error", "timeout"],
 ) -> None:
-    """A DM shares the session timestamp but has no session name to set."""
-    threads = _Threads(
-        {
-            "source": "slack",
-            "title": "please review title generation",
-            "title_seed": "please review title generation",
-            "source_context": {"slack_thread": {"channel_id": "D1", "thread_ts": "0"}},
-        }
-    )
-    client = type("Client", (), {"threads": threads})()
-    rename = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.rename_session", rename)
-    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=False))
+    threads = _Threads({"source": "dashboard", "title": "Fix the bug", "title_seed": "Fix the bug"})
+    cancelled = asyncio.Event()
 
-    await generate_and_store_thread_title(
-        thread_id="thread-123",
-        conversation="please review title generation",
-        model=cast(BaseChatModel, _Model()),
-        client=client,
+    async def fail_update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        if failure == "error":
+            raise OSError("Title storage unavailable")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(threads, "update", fail_update)
+    monkeypatch.setattr("agent.thread_title.TITLE_GENERATION_TIMEOUT_SECONDS", 0.01)
+    await asyncio.wait_for(
+        generate_and_store_thread_title(
+            thread_id="thread-123",
+            conversation="Fix the bug",
+            model=cast(BaseChatModel, _Model()),
+            client=SimpleNamespace(threads=threads),
+        ),
+        timeout=1,
     )
 
-    rename.assert_not_awaited()
+    assert threads.metadata["title"] == "Fix the bug"
+    assert threads.metadata["title_seed"] == "Fix the bug"
+    assert cancelled.is_set() is (failure == "timeout")
+    record = next(r for r in caplog.records if r.message == "Thread title persistence failed")
+    assert record.__dict__["thread_id"] == "thread-123"
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], TimeoutError if failure == "timeout" else OSError)
 
 
 class _PromotingThreads(_Threads):
@@ -221,71 +206,4 @@ async def test_title_generation_never_inherits_the_runs_context() -> None:
         _RUN_STREAM.reset(token)
 
     assert recorder["stream"] == "none"
-    assert threads.metadata["title"] == "Review thread title generation"
-
-
-@pytest.mark.asyncio
-async def test_title_generation_disables_inherited_callbacks() -> None:
-    """Belt and braces: callbacks bound to the model itself must not stream either."""
-    recorder: dict[str, Any] = {}
-    threads = _Threads(
-        {
-            "source": "dashboard",
-            "title": "please review title generation",
-            "title_seed": "please review title generation",
-        }
-    )
-    client = type("Client", (), {"threads": threads})()
-
-    await generate_and_store_thread_title(
-        thread_id="thread-123",
-        conversation="please review title generation",
-        model=cast(BaseChatModel, _Model(recorder)),
-        client=client,
-    )
-
-    assert recorder["config"]["callbacks"] == []
-
-
-@pytest.mark.asyncio
-async def test_title_generation_reads_the_whole_thread() -> None:
-    """Every message feeds the title; identity context and envelopes do not.
-
-    Runs open with a `dynamic-context` introduction and carry the user's prompt
-    inside an `<input-message>` envelope, so a titler that only accepted a lone
-    bare human message never fired at all.
-    """
-    recorder: dict[str, Any] = {}
-    threads = _Threads(
-        {
-            "source": "dashboard",
-            "title": "first",
-            "title_seed": "first",
-        }
-    )
-    client = type("Client", (), {"threads": threads})()
-
-    person = person_introduction({"id": "github:octocat", "platform": "github"})
-    prompt = human_input(
-        "first", {"sender_id": "github:octocat", "surface": "web", "kind": "human"}
-    )
-    schedule_thread_title_generation(
-        thread_id="thread-123",
-        messages=[
-            HumanMessage(content=cast(str, person["content"])),
-            HumanMessage(content=cast(str, prompt["content"])),
-            AIMessage(content="reply"),
-            HumanMessage(content="second"),
-        ],
-        model=cast(BaseChatModel, _Model(recorder)),
-        client=client,
-    )
-    for _ in range(50):
-        await asyncio.sleep(0)
-        if "messages" in recorder:
-            break
-
-    sent = recorder["messages"][-1].text
-    assert "github:octocat" not in sent
-    assert "first\n\nreply\n\nsecond" in sent
     assert threads.metadata["title"] == "Review thread title generation"

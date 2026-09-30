@@ -76,6 +76,9 @@ class WorkspaceRepositoryRow(Base):
         ForeignKey("repository.id", ondelete="CASCADE"), primary_key=True
     )
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
+    # Whether a workflow in this repository may federate its own GitHub OIDC
+    # token into a run. Binding a repository must not imply it.
+    may_start_threads: Mapped[bool] = mapped_column(server_default="false", default=False)
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -84,10 +87,14 @@ class WorkspaceSlackChannelRow(Base):
 
     channel_id: Mapped[str] = mapped_column(primary_key=True)
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
+    # Untagged human messages here start and continue threads.
+    kitchen: Mapped[bool] = mapped_column(server_default="false", default=False)
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
-def to_workspace(row: WorkspaceRow, repos: list[str], channels: list[str]) -> Workspace:
+def to_workspace(
+    row: WorkspaceRow, repos: list[str], channels: list[str], kitchen_channels: list[str]
+) -> Workspace:
     """The record this row stores, with the bindings that route to it.
 
     Validated on the way out, as every stored record was when workspaces lived
@@ -106,6 +113,7 @@ def to_workspace(row: WorkspaceRow, repos: list[str], channels: list[str]) -> Wo
             "base_snapshot_id": row.base_snapshot_id,
             "repos": repos,
             "slack_channel_ids": channels,
+            "kitchen_channel_ids": kitchen_channels,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,
@@ -141,6 +149,25 @@ def apply_workspace(row: WorkspaceRow, record: Workspace) -> None:
     so an imported record keeps the timestamp it was created with and a fresh
     row gets the one it was inserted at.
     """
+    apply_definition(row, record)
+    apply_state(row, record)
+    row.created_by = record.created_by
+    if created_at := _at(record.created_at):
+        row.created_at = created_at
+    stamp_updated(row, record)
+
+
+def stamp_updated(row: WorkspaceRow, record: Workspace) -> None:
+    row.updated_at = _at(record.updated_at) or datetime.now(UTC)
+
+
+def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
+    """Write what an admin edits onto ``row``, leaving snapshot and refresh state alone.
+
+    A refresh writes its state for minutes while an admin may be editing the
+    same workspace; each side writing only its own columns is what keeps one
+    from reverting the other, such as a refresh restoring revoked access.
+    """
     row.name = record.name
     row.prompt = record.prompt
     row.setup_script = record.setup_script
@@ -150,6 +177,15 @@ def apply_workspace(row: WorkspaceRow, record: Workspace) -> None:
     row.vcpus = record.vcpus
     row.fs_capacity_bytes = record.fs_capacity_bytes
     row.create_params = dict(record.create_params)
+    row.snapshot_name = record.snapshot_name
+
+
+def apply_state(row: WorkspaceRow, record: Workspace) -> None:
+    """Write the snapshot and refresh state onto ``row``, leaving the definition alone.
+
+    ``snapshot_name`` is written here too: a capture records the name the image
+    was actually published under.
+    """
     row.snapshot_id = record.snapshot_id
     row.snapshot_name = record.snapshot_name
     row.snapshot_status = record.snapshot_status
@@ -167,10 +203,6 @@ def apply_workspace(row: WorkspaceRow, record: Workspace) -> None:
     row.refresh_cron_id = record.refresh_cron_id
     row.refresh_steps = [step.model_dump(mode="json") for step in record.refresh_steps]
     row.refresh_sandbox_id = record.refresh_sandbox_id
-    row.created_by = record.created_by
-    if created_at := _at(record.created_at):
-        row.created_at = created_at
-    row.updated_at = _at(record.updated_at) or datetime.now(UTC)
 
 
 def _iso(value: datetime | None) -> str | None:

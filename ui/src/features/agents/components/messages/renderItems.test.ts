@@ -38,7 +38,7 @@ describe("buildRenderItems", () => {
     ])
   })
 
-  it("keeps SQL results as a dedicated inline reply item", () => {
+  it("folds SQL results into work and counts the query as an action", () => {
     const chunk: ToolExecutionChunk = {
       kind: "tool-execution",
       toolCallId: "call-sql",
@@ -52,9 +52,9 @@ describe("buildRenderItems", () => {
     expect(buildRenderItems([chunk])).toEqual([
       { type: "sql-item", key: "tool-call-sql", chunk },
     ])
-    expect(
-      splitWorkAndReply(buildRenderItems([chunk])).replyItems
-    ).toHaveLength(1)
+    const items = buildRenderItems([chunk])
+    expect(selectCollapsedTurnItems(items)).toEqual([])
+    expect(countWorkActions(splitWorkAndReply(items).workItems)).toBe(1)
   })
 
   it.each([

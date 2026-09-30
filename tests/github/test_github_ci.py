@@ -44,68 +44,72 @@ def _patch(monkeypatch: pytest.MonkeyPatch, payload: Any, error: bool = False) -
     monkeypatch.setattr(github_ci.httpx2, "AsyncClient", _FakeClient)
 
 
-def test_branch_and_sha_from_check_run() -> None:
-    payload = {
-        "check_run": {
-            "head_sha": "deadbeef",
-            "check_suite": {"head_branch": "feat/x"},
-        }
-    }
-    assert github_ci.branch_from_check_payload(payload, "check_run") == "feat/x"
-    assert github_ci.head_sha_from_check_payload(payload, "check_run") == "deadbeef"
-
-
-def test_branch_and_sha_from_workflow_run() -> None:
-    payload = {"workflow_run": {"head_sha": "abc", "head_branch": "main"}}
-    assert github_ci.branch_from_check_payload(payload, "workflow_run") == "main"
-    assert github_ci.head_sha_from_check_payload(payload, "workflow_run") == "abc"
-
-
-def test_sha_from_status_event() -> None:
-    payload = {"sha": "sha1", "branches": [{"name": "b1"}]}
-    assert github_ci.head_sha_from_check_payload(payload, "status") == "sha1"
-    assert github_ci.branch_from_check_payload(payload, "status") == "b1"
-
-
-def test_is_failing_ci_payload() -> None:
-    assert github_ci.is_failing_ci_payload(
-        {"check_run": {"status": "completed", "conclusion": "failure"}}, "check_run"
-    )
-    assert not github_ci.is_failing_ci_payload(
-        {"check_run": {"status": "completed", "conclusion": "success"}}, "check_run"
-    )
-    assert not github_ci.is_failing_ci_payload(
-        {"check_run": {"status": "in_progress", "conclusion": None}}, "check_run"
-    )
-    assert github_ci.is_failing_ci_payload({"state": "failure"}, "status")
-    assert not github_ci.is_failing_ci_payload({"state": "pending"}, "status")
-
-
-@pytest.mark.asyncio
-async def test_list_failing_check_runs_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch(
-        monkeypatch,
-        {
-            "check_runs": [
-                {"name": "lint", "status": "completed", "conclusion": "failure"},
-                {"name": "test", "status": "completed", "conclusion": "success"},
-                {"name": "build", "status": "in_progress", "conclusion": None},
-                {"name": "Open SWE Auto-fix", "status": "completed", "conclusion": "failure"},
-            ]
-        },
-    )
-    failing = await github_ci.list_failing_check_runs(owner="o", repo="r", ref="sha", token="t")
-    assert failing is not None
-    names = {c["name"] for c in failing}
-    assert names == {"lint"}
-
-
-@pytest.mark.asyncio
-async def test_list_failing_check_runs_returns_none_on_error(
+async def test_required_checks_merge_branch_protection_and_every_ruleset_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch(monkeypatch, {}, error=True)
-    assert await github_ci.list_failing_check_runs(owner="o", repo="r", ref="s", token="t") is None
+    branch = {
+        "protection": {
+            "required_status_checks": {
+                "contexts": ["lint"],
+                "checks": [{"context": "unit tests", "app_id": 1}],
+            }
+        }
+    }
+    filler = [{"type": "pull_request", "parameters": {}}] * 99
+    rules_pages = {
+        "1": [
+            *filler,
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "required_status_checks": [
+                        {"context": "e2e", "integration_id": -1},
+                        {"context": github_ci.REVIEW_CHECK_RUN_NAME},
+                    ]
+                },
+            },
+        ],
+        "2": [
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": "deploy"}]},
+            }
+        ],
+    }
+
+    async def request(
+        _client: object, _method: str, url: str, params: dict[str, str] | None = None, **_: object
+    ) -> _FakeResponse:
+        if "/rules/" in url:
+            return _FakeResponse(rules_pages[(params or {})["page"]])
+        return _FakeResponse(branch)
+
+    monkeypatch.setattr(github_ci, "github_request", request)
+
+    required = await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t")
+
+    assert required == {
+        github_ci.RequiredCheck("lint"),
+        github_ci.RequiredCheck("unit tests", 1),
+        github_ci.RequiredCheck("e2e"),
+        github_ci.RequiredCheck("deploy"),
+    }
+    assert github_ci.unreported_required_checks(
+        required,
+        [{"name": "unit tests", "app": {"id": 2}}, {"name": "e2e", "app": {"id": 9}}],
+        [{"context": "lint"}, {"context": "unit tests"}],
+    ) == ["deploy", "unit tests"]
+
+
+async def test_required_checks_unavailable_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def request(*_: object, **__: object) -> _FakeResponse:
+        return _FakeResponse(error=True)
+
+    monkeypatch.setattr(github_ci, "github_request", request)
+
+    assert (
+        await github_ci.fetch_required_checks(owner="o", repo="r", branch="main", token="t") is None
+    )
 
 
 @pytest.mark.asyncio
@@ -123,46 +127,6 @@ async def test_list_commit_statuses_keeps_latest_context(monkeypatch: pytest.Mon
     statuses = await github_ci.list_commit_statuses(owner="o", repo="r", ref="s", token="t")
 
     assert statuses == [{"id": 2, "context": "ci", "state": "success"}]
-
-
-@pytest.mark.asyncio
-async def test_names_failing_on_base(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Both check-runs and statuses calls return the same fake payload here;
-    # only the check_runs shape is populated, statuses empty.
-    _patch(
-        monkeypatch,
-        {
-            "check_runs": [
-                {"name": "flaky", "status": "completed", "conclusion": "failure"},
-            ],
-            "statuses": [],
-        },
-    )
-    names = await github_ci.names_failing_on_base(owner="o", repo="r", base_sha="base", token="t")
-    assert "flaky" in names
-
-
-@pytest.mark.asyncio
-async def test_names_failing_on_base_empty_when_no_base() -> None:
-    assert (
-        await github_ci.names_failing_on_base(owner="o", repo="r", base_sha="", token="t") == set()
-    )
-
-
-@pytest.mark.asyncio
-async def test_has_repo_write_permission_true(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch(monkeypatch, {"permission": "write"})
-    assert await github_ci.has_repo_write_permission(
-        owner="o", repo="r", username="alice", token="t"
-    )
-
-
-@pytest.mark.asyncio
-async def test_has_repo_write_permission_false_for_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch(monkeypatch, {"permission": "read"})
-    assert not await github_ci.has_repo_write_permission(
-        owner="o", repo="r", username="bob", token="t"
-    )
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
+import { api } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
+
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 afterEach(() => {
   cleanup()
@@ -212,7 +216,9 @@ it.each([
   const original = identity.value
   const secret = screen.getByLabelText("Client secret") as HTMLInputElement
   expect(secret.checkValidity()).toBe(true)
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   fireEvent.change(identity, { target: { value } })
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
   expect(secret.validity.valueMissing).toBe(true)
   fireEvent.click(screen.getByRole("button", { name: "Save connection" }))
   fireEvent.click(
@@ -220,6 +226,7 @@ it.each([
   )
   expect(requests).toEqual([])
   fireEvent.change(identity, { target: { value: original } })
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   expect(secret.checkValidity()).toBe(true)
   fireEvent.change(identity, { target: { value } })
   fireEvent.change(secret, { target: { value: "test-replacement-secret" } })
@@ -250,6 +257,10 @@ it("validates the connection name before saving and discovering tools", async ()
   const add = screen.getByRole("button", { name: "Add MCP server" })
   await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
   fireEvent.click(add)
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Close" }))
+  expect(screen.queryByLabelText("Connection name")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Add MCP server" }))
   fireEvent.change(screen.getByLabelText("Connection name"), {
     target: { value: "incident.io" },
   })
@@ -379,14 +390,17 @@ it("saves personal authentication, discovers tools, and enables only selected to
       .getByRole("button", { name: "Close incident" })
       .getAttribute("aria-expanded")
   ).toBe("true")
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
   expect(screen.getByText("0 of 1 selected")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Select all" }))
   expect(
     (screen.getByRole("checkbox", { name: "Allow search" }) as HTMLInputElement)
       .checked
   ).toBe(true)
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Close" }))
   expect(within(incidentCard).queryByLabelText("Server URL")).toBeNull()
   expect(
     within(incidentCard)
@@ -566,12 +580,15 @@ it("reveals saved headers on demand and discards them when hidden or closed", as
   const value = await screen.findByLabelText("Saved Authorization value")
   expect((value as HTMLInputElement).value).toBe("test-secret")
   expect((value as HTMLInputElement).readOnly).toBe(true)
+  expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Hide saved headers" }))
   expect(screen.queryByDisplayValue("test-secret")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Show saved headers" }))
   await screen.findByDisplayValue("test-secret")
   expect(reveals).toBe(2)
-  fireEvent.click(screen.getByRole("button", { name: "Close incident" }))
+  fireEvent.click(screen.getByRole("button", { name: "Replace headers" }))
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   fireEvent.click(screen.getByRole("button", { name: "Edit incident" }))
   expect(screen.queryByDisplayValue("test-secret")).toBeNull()
   expect(reveals).toBe(2)
@@ -719,5 +736,98 @@ it("reviews imported connections one at a time without writing on import or skip
       ([, init]) => init?.method === "PUT" || init?.method === "POST"
     )
   ).toBe(false)
+  client.clear()
+})
+
+it("keeps a row's pending flip when another row's save finishes first", async () => {
+  const connection = (name: string): MCPConnection => ({
+    name,
+    url: `https://mcp.${name}.app/mcp`,
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: [],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  })
+  const finish = new Map<string, () => void>()
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([
+    connection("linear"),
+    connection("github"),
+  ])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    (update) =>
+      new Promise<MCPConnection>((resolve) =>
+        finish.set(update.name, () =>
+          resolve({ ...connection(update.name), enabled: false })
+        )
+      )
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  fireEvent.click(screen.getByRole("button", { name: "Disable github" }))
+  await waitFor(() => expect(finish.size).toBe(2))
+
+  finish.get("linear")!()
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Enable linear" })
+        .hasAttribute("disabled")
+    ).toBe(false)
+  )
+  expect(screen.getByRole("button", { name: "Enable github" })).toBeTruthy()
+  expect(api.getMyMCPs).toHaveBeenCalledTimes(1)
+  client.clear()
+})
+
+it("flips a connection at once and flips it back when the save fails", async () => {
+  const saved: MCPConnection = {
+    name: "linear",
+    url: "https://mcp.linear.app/mcp",
+    transport: "streamable_http",
+    enabled: true,
+    allowed_tools: ["search"],
+    header_names: [],
+    revision: "v1",
+    updated_at: "now",
+  }
+  let failSave: (error: Error) => void = () => {}
+  vi.spyOn(api, "getMyMCPs").mockResolvedValue([saved])
+  vi.spyOn(api, "saveMyMCP").mockImplementation(
+    () => new Promise<MCPConnection>((_resolve, reject) => (failSave = reject))
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MCPConnectionsSection scope="user" />
+    </QueryClientProvider>
+  )
+
+  fireEvent.click(await screen.findByRole("button", { name: "Disable linear" }))
+  const enable = await screen.findByRole("button", { name: "Enable linear" })
+  expect(screen.getByText(/· Disabled ·/)).toBeTruthy()
+  await waitFor(() => expect(api.saveMyMCP).toHaveBeenCalledTimes(1))
+  expect(enable.hasAttribute("disabled")).toBe(true)
+  fireEvent.click(enable)
+  expect(api.saveMyMCP).toHaveBeenCalledTimes(1)
+
+  failSave(new Error("MCP server unreachable"))
+  const disable = await screen.findByRole("button", { name: "Disable linear" })
+  await waitFor(() => expect(disable.hasAttribute("disabled")).toBe(false))
+  expect(reportError).toHaveBeenCalledWith({
+    title: "Couldn't disable linear",
+    error: new Error("MCP server unreachable"),
+  })
   client.clear()
 })

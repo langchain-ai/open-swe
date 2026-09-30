@@ -39,6 +39,7 @@ export interface PickerFilter {
 export interface ManualEntry {
   label: string
   placeholder: string
+  hint?: string
   /** The canonical id for a typed value, or null when it cannot be one. */
   normalize: (raw: string) => string | null
   invalidHint: string
@@ -57,6 +58,7 @@ export interface OwnershipPickerProps {
   onChange: (ids: Array<string>) => void
   searchPlaceholder: string
   filter?: PickerFilter
+  filters?: Array<PickerFilter>
   manual?: ManualEntry
   loading?: boolean
   loadError?: string | null
@@ -94,6 +96,7 @@ export function OwnershipPicker({
   onChange,
   searchPlaceholder,
   filter,
+  filters,
   manual,
   loading = false,
   loadError = null,
@@ -104,6 +107,10 @@ export function OwnershipPicker({
   const [draft, setDraft] = useState<Array<string>>(selected)
   const [search, setSearch] = useState("")
   const [filterOn, setFilterOn] = useState(true)
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
+  const categoryFilter = filters?.find(
+    (option) => option.label === activeFilter
+  )
   const [extras, setExtras] = useState<Array<PickerItem>>([])
   const [manualValue, setManualValue] = useState("")
   const [manualError, setManualError] = useState<string | null>(null)
@@ -121,12 +128,12 @@ export function OwnershipPicker({
     !!item.owner && item.owner.slug !== workspaceSlug
   const filterActive = !!filter && filterOn
   const passesFilter = (item: PickerItem) =>
-    !filterActive || filter.matches(item)
+    (!filterActive || filter.matches(item)) &&
+    (!categoryFilter || categoryFilter.matches(item))
 
   const inThis = draft
     .map((id) => rows.get(id))
     .filter((item): item is PickerItem => !!item)
-    .filter((item) => matchesSearch(item, search))
   const rest = [...rows.values()].filter(
     (item) => !draftSet.has(item.id) && matchesSearch(item, search)
   )
@@ -136,9 +143,7 @@ export function OwnershipPicker({
   const owned = rest.filter(
     (item) => ownedElsewhere(item) && passesFilter(item)
   )
-  const hiddenCount = filterActive
-    ? rest.filter((item) => !filter.matches(item)).length
-    : 0
+  const hiddenCount = rest.filter((item) => !passesFilter(item)).length
 
   const toggle = (id: string) =>
     setDraft((current) =>
@@ -279,6 +284,29 @@ export function OwnershipPicker({
             </label>
           )}
         </div>
+        {filters && (
+          <div
+            role="group"
+            aria-label={`${title} filter`}
+            className="flex gap-1 px-3 pb-2"
+          >
+            {[null, ...filters].map((option) => (
+              <Button
+                key={option?.label ?? "All"}
+                size="sm"
+                variant={
+                  activeFilter === (option?.label ?? null)
+                    ? "secondary"
+                    : "ghost"
+                }
+                aria-pressed={activeFilter === (option?.label ?? null)}
+                onClick={() => setActiveFilter(option?.label ?? null)}
+              >
+                {option?.label ?? "All"}
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-border pb-2">
           {notice && (
             <p className="flex items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
@@ -320,10 +348,16 @@ export function OwnershipPicker({
                   setManualError(null)
                 }}
               />
-              {manualError && (
+              {manualError ? (
                 <span role="alert" className="text-xs text-destructive">
                   {manualError}
                 </span>
+              ) : (
+                manual.hint && (
+                  <span className="text-xs text-muted-foreground">
+                    {manual.hint}
+                  </span>
+                )
               )}
             </div>
             <Button

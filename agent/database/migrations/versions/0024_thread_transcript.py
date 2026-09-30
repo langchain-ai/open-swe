@@ -12,6 +12,8 @@ authorize a caller without calling LangGraph at all.
 
 from alembic import op
 
+from agent.database.migrations.transcript_legacy import prepare_empty_legacy_schema
+
 revision = "0024"
 down_revision = "0023"
 branch_labels = None
@@ -19,6 +21,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    prepare_empty_legacy_schema()
     op.execute(
         """
         CREATE TABLE thread (
