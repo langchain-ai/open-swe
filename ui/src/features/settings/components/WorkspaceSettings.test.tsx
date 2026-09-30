@@ -53,6 +53,7 @@ const RECORD: WorkspaceRecord = {
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
+  snapshot_id: "snapshot-1",
   snapshot_status: "ready",
   refresh_status: "success",
   vcpus: 4,
@@ -379,7 +380,7 @@ describe("WorkspaceSettingsPanel", () => {
             ? "image rebuild could not be confirmed"
             : outcome === "failed"
               ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
+              : "Sandbox image built with the saved repositories."
         )
         expect(
           screen

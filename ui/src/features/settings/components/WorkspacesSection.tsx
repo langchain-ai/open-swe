@@ -37,12 +37,14 @@ const REFRESH_LABEL: Record<WorkspaceRefreshStatus, string> = {
 // snapshot read differently to a person deciding whether to trust the image.
 function refreshLabel(
   status: WorkspaceRefreshStatus,
-  kind: WorkspaceOption["refresh_kind"]
+  kind: WorkspaceOption["refresh_kind"],
+  hasSnapshot: boolean
 ): string {
   if (status === "success" && kind === "update") return "Updated"
   if (status === "success" && kind === "full") return "Rebuilt"
   if (status === "refreshing" && kind === "update") return "Updating…"
-  if (status === "refreshing" && kind === "full") return "Rebuilding…"
+  if (status === "refreshing" && kind === "full")
+    return hasSnapshot ? "Rebuilding…" : "Building…"
   return REFRESH_LABEL[status]
 }
 
@@ -138,7 +140,11 @@ function WorkspaceRow({
                 : undefined
             }
           >
-            {refreshLabel(status, workspace.refresh_kind)}
+            {refreshLabel(
+              status,
+              workspace.refresh_kind,
+              workspace.has_snapshot
+            )}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>
           {configure}
