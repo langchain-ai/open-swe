@@ -169,12 +169,6 @@ def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoi
             section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
             actions(_ready_button(approval), _dismiss_button(approval)),
         ]
-    if approval.approved:
-        return [
-            section(
-                f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
-            )
-        ]
     return [
         section(_vote_summary(approval, author)),
         actions(*_vote_buttons(approval)),
@@ -192,13 +186,19 @@ def open_card(
     choices: list[ChannelChoice] | None = None,
     thread_url: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for an open card; diff and buttons go once it is approved.
+    """Text fallback and blocks for an open card; an approved one collapses to one line.
 
     ``author`` is the PR author's Slack mention, from :meth:`HumanReviewRequest.author_mention`.
     ``choices`` are the channels the card offers to be sent to, its own first. ``thread_url``
     marks the copy posted in another channel, which links back and offers no sending.
     """
     pr = approval.pull_request
+    if approval.approved and not approval.awaiting_ready:
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        heading = f"Expedited review: {_vote_summary(approval, author)}"
+        return f"{heading} — {pr.url}", [
+            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        ]
     header = _header(approval, title, author)
     if thread_url:
         header.append(context(f"Sent from <{thread_url}|this thread>."))

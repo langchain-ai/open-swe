@@ -75,8 +75,8 @@ export function RepositoryPicker({
   return (
     <OwnershipPicker
       triggerLabel="Choose repositories"
-      title="Repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is preferred by one workspace."
+      title="Bound repositories"
+      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
       noun="repository"
       pluralNoun="repositories"
       items={items}

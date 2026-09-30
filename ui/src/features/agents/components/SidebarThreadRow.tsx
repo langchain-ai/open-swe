@@ -302,7 +302,9 @@ export function SidebarThreadRow({
     }) ?? null
 
   const thread = item.location === "cloud" ? item.thread : null
-  const subagents = item.subagents ?? []
+  const subagents = (item.subagents ?? []).filter(
+    (subagent) => subagent.status !== "completed"
+  )
   const hasSubagents = subagents.length > 0
   const activeSubagent =
     isActive &&

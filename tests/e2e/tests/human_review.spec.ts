@@ -336,7 +336,7 @@ test.describe("Human review in Slack", () => {
     expect(text).toContain(`Requested by <@${ALICE.slack}>`);
     expect(text).not.toContain("Reviewers");
     expect(text).not.toContain("Merges on its own");
-    expect(buttons(card)).toEqual(["I'll review", "Open on GitHub", "Dismiss"]);
+    expect(buttons(card)).toEqual(["I'll review", "Dismiss"]);
     const review = (card.blocks ?? [])
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");

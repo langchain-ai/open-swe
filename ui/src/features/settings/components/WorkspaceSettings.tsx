@@ -95,7 +95,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, the repositories it prefers, and its Slack channels. A repository is preferred by, and a Slack channel belongs to, exactly one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -257,7 +257,7 @@ export function WorkspaceSettingsPanel({
             >
               <CircleNotchIcon
                 aria-hidden="true"
-                className="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+                className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
                 ? "Rebuilding sandbox image…"
