@@ -66,7 +66,8 @@ class SlackFileRef(TypedDict):
 
 class ImageBlock(TypedDict):
     type: Literal["image"]
-    slack_file: SlackFileRef
+    slack_file: NotRequired[SlackFileRef]
+    image_url: NotRequired[str]
     alt_text: str
 
 
