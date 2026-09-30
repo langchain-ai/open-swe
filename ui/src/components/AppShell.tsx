@@ -135,7 +135,7 @@ interface SettingsSectionProps {
   title: ReactNode
   description?: string
   action?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }
 
 /** A titled group of rows rendered as a single card. */
@@ -158,9 +158,11 @@ export function SettingsSection({
         </div>
         {action}
       </div>
-      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-        {children}
-      </div>
+      {children && (
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+          {children}
+        </div>
+      )}
     </section>
   )
 }
@@ -173,6 +175,7 @@ interface SettingsRowProps {
   comingSoon?: boolean
   /** A short tag after the label, such as where a value comes from. */
   badge?: string
+  badgeClassName?: string
 }
 
 /** Label + description on the left, a single control on the right. */
@@ -183,6 +186,7 @@ export function SettingsRow({
   htmlFor,
   comingSoon,
   badge,
+  badgeClassName,
 }: SettingsRowProps) {
   return (
     <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
@@ -197,7 +201,12 @@ export function SettingsRow({
             {label}
           </span>
           {(comingSoon || badge) && (
-            <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+            <span
+              className={cn(
+                "rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground",
+                !comingSoon && badgeClassName
+              )}
+            >
               {comingSoon ? "Coming soon" : badge}
             </span>
           )}

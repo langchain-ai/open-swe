@@ -6,7 +6,7 @@ LangSmith dataset.
 
 Usage:
     uv run python -m evals.reviewer.build_dataset \\
-        --dataset-name openswe-reviewer-v1
+        --dataset-name openswe-reviewer-v2
 """
 
 import argparse
@@ -113,7 +113,7 @@ def upload(dataset_name: str, examples: list[dict]) -> None:
 def main() -> None:
     load_dotenv()
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset-name", default="openswe-reviewer-v1")
+    ap.add_argument("--dataset-name", default="openswe-reviewer-v2")
     ap.add_argument("--dry-run", action="store_true", help="Build examples but don't upload.")
     ap.add_argument("--limit", type=int, default=None)
     args = ap.parse_args()

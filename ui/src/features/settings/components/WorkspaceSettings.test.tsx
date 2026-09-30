@@ -53,6 +53,7 @@ const RECORD: WorkspaceRecord = {
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
+  snapshot_id: "snapshot-1",
   snapshot_status: "ready",
   refresh_status: "success",
   vcpus: 4,
@@ -379,7 +380,7 @@ describe("WorkspaceSettingsPanel", () => {
             ? "image rebuild could not be confirmed"
             : outcome === "failed"
               ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
+              : "Sandbox image built with the saved repositories."
         )
         expect(
           screen
@@ -486,6 +487,9 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Unsaved workspace name" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
@@ -503,6 +507,17 @@ describe("WorkspaceSettingsPanel", () => {
         ).queryByRole("button", { name: "Cancel" })
       ).toBeNull()
     )
+
+    expect(
+      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+    ).toBe("Unsaved workspace name")
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
 
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.

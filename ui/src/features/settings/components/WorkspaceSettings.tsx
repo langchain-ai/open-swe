@@ -206,6 +206,7 @@ export function WorkspaceSettingsPanel({
     )
   }
 
+  const buildAction = record.data.snapshot_id ? "Rebuild" : "Build"
   const onSaved = (saved: WorkspaceRecord) => {
     const previousRepos = new Set(
       record.data.repos.map((repo) => repo.toLowerCase())
@@ -260,8 +261,8 @@ export function WorkspaceSettingsPanel({
                 className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
-                ? "Rebuilding sandbox image…"
-                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+                ? `${buildAction}ing sandbox image…`
+                : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
               Existing runs keep their current image.
             </p>
           ) : awaitingRepositoryRebuild(record.data) ? (
@@ -269,8 +270,9 @@ export function WorkspaceSettingsPanel({
               role="alert"
               className="min-w-48 flex-1 text-xs text-destructive"
             >
-              Repositories saved, but the image rebuild could not be confirmed.
-              Check the sandbox image status or retry Rebuild image.
+              Repositories saved, but the image {buildAction.toLowerCase()}{" "}
+              could not be confirmed. Check the sandbox image status or retry{" "}
+              {buildAction} image.
             </p>
           ) : repositoryRebuild?.slug === slug ? (
             <p
@@ -280,8 +282,8 @@ export function WorkspaceSettingsPanel({
               className="min-w-48 flex-1 text-xs text-muted-foreground"
             >
               {record.data.refresh_status === "failed"
-                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
-                : "Sandbox image rebuilt with the saved repositories."}
+                ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
+                : "Sandbox image built with the saved repositories."}
             </p>
           ) : null
         }
@@ -312,8 +314,7 @@ export function WorkspaceSettingsPanel({
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-        >
-          <div className="px-4 py-3.5">
+          action={
             <Button
               size="sm"
               variant="destructive"
@@ -322,8 +323,8 @@ export function WorkspaceSettingsPanel({
             >
               Delete
             </Button>
-          </div>
-        </SettingsSection>
+          }
+        />
       )}
       {canEdit && deleting && (
         <AlertDialog

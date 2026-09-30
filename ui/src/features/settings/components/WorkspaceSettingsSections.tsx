@@ -59,6 +59,7 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
+      badgeClassName={!inherits ? "text-destructive" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}

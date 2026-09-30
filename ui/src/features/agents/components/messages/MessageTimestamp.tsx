@@ -1,3 +1,8 @@
+import { toast } from "sonner"
+
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
+
 type MessageTimestampProps = {
   timestamp: string
   startedAt?: string
@@ -50,6 +55,7 @@ export function MessageTimestamp({
   align = "left",
   className = "",
 }: MessageTimestampProps) {
+  const { copy } = useCopyToClipboard()
   const date = parseTimestamp(timestamp)
   if (!date) return null
 
@@ -63,13 +69,24 @@ export function MessageTimestamp({
     <div
       className={`flex ${align === "right" ? "justify-end" : "justify-start"} ${className}`}
     >
-      <time
-        dateTime={date.toISOString()}
-        title={title}
-        className="text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-focus-within/turn:opacity-100 group-hover/turn:opacity-100"
-      >
-        {shortTimestamp(date)}
-      </time>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`Copy timestamp: ${title}`}
+              onClick={async () => {
+                if (await copy(date.toISOString()))
+                  toast.success("Timestamp copied")
+              }}
+              className="cursor-pointer text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-focus-within/turn:opacity-100 group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100"
+            />
+          }
+        >
+          <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
+        </TooltipTrigger>
+        <TooltipPopup>{title} · Click to copy</TooltipPopup>
+      </Tooltip>
     </div>
   )
 }
