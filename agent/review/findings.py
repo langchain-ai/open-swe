@@ -775,7 +775,7 @@ def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     )
 
 
-async def list_findings(thread_id: str) -> list[Finding]:
+async def list_findings(thread_id: str, *, strict: bool = False) -> list[Finding]:
     """Return all findings recorded for the reviewer thread.
 
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
@@ -794,6 +794,8 @@ async def list_findings(thread_id: str) -> list[Finding]:
         logger.exception(
             "Failed to load reviewer findings", extra={"reviewer_thread_id": thread_id}
         )
+        if strict:
+            raise
         return []
 
 

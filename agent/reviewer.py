@@ -36,7 +36,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState, hook_config
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.dashboard.options import gate_fable_model
@@ -62,6 +62,7 @@ from agent.middleware import (
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.review.approval_fast_path import try_deterministic_approval
 from agent.review.approvals import approval_policy_for_review
 from agent.review.diff import (
     changed_files,
@@ -583,6 +584,27 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             "eval": cfg.eval,
             "finding_reply_id": cfg.finding_reply_id,
         }
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
+        cfg = RunConfig.from_config(self._config)
+        if (
+            cfg.repo
+            and cfg.source
+            and cfg.pr_number
+            and cfg.head_sha
+            and cfg.base_sha
+            and not state.get("_deepagents_forked_context")
+            and not cfg.is_eval
+            and not cfg.reviewer_event
+            and not cfg.finding_reply_id
+        ):
+            token, _ = await get_github_app_installation_token_with_expiry(
+                repositories=[cfg.repo.name]
+            )
+            if token and await try_deterministic_approval(cfg, token=token):
+                return {"jump_to": "end"}
+        return await super().abefore_agent(state, runtime)
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
         cfg = RunConfig.from_config(self._config)

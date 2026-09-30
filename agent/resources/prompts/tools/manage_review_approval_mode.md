@@ -1,13 +1,3 @@
-Read or set a repository's approval mode. Only use this from a private admin task when the user requests a settings change.
+Read or set repository approval mode, or regenerate its deterministic approval rules. Available only to an authorized workspace admin on a private admin surface, with repository access.
 
-Approval criteria live in the repository's `.open-swe/APPROVALS.md`, read from the pull request's base commit; this tool does not edit them. Change the file through a pull request instead.
-
-- `action`: `read` or `set`.
-- `repository`: `owner/repo`. Repository access is required.
-- `mode`: for `set`, one of:
-  - `off`: no approval assessment.
-  - `dry_run`: post the assessment as a comment, including "Would approve", without approving. This is the default.
-  - `approve`: submit a GitHub approval when the assessment would approve and the reviewed commit is still current. Set only when the user explicitly asks to submit GitHub approvals.
-  - `null`: reset to the default (`dry_run`).
-
-No merge is performed in any mode. `read` also reports whether `.open-swe/APPROVALS.md` exists on the default branch; without it, no mode produces an assessment.
+Use `read` to inspect the mode; `set` changes `mode` to `off`, `dry_run`, or `approve` (null restores the dry-run default). Set `approve` only when explicitly requested. `refresh` regenerates constrained rules from `.open-swe/APPROVALS.md` on the repository's default branch without changing the mode; omit `mode`. No pull-request code is executed and no pull request is approved by refreshing. Unsupported conditions remain with the normal reviewer.

@@ -645,6 +645,31 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         common.logger.warning("No GitHub App token for push re-review on %s", head_ref)
         return
 
+    if head_ref == repo.get("default_branch"):
+        from agent.review.approval_rules import approval_program
+        from agent.review.approvals import APPROVALS_PATH, fetch_approvals_md
+
+        commits = payload.get("commits", [])
+        policy_changed = isinstance(commits, list) and any(
+            APPROVALS_PATH in commit.get(kind, [])
+            for commit in commits
+            if isinstance(commit, dict)
+            for kind in ("added", "modified", "removed")
+            if isinstance(commit.get(kind), list)
+        )
+        if policy_changed:
+            try:
+                policy = await fetch_approvals_md(
+                    repo_config["owner"], repo_config["name"], after_sha, token=app_token
+                )
+                if policy:
+                    await approval_program(repo_config["owner"], repo_config["name"], policy)
+            except Exception:
+                common.logger.exception(
+                    "Approval policy compilation failed",
+                    extra={"repository": f"{repo_config['owner']}/{repo_config['name']}"},
+                )
+
     pr = await common.fetch_open_pr_for_branch(repo_config, head_ref, token=app_token)
     if not pr:
         common.logger.debug(

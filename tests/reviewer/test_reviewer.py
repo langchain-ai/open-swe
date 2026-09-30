@@ -48,6 +48,42 @@ class _DummyAgent:
         return self
 
 
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_deterministic_approval_short_circuits_before_sandbox(eligible: bool) -> None:
+    prepare = reviewer.PrepareReviewerRunMiddleware(
+        thread_id="review",
+        use_gateway=False,
+        config={
+            "configurable": {
+                "thread_id": "review",
+                "source": "github",
+                "repo": {"owner": "o", "name": "r"},
+                "pr_number": 1,
+                "base_sha": "base",
+                "head_sha": "head",
+            }
+        },
+    )
+    with (
+        patch(
+            "agent.reviewer.get_github_app_installation_token_with_expiry",
+            AsyncMock(return_value=("t", None)),
+        ),
+        patch("agent.reviewer.try_deterministic_approval", AsyncMock(return_value=eligible)),
+        patch.object(
+            prepare, "_prepare", AsyncMock(return_value={"work_dir": "/workspace"})
+        ) as slow_prepare,
+    ):
+        result = await prepare.abefore_agent({"messages": []}, Runtime())
+    assert result is not None
+    if eligible:
+        assert result == {"jump_to": "end"}
+        slow_prepare.assert_not_awaited()
+    else:
+        assert result["work_dir"] == "/workspace"
+        slow_prepare.assert_awaited_once()
+
+
 async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
     updates = await prepare.abefore_agent(
         cast(AgentState, {"messages": []}), cast(Runtime[None], MagicMock())

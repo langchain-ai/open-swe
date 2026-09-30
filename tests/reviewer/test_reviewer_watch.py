@@ -41,6 +41,37 @@ def _pr_close_payload(*, action: str, number: int = 7) -> dict[str, Any]:
     # function returned early on the deletion check.
 
 
+@pytest.mark.parametrize(
+    ("ref", "changed"),
+    [
+        ("refs/heads/main", True),
+        ("refs/heads/feature", True),
+        ("refs/tags/main", True),
+        ("refs/heads/main", False),
+    ],
+)
+async def test_only_trusted_policy_pushes_compile_approval_rules(ref: str, changed: bool) -> None:
+    payload = _push_payload(ref=ref, after="newsha")
+    payload["repository"]["default_branch"] = "main"
+    payload["commits"] = [{"modified": [".open-swe/APPROVALS.md" if changed else "README.md"]}]
+    with (
+        patch("agent.webhooks.common.is_repo_auto_review_enabled", AsyncMock(return_value=True)),
+        patch("agent.webhooks.common.reviewer_token_for_repo", AsyncMock(return_value=("t", None))),
+        patch("agent.webhooks.common.fetch_open_pr_for_branch", AsyncMock(return_value=None)),
+        patch(
+            "agent.review.approvals.fetch_approvals_md", AsyncMock(return_value="docs policy")
+        ) as fetch,
+        patch("agent.review.approval_rules.approval_program", AsyncMock()) as compile_rules,
+    ):
+        await github_webhooks.process_github_push_event(payload)
+    if ref == "refs/heads/main" and changed:
+        fetch.assert_awaited_once_with("lc", "repo", "newsha", token="t")
+        compile_rules.assert_awaited_once_with("lc", "repo", "docs policy")
+    else:
+        fetch.assert_not_awaited()
+        compile_rules.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_push_event_skips_when_thread_not_watching() -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
