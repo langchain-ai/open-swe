@@ -68,7 +68,7 @@ interface SettingsSectionProps {
   title: ReactNode
   description?: string
   action?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }
 
 /** A titled group of rows rendered as a single card. */
@@ -91,9 +91,11 @@ export function SettingsSection({
         </div>
         {action}
       </div>
-      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-        {children}
-      </div>
+      {children && (
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+          {children}
+        </div>
+      )}
     </section>
   )
 }
