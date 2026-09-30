@@ -1,11 +1,4 @@
-"""Which pull requests may be approved from Slack: tiny and fully visible.
-
-The gates are size and visibility: every file the two voters have to read has
-to arrive as a readable text diff, and those files together have to fit in
-``MAX_CHANGED_LINES``, so all of it is on the card. Test files are outside both
-gates — CI judges them — which is what lets a two-line fix arrive with the
-tests that prove it.
-"""
+"""Small readable diffs eligible for inline or file-by-file Slack review."""
 
 import hashlib
 import re
@@ -17,10 +10,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 
 MAX_CHANGED_LINES = 20
-# What is actually enforced. A change that lands a few lines over is no harder to
-# read than one that lands under, and bouncing it costs the asker more than the
-# slack costs the voters; the agent is told 20 so it aims there.
-ACCEPTED_CHANGED_LINES = 25
+ACCEPTED_CHANGED_LINES = 200
 MAX_FILES = 100
 
 _TEST_PATH = re.compile(
@@ -119,7 +109,7 @@ def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:
     if changed > ACCEPTED_CHANGED_LINES:
         return Ineligible(
             f"the pull request changes {changed} lines outside tests; the limit is "
-            f"{MAX_CHANGED_LINES}"
+            f"{ACCEPTED_CHANGED_LINES}"
         )
     return EligibleDiff(
         files=list(files),
@@ -141,3 +131,9 @@ async def fetch_changed_files(
         return _CHANGED_FILES.validate_python(payload)
     except httpx2.HTTPError, ValueError, ValidationError:
         return None
+
+
+def needs_modal(files: list[ChangedFile]) -> bool:
+    return (
+        len(files) > 2 or ChangedFile.total_lines(ChangedFile.split(files)[0]) > MAX_CHANGED_LINES
+    )

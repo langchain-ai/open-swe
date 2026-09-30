@@ -749,6 +749,7 @@ async def slack_action(request: Request) -> JSONResponse:
             "blocks": source_message["blocks"],
         },
         "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
+        "trigger_id": user_id,
     }
     response = await _deliver_slack_interaction(payload)
     return JSONResponse(response.json(), status_code=response.status_code)
@@ -1833,3 +1834,74 @@ keep_dashboard_ui_last(app)
 
 # Quietly reference imports used only for env side effects.
 _ = (e2e_env, HUMAN_USER)
+
+
+SLACK_VIEWS: dict[str, dict[str, object]] = {}
+
+
+@app.post("/fake-slack/views.open")
+async def slack_views_open(request: Request) -> JSONResponse:
+    body = await request.json()
+    view = body["view"]
+    SLACK_VIEWS[str(body["trigger_id"])] = view
+    return _ok({"view": {"id": "V_REVIEW", **view}})
+
+
+@app.get("/mock/slack/modal")
+async def slack_modal(user: str) -> JSONResponse:
+    return JSONResponse(SLACK_VIEWS.get(user))
+
+
+@app.post("/mock/slack/modal")
+async def slack_modal_submit(request: Request) -> JSONResponse:
+    body = await request.json()
+    user = str(body["user"])
+    view = SLACK_VIEWS.get(user)
+    if view is None:
+        raise HTTPException(404, "No open modal")
+    response = await _deliver_slack_interaction(
+        {"type": "view_submission", "user": {"id": user}, "view": {"id": "V_REVIEW", **view}}
+    )
+    result = response.json()
+    if result.get("response_action") == "update":
+        SLACK_VIEWS[user] = result["view"]
+    elif result.get("response_action") != "errors":
+        SLACK_VIEWS.pop(user, None)
+    return JSONResponse(result, status_code=response.status_code)
+
+
+@app.delete("/mock/slack/modal")
+async def slack_modal_close(user: str) -> JSONResponse:
+    SLACK_VIEWS.pop(user, None)
+    return _ok()
+
+
+@app.post("/control/expedited-card")
+async def control_expedited_card(request: Request) -> JSONResponse:
+    from agent.expedited_review.card import open_card
+    from agent.expedited_review.eligibility import ChangedFile, diff_fingerprint
+    from agent.github.pull_requests import PullRequest
+    from agent.human_review.requests import HumanReviewRequest
+
+    pull = _seeded_pull(await request.json())
+    pr = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"], author=pull["author"]
+    ).save()
+    files = [ChangedFile.model_validate(file) for file in pull["files"]]
+    thread_ts = fakes.add_slack_message(
+        DEMO_CHANNEL, "", user="U_ALICE", text="Synthetic demo: review this three-file change."
+    )
+    approval = await HumanReviewRequest(
+        pull_request_id=pr.id,
+        kind="expedited",
+        head_sha=pull["head_sha"],
+        diff_fingerprint=diff_fingerprint(files),
+        slack_channel_id=DEMO_CHANNEL,
+        slack_thread_ts=thread_ts,
+    ).save()
+    text, blocks = open_card(approval, title=pull["title"], author="<@U_ALICE>", files=files)
+    approval.slack_message_ts = fakes.add_slack_message(
+        DEMO_CHANNEL, thread_ts, user=BOT_USER_ID, text=text, blocks=blocks, is_bot=True
+    )
+    await approval.save()
+    return _ok({"id": str(approval.id)})

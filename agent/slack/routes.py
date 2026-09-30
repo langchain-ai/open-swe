@@ -8,6 +8,7 @@ from typing import Literal, TypedDict, cast
 from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
+from agent.expedited_review import modal as expedited_modal
 from agent.expedited_review import slack as expedited_review
 from agent.human_review import slack as human_review
 from agent.human_review.posted import watch_post
@@ -746,7 +747,7 @@ async def slack_code_channel_command(
 @router.post("/webhooks/slack/interactivity")
 async def slack_interactivity(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse:
+) -> WebhookResponse | BlockSuggestionResponse | FeedbackResponse | JsonObject:
     """Handle Slack Block Kit interactions."""
     body = await request.body()
     _verify_signature(request, body, "interactivity")
@@ -775,6 +776,11 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if (
+        interaction.type == "view_submission"
+        and interaction.view.callback_id == expedited_modal.CALLBACK
+    ):
+        return await expedited_modal.submit_page(interaction, background_tasks)
     if (
         interaction.type == "view_submission"
         and interaction.view.callback_id == expedited_review.CHANNEL_MODAL

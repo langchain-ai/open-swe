@@ -6,6 +6,7 @@ from agent.expedited_review.eligibility import (
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
+    needs_modal,
 )
 
 
@@ -43,7 +44,7 @@ def test_line_cap_is_inclusive_and_carries_leeway_past_the_advertised_limit() ->
     assert isinstance(over_cap, EligibleDiff)
     assert isinstance(at_leeway, EligibleDiff)
     assert isinstance(past_leeway, Ineligible)
-    assert f"limit is {MAX_CHANGED_LINES}" in past_leeway.reason
+    assert f"limit is {ACCEPTED_CHANGED_LINES}" in past_leeway.reason
 
 
 def test_files_without_a_text_patch_are_refused() -> None:
@@ -64,3 +65,9 @@ def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
 
     assert not moved.is_test
     assert isinstance(assess_eligibility([moved]), Ineligible)
+
+
+def test_modal_routes_larger_changes_and_three_file_changes() -> None:
+    assert not needs_modal([_file("a.py", additions=20)])
+    assert needs_modal([_file("a.py", additions=21)])
+    assert needs_modal([_file("a.py"), _file("b.py"), _file("c.py")])
