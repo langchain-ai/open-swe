@@ -224,10 +224,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const repository =
     branchDiff.data?.repository ?? checkpointDiff.data?.repository
   const pr = repository?.pr ?? null
-  // The composer's PR link reads this lightweight lookup, not the panel's
-  // diff, so the row still shows while the panel is collapsed.
-  const composerPrQuery = useLocalThreadPr(sessionId)
-  const composerPr = pr ?? composerPrQuery.data ?? null
+  // The composer's PR link reads this independent, always-enabled lookup, not
+  // the panel's diff: the row must show while the panel is collapsed, and the
+  // panel's cached metadata would go stale after a branch switch.
+  const composerPr = useLocalThreadPr(sessionId).data ?? null
   const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
@@ -500,6 +500,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             <ThreadPullRequests
               pullRequests={composerPr ? [composerPr] : []}
               compact
+              healthUnavailable
             />
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
