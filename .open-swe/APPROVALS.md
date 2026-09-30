@@ -9,11 +9,15 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
 3. **Small, low-risk code changes.** Roughly 50 changed lines or fewer, in one feature
    area, with tests for any behavior change. For example: UI copy or styling fixes,
    log or error message fixes, type-only changes, lint fixes, or removing dead code.
-4. **Clean reverts.** Exactly reverses an identified, merged change, with no extra
-   edits or manual conflict resolutions. Verify against the original change, not
-   just the PR title or description. The size and behavior-test requirements above
-   do not apply; uncertainty about the revert or its compatibility with subsequent
-   changes requires human review. The sensitive-file restrictions below still apply.
+4. **Exact, recent reverts.** Exactly reverses an identified PR merged in this
+   repository within the last 7 days at assessment time, with no extra edits or
+   manual conflict resolutions. Verify the original PR's merge timestamp and that
+   the full revert diff is the exact inverse of its merged change; the PR title or
+   description is not evidence. If either cannot be established, deny automatic
+   approval and require human review, even if another category above would apply.
+   The size and behavior-test requirements above do not apply; uncertainty about
+   compatibility with subsequent changes requires human review. The sensitive-file
+   restrictions below still apply.
 
 Never approve a pull request authored by the approving agent or its GitHub identity.
 Revert approval does not authorize automatic merging or bypass branch protection.
