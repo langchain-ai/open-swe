@@ -1,4 +1,4 @@
-"""Read or change shared feature flags on private admin surfaces."""
+"""Read shared feature flags privately or change them through authorized admin writes."""
 
 from typing import Literal
 
