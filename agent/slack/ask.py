@@ -26,11 +26,10 @@ from agent.slack.client import (
     get_slack_user_names,
     post_slack_ephemeral_message,
     replace_slack_command_message,
-    set_slack_thread_status,
     strip_bot_mention,
 )
 from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
@@ -160,13 +159,13 @@ async def _budgeted_transcript(messages: list[SlackMessage]) -> str:
     return "\n".join(reversed(kept))
 
 
-async def _clear_thinking_status(request: SlackAskRequest) -> None:
+async def _settle_thinking_status(request: SlackAskRequest) -> None:
     if request.by_the_way:
-        await set_slack_thread_status(request.channel_id, request.reply_thread_ts, "")
+        await settle_slack_thread_status(request.channel_id, request.reply_thread_ts)
 
 
 async def _refuse(request: SlackAskRequest, text: str) -> None:
-    await _clear_thinking_status(request)
+    await _settle_thinking_status(request)
     if request.response_url and await replace_slack_command_message(request.response_url, text):
         return
     await post_slack_ephemeral_message(
@@ -188,7 +187,7 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
             has_record = await common.has_access_token_record(login)
         except Exception:  # noqa: BLE001
             logger.debug("Could not check the GitHub token record for %s", login, exc_info=True)
-    await _clear_thinking_status(request)
+    await _settle_thinking_status(request)
     await common.post_account_link_prompt(
         request.channel_id,
         request.reply_thread_ts,
