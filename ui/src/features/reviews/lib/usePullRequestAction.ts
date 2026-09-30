@@ -23,13 +23,12 @@ export function usePullRequestAction({
 }) {
   const { run, succeeded, failed } = githubActions[action]
   return useMutation({
-    mutationFn: () => run(pr, method),
+    mutationFn: (reason: string | void) => run(pr, method, reason || undefined),
+    meta: { errorTitle: failed(pullRequestKey(pr)) },
     onSuccess: () => {
       toast.success(succeeded(pullRequestKey(pr)))
       onDone()
     },
-    onError: (error) =>
-      toast.error(failed(pullRequestKey(pr)), { description: error.message }),
     retry: false,
   })
 }

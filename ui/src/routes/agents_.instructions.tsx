@@ -4,10 +4,12 @@ import { AgentInstructionsPanel } from "@/components/AgentInstructionsPanel"
 import { AppShell } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/agents_/instructions")({
   component: AgentInstructionsPage,
+  head: () => ({ meta: [{ title: pageTitle("Repository Instructions") }] }),
 })
 
 function AgentInstructionsPage() {

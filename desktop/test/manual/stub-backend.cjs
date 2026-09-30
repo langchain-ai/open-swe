@@ -13,8 +13,8 @@ const port = Number(process.argv[2] || 4999);
 const handoffs = new Map();
 
 const MODEL = {
-  id: "anthropic:claude-opus-5",
-  label: "Opus 5",
+  id: "anthropic:claude-opus-5-5",
+  label: "Opus 5.5",
   efforts: ["low", "medium", "high", "xhigh", "max"],
   default_effort: "high",
   supports_images: true,

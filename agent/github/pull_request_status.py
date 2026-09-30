@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from agent.github.ci import read_required_checks, unreported_required_checks
 from agent.github.http import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
@@ -51,6 +52,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
+          id
           isResolved
           path
           line
@@ -58,7 +60,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
           comments(first: 1) {
             nodes {
               author { login }
-              body
+              body: bodyText
               url
             }
           }
@@ -110,6 +112,7 @@ class OpenPullRequest(BaseModel):
     unresolved_threads: int | None = None
     failing_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
+    missing_checks: list[str] = Field(default_factory=list)
 
 
 class OpenPullRequests(BaseModel):
@@ -448,6 +451,9 @@ async def fetch_unresolved_review_threads(
                     line = thread.get("originalLine")
                 unresolved.append(
                     {
+                        "thread_id": thread.get("id")
+                        if isinstance(thread.get("id"), str)
+                        else None,
                         "author": author.get("login")
                         if isinstance(author, dict) and isinstance(author.get("login"), str)
                         else None,
@@ -804,4 +810,10 @@ async def load_open_pull_request(
         if runs or statuses
         else "none"
     )
+    base = pull.get("base")
+    base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+    if base_ref is not None and result.merge_state == "blocked":
+        required = await read_required_checks(client, owner=owner, repo=name, branch=base_ref)
+        if required is not None:
+            result.missing_checks = unreported_required_checks(required, runs, statuses)
     return result

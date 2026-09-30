@@ -12,9 +12,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
+import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
-export const Route = createFileRoute("/review")({ component: ReviewPage })
+export const Route = createFileRoute("/review")({
+  component: ReviewPage,
+  head: () => ({ meta: [{ title: pageTitle("Open SWE Review") }] }),
+})
 function ReviewPage() {
   const session = useSession()
 

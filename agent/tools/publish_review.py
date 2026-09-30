@@ -13,9 +13,10 @@ from agent.github.checks import review_check_conclusion
 from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
     GitHubAuthError,
-    get_github_token,
     invalidate_cached_github_token,
+    resolve_thread_github_token,
 )
+from agent.review.approvals import approval_mode_for
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
@@ -32,6 +33,7 @@ from agent.review.findings import (
     get_thread_metadata,
     get_thread_slack_ref,
     mark_surfaced,
+    mutate_findings,
     posted_resolution_comment_ids_for_finding,
     replace_findings,
     resolve_review_head_sha,
@@ -63,7 +65,6 @@ from agent.review.publish import (
     settle_review_check_run,
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
-from agent.review.styles import get_approval_policy
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.dashboard_links import dashboard_review_url
@@ -80,6 +81,7 @@ async def _record_reviewer_usage(**kwargs: Any) -> None:
 
 
 async def publish_review(
+    ranking: list[str],
     severity_threshold: Severity = "medium",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     assessment: ReviewAssessment | None = None,
@@ -101,6 +103,12 @@ async def publish_review(
     if not head_sha:
         return {"success": False, "error": "Missing head_sha in run config"}
 
+    try:
+        if ranking_error := await _record_ranking(ranking, cfg):
+            return ranking_error
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
+
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
             severity_threshold = cfg.reviewer_eval_severity_threshold
@@ -116,7 +124,7 @@ async def publish_review(
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
+    token = await resolve_thread_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
@@ -149,6 +157,64 @@ async def publish_review(
             ),
             "auth_error": str(exc),
         }
+
+
+async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
+    """Store the reviewer's best-first order over the findings this publish would post.
+
+    Returns a tool error instead when ``ranking`` is not exactly that set, once each.
+    """
+    thread_id = get_thread_id_from_runtime()
+    findings = await list_findings_async(thread_id)
+    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
+
+    def is_candidate(finding: Finding) -> bool:
+        if finding.get("status", "open") != "open" or not finding.get("in_diff", True):
+            return False
+        if cfg.is_eval:
+            return not _has_publication_identity(finding)
+        if comment_ids_for_finding(finding):
+            return False
+        return not cfg.re_review or finding.get("first_seen_sha") == head_sha
+
+    expected = [finding["id"] for finding in findings if is_candidate(finding)]
+    known = {finding["id"] for finding in findings}
+    duplicates = sorted({finding_id for finding_id in ranking if ranking.count(finding_id) > 1})
+    unknown = [finding_id for finding_id in ranking if finding_id not in known]
+    missing = [finding_id for finding_id in expected if finding_id not in ranking]
+    if duplicates or unknown or missing:
+        return {
+            "success": False,
+            "error": (
+                "ranking must list every finding in expected_finding_ids exactly once, "
+                "most important first. Nothing was published."
+            ),
+            "expected_finding_ids": expected,
+            "missing": missing,
+            "unknown": unknown,
+            "duplicates": duplicates,
+        }
+
+    expected_ids = set(expected)
+    ranks = {
+        finding_id: position
+        for position, finding_id in enumerate(
+            (finding_id for finding_id in ranking if finding_id in expected_ids), start=1
+        )
+    }
+
+    def _assign(latest: list[Finding]) -> bool:
+        changed = False
+        for finding in latest:
+            rank = ranks.get(finding["id"])
+            if rank is not None and finding.get("rank") != rank:
+                finding["rank"] = rank
+                changed = True
+        return changed
+
+    if ranks:
+        await mutate_findings(thread_id, _assign)
+    return None
 
 
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
@@ -227,21 +293,15 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    auto_approve = False
+    dry_run = True
     if assessment is not None:
-        settings = await get_workspace_settings()
-        policy = await get_approval_policy(owner, repo, settings)
-        if not policy:
+        # The policy was read at the base commit when the run started; the mode is
+        # read now so an admin switching a repository off or to dry run wins mid-review.
+        policy = state.get("review_approval_policy") if state else None
+        mode = await approval_mode_for(owner, repo)
+        if not policy or mode == "off":
             assessment = None
-        elif state and state.get("review_approval_policy") != policy:
-            return {
-                "success": False,
-                "error": "Approval policy changed. Start a new review before publishing an assessment.",
-            }
-        else:
-            auto_approve = settings.get("review_auto_approve") is True and bool(
-                state and state.get("review_approval_policy") == policy
-            )
+        dry_run = mode != "approve"
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -339,6 +399,9 @@ async def _publish_review_async(
             token=token,
             findings=findings,
         )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+        )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
             thread_id=thread_id,
@@ -369,7 +432,7 @@ async def _publish_review_async(
         }
 
     approved = (
-        auto_approve
+        not dry_run
         and assessment is not None
         and assessment.decision == "would_approve"
         and await approval_allowed_for_head(
@@ -386,6 +449,7 @@ async def _publish_review_async(
             additional_findings_count=additional_findings_count,
             assessment=assessment,
             approved=approved,
+            dry_run=dry_run,
         )
 
         review_response = await post_pull_request_review(
@@ -492,6 +556,12 @@ async def _publish_review_async(
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
         try:
+            if langgraph_run_id is None:
+                current_run_id = (await get_thread_metadata(thread_id)).get(
+                    "current_reviewer_run_id"
+                )
+                if isinstance(current_run_id, str) and current_run_id:
+                    langgraph_run_id = current_run_id
             await ASSESSMENTS.put(
                 str(review_id),
                 PublishedAssessment(
@@ -501,6 +571,8 @@ async def _publish_review_async(
                     repo=repo,
                     pr_number=pr_number,
                     approved=approved,
+                    dry_run=dry_run,
+                    run_id=langgraph_run_id,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
@@ -562,6 +634,28 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
+
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -592,22 +686,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,

@@ -4,6 +4,19 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { OwnershipPicker, type PickerItem } from "./OwnershipPicker"
+import { RepositoryPicker } from "./WorkspaceBindingPickers"
+
+vi.mock("@/lib/profile", () => ({
+  useRepos: () => ({
+    data: {
+      repositories: [
+        { full_name: "org/public-sdk", private: false },
+        { full_name: "org/internal-sdk", private: true },
+        { full_name: "org/public-docs", private: false },
+      ],
+    },
+  }),
+}))
 
 afterEach(cleanup)
 
@@ -54,6 +67,48 @@ function renderPicker(
 }
 
 describe("OwnershipPicker", () => {
+  it("filters repositories alongside search without losing selections", async () => {
+    const onChange = vi.fn()
+    render(
+      <RepositoryPicker
+        selected={[]}
+        onChange={onChange}
+        workspaceSlug="oss"
+        workspaces={[]}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
+    expect(await screen.findByText("Available · 3")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Public" }))
+    expect(
+      screen.queryByRole("checkbox", { name: "org/internal-sdk" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "org/public-sdk" }))
+    fireEvent.click(screen.getByRole("button", { name: "Internal" }))
+    expect(
+      screen.getByRole<HTMLInputElement>("checkbox", { name: "org/public-sdk" })
+        .checked
+    ).toBe(true)
+    expect(
+      screen.getByRole("checkbox", { name: "org/internal-sdk" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("checkbox", { name: "org/public-docs" })
+    ).toBeNull()
+    fireEvent.change(screen.getByLabelText("Search repositories"), {
+      target: { value: "docs" },
+    })
+    expect(
+      screen.queryByRole("checkbox", { name: "org/internal-sdk" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "All" }))
+    expect(
+      screen.getByRole("checkbox", { name: "org/public-docs" })
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Save 1 repository" }))
+    expect(onChange).toHaveBeenCalledWith(["org/public-sdk"])
+  })
+
   it("groups rows by ownership and keeps other workspaces' rows unselectable", async () => {
     renderPicker()
 
@@ -89,14 +144,19 @@ describe("OwnershipPicker", () => {
     expect(onChange).toHaveBeenCalledWith(["C4", "C2"])
   })
 
-  it("filters by search and discards changes on cancel", async () => {
+  it("keeps draft selections visible while searching and discards them on cancel", async () => {
     const { onChange } = renderPicker()
 
-    fireEvent.change(await screen.findByLabelText("Search channels"), {
-      target: { value: "maint" },
-    })
-    expect(screen.queryByRole("checkbox", { name: "#oss-help" })).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-maintainers" }))
+    fireEvent.change(await screen.findByLabelText("Search channels"), {
+      target: { value: "commits" },
+    })
+
+    expect(screen.getByRole("checkbox", { name: "#oss-help" })).toBeTruthy()
+    expect(
+      screen.getByRole("checkbox", { name: "#oss-maintainers" })
+    ).toBeTruthy()
+    expect(screen.getByText("In this workspace · 2")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     expect(onChange).not.toHaveBeenCalled()

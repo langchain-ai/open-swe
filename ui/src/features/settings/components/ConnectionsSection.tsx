@@ -3,13 +3,12 @@ import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
 import { SiNotion } from "react-icons/si"
 
-import type { SessionUser } from "@/lib/api"
+import type { NotionCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
-
-type SetError = (message: string | null) => void
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -80,7 +79,7 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-function NotionRow({ setError }: { setError: SetError }) {
+function NotionRow() {
   const qc = useQueryClient()
   const creds = useQuery({
     queryKey: ["myNotion"],
@@ -89,12 +88,17 @@ function NotionRow({ setError }: { setError: SetError }) {
   const [connecting, setConnecting] = useState(false)
 
   const disconnect = useMutation({
+    meta: { errorTitle: "Couldn't disconnect Notion" },
     mutationFn: () => api.disconnectNotion(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
-      setError(null)
-    },
-    onError: (e: Error) => setError(e.message),
+    onMutate: async () => ({
+      undo: await optimisticUpdate<NotionCredentialStatus>(
+        qc,
+        ["myNotion"],
+        (current) => ({ ...current, connected: false })
+      ),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["myNotion"] }),
   })
 
   const connected = !!creds.data?.connected
@@ -119,7 +123,6 @@ function NotionRow({ setError }: { setError: SetError }) {
               variant="outline"
               size="sm"
               onClick={() => disconnect.mutate()}
-              disabled={disconnect.isPending}
             >
               Disconnect
             </Button>
@@ -140,16 +143,13 @@ function NotionRow({ setError }: { setError: SetError }) {
 }
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
-  const [error, setError] = useState<string | null>(null)
-
   return (
     <SettingsSection
       title="Personal connections"
       description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
     >
       <SlackRow user={user} />
-      <NotionRow setError={setError} />
-      {error && <p className="px-4 py-2 text-xs text-destructive">{error}</p>}
+      <NotionRow />
     </SettingsSection>
   )
 }

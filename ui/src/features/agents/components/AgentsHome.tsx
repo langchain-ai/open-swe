@@ -7,12 +7,11 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
   pickComposerRepo,
   pickComposerWorkspace,
-  reposForWorkspace,
 } from "@/features/agents/lib/composerWorkspace"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
@@ -41,11 +40,9 @@ import {
   localThreadKeys,
 } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
-import {
-  modelConfigurable,
-  promptMessage,
-} from "@/features/agents/lib/stream/promptMessage"
+import { agentsApi } from "@/features/agents/lib/api"
+import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
+import { runStartCommand, startRun } from "@/features/agents/lib/transcript/api"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -68,6 +65,13 @@ const NEW_AGENT_PANEL_REF = {
   threadId: NEW_AGENT_PANEL_ID,
 }
 
+/** A cloud submission whose `run.start` has not come back yet. */
+interface PendingCloudSubmit {
+  threadId: string
+  /** Stop was pressed before the run was accepted; cancel it once it is. */
+  stopRequested: boolean
+}
+
 export function AgentsHome({
   initialRepo,
   initialLocalRepo,
@@ -77,7 +81,6 @@ export function AgentsHome({
   initialLocalRepo?: string
   initialNoRepo?: boolean
 }) {
-  const stream = useAgentStream()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const session = useSession()
@@ -91,7 +94,6 @@ export function AgentsHome({
     setSelection(next)
     persistModelSelection(next, session.data?.login ?? "")
   }
-  const [planMode, setPlanMode] = useState(false)
   const cloudEnabled = Boolean(session.data)
   const preferences = useQuery({
     queryKey: ["myPreferences"],
@@ -106,7 +108,10 @@ export function AgentsHome({
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
   const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
+  const workspaces = useMemo(
+    () => workspaceOptionsQuery.data?.workspaces ?? [],
+    [workspaceOptionsQuery.data]
+  )
   // undefined = untouched, so the run falls back to the repo's own workspace,
   // then the default one.
   const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
@@ -168,9 +173,9 @@ export function AgentsHome({
   )
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
-  // Workspace first: an explicit pick, else the owner of a repository named
-  // from outside (a link or the profile default), else the user's default,
-  // then the instance default.
+  // Workspace first: an explicit pick, else the workspace preferring a
+  // repository named from outside (a link or the profile default), else the
+  // user's default, then the instance default.
   const namedRepo = (
     repoOverride === undefined ? userDefaultRepo : repoOverride
   )?.toLowerCase()
@@ -185,15 +190,11 @@ export function AgentsHome({
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
   })
-  // Then the repository, limited to what that workspace may work in.
+  // Then the repository: every workspace can work in every accessible one.
   const accessibleRepos = reposQuery.data?.repositories
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
-  const workspaceRepos = useMemo(
-    () =>
-      reposForWorkspace(selectedWorkspace, workspaces, accessibleRepos ?? []),
-    [accessibleRepos, selectedWorkspace, workspaces]
-  )
+  const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   const repo = pickComposerRepo({
     override: repoOverride,
     userDefault: userDefaultRepo,
@@ -219,24 +220,23 @@ export function AgentsHome({
   const { models, defaultSelection } = useModelOptions(selectedWorkspace)
   const activeSelection = autoSelected ? null : (selection ?? defaultSelection)
 
-  // Holds the just-submitted prompt until the SDK mints the thread id.
-  const draftRef = useRef<CreateAgentThreadVariables | null>(null)
+  // The thread id is minted here: the first `run.start` posted against it is
+  // what creates the thread server-side.
+  const [pendingThreadId, setPendingThreadId] = useState<string | null>(null)
+  // Identity of the submission in flight, so its continuation can tell whether
+  // it is still the one this page is waiting for.
+  const pendingRun = useRef<PendingCloudSubmit | null>(null)
+  useEffect(
+    () => () => {
+      pendingRun.current = null
+    },
+    []
+  )
 
   useEffect(() => {
-    const id = stream.threadId
-    const draft = draftRef.current
-    if (!id || !draft) return
-    const thread = optimisticThread(id, draft)
-    queryClient.setQueryData(agentThreadKeys.detail(id), thread)
-    seedAgentThreadLists(queryClient, thread)
-    invalidateAgentThreadLists(queryClient)
-  }, [stream.threadId, queryClient])
-
-  useEffect(() => {
-    if (stream.threadId) {
-      writeStoredPanelCollapsed(stream.threadId, panelCollapsed)
-    }
-  }, [panelCollapsed, stream.threadId])
+    if (pendingThreadId)
+      writeStoredPanelCollapsed(pendingThreadId, panelCollapsed)
+  }, [panelCollapsed, pendingThreadId])
 
   useEffect(() => {
     if (!isDesktop || !localReposLoaded) return
@@ -396,8 +396,32 @@ export function AgentsHome({
   }
 
   const resetPendingSubmit = () => {
-    draftRef.current = null
+    pendingRun.current = null
+    setPendingThreadId(null)
     setSubmittedDraft(null)
+  }
+
+  const cancelPendingThread = async (threadId: string) => {
+    try {
+      const cancelled = await agentsApi.cancelThread(threadId)
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), cancelled)
+      invalidateAgentThreadLists(queryClient)
+    } catch (error) {
+      console.warn("Could not cancel the thread being created", error)
+    }
+  }
+
+  /**
+   * Stop while the thread is still being created. The start request is left to
+   * finish: aborting it would not stop the server from creating the thread and
+   * dispatching the run, and cancelling before the run exists either 404s or
+   * finds nothing to cancel. So the run is only marked for cancellation here,
+   * and the request's own continuation cancels it once it was accepted.
+   */
+  const stopPendingSubmit = () => {
+    const pending = pendingRun.current
+    if (pending) pending.stopRequested = true
+    resetPendingSubmit()
   }
 
   const handleSubmit = (prompt: string, images: Array<ImageChunk>) => {
@@ -481,16 +505,19 @@ export function AgentsHome({
       })()
       return
     }
+    // Minted here so the seeded thread, the graph's HumanMessage and the
+    // transcript row all carry the same message id.
+    const messageId = crypto.randomUUID()
     const draft = {
       prompt,
       images,
+      client_message_id: messageId,
       repo,
       visibility,
       repo_explicitly_none: repoOverride === null,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
     }
-    draftRef.current = draft
     setSubmittedDraft(draft)
     setLocalError(null)
 
@@ -498,8 +525,8 @@ export function AgentsHome({
       modelConfigurable(activeSelection)
     if (repo) configurable.repo = repo
     if (repoOverride === null) configurable.repo_explicitly_none = true
-    configurable.visibility = visibility
-    if (planMode) configurable.plan_mode = true
+    configurable.thread_type =
+      visibility === "private" ? "private" : "workspace"
     if (selectedWorkspace) configurable.workspace = selectedWorkspace
 
     const handleCloudSubmitError = (error: unknown) => {
@@ -510,15 +537,45 @@ export function AgentsHome({
           : "Could not start the cloud Open SWE agent"
       )
     }
-    void stream
-      .submit(
-        { messages: [promptMessage(prompt, images)] },
-        {
-          config: { configurable },
-          onError: handleCloudSubmitError,
-        }
-      )
-      .catch(handleCloudSubmitError)
+
+    const threadId = crypto.randomUUID()
+    const pending: PendingCloudSubmit = { threadId, stopRequested: false }
+    pendingRun.current = pending
+    setPendingThreadId(threadId)
+    void (async () => {
+      try {
+        await startRun(
+          threadId,
+          runStartCommand({
+            threadId,
+            message: { id: messageId, text: prompt, images },
+            configurable,
+          })
+        )
+      } catch (error) {
+        // A run that never started has nothing left to cancel, and the page
+        // already went back to the empty composer when Stop was pressed.
+        if (!pending.stopRequested) handleCloudSubmitError(error)
+        return
+      }
+      // Seeded so the thread route renders the prompt immediately; the real
+      // record lands with the next detail fetch.
+      const thread: AgentThread = optimisticThread(threadId, draft, {
+        recorded: session.data?.transcript_recording === true,
+      })
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      seedAgentThreadLists(queryClient, thread)
+      invalidateAgentThreadLists(queryClient)
+      if (pending.stopRequested) {
+        await cancelPendingThread(threadId)
+        return
+      }
+      // The user moved on (another submission, or another thread opened) while
+      // this was in flight: the thread is seeded either way, but only the
+      // submission this page is still waiting for may navigate.
+      if (pendingRun.current !== pending) return
+      await navigate({ to: "/agents/$threadId", params: { threadId } })
+    })()
   }
 
   const handlePanelCollapsedChange = (next: boolean) => {
@@ -576,7 +633,7 @@ export function AgentsHome({
           <AgentPromptBar
             activeRun={
               optimisticDraftThread && runTarget === "cloud"
-                ? { threadId: stream.threadId ?? "", running: true }
+                ? { threadId: pendingThreadId ?? "", running: true }
                 : undefined
             }
             autoFocus
@@ -585,7 +642,7 @@ export function AgentsHome({
             onSubmit={handleSubmit}
             onStop={
               optimisticDraftThread && runTarget === "cloud"
-                ? () => stream.stop().finally(resetPendingSubmit)
+                ? stopPendingSubmit
                 : undefined
             }
             disabled={Boolean(submittedDraft)}
@@ -618,8 +675,6 @@ export function AgentsHome({
               selectedLocalRef?.worktreePath ? "Worktree" : undefined
             }
             onLocalWorkspaceModeChange={selectLocalWorkspaceMode}
-            planMode={planMode}
-            onPlanModeChange={runTarget === "cloud" ? setPlanMode : undefined}
             workspaceOptions={workspaces}
             selectedWorkspace={selectedWorkspace}
             onWorkspaceChange={

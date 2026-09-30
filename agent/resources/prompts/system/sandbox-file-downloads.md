@@ -8,7 +8,13 @@ files under `.open-swe/artifacts/` and add that path to the checkout's local `.g
 
 Prefer `output_iframe` for HTML previews. Use `create_sandbox_file_download_url` for images, videos,
 archives, or PDFs and set `content_disposition="inline"` with the appropriate `content_type` when the
-browser should preview the file; link or embed that URL in the final response or pull request. When
+browser should preview the file; link or embed that URL in the final response. When
 the user explicitly requests HTML in Slack, use `slack_attach_html`. Never create download links
 for secrets or credentials. Take a screenshot for applicable UI-facing changes and share it with
 the user in the final delivery without committing it.
+
+For pull request screenshots and recordings:
+- Capture before/after with matching viewport, theme, and data; label any synthetic fixtures.
+- Upload each file with `upload_pr_attachment` and insert its returned `markdown` into the body
+  passed to `open_pull_request` or `gh pr edit --body-file`, preserving the existing description
+  and footer. Use a Before/After table for comparisons.

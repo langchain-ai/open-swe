@@ -125,8 +125,7 @@ async def ensure_refresh_cron(slug: str) -> str | None:
     cron_id = cron.get("cron_id") if isinstance(cron, dict) else getattr(cron, "cron_id", None)
     if not (isinstance(cron_id, str) and cron_id):
         return None
-    record.refresh_cron_id = cron_id
-    await WORKSPACES.save(record)
+    await WORKSPACES.set_refresh_cron_id(slug, cron_id)
     return cron_id
 
 
@@ -162,14 +161,14 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
 
 
 async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
-    from agent.github.sandbox_access import repository_token
+    from agent.github.sandbox_access import installation_token
     from agent.sandboxes.providers.langsmith import (
-        configure_github_proxy,
+        configure_sandbox_proxy,
         create_langsmith_sandbox,
         get_sandbox_proxy_config,
     )
 
-    access = await repository_token(record.repos)
+    access = await installation_token()
     create_params = {
         **record.sandbox_create_params(),
         "delete_after_stop_seconds": BUILDER_DELETE_AFTER_STOP_SECONDS,
@@ -179,7 +178,7 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
         create_params=create_params,
         **record.sandbox_resources(),
     )
-    await configure_github_proxy(
+    await configure_sandbox_proxy(
         backend.id, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
     )
     return backend
@@ -196,7 +195,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "setup",
-                script_command(record.setup_script, "setup"),
+                script_command(record.setup_script, "setup", record.repos),
                 _seconds(ENV.WORKSPACE_REFRESH_TIMEOUT_SECONDS, DEFAULT_SCRIPT_TIMEOUT_SECONDS),
             )
         )
@@ -204,7 +203,7 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
         steps.append(
             (
                 "update",
-                script_command(record.update_script, "update"),
+                script_command(record.update_script, "update", record.repos),
                 _seconds(ENV.WORKSPACE_UPDATE_TIMEOUT_SECONDS, DEFAULT_UPDATE_TIMEOUT_SECONDS),
             )
         )
@@ -360,11 +359,7 @@ async def start_refresh_run(slug: str, kind: RefreshKind = "full") -> str | None
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     if not isinstance(run_id, str):
         return None
-    # Recorded so a poll can tell this refresh from a later one that superseded it.
-    record = await WORKSPACES.get(slug)
-    if record is not None:
-        record.refresh_run_id = run_id
-        await WORKSPACES.save(record)
+    await WORKSPACES.set_refresh_run_id(slug, run_id)
     return run_id
 
 

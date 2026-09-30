@@ -64,3 +64,25 @@ async def test_retries_are_bounded() -> None:
         await retry_transient_sandbox_errors(operation, description="test")
 
     assert operation.await_count == MAX_TRANSIENT_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_elapsed_budget_allows_more_than_default_attempts() -> None:
+    attempts = 0
+
+    async def operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= MAX_TRANSIENT_ATTEMPTS:
+            raise _transient()
+        return "ok"
+
+    with patch("agent.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock):
+        result = await retry_transient_sandbox_errors(
+            operation,
+            description="test",
+            max_elapsed=60,
+        )
+
+    assert result == "ok"
+    assert attempts == MAX_TRANSIENT_ATTEMPTS + 1

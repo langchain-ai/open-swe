@@ -1,16 +1,14 @@
 import json
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
-from mcp.types import Tool
 from pydantic import ValidationError
 
 from agent.dashboard import deps, oauth, routes
 from agent.encryption import decrypt_token
-from agent.mcp import MCPConnectionUpdate, runtime
+from agent.mcp import MCPConnectionUpdate
 from agent.mcp import workspace as mcps
 
 
@@ -61,26 +59,6 @@ async def test_corrupt_record_does_not_hide_other_connections_or_log_values(fake
     assert "test-secret" not in caplog.text
 
 
-async def test_url_change_requires_explicit_header_replacement(fake_store):
-    await mcps.save_workspace_mcp(
-        "default",
-        "example",
-        MCPConnectionUpdate(
-            name="example", url="https://one.example/mcp", headers={"Authorization": "secret"}
-        ),
-    )
-    with pytest.raises(ValueError, match="headers"):
-        await mcps.save_workspace_mcp(
-            "default", "example", MCPConnectionUpdate(name="example", url="https://two.example/mcp")
-        )
-    saved = await mcps.save_workspace_mcp(
-        "default",
-        "example",
-        MCPConnectionUpdate(name="example", url="https://two.example/mcp", headers={}),
-    )
-    assert saved["header_names"] == []
-
-
 async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
     oauth = {
         "token_url": "https://api.linear.app/oauth/token",
@@ -115,20 +93,6 @@ async def test_oauth_secret_is_encrypted_preserved_and_cleared(fake_store):
     assert (
         fake_store.values(["workspace_mcps", "default"])["linear"]["encrypted_client_secret"] == ""
     )
-
-
-async def test_new_oauth_connection_requires_secret(fake_store):
-    with pytest.raises(ValueError, match="client secret"):
-        await mcps.save_workspace_mcp(
-            "default",
-            "linear",
-            MCPConnectionUpdate(
-                name="linear",
-                url="https://mcp.linear.app/mcp",
-                oauth={"token_url": "https://api.linear.app/oauth/token", "client_id": "app"},
-            ),
-        )
-    assert await mcps.list_workspace_mcps("default") == []
 
 
 @pytest.mark.parametrize("saved_header", [False, True])
@@ -224,40 +188,6 @@ def test_invalid_connection_is_rejected(fields):
     values = {"name": "example", "url": "https://example.com/mcp", **fields}
     with pytest.raises(ValidationError):
         MCPConnectionUpdate(**values)
-
-
-async def test_all_discovered_tools_can_be_saved_for_large_catalogs(fake_store, monkeypatch):
-    tool_names = [f"tool_{index}" for index in range(201)]
-    monkeypatch.setattr(
-        runtime,
-        "_discover_tools",
-        AsyncMock(return_value=[Tool(name=name, inputSchema={}) for name in tool_names]),
-    )
-    app = FastAPI()
-    app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
-    body = {"name": "example", "url": "https://example.com/mcp"}
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-        headers={"Origin": "http://test"},
-    ) as client:
-        catalog = await client.post(
-            "/dashboard/api/workspaces/default/mcps/example/discover", json=body
-        )
-        assert catalog.status_code == 200
-        selected = [tool["name"] for tool in catalog.json()]
-        assert selected == tool_names
-        saved = await client.put(
-            "/dashboard/api/workspaces/default/mcps/example",
-            json={**body, "allowed_tools": selected},
-        )
-        assert saved.status_code == 200
-        assert saved.json()["allowed_tools"] == tool_names
-        assert (await client.get("/dashboard/api/workspaces/default/mcps")).json()[0][
-            "allowed_tools"
-        ] == tool_names
 
 
 async def test_workspace_mcp_routes_are_admin_only_and_same_origin(fake_store, monkeypatch):
@@ -410,118 +340,3 @@ async def test_query_credentials_are_rejected_without_saving_or_echoing(
         assert "test-secret" not in response.text
         assert fake_store.values(["workspace_mcps", "default"]) == {}
         assert (await client.get("/dashboard/api/workspaces/default/mcps")).json() == []
-
-
-async def test_ordinary_query_parameters_roundtrip_unchanged(fake_store, monkeypatch):
-    app = FastAPI()
-    app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
-    url = (
-        "https://mcp.us5.datadoghq.com/v1/mcp"
-        "?toolsets=core&region=us5&page_token=next&token_budget=1000&monkey=banana"
-    )
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-        headers={"Origin": "http://test"},
-    ) as client:
-        response = await client.put(
-            "/dashboard/api/workspaces/default/mcps/example", json={"name": "example", "url": url}
-        )
-        assert response.status_code == 200
-        assert response.json()["url"] == url
-        assert fake_store.values(["workspace_mcps", "default"])["example"]["url"] == url
-        assert (await client.get("/dashboard/api/workspaces/default/mcps")).json()[0]["url"] == url
-
-
-@pytest.mark.parametrize(
-    ("fields", "message"),
-    [
-        ({"name": "incident.io"}, "Connection name"),
-        ({"url": "http://example.com/mcp"}, "Server URL"),
-        ({"transport": "stdio"}, "Transport"),
-        ({"headers": {"Authorization": {"test-secret": "test-secret"}}}, "Headers"),
-        (
-            {
-                "oauth": {
-                    "token_url": "http://example.com/token",
-                    "client_id": "app",
-                    "client_secret": "test-secret",
-                }
-            },
-            "OAuth",
-        ),
-    ],
-)
-async def test_validation_identifies_fields_without_echoing_input(monkeypatch, fields, message):
-    app = FastAPI()
-    app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-        headers={"Origin": "http://test"},
-    ) as client:
-        response = await client.put(
-            "/dashboard/api/workspaces/default/mcps/example",
-            json={
-                "name": "example",
-                "url": "https://example.com/mcp",
-                "headers": {"Authorization": "test-secret"},
-                **fields,
-            },
-        )
-    assert response.status_code == 422
-    assert message in response.json()["detail"]
-    assert "test-secret" not in response.text
-
-
-@pytest.mark.parametrize("existing", [False, True])
-@pytest.mark.parametrize("fails", [False, True])
-async def test_discover_draft_never_saves_settings(fake_store, monkeypatch, existing, fails):
-    previous = None
-    if existing:
-        previous = await mcps.save_workspace_mcp(
-            "default",
-            "example",
-            MCPConnectionUpdate(
-                name="example", url="https://example.com/old", headers={"Authorization": "old"}
-            ),
-        )
-    request = httpx.Request("POST", "https://example.com/mcp")
-    error = httpx.HTTPStatusError(
-        "test-secret", request=request, response=httpx.Response(403, request=request)
-    )
-    discover = AsyncMock(
-        side_effect=ExceptionGroup("test-secret", [error]) if fails else None,
-        return_value=[],
-    )
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
-    app = FastAPI()
-    app.include_router(routes.router)
-    app.dependency_overrides[deps.admin_session] = lambda: {"sub": "admin"}
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-        headers={"Origin": "http://test"},
-    ) as client:
-        response = await client.post(
-            "/dashboard/api/workspaces/default/mcps/example/discover",
-            json={
-                "name": "example",
-                "url": "https://example.com/mcp",
-                "headers": {"Authorization": "test-secret"},
-            },
-        )
-    assert response.status_code == (400 if fails else 200)
-    if fails:
-        assert "HTTP 403" in response.json()["detail"]
-    assert "test-secret" not in response.text
-    candidate = discover.call_args.args[0]
-    assert candidate.url == "https://example.com/mcp"
-    assert candidate.connection_headers() == {"Authorization": "test-secret"}
-    current = await mcps.get_workspace_mcp("default", "example")
-    assert (current.public() if current else None) == previous

@@ -11,10 +11,17 @@ from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
-from agent.expedited_review.watch import CRON_TASK as EXPEDITED_REVIEW_TASK
-from agent.expedited_review.watch import evaluate_approval
+from agent.human_review.lifecycle import LEGACY_CRON_TASK as EXPEDITED_REVIEW_TASK
+from agent.human_review.lifecycle import delete_legacy_crons
+from agent.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_TASK
+from agent.human_review.standard import run_deadline
 from agent.reconcile import reconcile_stale_runs
 from agent.run_config import RunConfig
+from agent.sandboxes.retry import (
+    SANDBOX_ATTACH_MAX_ELAPSED,
+    is_transient_sandbox_error,
+    retry_transient_sandbox_errors,
+)
 from agent.schedules.store import launch_scheduled_agent_run
 from agent.session_cost import run_session_cost_refresh
 from agent.thread_feedback import run_feedback_prompt
@@ -44,44 +51,63 @@ class SchedulerState(BaseModel):
     thread_ts: str | None = None
     attempt: int | None = None
     feedback: dict[str, Any] | None = None
+    request_id: str | None = None
+    step: str | None = None
     result: dict[str, Any] | None = None
 
 
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
-    cfg = RunConfig.from_config(config)
-    task = state.task or cfg.task
-    if task == "reconcile":
-        return {"result": await reconcile_stale_runs()}
-    if task == "baby_sit":
-        key = state.watch_key or cfg.watch_key
-        if not key:
-            return {"result": {"status": "missing_watch_key"}}
-        return {"result": {"status": await evaluate_watch(key)}}
-    if task == EXPEDITED_REVIEW_TASK:
-        key = state.watch_key or cfg.watch_key
-        if not key:
-            return {"result": {"status": "missing_watch_key"}}
-        return {"result": {"status": await evaluate_approval(key)}}
-    if task == BACKGROUND_TASK_CRON_KIND:
-        thread_id = state.thread_id or cfg.thread_id
-        if not thread_id:
-            return {"result": {"status": "missing_thread_id"}}
-        return {"result": await monitor_background_tasks(thread_id)}
-    if task in (WORKSPACE_REFRESH_TASK, LEGACY_REFRESH_TASK):
-        slug = state.workspace_slug or state.environment_slug or cfg.workspace_slug
-        kind = "update" if state.refresh_kind == "update" else "full"
-        return {"result": await run_workspace_refresh_tick(slug or None, kind)}
-    if task == "session_cost":
-        return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
-    if task == "thread_feedback":
-        return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
-    if task == "agent_cost":
-        return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
-    schedule_id = state.schedule_id or cfg.schedule_id
-    if not schedule_id:
-        logger.warning("Scheduled agent tick missing schedule_id")
-        return {"result": {"status": "missing_schedule_id"}}
-    return {"result": await launch_scheduled_agent_run(schedule_id)}
+    async def launch_once() -> dict[str, Any]:
+        cfg = RunConfig.from_config(config)
+        task = state.task or cfg.task
+        if task == "reconcile":
+            return {"result": await reconcile_stale_runs()}
+        if task == "baby_sit":
+            key = state.watch_key or cfg.watch_key
+            if not key:
+                return {"result": {"status": "missing_watch_key"}}
+            return {"result": {"status": await evaluate_watch(key)}}
+        if task == EXPEDITED_REVIEW_TASK:
+            key = state.watch_key or cfg.watch_key
+            if not key:
+                return {"result": {"status": "missing_watch_key"}}
+            return {"result": await delete_legacy_crons(key)}
+        if task == BACKGROUND_TASK_CRON_KIND:
+            thread_id = state.thread_id or cfg.thread_id
+            if not thread_id:
+                return {"result": {"status": "missing_thread_id"}}
+            return {"result": await monitor_background_tasks(thread_id)}
+        if task in (WORKSPACE_REFRESH_TASK, LEGACY_REFRESH_TASK):
+            slug = state.workspace_slug or state.environment_slug or cfg.workspace_slug
+            kind = "update" if state.refresh_kind == "update" else "full"
+            return {"result": await run_workspace_refresh_tick(slug or None, kind)}
+        if task == "session_cost":
+            return {"result": await run_session_cost_refresh(state.model_dump(exclude_none=True))}
+        if task == "thread_feedback":
+            return {"result": await run_feedback_prompt(state.model_dump(exclude_none=True))}
+        if task == "agent_cost":
+            return {"result": await run_agent_cost_refresh(state.model_dump(exclude_none=True))}
+        if task == HUMAN_REVIEW_TASK:
+            if not state.request_id or not state.step:
+                return {"result": {"status": "missing_request"}}
+            return {"result": await run_deadline(state.request_id, state.step)}
+        schedule_id = state.schedule_id or cfg.schedule_id
+        if not schedule_id:
+            logger.warning("Scheduled agent tick missing schedule_id")
+            return {"result": {"status": "missing_schedule_id"}}
+        return {"result": await launch_scheduled_agent_run(schedule_id)}
+
+    try:
+        return await retry_transient_sandbox_errors(
+            launch_once,
+            description="Scheduled sandbox work",
+            max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+        )
+    except Exception as exc:
+        if not is_transient_sandbox_error(exc):
+            raise
+        logger.exception("Scheduled sandbox work exhausted transient retries")
+        return {"result": {"status": "sandbox_unavailable"}}
 
 
 def get_scheduler(config: RunnableConfig | None = None):

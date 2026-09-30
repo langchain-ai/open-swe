@@ -3,8 +3,15 @@ import { useMutation } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import {
+  Popover,
+  PopoverPopup,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { api, type WorkspaceRecord } from "@/lib/api"
+
+import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 
 const SNAPSHOT_LABEL: Record<
   NonNullable<WorkspaceRecord["snapshot_status"]>,
@@ -14,6 +21,22 @@ const SNAPSHOT_LABEL: Record<
   capturing: "Capturing…",
   ready: "Image ready",
   failed: "Capture failed",
+}
+
+function WorkspaceReposPopover({ repos }: { repos: string[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+        OPENSWE_WORKSPACE_REPOS
+      </PopoverTrigger>
+      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
+        <PopoverTitle>Expanded value</PopoverTitle>
+        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
+          <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
+        </pre>
+      </PopoverPopup>
+    </Popover>
+  )
 }
 
 function gib(bytes: number | null | undefined): string | null {
@@ -42,6 +65,7 @@ export function WorkspaceSandboxSection({
     updateScript !== (record.update_script ?? "")
 
   const save = useMutation({
+    meta: { silent: true },
     mutationFn: () =>
       api.updateWorkspace(record.slug, {
         setup_script: setupScript,
@@ -50,6 +74,7 @@ export function WorkspaceSandboxSection({
     onSuccess: onSaved,
   })
   const rebuild = useMutation({
+    meta: { errorTitle: "Couldn't start the image rebuild" },
     mutationFn: () => api.refreshWorkspace(record.slug),
     onSuccess: onRebuildStarted,
   })
@@ -98,29 +123,34 @@ export function WorkspaceSandboxSection({
         />
       )}
       <div className="space-y-3 px-4 py-3.5">
-        <label className="block text-sm">
-          Setup script
-          <Textarea
-            aria-label="Setup script"
-            className="mt-1 font-mono text-xs"
-            placeholder="Runs on the base snapshot to build the image, e.g. install dependencies."
+        <div className="text-sm">
+          <div>Setup script</div>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Runs on the base snapshot to build the image. Bound repositories are
+            available in <WorkspaceReposPopover repos={record.repos} /> to
+            preload; runs clone any other repository on demand.
+          </span>
+          <WorkspaceScriptEditor
+            label="Setup script"
             value={setupScript}
-            onChange={(e) => setSetupScript(e.target.value)}
+            onChange={setSetupScript}
           />
-        </label>
-        <label className="block text-sm">
-          Update script
-          <Textarea
-            aria-label="Update script"
-            className="mt-1 font-mono text-xs"
-            placeholder="Runs on the current image to bring it up to date, e.g. pull and reinstall."
+        </div>
+        <div className="text-sm">
+          <div>Update script</div>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Runs on the current image to bring it up to date, with the same{" "}
+            <WorkspaceReposPopover repos={record.repos} /> value.
+          </span>
+          <WorkspaceScriptEditor
+            label="Update script"
             value={updateScript}
-            onChange={(e) => setUpdateScript(e.target.value)}
+            onChange={setUpdateScript}
           />
-        </label>
-        {(save.error || rebuild.error) && (
+        </div>
+        {save.error && (
           <p role="alert" className="text-xs text-destructive">
-            {(save.error ?? rebuild.error)?.message}
+            {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (
@@ -140,17 +170,19 @@ export function WorkspaceSandboxSection({
             {refreshing ? "Rebuilding…" : "Rebuild image"}
           </Button>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!dirty || save.isPending}
-              onClick={() => {
-                setSetupScript(record.setup_script ?? "")
-                setUpdateScript(record.update_script ?? "")
-              }}
-            >
-              Cancel
-            </Button>
+            {dirty && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => {
+                  setSetupScript(record.setup_script ?? "")
+                  setUpdateScript(record.update_script ?? "")
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="sm"
               disabled={!dirty || save.isPending}

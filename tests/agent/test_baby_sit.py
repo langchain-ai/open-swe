@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -7,8 +6,9 @@ import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent import baby_sit, scheduler
+from agent import baby_sit
 from agent import store as agent_store
+from agent.github.ci import RequiredCheck
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
 
@@ -122,50 +122,6 @@ async def _start_watch(client: _Client) -> baby_sit.BabySitWatch:
     )
 
 
-async def test_watch_lifecycle_creates_and_deletes_ten_minute_cron(
-    watch_client: _Client,
-) -> None:
-    watch = await _start_watch(watch_client)
-
-    assert watch.key == "acme/repo#7"
-    assert watch_client.threads.deleted == []
-    assert watch_client.crons.searches == [
-        {"metadata": {"kind": "baby_sit_watch", "watch_key": "acme/repo#7"}, "limit": 10}
-    ]
-    assert watch_client.crons.created[0]["assistant_id"] == "scheduler"
-    assert watch_client.crons.created[0]["schedule"] == "*/10 * * * *"
-    assert watch_client.crons.created[0]["input"] == {
-        "task": "baby_sit",
-        "watch_key": "acme/repo#7",
-    }
-
-    assert await baby_sit.stop_watch(watch.key) is True
-    assert watch_client.crons.deleted == ["cron-1"]
-    assert watch_client.store.values == {}
-
-
-async def test_fallback_uses_watch_installation_token(
-    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await _start_watch(watch_client)
-    token = AsyncMock(return_value="t")
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", token)
-    monkeypatch.setattr(
-        baby_sit,
-        "fetch_pr",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
-    )
-    monkeypatch.setattr(
-        baby_sit,
-        "list_check_runs",
-        AsyncMock(return_value=[{"id": 1, "status": "in_progress"}]),
-    )
-    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
-
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
-    token.assert_awaited_once_with(installation_id=42)
-
-
 async def test_failure_dispatch_is_deduplicated_until_retry_is_recorded(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -256,7 +212,7 @@ async def test_concurrent_failure_evaluations_dispatch_once(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "duplicate"
 
 
-async def test_success_waits_for_stable_check_set_before_notifying(
+async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     watch_client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _start_watch(watch_client)
@@ -264,8 +220,12 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     monkeypatch.setattr(
         baby_sit,
         "fetch_pr",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        AsyncMock(
+            return_value={"state": "open", "head": {"sha": "head-1"}, "base": {"ref": "main"}}
+        ),
     )
+    required = AsyncMock(return_value={RequiredCheck("tests"), RequiredCheck("e2e")})
+    monkeypatch.setattr(baby_sit, "fetch_required_checks", required)
     monkeypatch.setattr(
         baby_sit,
         "list_check_runs",
@@ -278,48 +238,27 @@ async def test_success_waits_for_stable_check_set_before_notifying(
     monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
-
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-    monkeypatch.setattr(baby_sit, "_now", lambda: now)
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "settling"
-    notify.assert_not_awaited()
-
-    monkeypatch.setattr(
-        baby_sit,
-        "_now",
-        lambda: now + timedelta(minutes=baby_sit.CHECK_SET_SETTLE_MINUTES),
-    )
-    assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
-    notify.assert_awaited_once()
-    assert notify.await_args is not None
-    assert notify.await_args.args[:2] == ("C1", "1.2")
-    assert watch_client.store.values == {}
-
-
-async def test_github_notification_uses_source_repository(
-    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    watch = await _start_watch(watch_client)
-    watch.source_context = SourceContext.parse(
-        {
-            "github_issue": {
-                "number": 12,
-                "url": "https://github.com/acme/default/issues/12",
-            }
-        }
-    )
-    watch.run_config = {
-        "source_repo": {"owner": "acme", "name": "default"},
-        "source_installation_id": 84,
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    payload = {
+        "installation": {"id": 99},
+        "repository": {"owner": {"login": "acme"}, "name": "repo"},
+        "check_run": {"status": "completed", "conclusion": "success", "head_sha": "head-1"},
     }
-    token = AsyncMock(return_value="t")
-    post = AsyncMock(return_value=True)
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", token)
-    monkeypatch.setattr(baby_sit, "post_github_comment", post)
 
-    assert await baby_sit._notify_watch(watch, "done") is True
-    token.assert_awaited_once_with(installation_id=84)
-    post.assert_awaited_once_with({"owner": "acme", "name": "default"}, 12, "done", token="t")
+    assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
+    dispatch.assert_not_awaited()
+
+    required.return_value = {RequiredCheck("tests")}
+    assert await baby_sit.handle_ci_webhook(payload, "check_run") == {
+        "matched": 1,
+        "dispatched": 0,
+    }
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
+    assert "checks are green" in dispatch.await_args.args[1]
+    notify.assert_not_awaited()
+    assert watch_client.store.values == {}
 
 
 async def test_terminal_notification_falls_back_to_originating_agent_thread(
@@ -333,8 +272,18 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     monkeypatch.setattr(
         baby_sit,
         "fetch_pr",
-        AsyncMock(return_value={"state": "closed", "head": {"sha": "head-1"}}),
+        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
     )
+    monkeypatch.setattr(
+        baby_sit,
+        "list_check_runs",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "name": "tests", "status": "completed", "conclusion": "cancelled"}
+            ]
+        ),
+    )
+    monkeypatch.setattr(baby_sit, "list_commit_statuses", AsyncMock(return_value=[]))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
@@ -406,50 +355,3 @@ async def test_new_head_resets_retry_budget(
     assert watch is not None
     assert watch.head_sha == "head-2"
     assert watch.retry_count == 0
-
-
-async def test_failed_webhook_matches_active_head_and_deduplicates_delivery(
-    watch_client: _Client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await _start_watch(watch_client)
-    evaluate = AsyncMock(return_value="dispatched")
-    monkeypatch.setattr(baby_sit, "_evaluate_watch", evaluate)
-    token = AsyncMock(return_value="t")
-    monkeypatch.setattr(baby_sit, "get_github_app_installation_token", token)
-    payload = {
-        "installation": {"id": 99},
-        "repository": {"owner": {"login": "Acme"}, "name": "Repo"},
-        "check_run": {"status": "completed", "conclusion": "failure", "head_sha": "head-1"},
-    }
-
-    first = await baby_sit.handle_ci_webhook(payload, "check_run", delivery_id="delivery-1")
-    second = await baby_sit.handle_ci_webhook(payload, "check_run", delivery_id="delivery-1")
-    payload["check_run"] = {
-        "status": "completed",
-        "conclusion": "failure",
-        "head_sha": "head-2",
-        "check_suite": {"head_branch": "feature"},
-    }
-    new_head = await baby_sit.handle_ci_webhook(payload, "check_run", delivery_id="delivery-2")
-
-    assert first == {"matched": 1, "dispatched": 1}
-    assert second == {"matched": 1, "dispatched": 0}
-    assert new_head == {"matched": 1, "dispatched": 1}
-    assert evaluate.await_count == 2
-    token.assert_awaited_with(installation_id=99)
-    watch = await baby_sit.WATCHES.get("acme/repo#7")
-    assert watch is not None
-    assert watch.installation_id == 99
-
-
-async def test_scheduler_routes_baby_sit_task(monkeypatch: pytest.MonkeyPatch) -> None:
-    evaluate = AsyncMock(return_value="pending")
-    monkeypatch.setattr(scheduler, "evaluate_watch", evaluate)
-
-    result = await scheduler._launch(
-        scheduler.SchedulerState(task="baby_sit", watch_key="acme/repo#7"),
-        {"configurable": {}},
-    )
-
-    assert result == {"result": {"status": "pending"}}
-    evaluate.assert_awaited_once_with("acme/repo#7")

@@ -1,30 +1,38 @@
 """Shared pytest fixtures."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import os
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
-from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent import store as agent_store
-from agent.database import postgres
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
 from agent.utils import ttl_cache
 from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES
+from tests.support.postgres import MigratedTemplate, isolated_database
+
+# What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
+os.environ.setdefault("REDIS_URI", "fake")
+os.environ.setdefault("DATABASE_URI", ":memory:")
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
+_MAX_PARAM_ID_CHARS = 40
+
+
+def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:
+    """Keep node IDs short; a 100 KB ID line truncates `gh run view --log-failed` output."""
+    if isinstance(val, str) and len(val) > _MAX_PARAM_ID_CHARS:
+        return f"{argname}-{hashlib.sha256(val.encode()).hexdigest()[:8]}"
+    return None
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
@@ -101,6 +109,18 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return client.store
 
 
+def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
+    """Treat ``logins`` as registered Open SWE users."""
+    from agent.users import User
+
+    registered = {login.lower() for login in logins}
+
+    async def known_logins(candidates: Sequence[str]) -> frozenset[str]:
+        return frozenset(c.lower() for c in candidates if c.lower() in registered)
+
+    monkeypatch.setattr(User, "known_logins", known_logins)
+
+
 async def post_signed_github_webhook(
     event_type: str,
     payload: Mapping[str, object],
@@ -135,32 +155,8 @@ async def post_signed_github_webhook(
 _TEST_POSTGRES_URI_SETTING = "TEST_ANALYTICS_POSTGRES_URI"
 
 
-@asynccontextmanager
-async def isolated_schema(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    """Point ``agent.database`` at a fresh, fully migrated schema, then drop it.
-
-    The real engine, connection, transaction and session code runs; only the
-    engine and the schema name are swapped, so it does not matter which module a
-    consumer imported the database API through.
-    """
-    monkeypatch.setenv("POSTGRES_URI", uri)
-    engine = create_async_engine(
-        postgres.uri() or uri, connect_args={"server_settings": {"TimeZone": "UTC"}}
-    )
-    schema = f"open_swe_test_{uuid4().hex}"
-    migrations = postgres.load_migrations()
-    async with engine.begin() as conn:
-        await conn.execute(text(f"CREATE SCHEMA {schema}"))
-        await conn.run_sync(postgres.upgrade, migrations, schema)
-    monkeypatch.setattr(postgres, "SCHEMA", schema)
-    monkeypatch.setattr(postgres, "_ENGINE", engine)
-    monkeypatch.setattr(postgres, "_ENGINE_URI", postgres.uri())
-    try:
-        yield
-    finally:
-        async with engine.begin() as conn:
-            await conn.execute(text(f"DROP SCHEMA {schema} CASCADE"))
-        await engine.dispose()
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    asyncio.run(MigratedTemplate.drop())
 
 
 @pytest.fixture
@@ -169,7 +165,7 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
     uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
     if not uri:
         pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for PostgreSQL regressions")
-    async with isolated_schema(uri, monkeypatch):
+    async with isolated_database(uri, monkeypatch):
         yield
 
 
@@ -184,8 +180,23 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         monkeypatch.delenv("POSTGRES_URI", raising=False)
         yield False
         return
-    async with isolated_schema(uri, monkeypatch):
+    async with isolated_database(uri, monkeypatch):
         yield True
+
+
+@pytest.fixture
+def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve dashboard findings from thread metadata, as for threads not yet in PostgreSQL."""
+    from agent.review import reviews
+    from agent.review.findings import Finding, coerce_findings
+
+    async def read(metadata_by_thread: Mapping[str, dict[str, Any]]) -> dict[str, list[Finding]]:
+        return {
+            thread_id: coerce_findings(metadata.get("findings"))
+            for thread_id, metadata in metadata_by_thread.items()
+        }
+
+    monkeypatch.setattr(reviews, "findings_by_thread", read)
 
 
 @pytest.fixture
@@ -216,10 +227,19 @@ def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 @pytest.fixture(autouse=True)
 def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global TTL cache from leaking workspace settings between tests."""
-    ttl_cache.clear()
+    """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
+    from langgraph_api import cache
+    from langgraph_api.feature_flags import IS_POSTGRES_OR_GRPC_BACKEND
+
+    def clear() -> None:
+        ttl_cache.clear()
+        # The postgres edition caches over gRPC and has no in-process store to clear.
+        if not IS_POSTGRES_OR_GRPC_BACKEND:
+            cache._CACHE.clear()
+
+    clear()
     yield
-    ttl_cache.clear()
+    clear()
 
 
 @pytest.fixture(autouse=True)
@@ -231,19 +251,6 @@ def _reset_sandbox_registries() -> Iterator[None]:
     yield
     SANDBOX_BACKENDS.clear()
     SANDBOX_CONNECTIONS.clear()
-
-
-@pytest.fixture(autouse=True)
-def _workspace_store_import_completed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Treat the startup import of LangGraph Store workspaces as done.
-
-    Tests do not run the application lifespan, and until that import succeeds
-    :func:`agent.workspaces.routing.repo_is_routable` fails closed rather than
-    reading an empty table as "nobody owns this repository". A test about that
-    path sets the flag back to ``False`` itself.
-    """
-    monkeypatch.setattr(WORKSPACES, "import_completed", True)
-    monkeypatch.setattr(WORKSPACES, "unimported_repos", frozenset())
 
 
 @pytest.fixture(autouse=True)

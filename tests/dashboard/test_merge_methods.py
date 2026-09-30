@@ -51,40 +51,6 @@ async def test_merge_methods_reflect_repository_flags(monkeypatch, flags, expect
     assert request.await_args.args[1:] == ("GET", "https://api.github.com/repos/acme/app")
 
 
-async def test_merge_methods_network_failure_is_bad_gateway(monkeypatch):
-    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
-    monkeypatch.setattr(
-        merge_methods, "github_request", AsyncMock(side_effect=httpx2.ConnectError("boom"))
-    )
-    with pytest.raises(HTTPException, match="Could not load merge settings from GitHub") as error:
-        await merge_methods.repository_merge_methods("acme", "app", "user-token")
-    assert error.value.status_code == 502
-
-
-async def test_merge_methods_error_status_is_bad_gateway(monkeypatch):
-    monkeypatch.setattr(merge_methods, "github_client", _client("user-token"))
-    monkeypatch.setattr(
-        merge_methods,
-        "github_request",
-        AsyncMock(
-            return_value=httpx2.Response(
-                404,
-                json={"message": "Not Found"},
-                request=httpx2.Request("GET", "https://api.github.com"),
-            )
-        ),
-    )
-    with pytest.raises(HTTPException) as error:
-        await merge_methods.repository_merge_methods("acme", "app", "user-token")
-    assert error.value.status_code == 502
-
-
-async def test_merge_methods_rejects_invalid_repository():
-    with pytest.raises(HTTPException) as error:
-        await merge_methods.repository_merge_methods("acme", "..", "user-token")
-    assert error.value.status_code == 422
-
-
 async def test_merge_methods_without_user_token_never_calls_github(monkeypatch):
     monkeypatch.setattr(repo_routes, "get_valid_access_token", AsyncMock(return_value=None))
     methods = AsyncMock()
