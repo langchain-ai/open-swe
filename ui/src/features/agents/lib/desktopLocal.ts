@@ -23,6 +23,7 @@ export const localThreadKeys = {
   ready: (threadId: string) => ["local-thread-ready", threadId] as const,
   diff: (threadId: string) => ["local-thread-diff", threadId] as const,
   prDiff: (threadId: string) => ["local-thread-pr-diff", threadId] as const,
+  pr: (threadId: string) => ["local-thread-pr", threadId] as const,
   repoDiff: (cwd: string) => ["local-repo-diff", cwd] as const,
   refs: (cwd: string | undefined) => ["local-repo-refs", cwd ?? ""] as const,
 }
@@ -162,6 +163,17 @@ export function useLocalThreadPrDiff(
   }, [enabled, isRunning, refetch])
 
   return query
+}
+
+/** The checked-out branch's pull request, for the composer PR link. */
+export function useLocalThreadPr(threadId: string) {
+  return useQuery({
+    queryKey: localThreadKeys.pr(threadId),
+    queryFn: async () =>
+      (await window.openSweDesktop?.getLocalPr(threadId)) ?? null,
+    staleTime: 30_000,
+    refetchOnWindowFocus: "always",
+  })
 }
 
 /**
