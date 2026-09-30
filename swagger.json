@@ -2405,6 +2405,17 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "pr_review_links": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Review Links"
+          },
           "preserve_sandbox_memory": {
             "anyOf": [
               {
@@ -5373,18 +5384,6 @@
               }
             ],
             "title": "Org Guidelines"
-          },
-          "pr_review_links": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Review Links"
           },
           "pr_summaries": {
             "agent_feature_flag": true,

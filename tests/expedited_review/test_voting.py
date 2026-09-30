@@ -321,7 +321,9 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
 class _OtherChannel:
     id = "C_OTHER"
 
-    async def post(self, text: str, *, blocks: object = None) -> tuple[str, None]:
+    async def post(
+        self, text: str, *, blocks: object = None, login: str | None = None
+    ) -> tuple[str, None]:
         return "9.0", None
 
 

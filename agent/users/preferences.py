@@ -15,6 +15,7 @@ class UserPreferences(BaseModel):
     # Pull requests this person links in a repository's review channel get approved and
     # merged reactions, and a bump with a picked reviewer once they sit green unapproved.
     review_channel_watch: bool = False
+    pr_review_links: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -26,5 +27,8 @@ class UserPreferencesPatch(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     review_channel_watch: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    pr_review_links: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )

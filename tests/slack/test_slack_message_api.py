@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
+from agent.dashboard.profiles import ProfileUpdate, put_my_profile
+from agent.run_config import RunConfig
 from agent.slack import client as slack_utils
-from agent.slack import pr_links
 from agent.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
-from agent.tools.manage_feature_flags import manage_feature_flags
+from agent.users import User, UserPreferences
 from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
 
@@ -154,15 +154,15 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
 
 @pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
 async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
-    fake_store: FakeStore,
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
     delivery: str,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
-    monkeypatch.setattr(pr_links, "workspace_for_slack_channel", AsyncMock(return_value="team"))
-    fake_store.seed(["workspace_settings"], "team", {"pr_review_links": True})
-    await upsert_instance_settings(WorkspaceSettingsUpdate(pr_review_links=delivery == "command"))
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
+    monkeypatch.setattr(
+        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
+    )
     url = "https://github.com/acme/app/pull/7"
     target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
     unchanged = f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
@@ -215,25 +215,37 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
     assert blocks[0]["text"] == text
 
 
-async def test_review_links_default_off_inherit_and_allow_workspace_opt_out(
+@pytest.mark.usefixtures("registry_db")
+async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
     fake_store: FakeStore,
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
-    grant_tool_access,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
-    monkeypatch.setattr(pr_links, "workspace_for_slack_channel", AsyncMock(return_value="team"))
-    grant_tool_access(admin=True, admin_surface=True)
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="alice")
+    await User.sign_in("github", "2", login="bob")
+    cfg = RunConfig(github_login="alice")
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
     url = "https://github.com/acme/app/pull/7"
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == url
-    await manage_feature_flags("set", {"pr_review_links": True})
+    saved = await put_my_profile(
+        ProfileUpdate(
+            default_model="openai:gpt-6.1-sol", reasoning_effort="high", pr_review_links=True
+        ),
+        {"sub": "alice", "email": "alice@example.com"},
+    )
+    assert saved["pr_review_links"] is True
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
-    fake_store.seed(["workspace_settings"], "team", {"pr_review_links": False})
+    cfg.github_login = "bob"
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == url
-    fake_store.seed(["workspace_settings"], "team", {})
+    await slack_utils.update_slack_message("C1", "1.0", url, login="alice")
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    cfg.github_login = "alice"
     monkeypatch.delenv("DASHBOARD_BASE_URL")
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     assert slack_api.calls[-1][1]["text"] == url

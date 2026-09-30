@@ -229,6 +229,7 @@ export interface Profile {
   preserve_sandbox_memory?: boolean
   human_review_requests?: boolean
   review_channel_watch?: boolean
+  pr_review_links?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -251,6 +252,7 @@ export interface ProfileUpdate {
   preserve_sandbox_memory?: boolean
   human_review_requests?: boolean
   review_channel_watch?: boolean
+  pr_review_links?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

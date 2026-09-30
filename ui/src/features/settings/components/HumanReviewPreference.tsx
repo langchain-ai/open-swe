@@ -12,6 +12,26 @@ export function HumanReviewPreference() {
   return (
     <>
       <SettingsRow
+        label="Link to Open SWE reviews in Slack"
+        htmlFor="pr-review-links"
+        description="When Open SWE posts pull request links for you in Slack, open the Open SWE review page instead of GitHub."
+        control={
+          <Switch
+            id="pr-review-links"
+            checked={profile.data?.pr_review_links ?? false}
+            disabled={disabled}
+            onCheckedChange={(value) => {
+              if (!defaults) return
+              save.patch(
+                { pr_review_links: value },
+                defaults.default_agent_model,
+                defaults.default_agent_reasoning_effort
+              )
+            }}
+          />
+        }
+      />
+      <SettingsRow
         label="Request human reviews in Slack"
         htmlFor="human-review-requests"
         description="Ask a repository's Slack review channel to review a pull request, from the dashboard or by asking Open SWE. The pull request merges once its reviewers approve."
