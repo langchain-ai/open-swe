@@ -15,18 +15,19 @@ directly comparable to martian's published numbers.
 """
 
 import json
-import os
 import threading
 from functools import cache
 from typing import Any, Literal, NotRequired, TypedDict
 from uuid import UUID
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langsmith.schemas import Example, Run
 
 from agent.review.findings import REVIEW_FINDING_CAP
+from agent.utils.gateway import gateway_overrides
+from agent.utils.model import make_model
 
-JUDGE_MODEL = "claude-opus-4-5"
+JUDGE_MODEL = "anthropic:claude-opus-4-5"
 
 ScoringProfile = Literal["strict", "core"]
 _STRICT_CATEGORIES = frozenset({"bug", "security", "concurrency", "data", "api"})
@@ -34,11 +35,6 @@ PROFILE_CATEGORIES: dict[ScoringProfile, frozenset[str]] = {
     "strict": _STRICT_CATEGORIES,
     "core": _STRICT_CATEGORIES | {"perf", "test_gap", "doc_defect"},
 }
-
-# Call Anthropic directly. Without an explicit base_url the Anthropic SDK falls
-# back to ANTHROPIC_BASE_URL, which in dev shells points at the LangSmith
-# gateway and 403s for this model — silently nulling every judge score.
-JUDGE_BASE_URL = os.environ.get("JUDGE_ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
 JUDGE_SYSTEM = "You are a precise code review evaluator. Always respond with valid JSON."
 
@@ -60,7 +56,7 @@ Respond with ONLY a JSON object:
 {{"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}}"""
 
 
-_judge: ChatAnthropic | None = None
+_judge: BaseChatModel | None = None
 
 
 class ReviewComment(TypedDict):
@@ -106,22 +102,17 @@ class ExampleCounts(TypedDict):
     is_synthetic: bool
 
 
-def _get_judge() -> ChatAnthropic:
+def _get_judge() -> BaseChatModel:
     global _judge
     if _judge is None:
-        api_key = os.environ.get("JUDGE_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        # Without gateway credentials make_model silently calls Anthropic directly.
+        if gateway_overrides(JUDGE_MODEL) is None:
             raise RuntimeError(
-                "No Anthropic API key for the judge. Set JUDGE_ANTHROPIC_API_KEY or "
-                "ANTHROPIC_API_KEY (the judge calls Anthropic directly, not via a gateway)."
+                "The judge calls Anthropic through the LangSmith gateway; set "
+                "LANGSMITH_GATEWAY_API_KEY or LANGSMITH_API_KEY."
             )
-        _judge = ChatAnthropic(
-            model=JUDGE_MODEL,
-            temperature=0.0,
-            max_tokens=512,
-            base_url=JUDGE_BASE_URL,
-            api_key=api_key,
-            max_retries=3,
+        _judge = make_model(
+            JUDGE_MODEL, use_gateway=True, temperature=0.0, max_tokens=512, max_retries=3
         )
     return _judge
 

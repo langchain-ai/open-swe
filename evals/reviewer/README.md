@@ -24,7 +24,9 @@ evals/reviewer/
 
 - `LANGSMITH_API_KEY` set in your env.
 - `gh` authenticated (`gh auth status`) — needed for `build_dataset.py`.
-- `ANTHROPIC_API_KEY` set — judge runs `claude-opus-4-5`.
+- A LangSmith key with `gateway:invoke` in `LANGSMITH_GATEWAY_API_KEY` (or
+  `LANGSMITH_API_KEY`) — the judge runs `claude-opus-4-5` through the LangSmith
+  LLM Gateway, like the reviewer's models.
 - A running reviewer graph (local `langgraph dev` or deployed assistant id) with
   `REVIEWER_ASSISTANT_ID` env var pointing at it. Defaults to assistant `reviewer`
   on `http://localhost:2024`.
@@ -81,7 +83,8 @@ stale and the dashboard flips the run to `failed` within ~60s.
 
 Required repository config:
 
-- secrets: `LANGSMITH_API_KEY`, `ANTHROPIC_API_KEY` (the judge runs in-process;
+- secrets: `LANGSMITH_API_KEY`, plus `LANGSMITH_GATEWAY_API_KEY` when that key
+  lacks `gateway:invoke` (the judge runs in-process through the gateway;
   reviewer-model keys are **not** needed — the reviewer runs in the deployment).
 - secret or var: `LANGGRAPH_URL` — the deployment URL the eval drives and reports to.
 
