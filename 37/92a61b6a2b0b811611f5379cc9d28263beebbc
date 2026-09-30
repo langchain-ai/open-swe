@@ -1,0 +1,19 @@
+langgraph.json
+  s_7ad70aabdac33d::t_11391ffcc288e3 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3792a61b6a2b0b811611f5379cc9d28263beebbc",
+  "prompts": {},
+  "sessions": {
+    "s_7ad70aabdac33d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cb19-a72b-7911-adf7-f2d6fae78b1a",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "syachamaneni-lc <sreekara.yachamaneni@langchain.dev>"
+    }
+  }
+}
