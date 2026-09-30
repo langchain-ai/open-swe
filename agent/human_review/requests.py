@@ -5,7 +5,7 @@ a tiny pull request: it pins the head SHA the card was posted for and a fingerpr
 of the diff it drew, and one approval from someone other than the author completes
 it. A ``standard`` request is a card in the repository's review channel that people
 sign up to review on GitHub; it merges once they approve. A ``posted`` request is
-someone's own message linking the pull request in its review channel: Open SWE never
+someone's own message linking the pull request in a Slack channel: Open SWE never
 edits it, only reacts to it when the pull request is approved or merged, and never
 merges.
 
