@@ -19,8 +19,7 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
-from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langgraph.types import Command
 
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import load_prompt
@@ -36,9 +35,10 @@ _ANTHROPIC_TOOL_ADDITION_MODELS = (
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-mythos-5",
+    "claude-sonnet-5-5",
 )
 # Responses API only: Chat Completions rejects ``additional_tools``.
-_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
+_OPENAI_TOOL_ADDITION_MODELS = ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")
 
 ToolAddition = dict[str, object]
 """A provider-native content block that adds one tool from its position onward."""
@@ -222,11 +222,6 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             return None
         return self._resolved.get(group, _Resolved()).tools.get(name)
 
-    async def abefore_agent(self, state: DynamicToolState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        if state.get("_deepagents_forked_context"):
-            return {}
-        return {"loaded_integration_tools": Overwrite([])}
-
     async def awrap_model_call(
         self,
         request: ModelRequest,
@@ -353,11 +348,7 @@ def _newly_loaded(artifact: object) -> list[str]:
 
 
 def _anchors(messages: Sequence[AnyMessage]) -> dict[str, int]:
-    """Index of the latest load result that newly loaded each tool.
-
-    The per-run reset empties the loaded list and a repeat load lists nothing new,
-    so the latest load result naming a tool is its first load in this run.
-    """
+    """Index of the latest load result that newly loaded each tool."""
     load_calls: set[str] = set()
     anchors: dict[str, int] = {}
     for index, message in enumerate(messages):

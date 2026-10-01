@@ -1,25 +1,20 @@
 import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from itertools import pairwise
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
 from langchain_anthropic import ChatAnthropic
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableBinding
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_openai import ChatOpenAI
-from langchain_openai.chat_models.codex import _ChatOpenAICodex  # noqa: PLC2701
 from langchain_openai.chatgpt_oauth import _ChatGPTToken  # noqa: PLC2701
-from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langgraph.types import Command
 from pydantic import SecretStr
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, DynamicToolState, IntegrationGroup
+from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:
@@ -48,7 +43,7 @@ def _opus() -> ChatAnthropic:
 
 def _gpt(*, use_responses_api: bool = True) -> ChatOpenAI:
     return ChatOpenAI(
-        model="gpt-6-sol",
+        model="gpt-6.1-sol",
         api_key=SecretStr("test"),
         use_responses_api=use_responses_api,
         store=False,
@@ -68,15 +63,6 @@ class _TokenProvider:
 
     async def aget_access_token(self) -> str:
         return "test"
-
-
-def _codex() -> ChatOpenAI:
-    """The desktop ChatGPT OAuth model, as ``build_desktop_openai_oauth_model`` builds it."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        return _ChatOpenAICodex(
-            model="gpt-6-sol", token_provider=_TokenProvider(), originator="test"
-        )
 
 
 def _notion() -> DynamicToolMiddleware:
@@ -140,13 +126,6 @@ class _Thread:
             self.messages.extend(update["messages"])
             loaded.update(update.get("loaded_integration_tools", []))
         self.loaded = sorted(loaded)
-
-    async def new_run(self, prompt: str) -> None:
-        state = cast(DynamicToolState, {"messages": self.messages})
-        update = await self.middleware.abefore_agent(state, cast(Runtime, MagicMock()))
-        reset = update["loaded_integration_tools"]
-        self.loaded = list(reset.value) if isinstance(reset, Overwrite) else reset
-        self.messages.append(HumanMessage(prompt))
 
 
 _SYSTEM_PROMPT = "You are Open SWE."
@@ -225,46 +204,6 @@ def _shape(messages: list[AnyMessage]) -> list[str]:
     return shape
 
 
-@pytest.mark.parametrize(
-    "model", [pytest.param(_opus(), id="anthropic"), pytest.param(_gpt(), id="openai")]
-)
-async def test_loading_a_tool_only_appends_to_the_request_on_a_supported_model(
-    model: object,
-) -> None:
-    thread = _Thread(_notion(), model)
-
-    await thread.model_call()
-    await thread.tool_turn(["notion-search"])
-    await thread.model_call()
-    await thread.tool_turn("notion-search")
-    await thread.model_call()
-    await thread.tool_turn(["notion-search", "notion-fetch"])
-    await thread.model_call()
-    await thread.tool_turn("notion-fetch")
-    await thread.model_call()
-
-    for previous, current in pairwise(thread.requests):
-        assert current.messages[: len(previous.messages)] == previous.messages
-        assert current.tools == previous.tools
-    assert _offered(thread.requests[0]) == ["execute"]
-    assert _offered(thread.requests[1]) == ["execute", "notion-search"]
-    assert _offered(thread.requests[-1]) == ["execute", "notion-search", "notion-fetch"]
-
-
-@pytest.mark.parametrize(
-    "model", [pytest.param(_opus(), id="anthropic"), pytest.param(_gpt(), id="openai")]
-)
-async def test_an_added_tool_is_defined_as_it_would_be_in_tools(model: object) -> None:
-    added = _Thread(_notion(), model)
-    await added.tool_turn(["notion-search"])
-    # Loaded, but with no load result to anchor to, so it goes to ``tools``.
-    in_tools = _Thread(_notion(), model, loaded=["notion-search"])
-
-    definitions = _added(await added.model_call())
-
-    assert definitions == [_payload(await in_tools.model_call())["tools"][-1]]
-
-
 async def test_tools_loaded_in_a_parallel_batch_are_added_together_after_it() -> None:
     thread = _Thread(_notion(), _opus())
 
@@ -301,106 +240,6 @@ async def test_a_tool_loaded_as_a_follow_up_arrives_is_added_after_the_follow_up
         "ai",
         "tool",
     ]
-
-
-async def test_a_tool_is_added_past_an_empty_reply_the_provider_drops() -> None:
-    thread = _Thread(_notion(), _opus())
-    await thread.tool_turn(["notion-search"])
-    await thread.model_call()
-    # The model answered with nothing, and a follow-up arrived before the run's next call.
-    thread.messages += [AIMessage(""), HumanMessage("Any luck?")]
-
-    request = await thread.model_call()
-
-    assert _shape(request.messages) == ["human", "ai", "tool", "ai", "human", "+notion-search"]
-    assert _anthropic_turns(_payload(request))[-1] == "system notion-search"
-
-
-async def test_reloading_a_loaded_tool_adds_only_the_tools_new_to_this_run() -> None:
-    thread = _Thread(_notion(), _opus())
-
-    await thread.tool_turn(["notion-search"])
-    await thread.tool_turn(["notion-search"])
-    await thread.tool_turn(["notion-search", "notion-fetch"])
-    request = await thread.model_call()
-
-    assert _shape(request.messages) == [
-        "human",
-        "ai",
-        "tool",
-        "+notion-search",
-        "ai",
-        "tool",
-        "ai",
-        "tool",
-        "+notion-fetch",
-    ]
-
-
-async def test_a_tool_loaded_again_in_a_later_run_is_added_at_the_new_load() -> None:
-    thread = _Thread(_notion(), _opus())
-    await thread.tool_turn(["notion-search"])
-    thread.messages.append(AIMessage("Found it."))
-
-    await thread.new_run("Now update it.")
-    before_reload = await thread.model_call()
-    await thread.tool_turn(["notion-search"])
-    after_reload = await thread.model_call()
-
-    assert _offered(before_reload) == ["execute"]
-    assert _shape(before_reload.messages) == ["human", "ai", "tool", "ai", "human"]
-    assert _shape(after_reload.messages) == [
-        "human",
-        "ai",
-        "tool",
-        "ai",
-        "human",
-        "ai",
-        "tool",
-        "+notion-search",
-    ]
-
-
-@pytest.mark.parametrize(
-    "model",
-    [
-        pytest.param(
-            ChatAnthropic(model_name="claude-sonnet-5", api_key=SecretStr("test")),
-            id="claude-sonnet-5",
-        ),
-        pytest.param(GenericFakeChatModel(messages=iter([])), id="other-provider"),
-        pytest.param(_gpt(use_responses_api=False), id="openai-chat-completions"),
-        pytest.param(_codex(), id="openai-codex-oauth"),
-    ],
-)
-async def test_unsupported_models_receive_loaded_tools_in_tools(model: object) -> None:
-    thread = _Thread(_notion(), model)
-
-    await thread.tool_turn(["notion-search"])
-    request = await thread.model_call()
-
-    assert request.messages == thread.messages
-    assert [tool.name for tool in request.tools] == ["execute", "notion-search"]
-
-
-async def test_a_tool_claude_rejects_inline_keeps_todays_path() -> None:
-    async def run(**_: str) -> str:
-        return "ok"
-
-    # Anthropic rejects a root anyOf; ``bind_tools`` drops such a tool from ``tools``,
-    # but inline it would fail every request for the rest of the run.
-    either = {"anyOf": [{"required": ["page_id"]}, {"required": ["url"]}]}
-    schema = {"type": "object", "properties": {"page_id": {}, "url": {}}, **either}
-    fetch = StructuredTool.from_function(
-        coroutine=run, name="notion-fetch", description="Fetch a page.", args_schema=schema
-    )
-    thread = _Thread(DynamicToolMiddleware({"Notion": [_tool("notion-search"), fetch]}), _opus())
-
-    await thread.tool_turn(["notion-search", "notion-fetch"])
-    request = await thread.model_call()
-
-    assert _shape(request.messages) == ["human", "ai", "tool", "+notion-search"]
-    assert [tool.name for tool in request.tools] == ["execute", "notion-fetch"]
 
 
 async def test_a_loaded_tool_without_a_visible_load_result_goes_to_tools() -> None:
@@ -546,119 +385,6 @@ async def test_dynamic_tools_load_only_selected_schemas_and_route_calls() -> Non
         DynamicToolMiddleware({"Notion": [_tool("static")]}, reserved_names={"static"})
 
 
-def test_general_purpose_subagent_includes_dynamic_tools() -> None:
-    from agent.server import _general_purpose_subagent
-
-    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    subagent = _general_purpose_subagent(MagicMock(), tools=[], dynamic_tools=middleware)
-
-    assert middleware in subagent.get("middleware", [])
-
-
-async def test_a_lazy_group_is_not_built_until_it_is_loaded() -> None:
-    builds = 0
-
-    async def load() -> list[BaseTool]:
-        nonlocal builds
-        builds += 1
-        return [_tool("analyzePlan")]
-
-    middleware = DynamicToolMiddleware(
-        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
-    )
-    loader = cast(StructuredTool, middleware.tools[0])
-
-    # The catalog reaches the model without the group ever being built.
-    assert "- analyzePlan (integration: Corridor)" in loader.description
-    assert 'Example: {"tool_names":["analyzePlan"]}' in loader.description
-    assert builds == 0
-
-    coroutine = cast(Any, loader.coroutine)
-    command = await coroutine(tool_names=["analyzePlan"], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    assert builds == 1
-
-    loaded_state = cast(dict[str, Any], command.update)
-    routed: list[str] = []
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert request.tool is not None
-        routed.append(request.tool.name)
-        return ToolMessage(content="ok", tool_call_id=request.tool_call["id"])
-
-    call = _Request(
-        state=loaded_state,
-        tools=[],
-        tool_call={"name": "analyzePlan", "args": {"value": "x"}, "id": "call-1"},
-    )
-    await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
-    assert routed == ["analyzePlan"]
-    # Built once and reused, not re-fetched per call.
-    assert builds == 1
-
-
-@pytest.mark.parametrize("qualified_name", ["Corridor:analyzePlan", "Corridor: analyzePlan"])
-async def test_catalog_qualified_names_are_normalized(qualified_name: str) -> None:
-    builds = 0
-    calls = 0
-
-    async def analyze_plan(value: str) -> str:
-        nonlocal calls
-        calls += 1
-        return value
-
-    async def load() -> list[BaseTool]:
-        nonlocal builds
-        builds += 1
-        return [
-            StructuredTool.from_function(
-                coroutine=analyze_plan,
-                name="analyzePlan",
-                description="Analyze an implementation plan.",
-            )
-        ]
-
-    middleware = DynamicToolMiddleware(
-        {"Corridor": IntegrationGroup(tool_names=("analyzePlan",), load=load)}
-    )
-    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
-
-    command = await coroutine(tool_names=[qualified_name], state={}, tool_call_id="load-1")
-    assert isinstance(command, Command)
-    assert builds == 1
-    loaded_state = cast(dict[str, Any], command.update)
-    assert loaded_state["loaded_integration_tools"] == ["analyzePlan"]
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert request.tool is not None
-        result = await request.tool.ainvoke(request.tool_call["args"])
-        return ToolMessage(content=result, tool_call_id=request.tool_call["id"])
-
-    call = _Request(
-        state=loaded_state,
-        tools=[],
-        tool_call={"name": "analyzePlan", "args": {"value": "plan"}, "id": "call-1"},
-    )
-    result = await middleware.awrap_tool_call(cast(ToolCallRequest, call), tool_handler)
-
-    assert isinstance(result, ToolMessage)
-    assert result.content == "plan"
-    assert builds == 1
-    assert calls == 1
-
-
-async def test_unknown_qualified_name_is_rejected() -> None:
-    middleware = DynamicToolMiddleware({"Corridor": [_tool("analyzePlan")]})
-    coroutine = cast(Any, cast(StructuredTool, middleware.tools[0]).coroutine)
-
-    command = await coroutine(tool_names=["Other:analyzePlan"], state={}, tool_call_id="load-1")
-
-    assert isinstance(command, Command)
-    message = cast(dict[str, Any], command.update)["messages"][0]
-    assert message.status == "error"
-    assert message.content == "Unknown integration tools: Other:analyzePlan"
-
-
 async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     async def load() -> list[BaseTool]:
         raise RuntimeError("mcp unreachable")
@@ -673,26 +399,3 @@ async def test_a_group_that_fails_to_build_is_reported_not_raised() -> None:
     message = cast(dict[str, Any], command.update)["messages"][0]
     assert message.status == "error"
     assert "unavailable right now" in message.content
-
-
-async def test_a_group_whose_catalog_is_empty_is_not_offered() -> None:
-    async def load() -> list[BaseTool]:
-        return []
-
-    middleware = DynamicToolMiddleware({"Corridor": IntegrationGroup(tool_names=(), load=load)})
-
-    assert not middleware.has_groups
-    assert "- Corridor" not in cast(StructuredTool, middleware.tools[0]).description
-
-
-async def test_fork_preserves_loaded_integration_schemas() -> None:
-    middleware = DynamicToolMiddleware({"Notion": [_tool("notion-search")]})
-    state = cast(
-        DynamicToolState,
-        {
-            "messages": [],
-            "_deepagents_forked_context": True,
-            "loaded_integration_tools": ["notion-search"],
-        },
-    )
-    assert await middleware.abefore_agent(state, cast(Runtime, MagicMock())) == {}

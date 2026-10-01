@@ -61,6 +61,8 @@ class Principal:
     created_by: str = ""
     # A workflow names no repository when it means its own.
     default_repo: str = ""
+    # The repositories the threads it starts may reach; None is the installation.
+    token_repositories: tuple[str, ...] | None = None
 
     @classmethod
     def of_key(cls, key: ApiKey) -> Principal:
@@ -81,6 +83,13 @@ class Principal:
             started_by_name=f"{claims.repository} ({claims.workflow or 'workflow'})",
             created_by=claims.repository,
             default_repo=claims.repository,
+            # Anyone can open a pull request against a public repository, and a
+            # workflow it triggers must not reach the rest of the installation.
+            token_repositories=(
+                None
+                if claims.repository_visibility in ("private", "internal")
+                else (claims.repository,)
+            ),
         )
 
     @classmethod

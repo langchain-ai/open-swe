@@ -47,7 +47,10 @@ class Hypothesis(BaseModel):
 class IncidentReport(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     summary: str
+    problem: str = ""
+    previous_occurrence: str = ""
     impact: str = ""
+    cause: str = ""
     next_steps: list[str] = Field(default_factory=list)
     outcome: Literal["inconclusive", "findings"] = "inconclusive"
     hypotheses: list[Hypothesis] = Field(default_factory=list)
@@ -96,6 +99,9 @@ class IncidentReportRecord(BaseModel):
     report: IncidentReport
     digest: str
     run_id: str = ""
+    # True once the one automatic investigation has reached the channel. Later automatic
+    # turns keep this record current without posting again.
+    investigation_posted: bool = False
     posted_digest: str = ""
     posted_run_id: str = ""
     posted_at: str = ""

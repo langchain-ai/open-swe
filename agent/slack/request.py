@@ -26,7 +26,10 @@ class SlackRequest(BaseModel):
     reply_thread_ts: str = ""
     # Another Slack thread whose whole transcript becomes this run's context.
     context_thread_ts: str = ""
+    context_channel_id: str = ""
+    prior_message_text: str = ""
     treat_all_messages_as_mentions: bool = False
+    kitchen_channel: bool = False
     message_update: bool = False
     code_channel: bool = False
     concierge_mode: bool = False

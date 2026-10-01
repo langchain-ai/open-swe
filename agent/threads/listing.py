@@ -27,13 +27,14 @@ from agent.threads.summary import (
     _thread_metadata,
     _thread_summary,
     _thread_timestamp_ms,
-    _thread_updated_ms,
     _ThreadSortBy,
     assert_thread_readable,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
+    thread_updated_ms,
 )
+from agent.transcript.subagents import attach_subagents
 from agent.utils.json_types import JsonObject, ThreadLike, as_thread_dict
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import participant_search_filters
@@ -310,7 +311,9 @@ async def _summarize_threads(
                 minimal_run_update=minimal_run_update,
             )
 
-    return list(await asyncio.gather(*(summarize(thread) for thread in threads)))
+    summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
+    await attach_subagents(summaries)
+    return summaries
 
 
 async def _collect_thread_candidates(
@@ -496,7 +499,7 @@ async def list_dashboard_thread_repos(
         if not full_name:
             continue
         key = full_name.lower()
-        updated_at = _thread_updated_ms(thread)
+        updated_at = thread_updated_ms(thread)
         current = repos.get(key)
         if current is None or updated_at > current["updatedAt"]:
             repos[key] = {

@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, type ReactNode } from "react"
-import type { ModelOption, WorkspaceSettings } from "@/lib/api"
+import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import {
@@ -59,6 +59,7 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
+      badgeClassName={!inherits ? "text-destructive" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}
@@ -163,8 +164,8 @@ export function DefaultRepoSection({
   repositories,
 }: {
   scope: SettingsScope
-  /** On a workspace, its own repositories; on the instance, every repository the installation can see. */
-  repositories: Array<string>
+  /** Every repository the installation can see: any workspace may default to any of them. */
+  repositories: Array<Repository>
 }) {
   const settings = useScopedSettings(scope)
   const scoped = scope.kind === "workspace"
@@ -173,7 +174,7 @@ export function DefaultRepoSection({
       title="Default repository"
       description={
         scoped
-          ? "Where a run in this workspace lands when nothing names a repository. An inherited instance default only applies if this workspace owns it."
+          ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
@@ -187,7 +188,8 @@ export function DefaultRepoSection({
             <div className="w-56">
               <RepoSelector
                 autoSelect={false}
-                repos={repositories.map((full_name) => ({ full_name }))}
+                repos={repositories}
+                allowArchived
                 selectedRepo={settings.data?.default_repo ?? null}
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"

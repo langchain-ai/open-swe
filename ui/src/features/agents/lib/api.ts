@@ -8,6 +8,7 @@ import type {
   AutomationTrigger,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
 import { dashboardApiBase } from "@/lib/api-base"
 import {
   DashboardRequestError,
@@ -39,6 +40,8 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
+  /** Slug of the workspace every run launches in. */
+  workspace: string
 }
 
 export interface ScheduleUpdateRequest {
@@ -53,6 +56,7 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+  workspace?: string | null
 }
 
 export interface ScheduleTriggerResult {
@@ -435,6 +439,14 @@ export const agentsApi = {
   getThreadWorkingTreeDiff: (threadId: string) =>
     agentsRequest<ThreadTurnDiff>(
       `/threads/${encodeURIComponent(threadId)}/working-tree-diff`
+    ),
+  getThreadPath: (threadId: string, path: string) =>
+    agentsRequest<WorkspacePath>(
+      `/threads/${encodeURIComponent(threadId)}/files?path=${encodeURIComponent(path)}`
+    ),
+  getThreadFileIndex: (threadId: string) =>
+    agentsRequest<WorkspaceFileIndex>(
+      `/threads/${encodeURIComponent(threadId)}/file-index`
     ),
   downloadThreadRecoveryPatch: (threadId: string) =>
     agentsBlobRequest(

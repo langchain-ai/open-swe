@@ -173,6 +173,11 @@ ENV.var(
     default="https://api.host.langchain.com",
 )
 ENV.var(
+    "TYPESAFE_API_KEY",
+    "TypeSafe key for direct Jev model routing when available.",
+    secret=True,
+)
+ENV.var(
     "LANGSMITH_GATEWAY_API_KEY",
     "LangSmith key with gateway:invoke for the LLM Gateway.",
     secret=True,
@@ -340,6 +345,10 @@ ENV.var(
     "LangGraph API runtime variant.",
     default="",
 )
+ENV.var(
+    "OPENSWE_ENV",
+    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
+)
 ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
@@ -376,7 +385,6 @@ ENV.var(
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
 ENV.var("TOOL_LOADER_TIMEOUT_SECONDS", "Timeout for loading optional tool integrations.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
-ENV.var("OPEN_SWE_WRAPUP_TIMEOUT_SECONDS", "Time granted to wrap up after a timeout.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------
 ENV.var(

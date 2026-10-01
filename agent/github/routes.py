@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from agent.github import webhook as service
 from agent.schedules import store as schedules
 from agent.webhooks import common
+from agent.webhooks.event_log import EventLog, EventRefs
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
@@ -34,6 +35,14 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    await EventLog.record(
+        request,
+        body,
+        "github",
+        event_type=event_type,
+        delivery_id=delivery_id,
+        refs=EventRefs.github(body),
+    )
     common.logger.info(
         "GitHub webhook received",
         extra={
@@ -103,6 +112,10 @@ async def github_webhook(
                 await common.update_agent_pr_usage_from_webhook(payload, delivery_id=delivery_id)
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
+        if action == "closed":
+            background_tasks.add_task(service.settle_human_review_on_close, payload)
+        elif action in common.GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(service.settle_human_reviews, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -149,6 +162,10 @@ async def github_webhook(
             delivery_id,
         )
         return {"status": "accepted", "message": "Processing GitHub CI event"}
+
+    if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
+        # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
+        background_tasks.add_task(service.settle_human_reviews, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

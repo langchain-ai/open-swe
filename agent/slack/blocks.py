@@ -17,6 +17,11 @@ from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
 SECTION_TEXT_MAX_CHARS = 3000
+# Slack documents no rich-text limit; 4.5k characters is the largest block verified to render.
+CODE_TEXT_MAX_CHARS = 4000
+# Cumulative across every markdown block in one message.
+MARKDOWN_TEXT_MAX_CHARS = 12000
+MESSAGE_MAX_BLOCKS = 50
 BUTTON_TEXT_MAX_CHARS = 75
 OPTION_TEXT_MAX_CHARS = 75
 ButtonStyle = Literal["primary", "danger"]
@@ -41,6 +46,11 @@ class SectionBlock(TypedDict):
     text: TextObject
 
 
+class MarkdownBlock(TypedDict):
+    type: Literal["markdown"]
+    text: str
+
+
 class ContextBlock(TypedDict):
     type: Literal["context"]
     elements: list[TextObject]
@@ -60,32 +70,67 @@ class ImageBlock(TypedDict):
     alt_text: str
 
 
+class RichTextText(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class RichTextPreformatted(TypedDict):
+    type: Literal["rich_text_preformatted"]
+    elements: list[RichTextText]
+    language: NotRequired[str]
+
+
+class RichTextBlock(TypedDict):
+    type: Literal["rich_text"]
+    elements: list[RichTextPreformatted]
+
+
 class ButtonElement(TypedDict):
     type: Literal["button"]
     text: PlainText
     action_id: str
     value: NotRequired[str]
+    url: NotRequired[str]
     style: NotRequired[ButtonStyle]
 
 
-class OptionObject(TypedDict):
-    text: TextObject
+class SelectOption(TypedDict):
+    text: PlainText
     value: str
 
 
-class CheckboxesElement(TypedDict):
-    type: Literal["checkboxes"]
+class StaticSelect(TypedDict):
+    type: Literal["static_select"]
     action_id: str
-    options: list[OptionObject]
-    initial_options: NotRequired[list[OptionObject]]
+    options: list[SelectOption]
+    initial_option: NotRequired[SelectOption]
+    placeholder: NotRequired[PlainText]
 
 
-type ActionElement = ButtonElement | CheckboxesElement
+type ConversationKind = Literal["public", "private", "im", "mpim"]
+
+
+class ConversationFilter(TypedDict, total=False):
+    include: list[ConversationKind]
+    exclude_external_shared_channels: bool
+    exclude_bot_users: bool
+
+
+class ConversationsSelect(TypedDict):
+    type: Literal["conversations_select"]
+    action_id: str
+    filter: NotRequired[ConversationFilter]
+    placeholder: NotRequired[PlainText]
+
+
+type ActionElement = ButtonElement | StaticSelect
 
 
 class ActionsBlock(TypedDict):
     type: Literal["actions"]
     elements: list[ActionElement]
+    block_id: NotRequired[str]
 
 
 class FeedbackButton(TypedDict):
@@ -118,15 +163,17 @@ class InputBlock(TypedDict):
     type: Literal["input"]
     block_id: str
     label: PlainText
-    element: PlainTextInput
+    element: PlainTextInput | ConversationsSelect
     optional: NotRequired[bool]
 
 
 type Block = (
     SectionBlock
+    | MarkdownBlock
     | ContextBlock
     | DividerBlock
     | ImageBlock
+    | RichTextBlock
     | ActionsBlock
     | ContextActionsBlock
     | InputBlock
@@ -155,6 +202,10 @@ def section(text: str) -> SectionBlock:
     return {"type": "section", "text": mrkdwn(text)}
 
 
+def markdown(text: str) -> MarkdownBlock:
+    return {"type": "markdown", "text": text}
+
+
 def context(*texts: str) -> ContextBlock:
     return {"type": "context", "elements": [mrkdwn(text) for text in texts]}
 
@@ -163,12 +214,47 @@ def image(file_id: str, alt_text: str) -> ImageBlock:
     return {"type": "image", "slack_file": {"id": file_id}, "alt_text": alt_text}
 
 
+def split_lines(text: str, limit: int) -> list[str]:
+    """``text`` cut on line boundaries into non-blank pieces of at most ``limit`` characters."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if current and len(current) + len(line) > limit:
+            chunks.append(current)
+            current = ""
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        current += line
+    chunks.append(current)
+    return [chunk.rstrip("\n") for chunk in chunks if chunk.strip()]
+
+
+def code_blocks(body: str, *, language: str | None = None) -> list[RichTextBlock]:
+    """All of ``body`` as syntax-highlighted code; unlike mrkdwn, rich text takes it literally."""
+    blocks: list[RichTextBlock] = []
+    for chunk in split_lines(body, CODE_TEXT_MAX_CHARS):
+        preformatted: RichTextPreformatted = {
+            "type": "rich_text_preformatted",
+            "elements": [{"type": "text", "text": chunk}],
+        }
+        if language:
+            preformatted["language"] = language
+        blocks.append({"type": "rich_text", "elements": [preformatted]})
+    return blocks
+
+
 def divider() -> DividerBlock:
     return {"type": "divider"}
 
 
 def button(
-    text: str, *, action_id: str, value: str | None = None, style: ButtonStyle | None = None
+    text: str,
+    *,
+    action_id: str,
+    value: str | None = None,
+    url: str | None = None,
+    style: ButtonStyle | None = None,
 ) -> ButtonElement:
     element: ButtonElement = {
         "type": "button",
@@ -177,22 +263,61 @@ def button(
     }
     if value is not None:
         element["value"] = value
+    if url is not None:
+        element["url"] = url
     if style is not None:
         element["style"] = style
     return element
 
 
-def checkbox(text: str, *, action_id: str, value: str) -> CheckboxesElement:
-    """A single unticked checkbox; a click's ``state.values`` says whether it is ticked."""
-    return {
-        "type": "checkboxes",
+def actions(*elements: ActionElement, block_id: str | None = None) -> ActionsBlock:
+    block: ActionsBlock = {"type": "actions", "elements": list(elements)}
+    if block_id is not None:
+        block["block_id"] = block_id
+    return block
+
+
+def option(text: str, value: str) -> SelectOption:
+    return {"text": plain_text(text[:OPTION_TEXT_MAX_CHARS]), "value": value}
+
+
+def static_select(
+    *,
+    action_id: str,
+    options: Sequence[SelectOption],
+    initial: SelectOption | None = None,
+    placeholder: str | None = None,
+) -> StaticSelect:
+    element: StaticSelect = {
+        "type": "static_select",
         "action_id": action_id,
-        "options": [{"text": plain_text(text[:OPTION_TEXT_MAX_CHARS]), "value": value}],
+        "options": list(options),
     }
+    if initial is not None:
+        element["initial_option"] = initial
+    if placeholder is not None:
+        element["placeholder"] = plain_text(placeholder)
+    return element
 
 
-def actions(*elements: ActionElement) -> ActionsBlock:
-    return {"type": "actions", "elements": list(elements)}
+def conversation_input(
+    *, block_id: str, label: str, action_id: str, include: Sequence[ConversationKind]
+) -> InputBlock:
+    """A required channel picker for a modal; external shared channels are never offered."""
+    return {
+        "type": "input",
+        "block_id": block_id,
+        "label": plain_text(label),
+        "element": {
+            "type": "conversations_select",
+            "action_id": action_id,
+            "filter": {
+                "include": list(include),
+                "exclude_external_shared_channels": True,
+                "exclude_bot_users": True,
+            },
+        },
+    }
 
 
 def text_input(

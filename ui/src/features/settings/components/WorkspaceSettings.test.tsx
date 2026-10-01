@@ -25,6 +25,23 @@ import { makeQueryClient } from "@/lib/query"
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
+vi.mock("@monaco-editor/react", () => ({
+  default: ({
+    value,
+    onChange,
+    options,
+  }: {
+    value: string
+    onChange: (value: string) => void
+    options: { ariaLabel: string }
+  }) => (
+    <textarea
+      aria-label={options.ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}))
 
 const RECORD: WorkspaceRecord = {
   slug: "oss",
@@ -32,9 +49,11 @@ const RECORD: WorkspaceRecord = {
   prompt: "Run make test.",
   repos: ["acme/oss"],
   slack_channel_ids: ["C1"],
+  kitchen_channel_ids: [],
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
+  snapshot_id: "snapshot-1",
   snapshot_status: "ready",
   refresh_status: "success",
   vcpus: 4,
@@ -67,6 +86,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "OSS",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         is_default: true,
         default_repo: null,
         has_snapshot: true,
@@ -76,6 +96,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         name: "Core",
         repos: ["acme/api"],
         slack_channel_ids: [],
+        kitchen_channel_ids: [],
         is_default: false,
         default_repo: null,
         has_snapshot: false,
@@ -111,14 +132,14 @@ function mockApis(record: WorkspaceRecord = RECORD) {
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
-function renderPage(canEdit = true, onDeleted = vi.fn()) {
+function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
       <WorkspaceSettingsPanel
-        slug="oss"
+        slug={slug}
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
@@ -127,6 +148,14 @@ function renderPage(canEdit = true, onDeleted = vi.fn()) {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("offers no way to delete the default workspace", async () => {
+    mockApis({ ...RECORD, slug: "default", name: "Default" })
+    renderPage(true, vi.fn(), "default")
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+  })
+
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
     mockApis()
     const onDeleted = vi.fn()
@@ -207,7 +236,15 @@ describe("WorkspaceSettingsPanel", () => {
     // Bound channels read by name once the directory is in.
     expect((await screen.findAllByText("#oss-help")).length).toBeGreaterThan(0)
 
+    const general = name.closest("section")!
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.change(name, { target: { value: "Discard this" } })
+    fireEvent.click(within(general).getByRole("button", { name: "Cancel" }))
+    expect((name as HTMLInputElement).value).toBe("OSS")
+    expect(within(general).queryByRole("button", { name: "Cancel" })).toBeNull()
+
     fireEvent.change(name, { target: { value: " OSS support " } })
+    expect(within(general).getByRole("button", { name: "Cancel" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() =>
@@ -215,6 +252,7 @@ describe("WorkspaceSettingsPanel", () => {
         name: "OSS support",
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
+        kitchen_channel_ids: [],
         prompt: "Run make test.",
       })
     )
@@ -277,6 +315,9 @@ describe("WorkspaceSettingsPanel", () => {
           .getByRole("button", { name: "Save" })
           .closest("section")
         if (!general) throw new Error("no General section")
+        expect(
+          within(general).queryByRole("button", { name: "Cancel" })
+        ).toBeNull()
         expect(within(general).getByRole("status").textContent).toContain(
           savedStatus === "refreshing"
             ? "Rebuilding sandbox image"
@@ -339,7 +380,7 @@ describe("WorkspaceSettingsPanel", () => {
             ? "image rebuild could not be confirmed"
             : outcome === "failed"
               ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
+              : "Sandbox image built with the saved repositories."
         )
         expect(
           screen
@@ -379,14 +420,19 @@ describe("WorkspaceSettingsPanel", () => {
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
     })
     const refresh = vi
       .spyOn(api, "refreshWorkspace")
       .mockResolvedValue({ started: true, run_id: "run-1" })
     renderPage()
 
-    const setup = await screen.findByLabelText("Setup script")
-    expect((setup as HTMLTextAreaElement).value).toBe("make setup")
+    await screen.findByRole("button", { name: "Edit setup script" })
+    const sandbox = screen
+      .getByRole("button", { name: "Save scripts" })
+      .closest("section")!
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
+    expect(screen.queryByLabelText("Setup script")).toBeNull()
     expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
     expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
     for (const trigger of screen.getAllByRole("button", {
@@ -402,20 +448,83 @@ describe("WorkspaceSettingsPanel", () => {
       fireEvent.keyDown(popup, { key: "Escape" })
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     }
-    fireEvent.change(setup, { target: { value: "make setup && make build" } })
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    const setup = await screen.findByRole("textbox", { name: "Setup script" })
+    expect((setup as HTMLTextAreaElement).value).toBe("make setup")
+    fireEvent.change(setup, { target: { value: "Discard this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(within(sandbox).getByRole("button", { name: "Cancel" }))
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    const restoredSetup = await screen.findByRole("textbox", {
+      name: "Setup script",
+    })
+    expect((restoredSetup as HTMLTextAreaElement).value).toBe("make setup")
+    fireEvent.change(restoredSetup, {
+      target: { value: "make setup && make build" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(update).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit update script" }))
+    fireEvent.change(
+      await screen.findByRole("textbox", { name: "Update script" }),
+      {
+        target: { value: "git pull --ff-only" },
+      }
+    )
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    expect(
+      (
+        (await screen.findByRole("textbox", {
+          name: "Setup script",
+        })) as HTMLTextAreaElement
+      ).value
+    ).toBe("make setup && make build")
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Unsaved workspace name" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
         setup_script: "make setup && make build",
-        update_script: "",
+        update_script: "git pull --ff-only",
       })
     )
+
+    await waitFor(() =>
+      expect(
+        within(
+          screen
+            .getByRole("button", { name: "Save scripts" })
+            .closest("section")!
+        ).queryByRole("button", { name: "Cancel" })
+      ).toBeNull()
+    )
+
+    expect(
+      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+    ).toBe("Unsaved workspace name")
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
 
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.
     const getWorkspace = vi.spyOn(api, "getWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
       refresh_status: "refreshing",
     })
     const readsBefore = getWorkspace.mock.calls.length
@@ -431,8 +540,23 @@ describe("WorkspaceSettingsPanel", () => {
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("offers only the workspace's own repositories as its default", async () => {
+  it("offers every accessible repository as its default", async () => {
     mockApis()
+    // The repository list loads for a signed-in user.
+    vi.spyOn(api, "me").mockResolvedValue({
+      login: "alice",
+      email: null,
+      avatar_url: null,
+      is_admin: true,
+    })
+    vi.spyOn(api, "repos").mockResolvedValue({
+      installations: [],
+      repositories: [
+        { full_name: "acme/oss", private: false, archived: false },
+        { full_name: "acme/api", private: true, archived: false },
+        { full_name: "acme/legacy", private: false, archived: true },
+      ],
+    })
     renderPage()
 
     // The selector stays disabled until the workspace's settings have loaded.
@@ -442,11 +566,17 @@ describe("WorkspaceSettingsPanel", () => {
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
 
-    // The chip in General plus the option in the portalled dropdown; Core's repo nowhere.
-    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
-    const option = screen.getByRole("button", { name: "acme/oss" })
+    // Core prefers acme/api, and OSS can still default to it.
+    const option = await screen.findByRole("button", {
+      name: /acme\/api\s*Private/,
+    })
     expect(option.closest("section")).toBeNull()
-    expect(screen.queryByText("acme/api")).toBeNull()
+    expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
+    expect(screen.queryByText("acme/legacy")).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
+    expect(
+      screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })
+    ).toBeTruthy()
   })
 
   it("turns an inherited setting into an override and resets it back", async () => {

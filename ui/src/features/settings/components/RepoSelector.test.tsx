@@ -118,3 +118,91 @@ it("isolates accounts and does not auto-select disabled or multi-select pickers"
   )
   expect(change).not.toHaveBeenCalled()
 })
+
+it("never offers archived choices or an archive toggle by default", async () => {
+  render(
+    <RepoSelector
+      repos={[
+        { full_name: "org/active", private: false, archived: false },
+        {
+          full_name: "org/legacy",
+          private: false,
+          archived: true,
+        },
+      ]}
+      onRepoChange={vi.fn()}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
+  expect(await screen.findByText("org/active")).toBeTruthy()
+  expect(screen.queryByText("org/legacy")).toBeNull()
+  expect(screen.queryByRole("checkbox", { name: "Show archived" })).toBeNull()
+})
+
+it("hides archives even in search until opted in, without clearing the selection", async () => {
+  const onRepoChange = vi.fn()
+  render(
+    <RepoSelector
+      allowArchived
+      repos={[
+        { full_name: "org/active", private: false, archived: false },
+        {
+          full_name: "org/legacy",
+          private: false,
+          archived: true,
+        },
+        {
+          full_name: "org/internal-legacy",
+          private: true,
+          archived: true,
+        },
+      ]}
+      selectedRepo="org/legacy"
+      onRepoChange={onRepoChange}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
+  expect(
+    await screen.findByRole("button", { name: /org\/active\s*Public/ })
+  ).toBeTruthy()
+  expect(
+    screen.queryByRole("button", { name: /org\/legacy\s*Public\s*archive/ })
+  ).toBeNull()
+  expect(onRepoChange).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByPlaceholderText("Search repositories…"), {
+    target: { value: "LEGACY" },
+  })
+  expect(screen.getByText("No matches")).toBeTruthy()
+  fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
+  expect(
+    screen.getByRole("button", { name: /org\/legacy\s*Public\s*archive/ })
+  ).toBeTruthy()
+  expect(
+    screen.queryByRole("button", { name: /org\/active\s*Public/ })
+  ).toBeNull()
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /org\/internal-legacy\s*Private\s*archive/,
+    })
+  )
+  expect(onRepoChange).toHaveBeenCalledWith("org/internal-legacy")
+})
+
+it("does not auto-select an archived recent repository", async () => {
+  useRecentRepos.setState({
+    byAccount: { "alice:github": ["org/legacy", "org/active"] },
+  })
+  const change = vi.fn()
+  render(
+    <RepoSelector
+      allowArchived
+      repos={[
+        { full_name: "org/legacy", archived: true },
+        { full_name: "org/active", archived: false },
+      ]}
+      onRepoChange={change}
+    />
+  )
+  await waitFor(() => expect(change).toHaveBeenCalledWith("org/active"))
+})

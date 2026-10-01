@@ -299,7 +299,7 @@ def _thread_timestamp_ms(thread: ThreadLike, field: _ThreadSortBy) -> int:
     return 0
 
 
-def _thread_updated_ms(thread: ThreadLike) -> int:
+def thread_updated_ms(thread: ThreadLike) -> int:
     return _thread_timestamp_ms(thread, "updated_at")
 
 

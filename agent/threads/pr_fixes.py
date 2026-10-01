@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Literal
 
 from fastapi import HTTPException
@@ -13,11 +14,11 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.pull_requests import PullRequest
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
-    _create_dashboard_thread_record,
+    create_dashboard_thread_record,
 )
 from agent.threads.summary import _assert_thread_postable
 from agent.utils.json_types import thread_metadata
@@ -73,7 +74,7 @@ class OpenThreadIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = False
 
     def prompt(self, url: str) -> str:
-        return render_prompt("runs/pull-request-thread.md", url=url)
+        return prompt("runs/pull-request-thread", url=url)
 
     def thread_title(self, full_name: str, number: int) -> str:
         return self.title
@@ -86,14 +87,14 @@ class FixIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        prompt = render_prompt("runs/pull-request-fix.md", url=url)
+        text = prompt("runs/pull-request-fix", url=url)
         if self.context is None:
-            return prompt
-        snapshot = render_prompt(
-            "runs/pull-request-fix-context.md",
+            return text
+        snapshot = prompt(
+            "runs/pull-request-fix-context",
             snapshot=self.context.model_dump_json(indent=2),
         )
-        return f"{prompt}\n\n{snapshot}"
+        return f"{text}\n\n{snapshot}"
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Fix {full_name}#{number}"
@@ -105,7 +106,7 @@ class AddressCommentsIntent(_PullRequestIntentBase):
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        return render_prompt("runs/pull-request-comments.md", url=url)
+        return prompt("runs/pull-request-comments", url=url, comment_url="")
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Address comments on {full_name}#{number}"
@@ -121,16 +122,12 @@ class AddressCommentIntent(_PullRequestIntentBase):
     def prompt(self, url: str) -> str:
         if not self.comment_url.startswith(f"{url}#"):
             raise HTTPException(422, "comment does not belong to this pull request")
-        prompt = render_prompt(
-            "runs/pull-request-comment.md", url=url, comment_url=self.comment_url
-        )
+        text = prompt("runs/pull-request-comments", url=url, comment_url=self.comment_url)
         instructions = self.instructions.strip()
         if not instructions:
-            return prompt
-        extra = render_prompt(
-            "runs/pull-request-comment-instructions.md", instructions=instructions
-        )
-        return f"{prompt}\n\n{extra}"
+            return text
+        extra = prompt("runs/pull-request-comment-instructions", instructions=instructions)
+        return f"{text}\n\n{extra}"
 
     def thread_title(self, full_name: str, number: int) -> str:
         return f"Address comment on {full_name}#{number}"
@@ -213,7 +210,7 @@ async def _find_or_create_pr_thread(
     candidates = await _find_pr_threads(owner, repo, number, login, email)
     if candidates:
         return candidates[0]["thread_id"]
-    thread = await _create_dashboard_thread_record(
+    thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -304,7 +301,46 @@ async def start_pull_request_thread(
             prompt,
             configurable,
             source="dashboard",
+            thread_title=None,
             client=client,
             multitask_strategy="enqueue",
         )
         return PullRequestThreadRun(thread_id=thread_id)
+
+
+async def dispatch_pull_request_prompt(
+    owner: str,
+    repo: str,
+    number: int,
+    login: str,
+    prompt: str,
+    *,
+    title: str,
+    before_dispatch: Callable[[str], Awaitable[None]],
+) -> str:
+    """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
+
+    ``before_dispatch`` receives the thread id before the run is queued, so the caller
+    can record which thread it woke before that thread can act.
+    """
+    url = f"https://github.com/{owner}/{repo}/pull/{number}"
+    client = langgraph_client()
+    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+        thread_id = await _find_or_create_pr_thread(
+            owner, repo, number, login, None, prompt=prompt, title=title
+        )
+        await before_dispatch(thread_id)
+        current = await client.threads.get(thread_id)
+        configurable = await _build_dashboard_configurable(
+            thread_id, login, thread_metadata(current)
+        )
+        await dispatch_agent_run(
+            thread_id,
+            prompt,
+            configurable,
+            source="dashboard",
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    return thread_id

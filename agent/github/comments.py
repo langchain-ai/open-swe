@@ -12,7 +12,7 @@ import httpx2
 
 from agent.config import ENV
 from agent.github.thread_token import GitHubAuthError
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ __all__ = [
     "fetch_pr_branch",
     "fetch_pr_comments_since_last_tag",
     "fetch_pr_event_comments",
+    "fence_github_comment_body",
     "format_github_comment_body_for_prompt",
     "mentions_open_swe",
     "post_github_comment",
@@ -142,8 +143,13 @@ def format_github_comment_body_for_prompt(
     ``trusted`` is the lowercased GitHub logins of known Open SWE users; anyone
     else's words are fenced as untrusted.
     """
+    return fence_github_comment_body(body, registered=author.strip().lower() in trusted)
+
+
+def fence_github_comment_body(body: str, *, registered: bool) -> str:
+    """Sanitize ``body``, fencing it as untrusted unless its author is a registered user."""
     sanitized_body = sanitize_github_comment_body(body)
-    if author.strip().lower() in trusted:
+    if registered:
         return sanitized_body
 
     return (
@@ -616,8 +622,8 @@ def build_pr_prompt(
     repo_line = ""
     if repo_config:
         repo_line = f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-    return render_prompt(
-        "runs/github-pr-mention.md",
+    return prompt(
+        "runs/github-pr-mention",
         repo_line=repo_line,
         pr_url=pr_url,
         comments=comments_text,

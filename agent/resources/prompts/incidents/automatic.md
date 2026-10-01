@@ -1,0 +1,1 @@
+New activity arrived in the incident channel. Review the new context messages and record an updated report so the stored investigation and postmortem stay current. This turn does not post to the channel, so do not restate what responders already said there.

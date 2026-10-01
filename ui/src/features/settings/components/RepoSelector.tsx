@@ -12,7 +12,12 @@ import { useRecentRepos } from "@/lib/recentRepos"
 import { OwnershipPicker, type OwnershipPickerProps } from "./OwnershipPicker"
 import { cn } from "@/lib/utils"
 
-type RepoOption = { full_name: string; label?: string }
+type RepoOption = {
+  full_name: string
+  label?: string
+  private?: boolean
+  archived?: boolean
+}
 
 interface CommonProps {
   repos?: Array<RepoOption>
@@ -30,6 +35,7 @@ interface CommonProps {
   autoSelect?: boolean
   historyScope?: string
   footer?: ReactNode
+  allowArchived?: boolean
   refreshable?: boolean
 }
 
@@ -114,6 +120,7 @@ function RepoSelect(
     autoSelect = true,
     footer,
     refreshable = true,
+    allowArchived = false,
     history,
     remember,
   } = props
@@ -130,7 +137,7 @@ function RepoSelect(
       return
     }
     const recent = history.find((id) =>
-      repos?.some((repo) => repo.full_name === id)
+      repos?.some((repo) => repo.full_name === id && !repo.archived)
     )
     if (recent) {
       initialized.current = true
@@ -156,14 +163,18 @@ function RepoSelect(
   }
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [showArchived, setShowArchived] = useState(false)
   const refresh = useRefreshRepos()
 
   const filteredRepos = useMemo(() => {
     const all = prioritize(repos ?? [], history, (repo) => repo.full_name)
     const q = query.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
-  }, [repos, query, history])
+    return all.filter(
+      (repo) =>
+        ((allowArchived && showArchived) || !repo.archived) &&
+        repo.full_name.toLowerCase().includes(q)
+    )
+  }, [repos, query, history, allowArchived, showArchived])
 
   return (
     <Popover
@@ -234,6 +245,16 @@ function RepoSelect(
               </button>
             )}
           </div>
+          {allowArchived && repos?.some((repo) => repo.archived) && (
+            <label className="flex cursor-pointer items-center gap-2 border-b border-border px-2 py-1.5 text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+              />
+              Show archived
+            </label>
+          )}
           <div
             className="overflow-y-auto"
             role={props.multiple ? "menu" : undefined}
@@ -267,7 +288,7 @@ function RepoSelect(
                   <button
                     key={repo.full_name}
                     type="button"
-                    aria-label={repo.label ?? repo.full_name}
+                    aria-label={`${repo.label ?? repo.full_name}${repo.private === undefined ? "" : ` ${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`}`}
                     onClick={() => choose(repo.full_name)}
                     role={props.multiple ? "menuitemcheckbox" : undefined}
                     aria-checked={props.multiple ? checked : undefined}
@@ -280,6 +301,12 @@ function RepoSelect(
                     <span className="truncate">
                       {repo.label ?? repo.full_name}
                     </span>
+                    {repo.private !== undefined && (
+                      <span className="ml-2 shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
+                        {repo.private ? "Private" : "Public"}
+                        {repo.archived ? " archive" : ""}
+                      </span>
+                    )}
                     {history.includes(repo.full_name) && (
                       <span className="ml-auto pl-3 text-[10px] text-muted-foreground">
                         Recent
