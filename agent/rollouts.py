@@ -83,6 +83,7 @@ class RolloutWatch(BaseModel):
     source_context: dict[str, Any] = Field(default_factory=dict)
     seen: list[str] = Field(default_factory=list)
     dispatched: list[str] = Field(default_factory=list)
+    check_id: str = ""
     cron_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -130,11 +131,20 @@ def rollout_payload_allowed(payload: Mapping[str, Any]) -> bool:
 
 
 def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
-    """True while a stored check still has to run after merge."""
+    """True while a stored check still has to run after merge.
+
+    ``done`` only covers the check id written with it. A follow-up check recorded
+    while an older watch is still running stays pending even if that watch later
+    writes ``done``.
+    """
     check = metadata.get("rollout_check")
     if not isinstance(check, dict):
         return False
-    return metadata.get("rollout_status") != "done"
+    if metadata.get("rollout_status") != "done":
+        return True
+    check_id = check.get("check_id")
+    finished_for = metadata.get("rollout_status_check_id")
+    return isinstance(check_id, str) and bool(check_id) and finished_for != check_id
 
 
 def rollout_env(target_id: str, label: str = "") -> str | None:
@@ -291,6 +301,39 @@ async def _mark_thread(thread_id: str, metadata: dict[str, Any]) -> None:
         logger.warning("Failed to update rollout status for %s", thread_id, exc_info=True)
 
 
+def _status_metadata(status: str, check_id: str) -> dict[str, Any]:
+    metadata = {"rollout_status": status}
+    if check_id:
+        metadata["rollout_status_check_id"] = check_id
+    return metadata
+
+
+def _stored_check_id(thread: Any) -> str:
+    metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    check = metadata.get("rollout_check") if isinstance(metadata, Mapping) else None
+    check_id = check.get("check_id") if isinstance(check, Mapping) else None
+    return check_id if isinstance(check_id, str) else ""
+
+
+async def _superseded(watch: RolloutWatch) -> bool:
+    """True when the thread has recorded a newer check than this watch."""
+    if not watch.check_id:
+        return False
+    try:
+        thread = await get_client().threads.get(watch.thread_id)
+    except Exception:
+        logger.warning("Failed to read rollout check for %s", watch.thread_id, exc_info=True)
+        return False
+    current = _stored_check_id(thread)
+    return bool(current) and current != watch.check_id
+
+
+async def _retire(watch: RolloutWatch) -> None:
+    watch.active = False
+    await _stop_cron(watch)
+    await WATCHES.save(watch)
+
+
 async def start_watch(
     *,
     thread_id: str,
@@ -306,15 +349,18 @@ async def start_watch(
     resolves_thread: bool,
     run_config: dict[str, Any],
     source_context: dict[str, Any],
+    check_id: str = "",
 ) -> RolloutWatch:
     key = watch_key(owner, repo, pr_number)
     existing = await WATCHES.get(key)
     if existing and existing.active and existing.thread_id not in {"", thread_id}:
         raise ValueError("This pull request is already watched from another agent thread")
     if existing and existing.active and existing.thread_id == thread_id and existing.sha == sha:
+        if check_id:
+            existing.check_id = check_id
         existing.cron_id = await _ensure_watch_cron(key)
         saved = await WATCHES.save(existing)
-        await _mark_thread(thread_id, {"rollout_status": "watching"})
+        await _mark_thread(thread_id, _status_metadata("watching", saved.check_id))
         return saved
 
     workspace = ""
@@ -342,6 +388,7 @@ async def start_watch(
         workspace=workspace,
         run_config=run_config,
         source_context=source_context,
+        check_id=check_id,
         cron_id=existing.cron_id if existing else None,
         created_at=now,
         updated_at=now,
@@ -359,7 +406,7 @@ async def start_watch(
                     logger.warning("Failed to roll back rollout cron %s", watch.cron_id)
             await WATCHES.delete(key)
         raise
-    await _mark_thread(thread_id, {"rollout_status": "watching"})
+    await _mark_thread(thread_id, _status_metadata("watching", saved.check_id))
     return saved
 
 
@@ -406,6 +453,7 @@ async def start_from_merge(
         resolves_thread=resolves_thread,
         run_config=run_config if isinstance(run_config, dict) else {},
         source_context=source_context if isinstance(source_context, dict) else {},
+        check_id=_clip(check.get("check_id"), 80),
     )
 
 
@@ -420,10 +468,11 @@ async def _stop_cron(watch: RolloutWatch) -> None:
 
 
 async def _finish(watch: RolloutWatch) -> None:
-    watch.active = False
-    await _stop_cron(watch)
-    await WATCHES.save(watch)
-    metadata: dict[str, Any] = {"rollout_status": "done"}
+    superseded = await _superseded(watch)
+    await _retire(watch)
+    if superseded:
+        return
+    metadata = _status_metadata("done", watch.check_id)
     if watch.resolves_thread:
         metadata["resolved"] = True
         metadata["resolved_at_ms"] = int(datetime.now(UTC).timestamp() * 1000)
@@ -508,6 +557,9 @@ async def evaluate_rollout(key: str) -> str:
         watch = await WATCHES.get(key)
         if watch is None or not watch.active:
             return "inactive"
+        if await _superseded(watch):
+            await _retire(watch)
+            return "superseded"
         if _expired(watch):
             waiting = ", ".join(env for env in watch.envs if env not in watch.dispatched) or "none"
             sent = await _dispatch(

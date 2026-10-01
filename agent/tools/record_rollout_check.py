@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+from uuid import uuid4
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
@@ -61,6 +62,7 @@ async def record_rollout_check(
         }
     )
     check = {
+        "check_id": uuid4().hex,
         "page": _without_userinfo(_clip(page, _PAGE_LIMIT)),
         "expected": _clip(expected, _TEXT_LIMIT),
         "metrics": _clip(metrics, _TEXT_LIMIT),

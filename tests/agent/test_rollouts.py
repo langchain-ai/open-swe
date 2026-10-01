@@ -63,6 +63,7 @@ class _Threads:
     def __init__(self) -> None:
         self.active: set[str] = set()
         self.updated: list[dict[str, Any]] = []
+        self.records: dict[str, dict[str, Any]] = {}
         self.create_lock = asyncio.Lock()
 
     async def create(self, *, thread_id: str, if_exists: str, ttl: int) -> None:
@@ -79,6 +80,9 @@ class _Threads:
 
     async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
         self.updated.append({"thread_id": thread_id, "metadata": metadata})
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return self.records.get(thread_id, {"metadata": {}})
 
 
 class _Client:
@@ -240,6 +244,55 @@ async def test_locate_commit_accepts_a_json_string(monkeypatch: pytest.MonkeyPat
     assert report["targets"][0]["contains"] is True
 
 
+def test_done_status_does_not_cover_a_newer_check() -> None:
+    assert rollouts.rollout_watch_pending(
+        {
+            "rollout_check": {"check_id": "newer"},
+            "rollout_status": "done",
+            "rollout_status_check_id": "older",
+        }
+    )
+    assert not rollouts.rollout_watch_pending(
+        {
+            "rollout_check": {"check_id": "older"},
+            "rollout_status": "done",
+            "rollout_status_check_id": "older",
+        }
+    )
+
+
+async def test_older_watch_stops_without_closing_a_newer_check(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await rollouts.start_watch(
+        thread_id="thread-1",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        sha=SHA,
+        author="octocat",
+        envs=["dev", "staging"],
+        page="",
+        expected="",
+        metrics="",
+        resolves_thread=True,
+        run_config={"workspace": "oss"},
+        source_context={},
+        check_id="older",
+    )
+    client.threads.records["thread-1"] = {"metadata": {"rollout_check": {"check_id": "newer"}}}
+
+    async def fail_locate(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("a superseded watch should not poll")
+
+    monkeypatch.setattr(rollouts, "locate_commit", fail_locate)
+    assert await rollouts.evaluate_rollout("acme/repo#7") == "superseded"
+    assert all(item["metadata"].get("rollout_status") != "done" for item in client.threads.updated)
+    assert all("resolved" not in item["metadata"] for item in client.threads.updated)
+    watch = await rollouts.WATCHES.get("acme/repo#7")
+    assert watch is not None and watch.active is False
+
+
 async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
     await rollouts.start_from_merge(
         "thread-1",
@@ -338,6 +391,7 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
     assert result["envs"] == ["dev", "staging"]
     check = updates[0]["rollout_check"]
     assert check["envs"] == ["dev", "staging"]
+    assert isinstance(check["check_id"], str) and check["check_id"]
     assert secret not in json.dumps(check)
     assert check["run_config"]["workspace"] == "oss"
     assert check["run_config"]["slack_thread"]["channel_id"] == "C1"
