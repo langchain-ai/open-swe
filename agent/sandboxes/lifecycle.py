@@ -520,12 +520,8 @@ async def recreate_sandbox_for_thread(
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox while preserving its previous sandbox.
-
-    ``workspace`` boots the thread's workspace snapshot; ``base`` boots the base
-    snapshot with deployment defaults, as a thread with no workspace would.
-    """
+) -> tuple[str, str, str | None]:
+    """Best-effort stop the old sandbox and bind the thread to a fresh one."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = metadata.get("sandbox_id")
@@ -535,6 +531,29 @@ async def recreate_sandbox_for_thread(
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
     if Bridge.bridge_id_of(old_sandbox_id) is not None:
         raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
+
+    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+
+    stop_error = None
+    try:
+        async with asyncio.timeout(10):
+            if ENV.SANDBOX_TYPE.get() != "langsmith":
+                raise NotImplementedError("Stopping this sandbox provider is not supported")
+            async with get_async_sandbox_client() as sandbox_client:
+                await sandbox_client.stop_sandbox(old_sandbox_id)
+    except Exception as exc:
+        stop_error = (
+            "Stopping the old sandbox timed out after 10 seconds"
+            if isinstance(exc, TimeoutError)
+            else str(exc)
+        )
+        logger.warning(
+            "Failed to stop old sandbox before recreation",
+            extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
+            exc_info=True,
+        )
+    else:
+        logger.info("Stopped old sandbox before recreation", extra={"sandbox_id": old_sandbox_id})
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
@@ -565,7 +584,7 @@ async def recreate_sandbox_for_thread(
         old_sandbox_id,
         new_sandbox.id,
     )
-    return old_sandbox_id, new_sandbox.id
+    return old_sandbox_id, new_sandbox.id, stop_error
 
 
 def get_cached_sandbox_backend(
