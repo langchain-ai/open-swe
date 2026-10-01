@@ -6,13 +6,14 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_typesafe import Choice
 from langsmith import get_current_run_tree, trace, tracing_context
 from langsmith.run_trees import RunTree
 
 from agent.dashboard.options import ModelOption
 from agent.input_messages import input_message_text, input_message_timestamps, message_sender_id
 from agent.prompts import prompt
-from agent.utils.jev import JevDecision, select_jev_choice
+from agent.utils.jev import JevDecision, select_jev_choices
 
 MAX_MODEL_REQUEST_CHARS = 8_000
 
@@ -107,28 +108,23 @@ async def infer_requested_model(
         no_request=prompt("model-request/effort-no-request"),
         unavailable=prompt("model-request/effort-unavailable"),
     )
-    choice, effort_choice = await asyncio.gather(
-        asyncio.create_task(
-            select_jev_choice(
-                task[:MAX_MODEL_REQUEST_CHARS],
-                question="runtime_model",
-                instructions=prompt("model-request/instructions"),
-                criteria=criteria,
-                decision=decision,
-            ),
-            context=contextvars.Context(),
+    choices = await asyncio.create_task(
+        select_jev_choices(
+            task[:MAX_MODEL_REQUEST_CHARS],
+            questions={
+                "runtime_model": Choice(
+                    instructions=prompt("model-request/instructions"), criteria=criteria
+                ),
+                "runtime_effort": Choice(
+                    instructions=prompt("model-request/effort-instructions"),
+                    criteria=effort_criteria,
+                ),
+            },
+            decisions={"runtime_model": decision, "runtime_effort": effort_decision},
         ),
-        asyncio.create_task(
-            select_jev_choice(
-                task[:MAX_MODEL_REQUEST_CHARS],
-                question="runtime_effort",
-                instructions=prompt("model-request/effort-instructions"),
-                criteria=effort_criteria,
-                decision=effort_decision,
-            ),
-            context=contextvars.Context(),
-        ),
+        context=contextvars.Context(),
     )
+    choice, effort_choice = choices["runtime_model"], choices["runtime_effort"]
     if choice is None or choice not in criteria:
         return None
     return ModelRequestIntent(

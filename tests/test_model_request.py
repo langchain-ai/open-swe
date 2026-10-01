@@ -26,7 +26,7 @@ async def test_slack_request_never_falls_back_to_unrelated_human(
             )
         )
     classify = AsyncMock()
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
     intent = await infer_requested_model(
         messages=messages,
         requested_models=available_requested_models(fable_enabled=False),
@@ -42,14 +42,14 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
     stream = contextvars.ContextVar("run_stream", default="none")
     observed: list[str] = []
 
-    async def classify(task: str, **kwargs: object) -> str:
+    async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
         assert stream.get() == "none"
         assert get_current_run_tree() is None
         assert var_child_runnable_config.get() is None
         observed.append(task)
-        return "anthropic:claude-opus-5-5" if kwargs["question"] == "runtime_model" else "max"
+        return {"runtime_model": "anthropic:claude-opus-5-5", "runtime_effort": "max"}
 
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
     token = stream.set("agent-stream")
     config_token = var_child_runnable_config.set({"configurable": {"secret": "not-for-classifier"}})
     try:
@@ -75,7 +75,7 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
     finally:
         stream.reset(token)
         var_child_runnable_config.reset(config_token)
-    assert observed == ["Use Oppus for this", "Use Oppus for this"]
+    assert observed == ["Use Oppus for this"]
     assert intent == ModelRequestIntent(
         requested_model="anthropic:claude-opus-5-5", requested_effort="max"
     )
@@ -113,10 +113,10 @@ async def test_effort_selection_preserves_model_failure_safety(
     effort_choice: str | None,
     expected: ModelRequestIntent | None,
 ) -> None:
-    async def classify(task: str, *, question: str, **kwargs: object) -> str | None:
-        return model_choice if question == "runtime_model" else effort_choice
+    async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
+        return {"runtime_model": model_choice, "runtime_effort": effort_choice}
 
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
     assert (
         await infer_requested_model(
             messages=[HumanMessage(content="Use Opus with max reasoning effort")],
