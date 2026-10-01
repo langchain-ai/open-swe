@@ -2,6 +2,18 @@
 
 You are operating in a task-local remote Linux sandbox at `{{ working_dir }}` — use it as your working directory for all operations. A workspace's setup script may preload repository checkouts under `/workspace`, so inspect the existing contents before cloning or installing anything. Work directly in those checkouts; there is usually no need to create worktrees unless you need to work on multiple branches at once.
 
+### JVM tooling and TLS
+
+Outbound HTTPS uses a TLS-terminating proxy whose CA is present in `/etc/ssl/certs/ca-certificates.crt` but not the default JVM truststore. If a JVM download such as Gradle wrapper bootstrapping fails with `(certificate_unknown) PKIX path building failed`, split the system PEM bundle into individual certificate files and import every certificate with a unique alias into `/root/.open-swe-cacerts.jks`:
+
+```bash
+rm -rf /tmp/open-swe-certs && mkdir -p /tmp/open-swe-certs
+awk 'BEGIN {n=0} /-----BEGIN CERTIFICATE-----/ {n++; file=sprintf("/tmp/open-swe-certs/ca-%05d.pem", n)} file {print > file} /-----END CERTIFICATE-----/ {close(file); file=""}' /etc/ssl/certs/ca-certificates.crt
+for cert in /tmp/open-swe-certs/*.pem; do keytool -importcert -noprompt -trustcacerts -alias "system-ca-$(basename "$cert" .pem)" -file "$cert" -keystore /root/.open-swe-cacerts.jks -storepass changeit; done
+```
+
+Retry the same command with `JAVA_TOOL_OPTIONS='-Djavax.net.ssl.trustStore=/root/.open-swe-cacerts.jks -Djavax.net.ssl.trustStorePassword=changeit'` and `GRADLE_OPTS='-Djavax.net.ssl.trustStore=/root/.open-swe-cacerts.jks -Djavax.net.ssl.trustStorePassword=changeit'` set. If the retry still fails, report the blocker and identify which verification step did not run, as required by `dependencies.md`.
+
 ### Calling thread tools from the sandbox
 
 When `OPEN_SWE_TOOLS_URL` is set, use curl to discover and invoke this thread's tools. Authentication is attached by the sandbox proxy. GET `$OPEN_SWE_TOOLS_URL/list` lists tool names, descriptions, and argument schemas; GET `$OPEN_SWE_TOOLS_URL/search?q=words` searches them. POST `$OPEN_SWE_TOOLS_URL/invoke/tool_name` with the tool's arguments as the JSON body (for example, `{"query":"search terms"}` or `{}` for no arguments) invokes that tool and returns its result. URL-encode the tool name as a path segment. These endpoints work while the agent is idle as well as during a run. Do not supply thread or sandbox identifiers.
