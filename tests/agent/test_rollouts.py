@@ -322,7 +322,7 @@ async def test_page_check_reports_config_without_the_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secret = "rollout-bot-test-secret"
-    monkeypatch.setenv("ROLLOUT_BOT_USERNAME", "openswe")
+    monkeypatch.delenv("ROLLOUT_BOT_USERNAME", raising=False)
     monkeypatch.setenv("ROLLOUT_BOT_EMAIL", "openswe@example.com")
     monkeypatch.setenv("ROLLOUT_BOT_PASSWORD", secret)
 
@@ -336,7 +336,9 @@ async def test_page_check_reports_config_without_the_password(
         "https://smith.langchain.com/o/org", "projects"
     )
     assert unavailable["reason"] == "browser_unavailable"
+    assert unavailable["email_configured"] is True
     assert unavailable["password_configured"] is True
+    assert "username_configured" not in unavailable
     assert secret not in json.dumps(unavailable)
 
     monkeypatch.delenv("ROLLOUT_BOT_PASSWORD")
