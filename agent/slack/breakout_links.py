@@ -9,7 +9,7 @@ async def source_thread_line(channel_id: str, message_ts: str) -> str:
     permalink = await get_slack_permalink(channel_id, message_ts)
     if not permalink:
         return ""
-    return f"<{permalink}|from this thread>"
+    return f"<{permalink}|(source)>"
 
 
 async def mark_broken_out(

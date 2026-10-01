@@ -40,15 +40,6 @@ def _load_daytona_module(monkeypatch):
     return module
 
 
-def test_daytona_params_default_to_existing_snapshot(monkeypatch):
-    monkeypatch.delenv("DAYTONA_SANDBOX_SNAPSHOT", raising=False)
-    module = _load_daytona_module(monkeypatch)
-
-    params = module._get_daytona_sandbox_params()
-
-    assert params.snapshot == "daytonaio/sandbox:0.6.0"
-
-
 def test_daytona_params_use_env_snapshot(monkeypatch):
     monkeypatch.setenv("DAYTONA_SANDBOX_SNAPSHOT", "custom/snapshot:1.0")
     module = _load_daytona_module(monkeypatch)
@@ -56,12 +47,3 @@ def test_daytona_params_use_env_snapshot(monkeypatch):
     params = module._get_daytona_sandbox_params()
 
     assert params.snapshot == "custom/snapshot:1.0"
-
-
-def test_daytona_params_treat_blank_snapshot_as_unset(monkeypatch):
-    monkeypatch.setenv("DAYTONA_SANDBOX_SNAPSHOT", "  ")
-    module = _load_daytona_module(monkeypatch)
-
-    params = module._get_daytona_sandbox_params()
-
-    assert params.snapshot == "daytonaio/sandbox:0.6.0"

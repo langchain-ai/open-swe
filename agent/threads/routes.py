@@ -20,6 +20,12 @@ from agent.threads.diffs import (
     get_dashboard_thread_working_tree_diff,
 )
 from agent.threads.feedback import feedback_router
+from agent.threads.files import (
+    WorkspaceFileIndex,
+    WorkspacePath,
+    get_dashboard_thread_file_index,
+    get_dashboard_thread_path,
+)
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -60,6 +66,7 @@ from agent.threads.runs import (
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -90,6 +97,14 @@ async def api_list_threads(
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
+
+
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+async def api_upload_session(
+    request: Request,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/resolve-all")
@@ -296,6 +311,27 @@ async def api_get_thread_branch_diff(
         thread_id,
         session["sub"],
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/files")
+async def api_get_thread_path(
+    thread_id: str,
+    path: str = "",
+    session: dict[str, Any] = SESSION_DEP,
+) -> WorkspacePath:
+    return await get_dashboard_thread_path(
+        thread_id, session["sub"], path, email=session.get("email")
+    )
+
+
+@router.get("/threads/{thread_id}/file-index")
+async def api_get_thread_file_index(
+    thread_id: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> WorkspaceFileIndex:
+    return await get_dashboard_thread_file_index(
+        thread_id, session["sub"], email=session.get("email")
     )
 
 

@@ -220,8 +220,10 @@ async def test_cost_lookup_distinguishes_rejected_requests_from_retryable_failur
         assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
 
 
+@pytest.mark.parametrize("run_cost", [3.25, None])
 async def test_refresh_updates_exact_mapped_slack_message_in_place(
     monkeypatch: pytest.MonkeyPatch,
+    run_cost: float | None,
 ) -> None:
     class _Store:
         async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
@@ -249,11 +251,19 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             ],
         },
     ]
-    monkeypatch.setattr(
-        session_cost,
-        "get_langsmith_thread_cost",
-        AsyncMock(return_value=SimpleNamespace(total_cost=0.42)),
-    )
+
+    async def get_cost(
+        thread_id: str,
+        invocation_id: str,
+        *,
+        run_only: bool = False,
+        lookup_start: str | None = None,
+    ) -> SimpleNamespace | None:
+        if run_only:
+            return SimpleNamespace(total_cost=run_cost) if run_cost is not None else None
+        return SimpleNamespace(total_cost=12.50)
+
+    monkeypatch.setattr(session_cost, "get_langsmith_thread_cost", get_cost)
     monkeypatch.setattr(
         session_cost,
         "fetch_slack_thread_message_by_ts",
@@ -269,14 +279,69 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
 
     status, reason = await session_cost._refresh_once(_state(0), client)
 
+    if run_cost is None:
+        assert status == "pending"
+        update.assert_not_awaited()
+        return
     assert (status, reason) == ("updated", "Slack footer updated")
     update.assert_awaited_once()
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2].endswith("model-a • $0.42")
+    assert args.args[2].endswith("model-a • $12.50 • +$3.25")
+    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 • +$3.25")
     assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
+
+
+async def test_refresh_updates_compact_feedback_footer(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Store:
+        async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
+            if key == "run:run-1":
+                return {"value": {"run_id": "run-1", "thread_ts": "1.0", "message_ts": "1.1"}}
+            return None
+
+    client: Any = SimpleNamespace(store=_Store())
+    url = "https://app/agents/t1"
+    from agent.slack.client import _with_slack_web_link_context_block, append_slack_web_link_footer
+    from agent.slack.run_feedback import feedback_block
+    from agent.utils.run_usage import RunUsageSummary
+
+    usage = RunUsageSummary(models=("model-a",), total_tokens=123)
+    blocks = _with_slack_web_link_context_block(
+        "Done",
+        [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}, feedback_block("run-1")],
+        url,
+        usage,
+    )
+    text = append_slack_web_link_footer("Done", url, usage)
+
+    async def get_cost(
+        thread_id: str,
+        invocation_id: str,
+        *,
+        run_only: bool = False,
+        lookup_start: str | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(total_cost=0.001 if run_only else 0.42)
+
+    monkeypatch.setattr(session_cost, "get_langsmith_thread_cost", get_cost)
+    monkeypatch.setattr(
+        session_cost,
+        "fetch_slack_thread_message_by_ts",
+        AsyncMock(return_value={"text": text, "blocks": blocks}),
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(session_cost, "update_slack_message", update)
+
+    assert await session_cost._refresh_once(_state(0), client) == (
+        "updated",
+        "Slack footer updated",
+    )
+    assert update.await_args is not None
+    assert update.await_args.kwargs["blocks"][-1]["elements"][-1]["text"]["text"] == (
+        "↗ model-a • $0.42 • +<$0.01"
+    )
 
 
 class _Runs:

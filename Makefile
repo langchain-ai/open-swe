@@ -80,15 +80,22 @@ cli:
 	pnpm --filter open-swe-cli run build
 	@echo "Built $(CURDIR)/cli/dist/oswe"
 
+CLI_SOURCES := $(wildcard cli/src/*.ts) desktop/src/shared-config.ts cli/package.json pnpm-lock.yaml
+
+# `make cli`, but only when a source is newer than the binary.
+cli/dist/oswe: $(CLI_SOURCES)
+	@$(MAKE) --no-print-directory cli
+
 ######################
 # TESTING
 ######################
 
 TEST_FILE ?= tests/
+PYTEST_ARGS ?=
 
 test tests:
 	@if [ -d "$(TEST_FILE)" ] || [ -f "$(TEST_FILE)" ]; then \
-		uv run pytest -vvv $(TEST_FILE); \
+		uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE); \
 	else \
 		echo "Skipping tests: path not found: $(TEST_FILE)"; \
 	fi

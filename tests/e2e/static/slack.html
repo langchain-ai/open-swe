@@ -76,6 +76,7 @@
       const $ = (id) => document.getElementById(id);
       const userNames = {};
       let selectedChannel = "C_DEMO";
+      let pickedChannel = false;
       let selectedIsCodeChannel = false;
       let knownCodeChannels = 0;
 
@@ -95,7 +96,7 @@
         const response = await fetch("/mock/slack/action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, message_ts: message.ts, thread_ts: message.thread_ts, user: $("user").value }),
+          body: JSON.stringify({ action, channel: message.channel, message_ts: message.ts, thread_ts: message.thread_ts, user: $("user").value }),
         });
         if (!response.ok) button.disabled = false;
         await poll();
@@ -205,6 +206,7 @@
 
       async function selectChannel(channel) {
         selectedChannel = channel.id;
+        pickedChannel = true;
         selectedIsCodeChannel = Boolean(channel.code_channel);
         $("channel-title").textContent = `# ${channel.name}`;
         $("channel-subtitle").textContent = selectedIsCodeChannel ? "Open SWE code channel · one task, one session" : "Team channel";
@@ -247,7 +249,7 @@
       }
 
       async function pollMessages() {
-        const url = selectedIsCodeChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages";
+        const url = selectedIsCodeChannel || pickedChannel ? `/mock/slack/messages?channel=${encodeURIComponent(selectedChannel)}` : "/mock/slack/messages";
         const messages = await (await fetch(url)).json();
         renderMessages(messages);
       }

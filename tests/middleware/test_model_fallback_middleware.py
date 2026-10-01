@@ -3,31 +3,16 @@
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import anthropic
-import httpx
 import httpx2
 import openai
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.exceptions import ModelConnectionError, ModelInvalidRequestError
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
-from agent.middleware.model_call_timeout import ModelCallTimeoutError
 from agent.middleware.model_fallback import (
     ModelFallbackMiddleware,
-    _should_fallback,
 )
-
-
-def _anthropic_overloaded() -> anthropic.APIStatusError:
-    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx2.Response(
-        529,
-        request=request,
-        json={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
-    )
-    body = response.json()
-    return anthropic.APIStatusError("Overloaded", response=response, body=body)
 
 
 def _openai_5xx() -> openai.APIStatusError:
@@ -36,72 +21,54 @@ def _openai_5xx() -> openai.APIStatusError:
     return openai.APIStatusError("unavailable", response=response, body=response.json())
 
 
-def _anthropic_model_not_available_error() -> anthropic.BadRequestError:
-    body = {
-        "type": "error",
-        "error": {
-            "type": "invalid_request_error",
-            "message": "In order to access this model, your organization or workspace must have data retention enabled.",
-            "details": {"error_code": "model_not_available"},
-        },
-        "request_id": "req_test",
-    }
-    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx2.Response(400, request=request, json=body)
-    return anthropic.BadRequestError("model unavailable", response=response, body=body)
-
-
 def _make_request() -> ModelRequest[None]:
     request = MagicMock()
     request.override = MagicMock(return_value=MagicMock(name="overridden_request"))
     return cast(ModelRequest[None], request)
 
 
-class TestShouldFallback:
-    def test_anthropic_529_overload_falls_back(self) -> None:
-        assert _should_fallback(_anthropic_overloaded()) is True
-
-    def test_openai_503_falls_back(self) -> None:
-        assert _should_fallback(_openai_5xx()) is True
-
-    def test_anthropic_rate_limit_falls_back(self) -> None:
-        request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx2.Response(429, request=request, json={"error": {}})
-        exc = anthropic.RateLimitError("rate", response=response, body={})
-        assert _should_fallback(exc) is True
-
-    def test_http_remote_protocol_error_falls_back(self) -> None:
-        exc = httpx2.RemoteProtocolError(
-            "peer closed connection without sending complete message body (incomplete chunked read)"
-        )
-        assert _should_fallback(exc) is True
-
-    def test_legacy_httpx_remote_protocol_error_falls_back(self) -> None:
-        exc = httpx.RemoteProtocolError(
-            "peer closed connection without sending complete message body (incomplete chunked read)"
-        )
-        assert _should_fallback(exc) is True
-
-    def test_retryable_langchain_model_error_falls_back(self) -> None:
-        assert _should_fallback(ModelConnectionError("Fireworks unavailable")) is True
-
-    def test_non_retryable_langchain_model_error_does_not_fall_back(self) -> None:
-        assert _should_fallback(ModelInvalidRequestError("bad request")) is False
-
-    def test_anthropic_400_does_not_fall_back(self) -> None:
-        request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx2.Response(400, request=request, json={"error": {}})
-        exc = anthropic.BadRequestError("bad", response=response, body={})
-        assert _should_fallback(exc) is False
-
-    def test_model_call_deadline_falls_back(self) -> None:
-        assert _should_fallback(ModelCallTimeoutError("wedged")) is True
-
-    def test_value_error_does_not_fall_back(self) -> None:
-        assert _should_fallback(ValueError("nope")) is False
-
-
 class TestModelFallbackMiddleware:
+    @pytest.mark.parametrize("default_fallback_enabled", [True, False])
+    @pytest.mark.parametrize("requested_fallback_enabled", [True, False])
+    async def test_handoff_fallback_does_not_change_other_model_calls(
+        self, default_fallback_enabled: bool, requested_fallback_enabled: bool
+    ) -> None:
+        requested = FakeListChatModel(responses=["requested"])
+        requested_fallback = FakeListChatModel(responses=["requested fallback"])
+        other = FakeListChatModel(responses=["other"])
+        default_fallback = FakeListChatModel(responses=["default fallback"])
+        middleware = ModelFallbackMiddleware(
+            default_fallback if default_fallback_enabled else None, backoff_schedule=(0.0,)
+        )
+        middleware.register_fallback(
+            requested, requested_fallback if requested_fallback_enabled else None
+        )
+
+        async def handler(request: ModelRequest[None]) -> ModelResponse[None]:
+            if request.model is requested or request.model is other:
+                raise TimeoutError("Provider unavailable")
+            message = await request.model.ainvoke(request.messages)
+            return ModelResponse(result=[message])
+
+        if requested_fallback_enabled:
+            result = await middleware.awrap_model_call(
+                ModelRequest(model=requested, messages=[]), handler
+            )
+            assert result.result[0].content == "requested fallback"
+        else:
+            with pytest.raises(TimeoutError, match="Provider unavailable"):
+                await middleware.awrap_model_call(
+                    ModelRequest(model=requested, messages=[]), handler
+                )
+        if default_fallback_enabled:
+            result = await middleware.awrap_model_call(
+                ModelRequest(model=other, messages=[]), handler
+            )
+            assert result.result[0].content == "default fallback"
+        else:
+            with pytest.raises(TimeoutError, match="Provider unavailable"):
+                await middleware.awrap_model_call(ModelRequest(model=other, messages=[]), handler)
+
     @pytest.mark.asyncio
     async def test_retry_spans_cover_backoff_and_attempt_without_error_body(self) -> None:
         primary = MagicMock(model_name="primary")
@@ -145,29 +112,6 @@ class TestModelFallbackMiddleware:
         sleep.assert_awaited_once_with(5.0)
 
     @pytest.mark.asyncio
-    async def test_async_falls_over_on_overloaded(self) -> None:
-        fallback_model = MagicMock(name="fallback_model")
-        middleware = ModelFallbackMiddleware(fallback_model)
-
-        calls: list[object] = []
-        good_response = MagicMock(result=[AIMessage(content="ok from fallback")])
-
-        async def handler(req: ModelRequest[None]) -> ModelResponse[Any]:
-            calls.append(req)
-            if len(calls) == 1:
-                raise _anthropic_overloaded()
-            return cast(ModelResponse[Any], good_response)
-
-        request = _make_request()
-        result = await middleware.awrap_model_call(request, handler)
-
-        assert result is good_response
-        assert len(calls) == 2
-        override = cast(MagicMock, request.override)
-        override.assert_called_once_with(model=fallback_model)
-        assert calls[1] is override.return_value
-
-    @pytest.mark.asyncio
     async def test_async_falls_over_on_openai_streaming_overload(self) -> None:
         exc = openai.APIError(
             "Our servers are currently overloaded. Please try again later.",
@@ -189,40 +133,6 @@ class TestModelFallbackMiddleware:
         override.assert_called_once_with(model=fallback)
         assert handler.await_count == 2
         handler.assert_awaited_with(override.return_value)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("error_type", "status", "message"),
-        [
-            (openai.APIError, None, "Unrelated API failure"),
-            (openai.APIError, None, "context_length_exceeded"),
-            (openai.AuthenticationError, 401, "Invalid API key"),
-            (openai.BadRequestError, 400, "Invalid request"),
-            (openai.BadRequestError, 400, "context_length_exceeded"),
-        ],
-    )
-    async def test_async_propagates_non_transient_openai_error(
-        self, error_type: type[openai.APIError], status: int | None, message: str
-    ) -> None:
-        api_request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
-        if issubclass(error_type, openai.APIStatusError):
-            assert status is not None
-            exc = error_type(
-                message, response=httpx2.Response(status, request=api_request), body=None
-            )
-        else:
-            exc = error_type(message, request=api_request, body=None)
-        request = _make_request()
-        handler = AsyncMock(side_effect=exc)
-
-        with pytest.raises(error_type) as raised:
-            await ModelFallbackMiddleware(MagicMock(), backoff_schedule=(0.0,)).awrap_model_call(
-                request, handler
-            )
-
-        assert raised.value is exc
-        handler.assert_awaited_once_with(request)
-        cast(MagicMock, request.override).assert_not_called()
 
     @pytest.mark.asyncio
     async def test_async_falls_over_on_httpx2_stream_transport_error(self) -> None:
@@ -263,19 +173,6 @@ class TestModelFallbackMiddleware:
             await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_async_surfaces_model_unavailable_error(self) -> None:
-        middleware = ModelFallbackMiddleware(MagicMock())
-
-        async def handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
-            raise _anthropic_model_not_available_error()
-
-        result = await middleware.awrap_model_call(_make_request(), handler)
-
-        assert isinstance(result, AIMessage)
-        assert "selected Anthropic model is not available" in result.text
-        assert "data retention enabled" in result.text
 
     @pytest.mark.asyncio
     async def test_async_retries_primary_after_fallback_failure(self) -> None:

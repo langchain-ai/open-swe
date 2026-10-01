@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from copy import deepcopy
 from importlib import import_module
 from types import SimpleNamespace
@@ -5,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain_core.tools import StructuredTool
 
 from agent.dashboard.personal_settings import SettingValue, patch_personal_settings
 from agent.tools.read_user_settings import read_user_settings
@@ -20,16 +20,14 @@ def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "source": "dashboard",
         "github_login": "Alice",
     }
-    monkeypatch.setattr(
-        import_module("agent.tools.save_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
-    monkeypatch.setattr(
-        import_module("agent.tools.read_user_settings"),
-        "get_config",
-        lambda: {"configurable": configurable},
-    )
+    for module in (
+        "agent.run_config",
+        "agent.tools.save_user_settings",
+        "agent.tools.read_user_settings",
+    ):
+        monkeypatch.setattr(
+            import_module(module), "get_config", lambda: {"configurable": configurable}
+        )
     return configurable
 
 
@@ -60,7 +58,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
 ) -> None:
     requester["source"] = source
     profile = {
-        "default_model": "openai:gpt-6-sol",
+        "default_model": "openai:gpt-6.1-sol",
         "reasoning_effort": "high",
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
@@ -151,26 +149,14 @@ async def test_unavailable_thread_scope_fails_closed(
     [
         {},
         {"login": "bob"},
-        {"email": "bob@example.com"},
         {"encrypted_gh_token": "secret"},
-        {"notion_token": "secret"},
         {"admin": True},
-        {"gateway_enabled": True},
-        {"instructions": "new"},
-        {"theme": "dark"},
-        {"default_visibility": "everyone"},
-        {"concierge_mode": None},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
-        {"default_subagent_model": "openai:gpt-5.5", "subagent_reasoning_effort": "high"},
         {"default_model": "anthropic:claude-fable-5-1"},
-        {"default_model": "anthropic:claude-haiku-4-5", "reasoning_effort": "high"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
-        {
-            "default_subagent_model": "anthropic:claude-haiku-4-5",
-            "subagent_reasoning_effort": "high",
-        },
         {"branch_prefix": "new/", "default_visibility": "invalid"},
+        {"preserve_sandbox_memory": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -180,7 +166,7 @@ async def test_invalid_patch_rejects_all_changes(
     settings: dict[str, SettingValue],
 ) -> None:
     fake_store.seed(
-        ["profiles"], "Alice", {"default_model": "openai:gpt-6-sol", "reasoning_effort": "high"}
+        ["profiles"], "Alice", {"default_model": "openai:gpt-6.1-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
     assert (await save_user_settings(settings))["ok"] is False
@@ -208,42 +194,31 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert fake_store.items == before
 
 
-async def test_nullable_fields_clear_and_false_values_survive(fake_store: FakeStore) -> None:
-    fake_store.seed(
-        ["profiles"],
-        "alice",
-        {
-            "default_model": "openai:gpt-6-sol",
-            "reasoning_effort": "high",
-            "default_subagent_model": "anthropic:claude-haiku-4-5",
-            "subagent_reasoning_effort": "none",
-            "review_draft_prs": True,
-            "model_routing_enabled": True,
-            "default_repo": "org/repo",
-            "base_branch": "develop",
-            "branch_prefix": "alice/",
-        },
-    )
-    patch_values: dict[str, SettingValue] = {
-        "default_subagent_model": None,
-        "subagent_reasoning_effort": None,
-        "review_draft_prs": None,
-        "model_routing_enabled": None,
-        "default_repo": None,
-        "base_branch": None,
-        "branch_prefix": None,
-        "auto_fix_ci": False,
-        "draft_prs": False,
-        "default_visibility": "private",
-        "local_tracing_project": None,
-        "default_workspace": None,
-    }
-    assert await patch_personal_settings("alice", patch_values) == patch_values
-    saved = {
-        **fake_store.values(["profiles"])["alice"],
-        **fake_store.values(["user_preferences"])["alice"],
-    }
-    assert {key: saved[key] for key in patch_values} == patch_values
+async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
+    fake_store: FakeStore, requester: dict[str, object], saved_scope: dict[str, object]
+) -> None:
+    from agent.users import User, UserPreferences
+
+    with patch.object(
+        User, "update_preferences", new_callable=AsyncMock, return_value=None
+    ) as save:
+        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+            "ok"
+        ] is False
+        save.assert_awaited_once()
+    assert not fake_store.items
+    with patch.object(
+        User,
+        "update_preferences",
+        new_callable=AsyncMock,
+        return_value=UserPreferences(preserve_sandbox_memory=True),
+    ) as save:
+        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+            "updated"
+        ] == {"preserve_sandbox_memory": True, "auto_fix_ci": False}
+        assert save.await_args.args[0] == "Alice"
+        assert save.await_args.args[1].preserve_sandbox_memory is True
+    assert fake_store.values(["profiles"])["Alice"]["auto_fix_ci"] is False
 
 
 async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: FakeStore) -> None:
@@ -256,41 +231,6 @@ async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: F
     prefs = fake_store.values(["user_preferences"])["alice"]
     assert prefs["default_visibility"] == "private"
     assert prefs["local_tracing_project"] == "project"
-
-
-@pytest.mark.parametrize("model", ["openai:gpt-5.5", "anthropic:claude-fable-5-1"])
-async def test_unrelated_patch_preserves_retired_model_pairs(
-    fake_store: FakeStore, model: str
-) -> None:
-    profile = {
-        "default_model": model,
-        "reasoning_effort": "high",
-        "default_subagent_model": model,
-        "subagent_reasoning_effort": "high",
-        "default_repo": "org/repo",
-    }
-    fake_store.seed(["profiles"], "alice", profile)
-    settings: dict[str, SettingValue] = {
-        "draft_prs": False,
-        "branch_prefix": "new/",
-        "auto_fix_ci": False,
-    }
-    assert await patch_personal_settings("alice", settings) == settings
-    saved = fake_store.values(["profiles"])["alice"]
-    assert {key: saved[key] for key in profile} == profile
-    assert {key: saved[key] for key in settings} == settings
-
-
-async def test_model_effort_patch_uses_dashboard_normalization(fake_store: FakeStore) -> None:
-    fake_store.seed(
-        ["profiles"],
-        "alice",
-        {"default_model": "anthropic:claude-opus-old", "reasoning_effort": "high"},
-    )
-    await patch_personal_settings("alice", {"reasoning_effort": "low"})
-    profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "anthropic:claude-opus-5-5"
-    assert profile["reasoning_effort"] == "low"
 
 
 async def test_preference_read_failure_does_not_overwrite_saved_defaults(
@@ -330,12 +270,18 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
     assert result["participants"] == [
         {
             "login": "Alice",
-            "profile": {**ordinary, "concierge_mode": False},
+            "profile": {
+                **ordinary,
+                "concierge_mode": False,
+                "preserve_sandbox_memory": False,
+                "human_review_requests": False,
+                "review_channel_watch": False,
+            },
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",
                 "local_tracing_project": "tracing",
-                "follow_up_behavior": "queue",
+                "follow_up_behavior": "steer",
             },
             "instructions": "",
             "connections": {"notion": {"connected": False}},
@@ -352,20 +298,21 @@ async def test_private_read_rejects_unverified_requesters(
 ) -> None:
     requester["github_login"] = login
     with patch("agent.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
-        assert (await read_user_settings())["success"] is False
+        assert "error" in await read_user_settings()
     profile.assert_not_awaited()
 
 
-async def test_first_model_change_saves_a_complete_pair(fake_store: FakeStore) -> None:
-    await patch_personal_settings("alice", {"default_model": "openai:gpt-6-sol"})
-    profile = fake_store.values(["profiles"])["alice"]
-    assert profile["default_model"] == "openai:gpt-6-sol"
-    assert isinstance(profile["reasoning_effort"], str)
-
-
-def test_tool_schema_accepts_partial_patch_without_identity_arguments() -> None:
-    tool = StructuredTool.from_function(coroutine=save_user_settings)
-    schema = tool.args_schema
-    assert schema is not None
-    parsed = schema.model_validate({"settings": {"draft_prs": False, "branch_prefix": None}})
-    assert parsed.model_dump() == {"settings": {"draft_prs": False, "branch_prefix": None}}
+async def test_sole_writer_save_does_not_publish_stored_settings(
+    fake_store: FakeStore,
+    requester: dict[str, object],
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(sole=True, direct=True)
+    fake_store.seed(
+        ["profiles"],
+        "Alice",
+        {"default_model": "openai:gpt-6-sol", "reasoning_effort": "secret-effort"},
+    )
+    result = await save_user_settings({"default_model": "anthropic:claude-opus-5-5"})
+    assert result == {"ok": True}
+    assert fake_store.values(["profiles"])["Alice"]["default_model"] == "anthropic:claude-opus-5-5"

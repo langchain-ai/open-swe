@@ -2,9 +2,10 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired
 
 from langgraph_sdk.client import LangGraphClient
+from typing_extensions import TypedDict
 
 from agent.invocation import resolve_invocation_id
 from agent.slack.client import (
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
 
 
-class SessionCostRefresh(TypedDict):
+class SessionCostRefresh(TypedDict, closed=True):
     task: Literal["session_cost"]
     agent_thread_id: str
     run_id: str
@@ -141,10 +142,14 @@ def _blocks_contain(blocks: list[dict[str, Any]] | None, text: str) -> bool:
         elements = block.get("elements")
         if isinstance(elements, list):
             values.extend(elements)
-        if any(
-            isinstance(value, dict) and text in str(value.get("text") or "") for value in values
-        ):
-            return True
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            content = value.get("text")
+            if isinstance(content, dict):
+                content = content.get("text")
+            if isinstance(content, str) and text in content:
+                return True
     return False
 
 
@@ -165,15 +170,20 @@ async def _refresh_once(
         return "unavailable", "run has no Slack response"
 
     try:
-        cost_kwargs: dict[str, Any] = {}
-        if started_at := payload.get("invocation_started_at"):
-            cost_kwargs["lookup_start"] = started_at
         snapshot = await get_langsmith_thread_cost(
-            payload["agent_thread_id"], payload["invocation_id"], **cost_kwargs
+            payload["agent_thread_id"],
+            payload["invocation_id"],
+            lookup_start=payload.get("invocation_started_at"),
+        )
+        run_snapshot = await get_langsmith_thread_cost(
+            payload["agent_thread_id"],
+            payload["invocation_id"],
+            run_only=True,
+            lookup_start=payload.get("invocation_started_at"),
         )
     except LangSmithCostUnavailable as exc:
         return "unavailable", str(exc)
-    if snapshot is None:
+    if snapshot is None or run_snapshot is None:
         return "pending", "LangSmith trace or fresh aggregate unavailable"
 
     message = await fetch_slack_thread_message_by_ts(
@@ -186,7 +196,9 @@ async def _refresh_once(
     if not isinstance(text, str) or (blocks is not None and not isinstance(blocks, list)):
         return "unavailable", "invalid Slack message"
 
-    updated_text, updated_blocks = with_slack_session_cost(text, blocks, snapshot.total_cost)
+    updated_text, updated_blocks = with_slack_session_cost(
+        text, blocks, snapshot.total_cost, run_cost=run_snapshot.total_cost
+    )
     cost_label = format_slack_session_cost(snapshot.total_cost)
     if cost_label not in updated_text or not _blocks_contain(updated_blocks, cost_label):
         return "unavailable", "Slack usage footer unavailable"

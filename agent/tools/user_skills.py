@@ -13,13 +13,17 @@ from agent.skill_store.store import (
     get_skill,
     update_skill,
 )
+from agent.tools.access import Policy, access, unchanged
 from agent.utils.json_types import as_json_object
+
+_OWN = Policy(trusted="private", actor="owner", sole=unchanged)
 
 
 async def _login() -> str | None:
     return await resolve_github_login(as_json_object(get_config()))
 
 
+@access(_OWN)
 async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
     """Implement the `save_user_skill` tool."""
     login = await _login()
@@ -38,6 +42,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
     return {"ok": True, "skill": skill}
 
 
+@access(_OWN)
 async def delete_user_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_user_skill` tool."""
     login = await _login()

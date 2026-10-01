@@ -28,6 +28,32 @@ describe("detectComposerTrigger", () => {
     expect(detectComposerTrigger("mail me@example.com", 19)).toBeNull()
   })
 
+  it("opens the Slack channel menu on # but not on an issue number", () => {
+    expect(detectComposerTrigger("post in #eng-al", 15)).toEqual({
+      kind: "slack-channel",
+      query: "eng-al",
+      rangeStart: 8,
+      rangeEnd: 15,
+    })
+    expect(detectComposerTrigger("fixes #123", 10)).toBeNull()
+    expect(detectComposerTrigger("C#", 2)).toBeNull()
+  })
+
+  it("renders a Slack channel reference as a channel chip", () => {
+    expect(
+      splitPromptIntoSegments("post to <#C0123ABCD|eng-alerts> now")
+    ).toEqual([
+      { type: "text", text: "post to " },
+      {
+        type: "channel",
+        channelId: "C0123ABCD",
+        name: "eng-alerts",
+        source: "<#C0123ABCD|eng-alerts>",
+      },
+      { type: "text", text: " now" },
+    ])
+  })
+
   it("treats a whitespace-delimited slash token as a command anywhere", () => {
     expect(detectComposerTrigger("/pl", 3)).toEqual({
       kind: "slash-command",

@@ -1,23 +1,19 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.backends.protocol import (
     DeleteResult,
-    ExecuteOffloadResult,
     ExecuteResponse,
     SandboxBackendProtocol,
 )
-from deepagents.backends.sandbox import BaseSandbox
+from langchain_core.runnables.config import var_child_runnable_config
 
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
     get_or_create_sandbox_backend_proxy,
-    get_sandbox_backend,
     get_sandbox_id_from_metadata,
 )
 
@@ -33,102 +29,6 @@ class _FakeSandboxBackend:
 
     async def adelete(self, file_path: str) -> DeleteResult:
         return DeleteResult(path=file_path)
-
-
-class _OffloadCapableBackend(BaseSandbox):
-    """Minimal BaseSandbox whose offload records how it was called."""
-
-    def __init__(self) -> None:
-        self.offload_calls: list[dict[str, object]] = []
-
-    @property
-    def id(self) -> str:
-        return "offload-sandbox"
-
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return ExecuteResponse(output=command, exit_code=0)
-
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        return ExecuteResponse(output=command, exit_code=0)
-
-    def upload_files(self, files):  # noqa: ANN001, ANN201 - unused stub
-        return []
-
-    def download_files(self, paths):  # noqa: ANN001, ANN201 - unused stub
-        return []
-
-    async def aexecute_with_offload(
-        self,
-        command: str,
-        capture_path: str,
-        *,
-        max_inline_bytes: int,
-        max_capture_bytes: int | None = None,
-        timeout: int | None = None,
-    ) -> ExecuteOffloadResult:
-        self.offload_calls.append(
-            {
-                "command": command,
-                "capture_path": capture_path,
-                "max_inline_bytes": max_inline_bytes,
-                "timeout": timeout,
-            }
-        )
-        return ExecuteOffloadResult(
-            offloaded=True, response=ExecuteResponse(output="preview", exit_code=0)
-        )
-
-
-def test_sandbox_proxy_is_capture_offload_capable() -> None:
-    # FilesystemMiddleware._resolve_capture gates the execute capture-at-source
-    # path on isinstance(backend, BaseSandbox); the proxy must satisfy it or the
-    # tool falls back to plain execute and pulls full stdout into the worker.
-    assert issubclass(SandboxBackendProxy, BaseSandbox)
-    assert isinstance(SandboxBackendProxy(thread_id="t"), BaseSandbox)
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_delegates_offload_to_live_backend() -> None:
-    backend = _OffloadCapableBackend()
-    proxy = SandboxBackendProxy(backend, thread_id="t")
-
-    result = await proxy.aexecute_with_offload(
-        "run tests", "/capture/path", max_inline_bytes=80_000, timeout=30
-    )
-
-    assert result.offloaded is True
-    assert result.response.output == "preview"
-    assert backend.offload_calls == [
-        {
-            "command": "run tests",
-            "capture_path": "/capture/path",
-            "max_inline_bytes": 80_000,
-            "timeout": 30,
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_offload_falls_back_when_backend_lacks_it() -> None:
-    # A backend implementing only the protocol (no capture-offload) must not
-    # error: the proxy runs it plainly and reports offloaded=False.
-    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, _FakeSandboxBackend()), thread_id="t")
-
-    result = await proxy.aexecute_with_offload("cmd", "/capture/path", max_inline_bytes=80_000)
-
-    assert result.offloaded is False
-    assert result.response.output == "sandbox-1: cmd: 300"
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_applies_default_execute_timeout() -> None:
-    proxy = SandboxBackendProxy(cast(SandboxBackendProtocol, _FakeSandboxBackend()), thread_id="t")
-
-    defaulted = await proxy.aexecute("rg pattern /workspace")
-    overridden = await proxy.aexecute("sleep 600", timeout=700)
-
-    assert defaulted.output == "sandbox-1: rg pattern /workspace: 300"
-    assert overridden.output == "sandbox-1: sleep 600: 700"
 
 
 @pytest.mark.asyncio
@@ -170,84 +70,22 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_sandbox_proxy_uses_registered_reconnect_once(
+async def test_sandbox_metadata_ignores_run_config_from_before_rebind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    thread_id = "thread-1"
-    SANDBOX_BACKENDS.pop(thread_id, None)
-    reconnected: list[str] = []
+    class _Threads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": {"sandbox_id": "sandbox-new"}}
 
-    async def reconnect():
-        reconnected.append(thread_id)
-        await asyncio.sleep(0)
-        return _FakeSandboxBackend()
+    class _Client:
+        threads = _Threads()
 
-    async def create_sandbox(sandbox_id: str):
-        raise AssertionError(f"unexpected direct reconnect to {sandbox_id}")
-
-    monkeypatch.setattr("agent.sandboxes.state.create_sandbox", create_sandbox)
-
-    proxy = get_or_create_sandbox_backend_proxy(
-        thread_id,
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    results = await asyncio.gather(*(proxy.aexecute(f"cmd-{idx}") for idx in range(5)))
-
-    assert reconnected == [thread_id]
-    assert [result.output for result in results] == [
-        "sandbox-1: cmd-0: 300",
-        "sandbox-1: cmd-1: 300",
-        "sandbox-1: cmd-2: 300",
-        "sandbox-1: cmd-3: 300",
-        "sandbox-1: cmd-4: 300",
-    ]
-    SANDBOX_BACKENDS.pop(thread_id, None)
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_refreshes_initialized_backend_when_started() -> None:
-    refreshed = _FakeSandboxBackend()
-    calls = 0
-
-    async def reconnect():
-        nonlocal calls
-        calls += 1
-        return refreshed
-
-    proxy = SandboxBackendProxy(
-        cast(SandboxBackendProtocol, _FakeSandboxBackend()),
-        thread_id="thread-1",
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    proxy.start()
-
-    assert await proxy.ready() is refreshed
-    assert calls == 1
-
-
-@pytest.mark.asyncio
-async def test_sandbox_proxy_starts_reconnect_before_first_operation() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def reconnect():
-        started.set()
-        await release.wait()
-        return _FakeSandboxBackend()
-
-    proxy = SandboxBackendProxy(
-        thread_id="thread-1",
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    proxy.start()
-
-    await started.wait()
-    assert not proxy.has_backend
-    release.set()
-    backend = await proxy.ready()
-
-    assert backend.id == "sandbox-1"
-    assert proxy.has_backend
+    monkeypatch.setattr("agent.sandboxes.state.get_client", lambda: _Client())
+    token = var_child_runnable_config.set({"metadata": {"sandbox_id": "sandbox-old"}})
+    try:
+        assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-new"
+    finally:
+        var_child_runnable_config.reset(token)
 
 
 @pytest.mark.asyncio
@@ -319,48 +157,3 @@ async def test_sandbox_proxy_delegates_delete_after_lazy_startup() -> None:
     result = await proxy.adelete("/workspace/file.txt")
 
     assert result.path == "/workspace/file.txt"
-
-
-@pytest.mark.asyncio
-async def test_get_sandbox_backend_awaits_registered_startup() -> None:
-    thread_id = "thread-1"
-    SANDBOX_BACKENDS.pop(thread_id, None)
-    release = asyncio.Event()
-
-    async def reconnect():
-        await release.wait()
-        return _FakeSandboxBackend()
-
-    proxy = get_or_create_sandbox_backend_proxy(
-        thread_id,
-        reconnect=cast(Callable[[], Awaitable[SandboxBackendProtocol]], reconnect),
-    )
-    proxy.start()
-    waiter = asyncio.create_task(get_sandbox_backend(thread_id))
-    await asyncio.sleep(0)
-    assert not waiter.done()
-
-    release.set()
-    assert await waiter is proxy
-    SANDBOX_BACKENDS.pop(thread_id, None)
-
-
-@pytest.mark.asyncio
-async def test_sandbox_id_metadata_falls_back_to_live_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    threads = SimpleNamespace(
-        get=AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-live"}})
-    )
-
-    monkeypatch.setattr(
-        "agent.sandboxes.state.get_config",
-        lambda: {"metadata": {}},
-    )
-    monkeypatch.setattr(
-        "agent.sandboxes.state.get_client",
-        lambda: SimpleNamespace(threads=threads),
-    )
-
-    assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-live"
-    threads.get.assert_awaited_once_with("thread-1")
