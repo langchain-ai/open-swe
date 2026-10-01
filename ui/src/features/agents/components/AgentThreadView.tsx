@@ -752,6 +752,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
+        onComment={
+          canPost ? (content) => submitMessage(content, []) : undefined
+        }
         revealFilePath={revealFilePath}
         revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
