@@ -485,6 +485,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
     assert "<@UBOT>" not in (trigger.text or "")
+    assert (
+        f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
+    ) == explicitly_tagged
     run_config = kwargs["config"]
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
@@ -665,7 +668,7 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert message.attrib["sender"] == "system:slack-bot-B123"
     assert message.attrib["kind"] == "system"
-    assert (message.text or "").strip() == "Open a PR"
+    assert (message.text or "").strip() == f"@{webhook_common.SLACK_BOT_USERNAME} Open a PR"
     await slack_webhooks._process_slack_mention_impl(
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )
