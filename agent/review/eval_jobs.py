@@ -1,11 +1,11 @@
 """Track the reviewer eval for the admin dashboard.
 
-The eval itself runs in the ``Reviewer eval`` GitHub Action (durable runner,
-isolated from the serving deployment). The Action's harness reports progress
+The eval itself runs detached in a LangSmith sandbox (``evals.reviewer.launch``),
+isolated from the serving deployment. The harness reports progress
 into a LangGraph store record (namespace ``["evals"]``, key ``"reviewer"``) via
 ``evals.reviewer.store_reporter``; this module reads that record for the
-dashboard and reconciles a run whose heartbeat has gone stale (e.g. the Action
-was killed) to ``failed``.
+dashboard and reconciles a run whose heartbeat has gone stale (e.g. the sandbox
+stopped) to ``failed``.
 """
 
 import logging
@@ -94,7 +94,6 @@ def _idle_record() -> dict[str, Any]:
         "worker_id": None,
         "heartbeat": None,
         "progress": None,
-        "github_run_url": None,
         "trigger": None,
         "updated_at": now_iso(),
     }
@@ -132,9 +131,9 @@ def _is_heartbeat_fresh(record: dict[str, Any]) -> bool:
 async def get_reviewer_eval_status() -> dict[str, Any]:
     """Return the latest reviewer-eval status, reconciling a stale ``running``.
 
-    The GitHub Action refreshes the record's heartbeat while it runs. A poll
+    The eval sandbox refreshes the record's heartbeat while it runs. A poll
     only marks the run failed once the heartbeat is stale, so a healthy run is
-    left untouched and a killed Action surfaces as ``failed`` within the stale
+    left untouched and a stopped sandbox surfaces as ``failed`` within the stale
     threshold.
     """
     record = await _get_record()
@@ -149,6 +148,6 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
             **record,
             "status": "failed",
             "finished_at": record.get("finished_at") or now_iso(),
-            "error": "Eval process is no longer tracked (GitHub Action stopped?).",
+            "error": "Eval process is no longer tracked (eval sandbox stopped?).",
         }
     )

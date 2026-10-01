@@ -102,7 +102,7 @@ async def api_set_enabled_review_repo(
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    """Read-only status for the reviewer eval (triggered from the GitHub Action)."""
+    """Read-only status for the reviewer eval (launched in a LangSmith sandbox)."""
     return await get_reviewer_eval_status()
 
 

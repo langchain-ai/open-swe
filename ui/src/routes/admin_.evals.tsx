@@ -33,7 +33,7 @@ function ReviewerEvalPage() {
     <AppShell
       user={session.data}
       title="Reviewer eval"
-      description="Triggered from the Reviewer eval GitHub Action (run it on the prod branch). Progress streams here live."
+      description="Launched in a LangSmith sandbox with evals.reviewer.launch. Progress streams here live."
       backTo={{ to: "/admin", label: "Back to Admin" }}
     >
       <ReviewerEvalStatusSection />
@@ -118,16 +118,6 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           className="underline hover:text-foreground"
         >
           View experiment in LangSmith
-        </a>
-      )}
-      {data.github_run_url && (
-        <a
-          href={data.github_run_url}
-          target="_blank"
-          rel="noreferrer"
-          className="underline hover:text-foreground"
-        >
-          View GitHub run
         </a>
       )}
       {data.error && <span className="text-destructive">{data.error}</span>}
@@ -219,7 +209,7 @@ function ReviewerEvalLogs() {
           <p className="text-xs text-muted-foreground">
             {running
               ? "Waiting for output…"
-              : "No output yet. Trigger the Reviewer eval GitHub Action to see logs here."}
+              : "No output yet. Launch a reviewer eval to see logs here."}
           </p>
         )}
       </div>

@@ -1250,7 +1250,6 @@ export interface ReviewerEvalStatus {
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
-  github_run_url?: string | null
   trigger?: string | null
   updated_at: string
 }

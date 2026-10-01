@@ -17,6 +17,7 @@ evals/reviewer/
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
 ├── store_reporter.py     # publishes live progress to the dashboard store record
+├── launch.py             # runs run_eval detached in a LangSmith sandbox
 └── run_eval.py           # client.aevaluate entrypoint
 ```
 
@@ -66,27 +67,23 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-### From the GitHub Action (recommended for full runs)
+### In a LangSmith sandbox (recommended for full runs)
 
-Trigger the **Reviewer eval** workflow (`.github/workflows/reviewer_eval.yml`)
-from the Actions UI or `gh workflow run reviewer_eval.yml --ref prod -f limit=3`.
-Run it on the **prod** branch so the harness/judge match the deployed reviewer it
-scores. Running it on a durable runner (instead of inside the serving deployment)
-means a deploy or container recycle can't kill a long run.
+```bash
+uv run python -m evals.reviewer.launch --langgraph-url https://<deployment> --limit 3
+```
 
-The Action sets `REVIEWER_EVAL_REPORT_STORE=1`, so `run_eval` publishes live
-status/progress/logs to the LangGraph store record the dashboard reads — watch it
-at **Admin → Reviewer eval** (`/admin/evals`), which is now a read-only progress
-view (status, `completed / total`, log tail, LangSmith experiment link, and a link
-back to the GitHub run). If the Action is cancelled/killed, the heartbeat goes
-stale and the dashboard flips the run to `failed` within ~60s.
+This boots a LangSmith sandbox, checks out `--ref` (default `prod`, so the
+harness and judge match the deployed reviewer), runs `run_eval` there with any
+extra flags, and exits. The sandbox stops itself when the eval finishes, so the
+laptop that launched it is free immediately. `LANGSMITH_API_KEY` (and
+`LANGSMITH_GATEWAY_API_KEY` when that key lacks `gateway:invoke`) come from your
+env and are injected by the sandbox proxy; they never enter the sandbox.
 
-Required repository config:
-
-- secrets: `LANGSMITH_API_KEY`, plus `LANGSMITH_GATEWAY_API_KEY` when that key
-  lacks `gateway:invoke` (the judge runs in-process through the gateway;
-  reviewer-model keys are **not** needed — the reviewer runs in the deployment).
-- secret or var: `LANGGRAPH_URL` — the deployment URL the eval drives and reports to.
+Progress, the log tail and the LangSmith experiment link stream to **Admin →
+Reviewer eval** (`/admin/evals`). The full log is at `/root/reviewer-eval.log` in
+the sandbox. Stop the sandbox to cancel; the dashboard flips the run to `failed`
+within ~60s.
 
 ### Tracing project
 
