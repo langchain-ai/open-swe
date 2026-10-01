@@ -17,7 +17,6 @@ evals/reviewer/
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
 ├── store_reporter.py     # publishes live progress to the dashboard store record
-├── launch.py             # runs run_eval detached in a LangSmith sandbox
 └── run_eval.py           # client.aevaluate entrypoint
 ```
 
@@ -67,22 +66,18 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-### In a LangSmith sandbox (recommended for full runs)
+### From the dashboard (recommended for full runs)
 
-```bash
-uv run python -m evals.reviewer.launch --langgraph-url https://<deployment> --limit 3
-```
+Admins start a run from **Evals** in the sidebar (`/admin/evals`): set the
+dataset, run name, reviewer model and effort, concurrency, limit, score mode and
+severity threshold, then **Start eval**. The deployment boots a LangSmith
+sandbox at its own commit, runs `run_eval` there against itself, and the sandbox
+stops itself when the eval finishes. The deployment's LangSmith keys are
+injected by the sandbox proxy; they never enter the sandbox.
 
-This boots a LangSmith sandbox, checks out `--ref` (default `prod`, so the
-harness and judge match the deployed reviewer), runs `run_eval` there with any
-extra flags, and exits. The sandbox stops itself when the eval finishes, so the
-laptop that launched it is free immediately. `LANGSMITH_API_KEY` (and
-`LANGSMITH_GATEWAY_API_KEY` when that key lacks `gateway:invoke`) come from your
-env and are injected by the sandbox proxy; they never enter the sandbox.
-
-Progress, the log tail and the LangSmith experiment link stream to **Admin →
-Reviewer eval** (`/admin/evals`). The full log is at `/root/reviewer-eval.log` in
-the sandbox. Stop the sandbox to cancel; the dashboard flips the run to `failed`
+Progress, the log tail and the LangSmith experiment link stream to the same
+page. The full log is at `/root/reviewer-eval.log` in the sandbox named on the
+page. Stop that sandbox to cancel; the dashboard flips the run to `failed`
 within ~60s.
 
 ### Tracing project

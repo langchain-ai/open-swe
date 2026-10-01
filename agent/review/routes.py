@@ -1,13 +1,14 @@
 """HTTP API for the PR review feature: reviews, review chat, and review styles."""
 
-from typing import Any
+from typing import Any, Self
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from agent.dashboard.options import model_supports_effort
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
@@ -29,7 +30,13 @@ from agent.review.chat import (
     proxy_review_chat_stream_events,
 )
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
-from agent.review.eval_jobs import get_reviewer_eval_status
+from agent.review.eval_jobs import (
+    ScoreMode,
+    Severity,
+    get_reviewer_eval_status,
+    resolve_eval_config,
+    start_reviewer_eval,
+)
 from agent.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
@@ -102,8 +109,39 @@ async def api_set_enabled_review_repo(
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    """Read-only status for the reviewer eval (launched in a LangSmith sandbox)."""
+    """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
+
+
+class ReviewerEvalStart(BaseModel):
+    dataset_name: str = Field(min_length=1, max_length=200)
+    experiment_prefix: str = Field(min_length=1, max_length=200)
+    max_concurrency: int = Field(ge=1, le=50)
+    model_id: str
+    reasoning_effort: str
+    score_mode: ScoreMode
+    severity_threshold: Severity
+    limit: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _check_model_effort(self) -> Self:
+        if not model_supports_effort(self.model_id, self.reasoning_effort):
+            raise ValueError(f"{self.model_id} does not support effort {self.reasoning_effort}")
+        return self
+
+
+@router.post("/admin/evals/reviewer")
+async def admin_start_reviewer_eval(
+    body: ReviewerEvalStart,
+    session: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
+    config = resolve_eval_config()
+    config.update(body.model_dump(exclude={"limit"}))
+    try:
+        return await start_reviewer_eval(config, body.limit, session.get("email") or session["sub"])
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/review-styles")

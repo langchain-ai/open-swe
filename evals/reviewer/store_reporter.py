@@ -1,6 +1,6 @@
 """Publish reviewer-eval progress to the LangGraph store for the dashboard.
 
-When the eval runs in a LangSmith sandbox (``evals.reviewer.launch``) it writes the same
+When the eval runs in a LangSmith sandbox (``agent.review.eval_jobs``) it writes the same
 store record the dashboard reads (namespace ``["evals"]``, key ``"reviewer"``),
 so ``/admin/evals`` shows the run live. The dashboard reconciles a run whose
 heartbeat goes stale to ``failed`` (see ``agent.review.eval_jobs``), so the

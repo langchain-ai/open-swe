@@ -1229,6 +1229,17 @@ export interface ReviewerEvalConfig {
   severity_threshold: ReviewerEvalSeverity
 }
 
+export interface ReviewerEvalStartRequest {
+  dataset_name: string
+  experiment_prefix: string
+  max_concurrency: number
+  model_id: string
+  reasoning_effort: string
+  score_mode: ReviewerEvalScoreMode
+  severity_threshold: ReviewerEvalSeverity
+  limit: number | null
+}
+
 export interface ReviewerEvalProgress {
   completed: number
   total: number | null
@@ -1236,7 +1247,7 @@ export interface ReviewerEvalProgress {
 
 export interface ReviewerEvalStatus {
   name: string
-  status: "idle" | "running" | "completed" | "failed"
+  status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
   limit: number | null
@@ -1250,6 +1261,7 @@ export interface ReviewerEvalStatus {
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
+  worker_id?: string | null
   trigger?: string | null
   updated_at: string
 }
@@ -1842,6 +1854,11 @@ export const api = {
       { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
+  startReviewerEval: (body: ReviewerEvalStartRequest) =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 

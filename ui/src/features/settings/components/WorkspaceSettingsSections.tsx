@@ -402,7 +402,7 @@ interface ModelPairControlProps {
 const INHERIT_VALUE = "__inherit__"
 
 /** A model and reasoning-effort pair. */
-function ModelPairControl({
+export function ModelPairControl({
   models,
   model,
   effort,
