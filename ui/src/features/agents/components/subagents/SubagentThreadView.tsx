@@ -125,7 +125,7 @@ export function SubagentThreadView({
         <div
           className={cn(
             "flex h-full w-full items-center gap-2 px-4",
-            sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14")
+            sidebarCollapsed && (isDesktop ? "pl-40" : "pl-22")
           )}
         >
           {backLink}

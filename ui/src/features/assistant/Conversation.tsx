@@ -3,7 +3,6 @@ import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { ArrowDown } from "lucide-react"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
-import { PullRequestBackLink } from "@/features/agents/components/PullRequestBackLink"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
@@ -12,6 +11,8 @@ import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useSession } from "@/lib/session"
 import { pageTitle } from "@/lib/pageTitle"
+import { cn } from "@/lib/utils"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { AssistantMessage } from "./Message"
 import { Composer } from "./Composer"
 import { useThreadMetadata } from "./AssistantProvider"
@@ -39,6 +40,9 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
     Boolean(thread?.pullRequests?.length)
   )
   const title = thread?.title
+  const sidebarCollapsed = useSidebarCollapsed()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   useEffect(() => {
     if (!title) return
@@ -57,8 +61,12 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-3 border-b border-border px-5 py-3">
-          <PullRequestBackLink />
+        <header
+          className={cn(
+            "flex items-center gap-3 border-b border-border px-5 py-3",
+            sidebarCollapsed && (isDesktop ? "pl-40" : "pl-22")
+          )}
+        >
           <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
             {thread?.title ?? "New conversation"}
           </h1>

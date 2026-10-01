@@ -14,11 +14,12 @@ import {
   createMemoryHistory,
   RouterProvider,
   Outlet,
+  Navigate,
 } from "@tanstack/react-router"
 import { afterEach, expect, it, vi } from "vitest"
 import { api, type ReviewListPayload } from "@/lib/api"
 import { Route } from "@/routes/agents/reviews/index"
-import { PullRequestBackLink } from "@/features/agents/components/PullRequestBackLink"
+import { AppBackButton } from "@/components/AppBackButton"
 
 vi.mock("@/lib/api", () => ({ api: { listReviews: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
@@ -33,8 +34,15 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-it("returns from a coding thread to the originating filtered PR page", async () => {
-  const root = createRootRoute({ component: Outlet })
+it("returns to the filtered PR page through an assistant redirect", async () => {
+  const root = createRootRoute({
+    component: () => (
+      <>
+        <AppBackButton />
+        <Outlet />
+      </>
+    ),
+  })
   const pageRoute = Route.update({
     getParentRoute: () => root,
     path: "/agents/reviews/",
@@ -42,29 +50,45 @@ it("returns from a coding thread to the originating filtered PR page", async () 
   const threadRoute = createRoute({
     getParentRoute: () => root,
     path: "/agents/$threadId",
-    component: PullRequestBackLink,
+    component: () => (
+      <Navigate
+        to="/assistant/$threadId"
+        params={{ threadId: "coding-thread" }}
+        replace
+      />
+    ),
+  })
+  const assistantRoute = createRoute({
+    getParentRoute: () => root,
+    path: "/assistant/$threadId",
+    component: () => <div>Conversation</div>,
   })
   const router = createRouter({
     isServer: false,
-    routeTree: root.addChildren([pageRoute, threadRoute]),
-    history: createMemoryHistory({ initialEntries: ["/agents/coding-thread"] }),
+    routeTree: root.addChildren([pageRoute, threadRoute, assistantRoute]),
+    history: createMemoryHistory({
+      initialEntries: [
+        "/agents/reviews/?q=backlink&repo=acme%2Fapp&pr=acme%2Fapp%237#details",
+      ],
+    }),
   })
   await router.load()
-  render(<RouterProvider router={router} />)
-  expect(screen.queryByRole("link", { name: "Pull Requests" })).toBeNull()
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  )
+  const back = await screen.findByRole("button", { name: "Go back" })
+  expect((back as HTMLButtonElement).disabled).toBe(true)
   await router.navigate({
     to: "/agents/$threadId",
     params: { threadId: "coding-thread" },
-    state: {
-      pullRequestBackLink:
-        "/agents/reviews/?q=backlink&repo=acme%2Fapp&pr=acme%2Fapp%237#details",
-    },
   })
-  const back = await screen.findByRole("link", { name: "Pull Requests" })
+  await screen.findByText("Conversation")
+  expect((back as HTMLButtonElement).disabled).toBe(false)
   fireEvent.click(back)
-  await waitFor(() =>
-    expect(router.state.location.pathname).toBe("/agents/reviews")
-  )
+  await screen.findByText("Open PRs")
+  expect(router.state.location.pathname).toBe("/agents/reviews")
   expect(router.state.location.search).toMatchObject({
     q: "backlink",
     repo: ["acme/app"],

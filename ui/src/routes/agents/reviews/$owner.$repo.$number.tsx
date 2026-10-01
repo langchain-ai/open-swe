@@ -133,7 +133,7 @@ function ReviewDetailPage() {
         className={cn(
           "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
           // Clear room for the fixed collapse toggle when the sidebar is hidden.
-          sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
+          sidebarCollapsed ? (isDesktop ? "pl-40" : "pl-22") : "pl-4"
         )}
       >
         <Link

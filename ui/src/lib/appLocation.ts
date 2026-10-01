@@ -1,11 +1,5 @@
 import { useRouter } from "@tanstack/react-router"
 
-declare module "@tanstack/react-router" {
-  interface HistoryState {
-    pullRequestBackLink?: string
-  }
-}
-
 const STORAGE_KEY = "open-swe:last-app-location"
 const SECTION_STORAGE_PREFIX = "open-swe:last-section-location:"
 const FALLBACK_LOCATION = "/agents"

@@ -42,7 +42,7 @@ function AssistantLayout() {
   if (!session.data) return <RequireLogin />
   if (!experimental)
     return threadId ? (
-      <Navigate to="/agents/$threadId" params={{ threadId }} state replace />
+      <Navigate to="/agents/$threadId" params={{ threadId }} replace />
     ) : (
       <Navigate to="/agents" replace />
     )

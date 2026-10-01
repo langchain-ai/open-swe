@@ -120,7 +120,6 @@ function AgentsLayout() {
         <Navigate
           to="/assistant/$threadId"
           params={{ threadId: activeThreadId }}
-          state={{ pullRequestBackLink: location.state.pullRequestBackLink }}
           replace
         />
       )

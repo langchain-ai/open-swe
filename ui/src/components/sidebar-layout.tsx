@@ -10,6 +10,7 @@ import { createPortal } from "react-dom"
 import { SidebarSimpleIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
+import { AppBackButton } from "@/components/AppBackButton"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
 const STORAGE_COLLAPSED = "open-swe.sidebar.collapsed"
@@ -123,18 +124,24 @@ export function SidebarFrame({
     // a page header marked draggable would swallow clicks on this floating
     // toggle if it came earlier. Portal it after all content to keep it last.
     return createPortal(
-      <button
-        type="button"
-        aria-label="Expand sidebar"
-        data-sidebar-expand=""
-        onClick={toggle}
+      <div
+        data-no-drag=""
         className={cn(
-          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "fixed top-2 left-2 z-30 flex items-center gap-1",
           isDesktop && "left-[90px]"
         )}
       >
-        <SidebarSimpleIcon className="size-4" />
-      </button>,
+        <AppBackButton className="size-7" />
+        <button
+          type="button"
+          aria-label="Expand sidebar"
+          data-sidebar-expand=""
+          onClick={toggle}
+          className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <SidebarSimpleIcon className="size-4" />
+        </button>
+      </div>,
       document.body
     )
   }
@@ -229,18 +236,27 @@ export function SidebarCollapseButton({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   return (
-    <button
-      type="button"
-      aria-label="Collapse sidebar"
-      data-sidebar-collapse=""
-      onClick={onToggle}
+    <div
+      data-no-drag=""
       className={cn(
-        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
-        isDesktop && "fixed top-2 left-[90px] z-30 size-7",
+        "flex shrink-0 items-center gap-1",
+        isDesktop && "fixed top-2 left-[90px] z-30",
         className
       )}
     >
-      <SidebarSimpleIcon className="size-4" />
-    </button>
+      <AppBackButton className={isDesktop ? "size-7" : undefined} />
+      <button
+        type="button"
+        aria-label="Collapse sidebar"
+        data-sidebar-collapse=""
+        onClick={onToggle}
+        className={cn(
+          "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+          isDesktop && "size-7"
+        )}
+      >
+        <SidebarSimpleIcon className="size-4" />
+      </button>
+    </div>
   )
 }

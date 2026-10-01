@@ -59,7 +59,10 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => stub.noop,
   useRouterState: () => undefined,
   useSearch: () => undefined,
-  useRouter: () => ({ options: { parseSearch: () => ({}) } }),
+  useRouter: () => ({
+    options: { parseSearch: () => ({}) },
+    history: { subscribe: () => () => {}, canGoBack: () => false },
+  }),
 }))
 
 vi.mock("@/lib/session", () => ({ useSession: () => stub.session }))

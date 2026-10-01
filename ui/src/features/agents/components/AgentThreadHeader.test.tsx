@@ -15,11 +15,7 @@ vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
 vi.mock("@/features/agents/lib/desktopProjects", () => ({
   useDesktopProjects: () => ({ projects: [] }),
 }))
-vi.mock("@tanstack/react-router", () => ({
-  useNavigate: () => vi.fn(),
-  useRouterState: () => undefined,
-  useRouter: () => ({}),
-}))
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
   useRefreshLocalThreads: () => vi.fn(),
 }))
