@@ -5,6 +5,7 @@ from agent.slack.client import (
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
+    slack_message_bot_id,
 )
 
 
@@ -33,7 +34,7 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
         "human_timestamps": [
             msg["ts"]
             for msg in messages
-            if msg.get("user") and not msg.get("bot_id") and isinstance(msg.get("ts"), str)
+            if not slack_message_bot_id(msg) and isinstance(msg.get("ts"), str)
         ],
     }
 
