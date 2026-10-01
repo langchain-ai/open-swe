@@ -538,9 +538,14 @@ async def recreate_sandbox_for_thread(
     try:
         async with asyncio.timeout(10):
             if ENV.SANDBOX_TYPE.get() != "langsmith":
-                raise NotImplementedError("Stopping this sandbox provider is not supported")
-            async with get_async_sandbox_client() as sandbox_client:
-                await sandbox_client.stop_sandbox(old_sandbox_id)
+                stop_error = "Stopping this sandbox provider is not supported"
+                logger.warning(
+                    "Stopping this sandbox provider is not supported",
+                    extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
+                )
+            else:
+                async with get_async_sandbox_client() as sandbox_client:
+                    await sandbox_client.stop_sandbox(old_sandbox_id)
     except Exception as exc:
         stop_error = (
             "Stopping the old sandbox timed out after 10 seconds"
@@ -553,7 +558,10 @@ async def recreate_sandbox_for_thread(
             exc_info=True,
         )
     else:
-        logger.info("Stopped old sandbox before recreation", extra={"sandbox_id": old_sandbox_id})
+        if stop_error is None:
+            logger.info(
+                "Stopped old sandbox before recreation", extra={"sandbox_id": old_sandbox_id}
+            )
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
