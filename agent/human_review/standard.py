@@ -598,9 +598,13 @@ async def settle(request: HumanReviewRequest) -> bool:
     if states is None:
         return False
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
+        picked = len(request.reviewers)
         request = await release_picks(
-            request, ", ".join(f"@{login}" for login in approvers) + " approved it", states
+            request, ", ".join(f"@{login}" for login in approvers) + " approved it"
         )
+        # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
+        if request.kind == "standard" and len(request.reviewers) < picked:
+            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
         return True
@@ -704,6 +708,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
         if request.kind == "standard" and await _github_approvers(request):
+            # Re-checked later in case the approval is dismissed while the request stays open.
+            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
             return {"status": "approved"}
         return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":

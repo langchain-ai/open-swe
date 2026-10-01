@@ -18,7 +18,7 @@ from agent.expedited_review import card as expedited_card
 from agent.expedited_review.channels import channel_choices, own_choices
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from agent.expedited_review.readiness import latest_review_states
+from agent.expedited_review.readiness import latest_review_states, review_authors
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
@@ -497,10 +497,9 @@ async def mark_approved(request: HumanReviewRequest) -> None:
 
 
 def idle_picks(
-    reviewers: list[HumanReviewParticipant], states: dict[str, str]
+    reviewers: list[HumanReviewParticipant], reviewed: set[str]
 ) -> list[HumanReviewParticipant]:
-    """Reviewers Open SWE picked who have not reviewed on GitHub yet."""
-    reviewed = {login.lower() for login in states}
+    """Reviewers Open SWE picked whose lowercased login is not among ``reviewed``."""
     return [
         reviewer
         for reviewer in reviewers
@@ -528,13 +527,8 @@ async def _unrequest_github_review(request: HumanReviewRequest, login: str, toke
         )
 
 
-async def release_picks(
-    request: HumanReviewRequest, reason: str, states: dict[str, str] | None = None
-) -> HumanReviewRequest:
-    """Take reviewers Open SWE picked off a pull request that no longer needs them, and tell them.
-
-    ``states`` maps each GitHub login to its latest review state; ``None`` reads it from GitHub.
-    """
+async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
+    """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them."""
     if not any(reviewer.assigned_by_agent for reviewer in request.reviewers):
         return request
     pr = request.pull_request
@@ -545,19 +539,18 @@ async def release_picks(
             extra={"request_id": str(request.id)},
         )
         return request
-    if states is None:
-        async with github_client(token=token) as client:
-            states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
-        if states is None:
-            logger.warning(
-                "Could not read reviews to release Open SWE's reviewer picks",
-                extra={"request_id": str(request.id)},
-            )
-            return request
+    async with github_client(token=token) as client:
+        reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if reviewed is None:
+        logger.warning(
+            "Could not read reviews to release Open SWE's reviewer picks",
+            extra={"request_id": str(request.id)},
+        )
+        return request
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
             return request
-        released = idle_picks(row.reviewers, states)
+        released = idle_picks(row.reviewers, reviewed)
         for reviewer in released:
             row.participants.remove(reviewer)
     if not released:
