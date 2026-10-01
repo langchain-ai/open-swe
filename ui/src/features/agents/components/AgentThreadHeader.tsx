@@ -14,6 +14,7 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { PullRequestBackLink } from "@/features/agents/components/PullRequestBackLink"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
@@ -230,6 +231,7 @@ export function AgentThreadHeader({
           panelCollapsed && "pr-14"
         )}
       >
+        <PullRequestBackLink />
         {title && (
           <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
             {(thread || localThread) && (

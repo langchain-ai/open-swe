@@ -3,6 +3,7 @@ import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { ArrowDown } from "lucide-react"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { PullRequestBackLink } from "@/features/agents/components/PullRequestBackLink"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
@@ -57,6 +58,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <header className="flex items-center gap-3 border-b border-border px-5 py-3">
+          <PullRequestBackLink />
           <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
             {thread?.title ?? "New conversation"}
           </h1>

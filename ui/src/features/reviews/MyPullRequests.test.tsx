@@ -47,6 +47,7 @@ vi.mock("@/lib/session", () => ({
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
+  useRouterState: () => "/agents/reviews?tab=mine&repos=acme%2Fapp&page=2",
   Link: ({
     params,
     children,
@@ -244,6 +245,10 @@ describe("My PRs", () => {
       expect(navigate).toHaveBeenCalledWith({
         to: "/agents/$threadId",
         params: { threadId: "coding-thread" },
+        state: {
+          pullRequestBackLink:
+            "/agents/reviews?tab=mine&repos=acme%2Fapp&page=2",
+        },
       })
     )
   })

@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react"
 import {
   createRootRoute,
+  createRoute,
   createRouter,
   createMemoryHistory,
   RouterProvider,
@@ -17,6 +18,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest"
 import { api, type ReviewListPayload } from "@/lib/api"
 import { Route } from "@/routes/agents/reviews/index"
+import { PullRequestBackLink } from "@/features/agents/components/PullRequestBackLink"
 
 vi.mock("@/lib/api", () => ({ api: { listReviews: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
@@ -29,6 +31,46 @@ vi.mock("./MyPullRequests", () => ({
 afterEach(() => {
   cleanup()
   vi.resetAllMocks()
+})
+
+it("returns from a coding thread to the originating filtered PR page", async () => {
+  const root = createRootRoute({ component: Outlet })
+  const pageRoute = Route.update({
+    getParentRoute: () => root,
+    path: "/agents/reviews/",
+  } as never)
+  const threadRoute = createRoute({
+    getParentRoute: () => root,
+    path: "/agents/$threadId",
+    component: PullRequestBackLink,
+  })
+  const router = createRouter({
+    isServer: false,
+    routeTree: root.addChildren([pageRoute, threadRoute]),
+    history: createMemoryHistory({ initialEntries: ["/agents/coding-thread"] }),
+  })
+  await router.load()
+  render(<RouterProvider router={router} />)
+  expect(screen.queryByRole("link", { name: "Pull Requests" })).toBeNull()
+  await router.navigate({
+    to: "/agents/$threadId",
+    params: { threadId: "coding-thread" },
+    state: {
+      pullRequestBackLink:
+        "/agents/reviews/?q=backlink&repo=acme%2Fapp&pr=acme%2Fapp%237#details",
+    },
+  })
+  const back = await screen.findByRole("link", { name: "Pull Requests" })
+  fireEvent.click(back)
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe("/agents/reviews")
+  )
+  expect(router.state.location.search).toMatchObject({
+    q: "backlink",
+    repo: ["acme/app"],
+    pr: "acme/app#7",
+  })
+  expect(router.state.location.hash).toBe("details")
 })
 
 it("shows immediate progress and prevents double pagination during a slow request", async () => {

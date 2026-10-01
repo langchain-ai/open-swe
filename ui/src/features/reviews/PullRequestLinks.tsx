@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
 import { IoLogoGithub } from "react-icons/io5"
 
@@ -24,11 +24,16 @@ export function PullRequestLinks({
 }) {
   const [owner, name] = repo.split("/")
   const navigate = useNavigate()
+  const href = useRouterState({ select: (state) => state.location.href })
   const thread = useMutation({
     mutationFn: () => api.openPullRequestThread(repo, number, title),
     meta: { errorTitle: "Couldn't open agent thread" },
     onSuccess: ({ thread_id }) =>
-      navigate({ to: "/agents/$threadId", params: { threadId: thread_id } }),
+      navigate({
+        to: "/agents/$threadId",
+        params: { threadId: thread_id },
+        state: { pullRequestBackLink: href },
+      }),
     retry: false,
   })
   return (
