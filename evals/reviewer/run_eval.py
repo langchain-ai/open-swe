@@ -301,6 +301,21 @@ async def _record_costs(experiment: str, reviewer_project: str | None) -> None:
         )
 
 
+def _examples_without_results(dataset_name: str, experiment: str) -> list[Example]:
+    client = Client()
+    project = client.read_project(project_name=experiment)
+    succeeded = {
+        run.reference_example_id
+        for run in client.list_runs(project_id=project.id, is_root=True)
+        if run.end_time and not run.error and run.outputs
+    }
+    return [
+        example
+        for example in client.list_examples(dataset_name=dataset_name)
+        if example.id not in succeeded
+    ]
+
+
 async def main() -> None:
     logging.basicConfig(
         level=os.environ.get("REVIEWER_EVAL_LOG_LEVEL", "INFO"),
@@ -329,6 +344,11 @@ async def main() -> None:
         "--severity-threshold",
         dest="severity_threshold",
         choices=sorted(_VALID_SEVERITIES),
+    )
+    ap.add_argument(
+        "--rerun-from-experiment",
+        dest="rerun_from_experiment",
+        help="Run only the examples that have no successful result in this experiment.",
     )
     ap.add_argument(
         "--no-cleanup",
@@ -365,7 +385,15 @@ async def main() -> None:
     )
 
     data: str | list[Example]
-    if args.limit:
+    if args.rerun_from_experiment:
+        data = _examples_without_results(dataset_name, args.rerun_from_experiment)
+        logger.info(
+            "Rerunning examples without a successful result",
+            extra={"source_experiment": args.rerun_from_experiment, "examples": len(data)},
+        )
+        if args.limit:
+            data = data[: args.limit]
+    elif args.limit:
         client = Client()
         data = list(client.list_examples(dataset_name=dataset_name, limit=args.limit))
     else:
