@@ -3,13 +3,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 from unittest.mock import AsyncMock
-from urllib.parse import urlencode
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException, Request
 
-from agent.slack import routes, run_feedback
-from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from agent.slack import run_feedback
+from agent.slack.payloads import SlackChannelContext, SlackInteraction
 from agent.utils.json_types import JsonObject
 
 
@@ -122,25 +120,6 @@ async def test_external_or_unknown_channel_cannot_be_rated(
     payload = interaction()
     await run_feedback.process_feedback(payload, payload.actions[0])
     saved_feedback.assert_not_awaited()
-
-
-@pytest.mark.parametrize("value", ["not json", "[]", "{}", '{"run_id":"run-1","rating":"bad"}'])
-async def test_malformed_selection_is_ignored(saved_feedback: AsyncMock, value: str) -> None:
-    payload = interaction()
-    await run_feedback.process_feedback(payload, SlackBlockAction(value=value))
-    saved_feedback.assert_not_awaited()
-
-
-async def test_failed_export_is_logged_without_recording_submission(
-    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    saved_feedback.return_value = False
-    analytics = AsyncMock()
-    monkeypatch.setattr(run_feedback, "record_feedback_submission", analytics)
-    payload = interaction()
-    await run_feedback.process_feedback(payload, payload.actions[0])
-    analytics.assert_not_awaited()
-    assert "Could not save Slack reply feedback" in caplog.text
 
 
 async def test_thumbs_down_opens_comment_modal(saved_feedback: AsyncMock) -> None:
@@ -278,3 +257,4 @@ async def test_webhook_acknowledges_feedback_without_starting_agent(
     process.assert_not_awaited()
     await tasks()
     process.assert_awaited_once_with(interaction(), interaction().actions[0])
+

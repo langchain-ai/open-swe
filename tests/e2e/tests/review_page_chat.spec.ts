@@ -494,6 +494,10 @@ test.describe("review page", () => {
     await expect(conversation).toBeVisible();
 
     const comment = "Thanks, taking a look now.";
+    await expect(conversation.getByRole("textbox")).toHaveCount(0);
+    await conversation
+      .getByRole("button", { name: "Comment", exact: true })
+      .click();
     await conversation.getByRole("textbox").fill(comment);
     await conversation
       .getByRole("button", { name: "Comment", exact: true })

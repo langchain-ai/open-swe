@@ -287,7 +287,7 @@ class PullRequest(Base):
         head_sha: str = "",
         finding_count: int | None = None,
     ) -> Self:
-        """Record a published review against this PR; a same-identity row is updated."""
+        """Record review completion, optionally with a GitHub publication; deduplicate by identity."""
         self.reviews.append(
             ReviewLink(
                 reviewer_thread_id=reviewer_thread_id,
@@ -515,6 +515,7 @@ class PullRequest(Base):
 class PullRequestPayload(BaseModel):
     number: int | None = None
     title: str = ""
+    body: str | None = None
     state: str = ""
     draft: bool = False
     merged: bool = False
@@ -524,6 +525,7 @@ class PullRequestPayload(BaseModel):
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
+    head_sha: str = Field("", validation_alias=AliasPath("head", "sha"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
 
 

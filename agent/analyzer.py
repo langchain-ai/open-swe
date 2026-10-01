@@ -32,11 +32,9 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
-    SanitizeToolInputsMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
-from agent.prompts import apply_tool_descriptions, load_prompt, render_prompt
+from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -59,18 +57,12 @@ logger = logging.getLogger(__name__)
 
 STYLE_ANALYZER_MODEL_CALL_LIMIT = 80
 
-# The per-mode procedure lives in the bundled SKILL.md playbooks (agent/skills/).
-# This base prompt only orients the agent and points it at the right skill.
-STYLE_ANALYZER_PROMPT = load_prompt("analyzer/main.md")
-
 
 async def _analyzer_workspace(cfg: RunConfig) -> str | None:
     if cfg.workspace_slug or not cfg.review_style_full_name:
         return cfg.workspace_slug
     from agent.workspaces.store import WORKSPACES
 
-    if WORKSPACES.repo_import_is_pending(cfg.review_style_full_name):
-        raise RuntimeError("Analyzer repository workspace has not been imported")
     return await WORKSPACES.owner_of_repo(cfg.review_style_full_name)
 
 
@@ -110,8 +102,8 @@ class PrepareAnalyzerRunMiddleware(BasePrepareRunMiddleware):
         owner, _, name = full_name.partition("/")
         samples_text = cfg.review_style_samples_text or ""
         mode = cfg.analyzer_mode or "bootstrap"
-        system_prompt = render_prompt(
-            "analyzer/main.md",
+        system_prompt = prompt(
+            "analyzer/main",
             repo_owner=owner or "<owner>",
             repo_name=name or "<repo>",
             working_dir=work_dir,
@@ -167,13 +159,11 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
                     exit_behavior="end",
                 ),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),

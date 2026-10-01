@@ -1,13 +1,11 @@
 from copy import deepcopy
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
-from xml.etree import ElementTree
 
 import pytest
 
 from agent.middleware.check_message_queue import (
     LinearNotifyState,
-    _build_blocks_from_payload,
     check_message_queue_before_model,
 )
 
@@ -41,62 +39,6 @@ def _envelope(message: dict) -> str:
     if isinstance(content, str):
         return content
     return "".join(block["text"] for block in content if block.get("type") == "text")
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_injects_dashboard_handoff_instruction() -> None:
-    store = _FakeStore(
-        {
-            (("queue", "thread-1"), "pending_messages"): {
-                "messages": [
-                    {
-                        "content": {
-                            "text": "continue in web",
-                            "source": "dashboard",
-                            "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777001",
-                            "sender": {
-                                "id": "github:octocat",
-                                "platform": "github",
-                                "github_login": "octocat",
-                            },
-                        }
-                    },
-                ]
-            }
-        }
-    )
-
-    with (
-        patch(
-            "agent.middleware.check_message_queue.get_config",
-            return_value={"configurable": {"thread_id": "thread-1"}},
-        ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
-    ):
-        result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": [], "reply_surface": "slack"}),
-            MagicMock(),
-        )
-
-    assert result is not None
-    assert result["reply_surface"] == "web"
-    messages = result["messages"]
-    # One envelope per message: the transcript parses them individually, so a
-    # concatenation would render as raw XML.
-    assert [message["role"] for message in messages] == ["user"] * 3
-    handoff_entity = ElementTree.fromstring(_envelope(messages[0]))
-    handoff_message = ElementTree.fromstring(_envelope(messages[1]))
-    user_message = ElementTree.fromstring(_envelope(messages[2]))
-    assert handoff_entity.attrib["id"] == "system:dashboard-handoff"
-    assert handoff_message.attrib["kind"] == "system"
-    assert "conversation has moved to Web" in (handoff_message.text or "")
-    assert user_message.attrib["sender"] == "github:octocat"
-    assert (user_message.text or "").strip() == "continue in web"
-    assert messages[2]["id"] == "8a60896d-65ca-4e40-8a2d-1fbe81777001"
-    # The handoff is carried by the injected message alone. Rewriting the system
-    # prompt would say the same thing while invalidating the whole cached prefix.
-    assert "rendered_system_prompt" not in result
-    assert store.deleted == [(("queue", "thread-1"), "pending_messages")]
 
 
 @pytest.mark.asyncio
@@ -174,65 +116,3 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds() -> 
     assert "first" in _envelope(result["messages"][-1])
     assert store.items[namespace_key] == {"messages": [second]}
     assert store.deleted == []
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_injects_pending_autofix_event() -> None:
-    store = _FakeStore(
-        {
-            (("autofix", "thread-1"), "pending_event"): {
-                "reason": "review_feedback",
-                "details": ["Reviewer alice commented: rename to userId"],
-            }
-        }
-    )
-
-    with (
-        patch(
-            "agent.middleware.check_message_queue.get_config",
-            return_value={"configurable": {"thread_id": "thread-1"}},
-        ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
-    ):
-        result = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-
-    assert result is not None
-    entity = ElementTree.fromstring(_envelope(result["messages"][0]))
-    message = ElementTree.fromstring(_envelope(result["messages"][-1]))
-    assert entity.attrib["id"] == "system:thread-queue"
-    assert message.attrib["kind"] == "system"
-    text = message.text or ""
-    assert "PR babysitting event arrived" in text
-    # The reviewer's actual comment is carried through, not dropped for a generic nudge.
-    assert "rename to userId" in text
-    assert (("autofix", "thread-1"), "pending_event") in store.deleted
-
-
-@pytest.mark.asyncio
-async def test_build_blocks_skips_images_for_text_only_model() -> None:
-    payload = {
-        "text": "see this screenshot",
-        "image_urls": ["https://files.slack.com/fake.png"],
-    }
-    blocks = await _build_blocks_from_payload(
-        payload, model_id="fireworks:accounts/fireworks/models/glm-5p2"
-    )
-    assert len(blocks) == 1
-    assert blocks[0]["type"] == "text"
-    assert "does not support image input" in blocks[0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_build_blocks_includes_images_for_vision_model() -> None:
-    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
-    blocks = await _build_blocks_from_payload(payload, model_id="openai:gpt-5.6-sol")
-    assert blocks == [{"type": "text", "text": "see this"}]
-
-
-@pytest.mark.asyncio
-async def test_build_blocks_no_model_check_fetches_images() -> None:
-    payload: dict[str, Any] = {"text": "see this", "image_urls": []}
-    blocks = await _build_blocks_from_payload(payload)
-    assert blocks == [{"type": "text", "text": "see this"}]

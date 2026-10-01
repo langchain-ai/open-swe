@@ -3,11 +3,12 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import httpx2
 from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from agent.analytics.usage import record_agent_pr_usage
@@ -34,9 +35,11 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.transcript.mirror import mirror_thread_metadata
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
+from agent.utils.run_usage import summarize_run_usage
 
 logger = logging.getLogger(__name__)
 
@@ -592,6 +595,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
 ) -> None:
@@ -742,7 +746,13 @@ async def _record_pr_telemetry(
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
+            if record_opening and retitle_thread and isinstance(pr_title, str) and pr_title:
+                metadata.update({"title": pr_title, "title_seed": None})
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            if "title" in metadata:
+                await mirror_thread_metadata(
+                    thread_id, {"title": metadata["title"], "title_seed": None}
+                )
             origin = (
                 cfg.slack_thread
                 if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
@@ -906,12 +916,20 @@ async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, r
     return bool(data.get("private")) if isinstance(data, dict) else False
 
 
-async def _stamp_attribution_footer(body: str) -> str:
+async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
     """Make the platform footer, naming this run's model, the body's last line."""
     cfg = _configurable()
     model_id: str | None = cfg.resolved_agent_model_id
     effort: str | None = cfg.resolved_agent_effort
-    if cfg.thread_id:
+    state = state or {}
+    if selected := state.get("selected_model_id"):
+        model_id, effort = selected, state.get("selected_effort")
+        usage = summarize_run_usage(state, invocation_id=cfg.invocation_id or None)
+        models = usage.models if usage else ()
+        reported = {name.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for name in models}
+        if models and reported != {selected.rsplit("/", 1)[-1].rsplit(":", 1)[-1]}:
+            model_id, effort = ", ".join(models), None
+    elif cfg.thread_id:
         try:
             thread = await get_client().threads.get(cfg.thread_id)
             metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -974,7 +992,9 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str | None = None,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         token, kind = await _resolve_pr_author_token(author)
@@ -1036,7 +1056,8 @@ async def _open_pull_request(
         if preflight_failure is not None:
             return preflight_failure
         body = await _stamp_attribution_footer(
-            await _maybe_append_references(client, token, owner, repo, body)
+            await _maybe_append_references(client, token, owner, repo, body),
+            state,
         )
         draft = _effective_draft(draft)
         payload = {
@@ -1063,6 +1084,7 @@ async def _open_pull_request(
                     base=base,
                     pr=pr,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     creation_response=pr,
                 )
             return {
@@ -1088,6 +1110,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     record_opening=False,
                 )
                 return {
@@ -1138,7 +1161,9 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str = "",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
     return await _open_pull_request(
@@ -1150,7 +1175,9 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        retitle_thread=retitle_thread,
         author=author or None,
+        state=state,
     )
 
 

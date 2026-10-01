@@ -33,7 +33,10 @@ export interface IncidentSummary {
 export interface IncidentReport {
   id: string
   summary: string
+  problem?: string
+  previous_occurrence?: string
   impact: string
+  cause?: string
   next_steps?: string[]
   outcome: "inconclusive" | "findings"
   hypotheses: Array<{

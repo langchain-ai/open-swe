@@ -1,4 +1,7 @@
+import { ApiError, ProtocolError } from "./api.ts"
+import { CredentialError } from "./credentials.ts"
 import {
+  errorMessage,
   isRecord,
   numberAt,
   parseJson,
@@ -79,6 +82,10 @@ export interface RunOutcome {
 export const RESULT_TOOL = "cli_result"
 const MAX_EXIT_CODE = 255
 
+function retryableStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429
+}
+
 const TERMINAL: ReadonlySet<string> = new Set([
   "completed",
   "failed",
@@ -124,9 +131,13 @@ export class RunCollector {
   handle(frame: SseFrame): RunOutcome | null {
     if (frame.event === "error") {
       const payload = parseJson(frame.data)
-      const detail =
-        stringAt(isRecord(payload) ? payload : null, "detail") ?? frame.data
-      return this.finish("failed", detail)
+      const record = isRecord(payload) ? payload : null
+      const detail = stringAt(record, "detail") ?? frame.data
+      const status = numberAt(record, "status")
+      return this.finish(
+        status !== null && retryableStatus(status) ? "closed" : "failed",
+        detail
+      )
     }
     const payload = parseJson(frame.data)
     if (!isRecord(payload)) return null
@@ -201,4 +212,59 @@ export async function collectRun(
     void reader.cancel().catch(() => undefined)
   }
   return collector.finish("closed", null)
+}
+
+const MIN_RECONNECT_MS = 1_000
+const MAX_RECONNECT_MS = 30_000
+const MAX_RECONNECTS = 10
+/** A stream that stayed open this long counts as healthy, resetting the reconnect budget. */
+const STABLE_STREAM_MS = 60_000
+
+export interface FollowOptions {
+  onReconnect?: (attempt: number, reason: string) => void
+  sleep?: (ms: number) => Promise<void>
+  now?: () => number
+}
+
+function reconnectable(cause: unknown): boolean {
+  if (cause instanceof ApiError) return retryableStatus(cause.status)
+  return !(cause instanceof ProtocolError || cause instanceof CredentialError)
+}
+
+/**
+ * Follows a run across dropped event streams. Every reopen replays the thread
+ * from the start, and the collector's run-id filter picks this run back out,
+ * so a backend restart mid-run costs a reconnect instead of the run.
+ */
+export async function followRun(
+  open: () => Promise<Response>,
+  runId: string | null,
+  options: FollowOptions = {}
+): Promise<RunOutcome> {
+  const sleep =
+    options.sleep ??
+    ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
+  const now = options.now ?? Date.now
+  let attempts = 0
+  let backoff = MIN_RECONNECT_MS
+  for (;;) {
+    const openedAt = now()
+    let outcome: RunOutcome
+    try {
+      outcome = await collectRun(await open(), runId)
+    } catch (cause) {
+      if (!reconnectable(cause)) throw cause
+      outcome = { status: "closed", error: errorMessage(cause), result: null }
+    }
+    if (outcome.status !== "closed") return outcome
+    if (now() - openedAt >= STABLE_STREAM_MS) {
+      attempts = 0
+      backoff = MIN_RECONNECT_MS
+    }
+    attempts += 1
+    if (attempts > MAX_RECONNECTS) return outcome
+    options.onReconnect?.(attempts, outcome.error ?? "the event stream ended")
+    await sleep(backoff)
+    backoff = Math.min(backoff * 2, MAX_RECONNECT_MS)
+  }
 }

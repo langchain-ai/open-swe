@@ -1,5 +1,5 @@
 import { memo, useLayoutEffect, useRef } from "react"
-import { Bot, File as FileIcon } from "lucide-react"
+import { Bot, File as FileIcon, Hash } from "lucide-react"
 
 import type { ComposerTriggerKind } from "./composerTrigger"
 import { cn } from "@/lib/utils"
@@ -26,6 +26,14 @@ export type ComposerCommandItem =
       label: string
       description: string
     }
+  | {
+      id: string
+      type: "slack-channel"
+      channelId: string
+      name: string
+      label: string
+      description: string
+    }
 
 interface ComposerCommandMenuProps {
   items: Array<ComposerCommandItem>
@@ -37,7 +45,7 @@ interface ComposerCommandMenuProps {
 }
 
 /**
- * The autocomplete popup for `@path`, `/command`, and `$skill`. Keyboard
+ * The autocomplete popup for `@path`, `/command`, `$skill`, and `#channel`. Keyboard
  * navigation lives in the composer (the editor keeps focus while this is open),
  * so this only reflects the active item and reports pointer intent back up.
  */
@@ -69,7 +77,9 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
           ? "Files"
           : triggerKind === "skill-command"
             ? "Skills"
-            : "Commands"
+            : triggerKind === "slack-channel"
+              ? "Slack channels"
+              : "Commands"
       }
     >
       {items.length > 0 ? (
@@ -97,6 +107,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
             >
               {item.type === "path" ? (
                 <FileIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+              ) : item.type === "slack-channel" ? (
+                <Hash className="size-3.5 shrink-0 text-muted-foreground/80" />
               ) : (
                 <Bot className="size-3.5 shrink-0 text-muted-foreground/80" />
               )}

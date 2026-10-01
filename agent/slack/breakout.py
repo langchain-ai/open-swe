@@ -11,7 +11,6 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
     post_slack_top_level_message_with_ts,
-    strip_bot_mention,
 )
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
@@ -32,23 +31,38 @@ class BreakoutCommand:
     instruction: str
     channel: str = ""
     channel_id: str = ""
+    prior_text: str = ""
 
     @classmethod
     def parse(cls, text: str, bot_user_id: str) -> BreakoutCommand | None:
-        """None when the message is not `/breakout`; a leading `#word` names the destination."""
-        clean = strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-        match = _COMMAND_RE.fullmatch(clean)
+        """Parse a command immediately after the bot mention, or a bare command."""
+        mentions = [f"<@{bot_user_id}>"] if bot_user_id else []
+        if common.SLACK_BOT_USERNAME:
+            mentions.append(f"@{common.SLACK_BOT_USERNAME}")
+        match = None
+        prior_text = ""
+        if mentions:
+            mention_re = re.compile("|".join(re.escape(mention) for mention in mentions))
+            for mention in mention_re.finditer(text):
+                candidate = _COMMAND_RE.fullmatch(text[mention.end() :].strip())
+                if candidate is not None:
+                    match = candidate
+                    prior_text = text[: mention.start()].strip()
+                    break
+        if match is None:
+            match = _COMMAND_RE.fullmatch(text.strip())
         if match is None:
             return None
         rest = (match.group("instruction") or "").strip()
         parts = rest.split(maxsplit=1)
         if not parts or not parts[0].startswith(("#", "<#")):
-            return cls(instruction=rest)
-        mention = _CHANNEL_MENTION_RE.fullmatch(parts[0])
+            return cls(instruction=rest, prior_text=prior_text)
+        channel = _CHANNEL_MENTION_RE.fullmatch(parts[0])
         return cls(
             instruction=parts[1] if len(parts) > 1 else "",
             channel=parts[0],
-            channel_id=mention["channel_id"] if mention else "",
+            channel_id=channel["channel_id"] if channel else "",
+            prior_text=prior_text,
         )
 
     def target_channel(self, request: SlackRequest) -> str:
@@ -113,7 +127,7 @@ async def _move(request: SlackRequest, target: str) -> None:
         return
 
     title = str(metadata.get("title") or "").strip() or "Untitled"
-    heading = f"*Breakout thread:* {_title(title)}"
+    heading = f"`/breakout`: {_title(title)}"
     result = await move_slack_thread(
         client,
         thread_id,
@@ -142,8 +156,9 @@ async def _start(
     instruction: str,
     target: str,
     repo: common.SlackRepoResolution | None,
+    prior_text: str = "",
 ) -> None:
-    heading = f"*Breakout thread:* {_title(instruction)}"
+    heading = f"`/breakout`: {_title(instruction)}"
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
         await _root_text(request, heading),
@@ -176,6 +191,7 @@ async def _start(
                 "text": instruction,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
+                "prior_message_text": prior_text,
                 **(
                     {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}
                     if moved_channel
@@ -210,7 +226,7 @@ async def process_slack_breakout(
                 )
                 return
         if command.instruction:
-            await _start(request, command.instruction, target, repo)
+            await _start(request, command.instruction, target, repo, command.prior_text)
         else:
             await _move(request, target)
     except Exception:

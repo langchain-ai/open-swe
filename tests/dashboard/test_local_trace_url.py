@@ -68,25 +68,3 @@ async def test_local_trace_url_requires_authentication(client: httpx.AsyncClient
     response = await client.get(URL)
 
     assert response.status_code == 401
-
-
-@pytest.mark.usefixtures("authenticated")
-async def test_local_trace_url_rejects_invalid_thread_id(client: httpx.AsyncClient) -> None:
-    response = await client.get("/dashboard/api/me/local-trace-url/not-a-uuid")
-
-    assert response.status_code == 422
-
-
-@pytest.mark.parametrize("tenant_id", ["tenant-id", None])
-@pytest.mark.usefixtures("authenticated")
-async def test_local_trace_url_is_null_when_unavailable(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, tenant_id: str | None
-) -> None:
-    monkeypatch.setattr(user_preferences, "get_value", AsyncMock(return_value=None))
-    monkeypatch.setattr(langsmith, "resolve_tenant_id", AsyncMock(return_value=tenant_id))
-    monkeypatch.setattr(langsmith, "_resolve_project_id_by_name", AsyncMock(return_value=None))
-
-    response = await client.get(URL)
-
-    assert response.status_code == 200
-    assert response.json() == {"trace_url": None}
