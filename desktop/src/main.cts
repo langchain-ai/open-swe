@@ -84,6 +84,14 @@ const {
   staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
+const {
+  migrateDesktopConfig,
+  readSharedConfig,
+  shareSession,
+  sharedConfigPath,
+  unshareSession,
+  updateSharedConfig,
+} = require("./shared-config.js");
 
 const appRuntime = resolveAppRuntime({
   argv: process.argv,
@@ -393,11 +401,7 @@ async function createThreadWorktree(thread, baseBranch) {
   return localThreadStore.setWorktree(thread.id, worktree, true);
 }
 
-/**
- * Two agents in one working tree overwrite each other's edits and fight over
- * its branch, and the backend now runs local threads concurrently, so a tree an
- * agent is working in is off limits to everything else.
- */
+/** Prevent branch switches and worktree reuse from disrupting running agents. */
 async function assertWorkspaceFree(root, exceptThreadId = null) {
   const activity = await backendSupervisor.threadActivity();
   if (!activity) throw new Error("Could not reach the local Open SWE backend");
@@ -692,7 +696,6 @@ function configureDesktopIpc() {
         "Add a valid project to Open SWE before starting a local agent",
       );
     await backendSupervisor.start();
-    if (input?.workspaceMode !== "worktree") await assertWorkspaceFree(cwd);
     let thread = localThreadStore.create({ ...input, cwd });
     try {
       if (input?.workspaceMode === "worktree")
@@ -879,33 +882,97 @@ function configureDesktopIpc() {
       return { status: "error", files: [], truncated: false };
     }
   });
+  /** The checked-out branch's pull request, for the composer PR link. */
+  ipcMain.handle("desktop:get-local-pr", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await diffThread(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return null;
+    try {
+      const { pr } = await repositoryMetadata(thread.checkpoint.repo);
+      return pr;
+    } catch {
+      return null;
+    }
+  });
 }
 
-function configPath() {
+function profileConfigPath() {
   return path.join(app.getPath("userData"), "desktop-config.json");
+}
+
+/** Development builds keep their own profile, so they never repoint the packaged app or the CLI. */
+function configPath() {
+  return isDevelopment
+    ? profileConfigPath()
+    : sharedConfigPath(require("node:os").homedir());
+}
+
+function migrateStoredConfig() {
+  if (isDevelopment) return;
+  try {
+    migrateDesktopConfig({
+      home: require("node:os").homedir(),
+      platform: process.platform,
+      env: process.env,
+    });
+  } catch (error) {
+    console.warn("Could not migrate desktop-config.json", error);
+  }
+}
+
+function isBackendSessionCookie(cookie) {
+  return (
+    Boolean(backendUrl) &&
+    cookie.name === SESSION_COOKIE_NAME &&
+    cookie.domain.replace(/^\./, "") === new URL(backendUrl).hostname
+  );
+}
+
+/** Mirror the app's session into the shared config, so `oswe` is signed in whenever the app is. */
+async function shareBackendSession() {
+  if (isDevelopment) return;
+  session.defaultSession.cookies.on(
+    "changed",
+    (_event, cookie, cause, removed) => {
+      if (!isBackendSessionCookie(cookie)) return;
+      if (removed && cause === "overwrite") return;
+      try {
+        if (removed) unshareSession(configPath(), backendUrl, cookie.value);
+        else shareSession(configPath(), backendUrl, cookie.value);
+      } catch (error) {
+        console.warn("Could not share the desktop session with oswe", error);
+      }
+    },
+  );
+  if (!backendUrl) return;
+  try {
+    const [cookie] = await session.defaultSession.cookies.get({
+      url: backendUrl,
+      name: SESSION_COOKIE_NAME,
+    });
+    if (cookie) shareSession(configPath(), backendUrl, cookie.value);
+  } catch (error) {
+    console.warn("Could not share the desktop session with oswe", error);
+  }
 }
 
 function readStoredBackendUrl() {
   try {
-    const config = JSON.parse(fs.readFileSync(configPath(), "utf8"));
-    return typeof config.backendUrl === "string"
-      ? validateBackendUrl(config.backendUrl)
-      : undefined;
-  } catch {
+    const { backendUrl } = readSharedConfig(configPath());
+    return backendUrl ? validateBackendUrl(backendUrl) : undefined;
+  } catch (error) {
+    console.warn("Could not read the stored backend URL", error);
     return undefined;
   }
 }
 
 function storeBackendUrl(value) {
   const url = validateBackendUrl(value.trim());
-  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
-  fs.writeFileSync(
-    configPath(),
-    `${JSON.stringify({ backendUrl: url }, null, 2)}\n`,
-    {
-      mode: 0o600,
-    },
-  );
+  updateSharedConfig(configPath(), (config) => ({
+    ...config,
+    backendUrl: url,
+  }));
   return url;
 }
 
@@ -1598,6 +1665,7 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({
         argv: process.argv.slice(1),
@@ -1613,6 +1681,7 @@ if (!hasSingleInstanceLock) {
       app.exit(1);
       return;
     }
+    void shareBackendSession();
 
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-local-threads.json"),

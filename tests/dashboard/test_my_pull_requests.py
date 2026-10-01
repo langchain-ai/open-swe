@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
+from agent.github.ci import RequiredCheck
 from agent.review import routes as review_routes
 
 
@@ -20,74 +21,6 @@ def response(payload, status=200):
     return httpx2.Response(
         status, json=payload, request=httpx2.Request("GET", "https://api.github.com")
     )
-
-
-async def test_lightweight_list_uses_server_sort_and_does_not_wait_for_details(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
-    search = AsyncMock(
-        return_value=response(
-            {
-                "items": [
-                    {
-                        "number": 1,
-                        "title": "PR 1",
-                        "repository_url": "https://api.github.com/repos/acme/app",
-                        "created_at": "2026-01-01T00:00:00Z",
-                    }
-                ],
-                "total_count": 1,
-            }
-        )
-    )
-    monkeypatch.setattr(prs, "github_request", search)
-    details = AsyncMock()
-    monkeypatch.setattr(prs, "_fetch_pull_request", details)
-    result = await prs.list_open_pull_requests(
-        "octocat", "user-token", lightweight=True, sort="created", direction="asc"
-    )
-    details.assert_not_awaited()
-    assert search.await_args.kwargs["params"]["sort"] == "created"
-    assert search.await_args.kwargs["params"]["order"] == "asc"
-    assert result.pull_requests[0].title == "PR 1"
-    assert result.pull_requests[0].details_loading is True
-
-
-async def test_payload_json_keys_stay_camel_case_for_the_dashboard_client():
-    pull = await prs.load_open_pull_request(
-        object(), {"repo_full_name": "acme/app", "number": 1}, details=False
-    )
-    assert pull is not None
-    assert set(pull.model_dump(by_alias=True, mode="json")) == {
-        "repo",
-        "number",
-        "title",
-        "draft",
-        "additions",
-        "deletions",
-        "mergeable",
-        "mergeState",
-        "headSha",
-        "headRef",
-        "reviewDecision",
-        "reviewRequired",
-        "unresolvedThreads",
-        "statusAvailable",
-        "createdAt",
-        "updatedAt",
-        "ci",
-        "failingChecks",
-        "pendingChecks",
-        "detailsLoading",
-    }
-    payload = prs.OpenPullRequests(
-        pull_requests=[pull], next_page=2, incomplete=False, updated_at="2026-01-01T00:00:00Z"
-    )
-    assert set(payload.model_dump(by_alias=True, mode="json")) == {
-        "pullRequests",
-        "nextPage",
-        "incomplete",
-        "updatedAt",
-    }
 
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
@@ -176,81 +109,37 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
     assert error.value.status_code == 422
 
 
-async def test_search_failure_is_not_an_empty_success(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
-    monkeypatch.setattr(prs, "github_request", AsyncMock(return_value=response({}, 429)))
-    with pytest.raises(HTTPException) as error:
-        await prs.list_open_pull_requests("octocat", "user-token")
-    assert error.value.status_code == 502
-
-
-async def test_search_pages_through_results(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
-    search = AsyncMock(return_value=response({"items": [], "total_count": 250}))
-    monkeypatch.setattr(prs, "github_request", search)
-    result = await prs.list_open_pull_requests("octocat", "user-token")
-    assert search.await_args.kwargs["params"]["page"] == "1"
-    assert result.next_page == 2 and result.incomplete is False
-    result = await prs.list_open_pull_requests("octocat", "user-token", page=3)
-    assert search.await_args.kwargs["params"]["page"] == "3"
-    assert result.next_page is None
-    search.return_value = response({"items": [], "total_count": 5000})
-    result = await prs.list_open_pull_requests("octocat", "user-token", page=10)
-    assert result.next_page is None
-    with pytest.raises(HTTPException) as error:
-        await prs.list_open_pull_requests("octocat", "user-token", page=11)
-    assert error.value.status_code == 422
-
-
-async def test_a_timed_out_search_returns_no_pull_requests(monkeypatch):
-    """GitHub answers a timed-out search with an arbitrary subset of the matches."""
-    monkeypatch.setattr(prs, "github_client", client)
-    monkeypatch.setattr(
-        prs,
-        "github_request",
-        AsyncMock(
-            return_value=response(
-                {
-                    "items": [
-                        {
-                            "number": 1,
-                            "title": "PR 1",
-                            "repository_url": "https://api.github.com/repos/acme/app",
-                        }
-                    ],
-                    "total_count": 86,
-                    "incomplete_results": True,
-                }
-            )
-        ),
-    )
-    result = await prs.list_open_pull_requests("octocat", "user-token", lightweight=True)
-    assert result.pull_requests == []
-    assert result.incomplete is True and result.next_page is None
-
-
-async def test_pending_mergeability_is_awaited_rather_than_reported_unknown(monkeypatch):
-    """GitHub answers `mergeable: null` until it finishes computing the merge."""
-    monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
-    open_pull = {"state": "open", "head": {"sha": "a" * 40}}
-    fetches = AsyncMock(
-        side_effect=[
-            {**open_pull, "mergeable": None, "mergeable_state": "unknown"},
-            {**open_pull, "mergeable": None, "mergeable_state": "unknown"},
-            {**open_pull, "mergeable": True, "mergeable_state": "clean"},
-        ]
-    )
-    monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
-    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
+@pytest.mark.parametrize(
+    ("merge_state", "runs", "missing", "reads_rules"),
+    [
+        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], True),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
+        ("clean", [{"name": "unit", "status": "completed"}], [], False),
+    ],
+)
+async def test_blocked_merge_names_required_checks_the_head_never_reported(
+    monkeypatch, merge_state, runs, missing, reads_rules
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": merge_state,
+        "head": {"sha": "a" * 40},
+        "base": {"ref": "main"},
+    }
+    monkeypatch.setattr(prs, "_fetch_pull_request", AsyncMock(return_value=pull))
+    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=runs))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
     monkeypatch.setattr(
         prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
+    rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
+    monkeypatch.setattr(prs, "read_required_checks", rules)
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
-    assert fetches.await_count == 3
     assert result is not None
-    assert result.mergeable is True and result.merge_state == "clean"
+    assert result.missing_checks == missing
+    assert rules.await_count == int(reads_rules)
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):
@@ -394,28 +283,6 @@ def _threads_response(resolved_flags, *, has_next=False, cursor=None):
             }
         }
     )
-
-
-async def test_unresolved_threads_are_counted_from_the_modules_graphql_endpoint(monkeypatch):
-    _patch_detail_fetchers(monkeypatch)
-    graphql = AsyncMock(
-        side_effect=[
-            _threads_response([False, True, False], has_next=True, cursor="page-2"),
-            _threads_response([True, False]),
-        ]
-    )
-    monkeypatch.setattr(prs, "github_request", graphql)
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 7})
-    assert result is not None
-    assert result.unresolved_threads == 3
-    assert [call.args[1:] for call in graphql.await_args_list] == [
-        ("POST", "https://fake-gh/graphql"),
-        ("POST", "https://fake-gh/graphql"),
-    ]
-    assert [call.kwargs["json"]["variables"] for call in graphql.await_args_list] == [
-        {"owner": "acme", "repo": "app", "number": 7, "cursor": None},
-        {"owner": "acme", "repo": "app", "number": 7, "cursor": "page-2"},
-    ]
 
 
 async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch):

@@ -1,5 +1,4 @@
 import { useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
 import {
   FolderIcon,
   GlobeIcon,
@@ -7,38 +6,15 @@ import {
   LockSimpleIcon,
 } from "@phosphor-icons/react"
 
-import {
-  api,
-  type SlackChannelDirectory,
-  type WorkspaceOption,
-} from "@/lib/api"
+import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
+import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import {
   OwnershipPicker,
   type PickerItem,
   type PickerOwner,
 } from "./OwnershipPicker"
-
-export const slackChannelDirectoryKey = ["slackChannels"] as const
-
-/** The channels the bot can see; a directory to browse, refreshed on its own. */
-export function useSlackChannelDirectory(enabled: boolean) {
-  return useQuery({
-    queryKey: slackChannelDirectoryKey,
-    queryFn: api.listSlackChannels,
-    enabled,
-    staleTime: 60_000,
-  })
-}
-
-/** `#name` for a channel the directory knows, else the id as stored. */
-export function slackChannelLabel(
-  directory: SlackChannelDirectory | undefined,
-  id: string
-): string {
-  const channel = directory?.channels.find((entry) => entry.id === id)
-  return channel ? `#${channel.name}` : id
-}
 
 function ownersOf(
   workspaces: Array<WorkspaceOption>,
@@ -57,7 +33,6 @@ function ownersOf(
 }
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
 interface BindingPickerProps {
   selected: Array<string>
@@ -76,6 +51,13 @@ export function RepositoryPicker({
   disabled,
 }: BindingPickerProps) {
   const repos = useRepos()
+  const reposByName = useMemo(
+    () =>
+      new Map(
+        (repos.data?.repositories ?? []).map((repo) => [repo.full_name, repo])
+      ),
+    [repos.data]
+  )
   const owners = useMemo(
     () => ownersOf(workspaces, (workspace) => workspace.repos),
     [workspaces]
@@ -85,7 +67,7 @@ export function RepositoryPicker({
       (repos.data?.repositories ?? []).map((repo) => ({
         id: repo.full_name,
         label: repo.full_name,
-        meta: repo.private ? "private" : "public",
+        meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
         icon: repo.private ? (
           <LockSimpleIcon size={14} />
         ) : (
@@ -98,8 +80,8 @@ export function RepositoryPicker({
   return (
     <OwnershipPicker
       triggerLabel="Choose repositories"
-      title="Repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is preferred by one workspace."
+      title="Bound repositories"
+      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
       noun="repository"
       pluralNoun="repositories"
       items={items}
@@ -107,6 +89,20 @@ export function RepositoryPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search repositories"
+      filter={{
+        label: "Exclude archived",
+        matches: (item) => !reposByName.get(item.id)?.archived,
+      }}
+      filters={[
+        {
+          label: "Public",
+          matches: (item) => reposByName.get(item.id)?.private === false,
+        },
+        {
+          label: "Internal",
+          matches: (item) => reposByName.get(item.id)?.private === true,
+        },
+      ]}
       manual={{
         label: "Add a repository by name",
         placeholder: "owner/repo",
@@ -164,9 +160,10 @@ export function SlackChannelPicker({
           <HashIcon size={14} />
         ),
         owner: owners.get(channel.id.toLowerCase()) ?? null,
+        disabled: !channel.is_member,
         warning: channel.is_member
           ? undefined
-          : "Open SWE is not in this channel, so mentions there will not reach it.",
+          : "Invite Open SWE to this channel, then refresh to select it.",
       })),
     [directory.data, owners]
   )
@@ -182,20 +179,12 @@ export function SlackChannelPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search channels"
-      filter={{
-        label: "Only channels the bot is in",
-        matches: (item) => !item.warning,
-      }}
-      manual={{
-        label: "Slack channel ID",
-        placeholder: "Paste a channel ID (for example, C0123456789)",
-        hint: "In Slack, open the channel details and copy the channel ID from the About tab.",
-        normalize: (raw) => {
-          const value = raw.trim().toUpperCase()
-          return CHANNEL_ID_PATTERN.test(value) ? value : null
-        },
-        invalidHint: "Channel IDs start with C or G.",
-      }}
+      actions={
+        <RefreshSlackChannels
+          refresh={directory.refresh}
+          isRefreshing={directory.isLoading || directory.isRefreshing}
+        />
+      }
       loading={directory.isLoading}
       loadError={
         directory.isError
@@ -203,13 +192,13 @@ export function SlackChannelPicker({
               directory.error instanceof Error
                 ? ` (${directory.error.message})`
                 : ""
-            }; add them by ID.`
+            }; refresh to try again.`
           : null
       }
       notice={
         directory.data?.partial
-          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed. Add others by ID."
-          : null
+          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed."
+          : "Missing a channel? Invite Open SWE in Slack, then refresh this list."
       }
       disabled={disabled}
     />

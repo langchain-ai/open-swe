@@ -9,7 +9,13 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
-from agent.slack.blocks import SECTION_TEXT_MAX_CHARS, block_payload, section
+from agent.slack.blocks import (
+    MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
+    SECTION_TEXT_MAX_CHARS,
+    block_payload,
+    section,
+)
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
@@ -19,7 +25,7 @@ from agent.slack.client import (
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -33,7 +39,9 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_MARKDOWN_MAX_CHARS = 12000
+_NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+# The posting helpers append a dashboard-link context block.
+_WEB_LINK_BLOCKS = 1
 
 
 def _usage_with_effort(
@@ -104,13 +112,15 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
-        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            if options:
-                return _oversized_options_error(message)
-            message = markdown_to_mrkdwn(message)
-            slack_blocks = None
-        if response_type == "final" and run_id and _triggering_user_id(cfg):
+        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            return _oversized_options_error(message)
+        feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        slack_blocks = blocks
+        if blocks is None:
+            slack_blocks = _reply_blocks(message, options, reserve=_WEB_LINK_BLOCKS + feedback)
+            if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+                message = markdown_to_mrkdwn(message)
+        if feedback and run_id:
             if slack_blocks is None:
                 slack_blocks = block_payload(
                     [
@@ -178,11 +188,9 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
     if blocks is None:
-        if native_markdown:
-            blocks = _build_option_blocks(message, None)
-        else:
+        blocks = _reply_blocks(message, None, reserve=_WEB_LINK_BLOCKS)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
     usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
@@ -272,12 +280,22 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
     }
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+def _reply_blocks(
+    message: str, options: list[str] | None, *, reserve: int
+) -> list[dict[str, Any]] | None:
+    """``message`` then option buttons; ``None`` when they cannot fit in one message."""
+    actions = _option_actions(options)
+    body = markdown_blocks(message)
+    if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
+        return None
+    return [*block_payload(body), *actions]
+
+
+def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
     clean_options = [option.strip() for option in options or [] if option.strip()]
-    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return blocks
-    blocks.append(
+        return []
+    return [
         {
             "type": "actions",
             "elements": [
@@ -290,8 +308,7 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 for index, option in enumerate(clean_options[:5])
             ],
         }
-    )
-    return blocks
+    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

@@ -227,6 +227,8 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
+  review_channel_watch?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -247,6 +249,8 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
+  human_review_requests?: boolean
+  review_channel_watch?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -493,6 +497,10 @@ export interface PRMergeRateEffort {
   decided_merge_rate: number | null
   mature_denominator: number
   mature_cohort_merge_share: number | null
+  avg_merge_seconds?: number | null
+  avg_delivery_seconds?: number | null
+  median_distance_basis_points?: number | null
+  distance_sample_size?: number
 }
 
 export interface PRMergeRateCohort {
@@ -516,6 +524,7 @@ export interface PRMergeRateCohort {
   avg_delivery_seconds?: number | null
   efforts: PRMergeRateEffort[]
   median_distance_basis_points?: number | null
+  mean_distance_basis_points?: number | null
   distance_sample_size?: number
 }
 
@@ -539,6 +548,7 @@ export interface PRMergeRateResponse {
 export interface Repository {
   full_name: string
   private: boolean
+  archived: boolean
 }
 
 export interface Installation {
@@ -660,6 +670,8 @@ export interface WorkspaceOption {
   /** Effective default repository, from the workspace's settings tiers. */
   default_repo: string | null
   slack_channel_ids: Array<string>
+  /** Bound channels where untagged messages start and continue threads. */
+  kitchen_channel_ids: Array<string>
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -698,6 +710,9 @@ export interface WorkspaceCreate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
 }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
@@ -706,6 +721,7 @@ export interface WorkspaceUpdate {
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
+  kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
 }
@@ -723,6 +739,7 @@ export interface WorkspaceRecord {
   prompt: string
   repos: Array<string>
   slack_channel_ids: Array<string>
+  kitchen_channel_ids: Array<string>
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -899,6 +916,9 @@ export interface OpenPullRequest {
   ci: "passing" | "failing" | "pending" | "unknown" | "none"
   failingChecks: string[]
   pendingChecks: string[]
+  // Required by the base branch but never reported on the head, so GitHub
+  // refuses the merge.
+  missingChecks: string[]
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
@@ -1166,7 +1186,6 @@ export interface ReviewerEvalConfig {
   reasoning_effort: string
   score_mode: ReviewerEvalScoreMode
   severity_threshold: ReviewerEvalSeverity
-  cap: number
 }
 
 export interface ReviewerEvalProgress {
@@ -1193,6 +1212,15 @@ export interface ReviewerEvalStatus {
   github_run_url?: string | null
   trigger?: string | null
   updated_at: string
+}
+
+export interface HumanReviewRequestResult {
+  success: boolean
+  error: string
+  request_id: string
+  channel: string
+  permalink: string
+  reused: boolean
 }
 
 async function pullRequestAction(
@@ -1229,6 +1257,8 @@ export const api = {
       `/options?workspace=${encodeURIComponent(workspace)}`
     ),
   profile: () => request<Profile>("/profile"),
+  dismissSlackOnboarding: () =>
+    request<Profile>("/profile/slack-onboarding-dismissal", { method: "POST" }),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: (options?: { refresh?: boolean }) =>
@@ -1407,19 +1437,14 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  slackUserName: (userId: string) =>
+    request<{ name: string }>(
+      `/slack/users/${encodeURIComponent(userId)}/name`
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
-  listKitchenChannels: () =>
-    request<Array<{ channel_id: string }>>("/slack/kitchen-channels"),
-  enableKitchenChannel: (channelId: string) =>
-    request<{ channel_id: string }>("/slack/kitchen-channels", {
-      method: "POST",
-      body: JSON.stringify({ channel_id: channelId }),
-    }),
-  disableKitchenChannel: (channelId: string) =>
-    request<{ ok: boolean }>(
-      `/slack/kitchen-channels/${encodeURIComponent(channelId)}`,
-      { method: "DELETE" }
+  listSlackChannels: (refresh = false) =>
+    request<SlackChannelDirectory>(
+      `/slack/channels${refresh ? "?refresh=true" : ""}`
     ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
@@ -1610,6 +1635,11 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  requestHumanReview: (pr: OpenPullRequest) =>
+    request<HumanReviewRequestResult>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
+      { method: "POST" }
+    ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
       `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/merge-methods`

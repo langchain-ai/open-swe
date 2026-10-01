@@ -241,6 +241,8 @@ export interface AgentSchedule {
   schedule: string | null
   trigger: AutomationTrigger
   scope: "workspace"
+  /** Slug of the workspace every run launches in. */
+  workspace: string
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode

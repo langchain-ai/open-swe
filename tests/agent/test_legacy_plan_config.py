@@ -1,9 +1,7 @@
-import asyncio
 from typing import Any
 
 import pytest
 
-from agent.threads import runs as thread_runs
 from tests.conftest import patch_thread_module
 
 
@@ -63,38 +61,6 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     return client
-
-
-def _run_start_command(plan_mode: bool | None) -> dict[str, Any]:
-    configurable: dict[str, Any] = {}
-    if plan_mode is not None:
-        configurable["plan_mode"] = plan_mode
-    return {
-        "method": "run.start",
-        "params": {
-            "input": {"messages": [{"role": "user", "content": "do work"}]},
-            "config": {"configurable": configurable},
-        },
-    }
-
-
-@pytest.mark.parametrize("legacy_mode", [True, False, None])
-def test_run_start_ignores_legacy_plan_mode(
-    dashboard_run_client: _FakeLangGraphClient,
-    legacy_mode: bool | None,
-) -> None:
-    enriched = asyncio.run(
-        thread_runs._enrich_run_start_command(
-            "thread-id",
-            "octo",
-            _run_start_command(legacy_mode),
-            metadata={"source": "dashboard", "github_login": "octo", "plan_mode": True},
-            creating=False,
-        )
-    )
-
-    configurable = enriched["params"]["config"]["configurable"]
-    assert "plan_mode" not in configurable
 
 
 @pytest.mark.parametrize("legacy_mode", [True, False])

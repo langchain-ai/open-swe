@@ -1,9 +1,23 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
 import { SlackMrkdwn } from "./SlackMrkdwn"
 
 describe("SlackMrkdwn", () => {
+  it("resolves bare user mentions without changing explicit labels or code", () => {
+    const client = new QueryClient()
+    client.setQueryData(["slackUserName", "U0917JZ8NLB"], { name: "Open SWE" })
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <SlackMrkdwn text="<@U0917JZ8NLB> <@U0917JZ8NLB|bot> `<@U0917JZ8NLB>`" />
+      </QueryClientProvider>
+    )
+    expect(html).toContain("@Open SWE")
+    expect(html).toContain("bot")
+    expect(html).toContain("&lt;@U0917JZ8NLB&gt;")
+  })
+
   it("renders Slack links, mentions, and inline formatting", () => {
     const html = renderToStaticMarkup(
       <SlackMrkdwn text="Read *important* <https://example.com/docs|docs> with <@U123|Alice>" />

@@ -1,6 +1,7 @@
 import { useQueries } from "@tanstack/react-query"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import { expiresInBrowser } from "@/lib/query"
 
 /**
  * Fill in the lightweight listing rows with their per-PR detail reads.
@@ -19,7 +20,7 @@ export function usePullRequestDetails(
       queryKey: ["my-pr-details", login, pr.repo, pr.number],
       queryFn: () => api.myPullRequestDetails(pr.repo, pr.number),
       enabled: pr.detailsLoading === true,
-      staleTime: Infinity,
+      ...expiresInBrowser,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       retry: false,

@@ -9,13 +9,13 @@ import {
   writeCachedRepos,
 } from "./repoCache"
 
-const STORAGE_KEY = "open-swe.repos.cache.v1"
+const STORAGE_KEY = "open-swe.repos.cache.v2"
 
 const payload = {
   installations: [{ id: 1, account: "acme", account_type: "Organization" }],
   repositories: [
-    { full_name: "acme/api", private: true },
-    { full_name: "acme/web", private: false },
+    { full_name: "acme/api", private: true, archived: false },
+    { full_name: "acme/web", private: false, archived: true },
   ],
 }
 
@@ -63,7 +63,9 @@ describe("repoCache", () => {
     const cached = readCachedRepos("octocat")
     expect(cached?.payload).toEqual({
       installations: [],
-      repositories: [{ full_name: "acme/api", private: false }],
+      repositories: [
+        { full_name: "acme/api", private: false, archived: false },
+      ],
     })
   })
 

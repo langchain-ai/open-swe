@@ -13,14 +13,13 @@ from agent.github.checks import review_check_conclusion
 from agent.github.pull_requests import PullRequest
 from agent.github.thread_token import (
     GitHubAuthError,
-    get_github_token,
     invalidate_cached_github_token,
+    resolve_thread_github_token,
 )
 from agent.review.approvals import approval_mode_for
 from agent.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
 from agent.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
 from agent.review.findings import (
-    REVIEW_FINDING_CAP,
     REVIEWER_EVAL_PUBLICATION_KEY,
     SEVERITY_ORDER,
     Finding,
@@ -112,19 +111,15 @@ async def publish_review(
     if cfg.is_eval:
         if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
             severity_threshold = cfg.reviewer_eval_severity_threshold
-        eval_cap = cfg.reviewer_eval_cap
-        if eval_cap is None or eval_cap < 0:
-            eval_cap = REVIEW_FINDING_CAP
         try:
             return await _publish_review_eval_dry_run_async(
                 head_sha=head_sha,
                 severity_threshold=severity_threshold,
-                cap=eval_cap,
             )
         except ReviewerThreadMissingError as exc:
             return thread_missing_tool_result(exc)
 
-    token = get_github_token()
+    token = await resolve_thread_github_token()
     if not token:
         return {"success": False, "error": "No GitHub token available"}
 
@@ -136,7 +131,6 @@ async def publish_review(
             head_sha=head_sha,
             token=token,
             severity_threshold=severity_threshold,
-            cap=None,
             is_re_review=is_re_review,
             langgraph_run_id=_current_run_id(config),
             trace_link_config_override=cfg.review_trace_link_enabled,
@@ -231,7 +225,6 @@ async def _publish_review_eval_dry_run_async(
     *,
     head_sha: str,
     severity_threshold: Severity,
-    cap: int,
 ) -> dict[str, Any]:
     """Simulate publish_review for benchmark runs without posting to GitHub."""
     thread_id = get_thread_id_from_runtime()
@@ -243,7 +236,6 @@ async def _publish_review_eval_dry_run_async(
     eligible = filter_findings_for_publish(
         in_diff_unpublished,
         severity_threshold=severity_threshold,
-        cap=cap,
     )
     eligible_with_payload = [
         (finding, payload)
@@ -257,8 +249,8 @@ async def _publish_review_eval_dry_run_async(
     ]
     publication = {
         "finding_ids": finding_ids,
+        "findings": [finding for finding, _payload in eligible_with_payload],
         "severity_threshold": severity_threshold,
-        "cap": cap,
     }
 
     await set_reviewer_thread_metadata(
@@ -285,7 +277,6 @@ async def _publish_review_async(
     head_sha: str,
     token: str,
     severity_threshold: Severity,
-    cap: int | None,
     is_re_review: bool,
     langgraph_run_id: str | None = None,
     trace_link_config_override: bool | None = None,
@@ -348,7 +339,7 @@ async def _publish_review_async(
     # hidden).
     in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
     eligible = filter_findings_for_publish(
-        in_diff_unpublished, severity_threshold=severity_threshold, cap=cap
+        in_diff_unpublished, severity_threshold=severity_threshold
     )
 
     severity_rank = SEVERITY_ORDER[severity_threshold]
@@ -398,6 +389,9 @@ async def _publish_review_async(
             pr_number=pr_number,
             token=token,
             findings=findings,
+        )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
@@ -553,6 +547,12 @@ async def _publish_review_async(
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
         try:
+            if langgraph_run_id is None:
+                current_run_id = (await get_thread_metadata(thread_id)).get(
+                    "current_reviewer_run_id"
+                )
+                if isinstance(current_run_id, str) and current_run_id:
+                    langgraph_run_id = current_run_id
             await ASSESSMENTS.put(
                 str(review_id),
                 PublishedAssessment(
@@ -563,6 +563,7 @@ async def _publish_review_async(
                     pr_number=pr_number,
                     approved=approved,
                     dry_run=dry_run,
+                    run_id=langgraph_run_id,
                 ),
             )
             await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
@@ -624,6 +625,28 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
 
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
+
     if not is_re_review:
         await _maybe_post_slack_completion_reply(
             thread_id=thread_id,
@@ -654,22 +677,6 @@ async def _publish_review_async(
         title=check_title,
         summary=check_summary,
     )
-
-    try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id,
-            github_review_id=review_id if isinstance(review_id, int) else None,
-            head_sha=head_sha,
-            finding_count=len(inline_comments),
-        )
-    except Exception:  # noqa: BLE001
-        # The review is already published on GitHub; a registry write must not
-        # turn that into a tool failure the agent retries.
-        logger.warning(
-            "Failed to link published review to its pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-            exc_info=True,
-        )
 
     result: dict[str, Any] = {
         "success": True,

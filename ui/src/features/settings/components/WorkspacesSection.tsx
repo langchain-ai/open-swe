@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
@@ -37,12 +37,14 @@ const REFRESH_LABEL: Record<WorkspaceRefreshStatus, string> = {
 // snapshot read differently to a person deciding whether to trust the image.
 function refreshLabel(
   status: WorkspaceRefreshStatus,
-  kind: WorkspaceOption["refresh_kind"]
+  kind: WorkspaceOption["refresh_kind"],
+  hasSnapshot: boolean
 ): string {
   if (status === "success" && kind === "update") return "Updated"
   if (status === "success" && kind === "full") return "Rebuilt"
   if (status === "refreshing" && kind === "update") return "Updating…"
-  if (status === "refreshing" && kind === "full") return "Rebuilding…"
+  if (status === "refreshing" && kind === "full")
+    return hasSnapshot ? "Rebuilding…" : "Building…"
   return REFRESH_LABEL[status]
 }
 
@@ -138,7 +140,11 @@ function WorkspaceRow({
                 : undefined
             }
           >
-            {refreshLabel(status, workspace.refresh_kind)}
+            {refreshLabel(
+              status,
+              workspace.refresh_kind,
+              workspace.has_snapshot
+            )}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>
           {configure}
@@ -200,14 +206,20 @@ export function WorkspacesSection({
         name: createDraft.name.trim(),
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
+        kitchen_channel_ids: createDraft.kitchenChannelIds,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
+      if (createDraft.setupScript.trim())
+        body.setup_script = createDraft.setupScript
+      if (createDraft.updateScript.trim())
+        body.update_script = createDraft.updateScript
       await api.createWorkspace(body)
       await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setAdding(false)
       setCreateDraft(EMPTY_DRAFT)
     } catch (e) {
+      void qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setCreateError(
         e instanceof Error ? e.message : "Could not create the workspace"
       )
@@ -276,7 +288,9 @@ export function WorkspacesSection({
                     setCreateError(null)
                   }}
                 >
-                  Cancel
+                  {JSON.stringify(createDraft) !== JSON.stringify(EMPTY_DRAFT)
+                    ? "Cancel"
+                    : "Close"}
                 </Button>
                 <Button
                   size="sm"

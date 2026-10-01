@@ -51,9 +51,7 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
@@ -71,7 +69,7 @@ from agent.review.diff import (
     materialize_review_diff,
     review_diff_range,
 )
-from agent.review.findings import Finding
+from agent.review.findings import Finding, start_run_scoped_findings
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
@@ -523,15 +521,20 @@ async def _ensure_reviewer_sandbox_for_thread(
     repo_name = cfg.repo.name if cfg.repo else ""
     github_token: str | None = None
     if cfg.source:
+        repositories = [repo_name] if repo_name else None
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=[repo_name] if repo_name else None
+            repositories=repositories
         )
         if not github_token:
             raise RuntimeError(
                 f"GitHub App installation token unavailable for reviewer thread {thread_id}"
             )
         cache_github_token_for_thread(
-            thread_id, github_token, expires_at=expires_at, is_bot_token=True
+            thread_id,
+            github_token,
+            expires_at=expires_at,
+            is_bot_token=True,
+            repositories=repositories,
         )
 
     return (
@@ -620,6 +623,8 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         is_re_review = bool(cfg.re_review)
         reviewer_event = cfg.reviewer_event or ""
         reviewer_eval = cfg.is_eval
+        if reviewer_eval:
+            start_run_scoped_findings(self._thread_id)
         can_fetch_pr = (
             pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
         )
@@ -727,8 +732,16 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                 )
                 return None
 
+        # Benchmark runs score the stock reviewer, without our workspace's
+        # guidelines, per-repo style prompts, or API standards.
+        async def _fetch_org_guidelines() -> str | None:
+            return None if reviewer_eval else await _cached_org_guidelines(cfg.workspace_slug)
+
+        async def _fetch_api_standards_skill() -> str | None:
+            return None if reviewer_eval else await _cached_api_standards_skill()
+
         async def _fetch_repo_style_prompt() -> str | None:
-            if not repo_owner or not repo_name:
+            if reviewer_eval or not repo_owner or not repo_name:
                 return None
             from agent.review.styles import get_repo_custom_prompt
 
@@ -762,9 +775,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         existing_threads_task = asyncio.create_task(_fetch_existing_threads_block())
         repo_style_task = asyncio.create_task(_fetch_repo_style_prompt())
         agents_md_task = asyncio.create_task(_fetch_agents_md_context())
-        org_guidelines_task = asyncio.create_task(_cached_org_guidelines(cfg.workspace_slug))
+        org_guidelines_task = asyncio.create_task(_fetch_org_guidelines())
         approval_policy_task = asyncio.create_task(_fetch_approval_policy())
-        api_standards_task = asyncio.create_task(_cached_api_standards_skill())
+        api_standards_task = asyncio.create_task(_fetch_api_standards_skill())
         diff_context = await diff_context_task
         pr_diff_text, pr_diff_line_set = diff_context
         scoped_agents_md_task = asyncio.create_task(
@@ -995,12 +1008,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                     config=config,
                     use_gateway=use_gateway,
                 ),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
-                TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

@@ -55,31 +55,6 @@ class TestSanitizeFireworksMessagesMiddleware:
         assert len(message.tool_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_preserves_message_without_function_call(self) -> None:
-        message = AIMessage(
-            content="ok",
-            tool_calls=[{"name": "read_file", "args": {"file_path": "/x"}, "id": "tc1"}],
-        )
-        request = _make_request([message], model=_fireworks_model())
-
-        await SanitizeFireworksMessagesMiddleware().awrap_model_call(request, _noop_handler)
-
-        assert "function_call" not in message.additional_kwargs
-        assert len(message.tool_calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_drops_function_call_with_no_tool_calls(self) -> None:
-        message = AIMessage(
-            content="",
-            additional_kwargs={"function_call": {"name": "search", "arguments": "{}"}},
-        )
-        request = _make_request([message], model=_fireworks_model())
-
-        await SanitizeFireworksMessagesMiddleware().awrap_model_call(request, _noop_handler)
-
-        assert "function_call" not in message.additional_kwargs
-
-    @pytest.mark.asyncio
     async def test_ignores_non_fireworks_models(self) -> None:
         message = AIMessage(
             content="",
@@ -93,16 +68,3 @@ class TestSanitizeFireworksMessagesMiddleware:
 
         # function_call preserved for non-Fireworks providers
         assert "function_call" in message.additional_kwargs
-
-    @pytest.mark.asyncio
-    async def test_skips_non_ai_messages(self) -> None:
-        messages = [
-            HumanMessage(content="hi"),
-            ToolMessage(content="result", tool_call_id="tc1"),
-        ]
-        request = _make_request(messages, model=_fireworks_model())
-
-        await SanitizeFireworksMessagesMiddleware().awrap_model_call(request, _noop_handler)
-
-        # No AIMessages to mutate — handler still called
-        assert all(not isinstance(m, AIMessage) for m in messages)

@@ -29,6 +29,7 @@ class InstallationSummary(TypedDict):
 class RepositorySummary(TypedDict):
     full_name: str
     private: bool
+    archived: bool
 
 
 def _github_api_http_exception(status_code: int) -> HTTPException:
@@ -126,7 +127,12 @@ async def _fetch_with_token(
                     continue
                 raise
             repositories.extend(
-                {"full_name": repo["full_name"], "private": repo["private"]} for repo in repos
+                {
+                    "full_name": repo["full_name"],
+                    "private": repo["private"],
+                    "archived": repo.get("archived", False),
+                }
+                for repo in repos
             )
     return installations, repositories
 
