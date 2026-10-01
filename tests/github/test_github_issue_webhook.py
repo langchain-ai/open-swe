@@ -2,17 +2,23 @@ import asyncio
 import hashlib
 import hmac
 import importlib
+import json
 from typing import cast
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
+from agent.api.app import app
 from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
 from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from agent.slack import client as slack_utils
+from agent.slack import webhook as slack_webhooks
 from agent.slack.client import GitHubPrRef
 from agent.slack.payloads import SlackChannelContext
+from agent.slack.request import SlackRequest
 from agent.users import User
 from agent.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
@@ -60,6 +66,20 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     base_string = f"v0:{timestamp}:{body.decode()}"
     sig = hmac.new(_TEST_SLACK_SECRET.encode(), base_string.encode(), hashlib.sha256).hexdigest()
     return f"v0={sig}"
+
+
+def _post_slack_webhook(client: TestClient, payload: dict[object, object]):
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    timestamp = "1700000000"
+    return client.post(
+        "/webhooks/slack",
+        content=body,
+        headers={
+            "X-Slack-Request-Timestamp": timestamp,
+            "X-Slack-Signature": _sign_slack_body(body, timestamp),
+            "Content-Type": "application/json",
+        },
+    )
 
 
 async def test_github_webhook_skips_automatic_review_when_disabled(
@@ -765,7 +785,7 @@ def test_slack_webhook_accepts_unmentioned_direct_message(monkeypatch) -> None:
     assert isinstance(event_data, SlackRequest)
     assert event_data.text == "please check my branch"
     assert event_data.thread_ts == "1700000000.000200"
-    assert event_data.dm_session is False
+    assert event_data.concierge_mode is False
     assert event_data.treat_all_messages_as_mentions is True
 
 
