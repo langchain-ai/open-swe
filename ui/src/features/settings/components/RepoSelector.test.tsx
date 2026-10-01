@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { RepoSelector } from "./RepoSelector"
 
 vi.mock("@/lib/profile", () => ({
+  useProfile: () => ({ data: { repository_usage: [] } }),
   useRefreshRepos: () => ({ isPending: false, mutate: vi.fn() }),
 }))
 
