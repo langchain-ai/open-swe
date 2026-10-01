@@ -21,12 +21,14 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
+import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
   useContinueThreadPrivately,
   useDeleteAgentThread,
   usePinAgentThread,
   useResolveAgentThread,
+  useShareThreadWithWorkspace,
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
@@ -98,8 +100,7 @@ export function AgentThreadHeader({
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLocalThreadSummary
   thread?: AgentThread
-  // Visibility of a thread that does not exist yet; existing threads read it
-  // from `thread` and can only continue privately.
+  // Visibility of a thread that does not exist yet.
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
@@ -115,6 +116,13 @@ export function AgentThreadHeader({
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()
   const continuePrivately = useContinueThreadPrivately()
+  const shareWithWorkspace = useShareThreadWithWorkspace()
+  const session = useSession()
+  const canShare = Boolean(
+    thread?.ownerLogin &&
+    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase()
+  )
+  const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const pinned = localThread
     ? prefs.pinnedLocalIds.includes(localThread.id)
@@ -184,9 +192,12 @@ export function AgentThreadHeader({
       value={thread.visibility ?? "public"}
       onChange={(next) => {
         if (next === "private") continueThreadPrivately()
+        else if (canShare) setShareOpen(true)
       }}
-      disabledValues={thread.visibility === "private" ? ["public"] : []}
-      busy={continuePrivately.isPending}
+      disabledValues={
+        thread.visibility === "private" && !canShare ? ["public"] : []
+      }
+      busy={continuePrivately.isPending || shareWithWorkspace.isPending}
     />
   ) : visibility ? (
     <ThreadVisibilityMenu
@@ -332,6 +343,19 @@ export function AgentThreadHeader({
           {menuItems}
         </ContextMenuPopup>
       </ContextMenu>
+      {thread && (
+        <ShareThreadDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          busy={shareWithWorkspace.isPending}
+          running={thread.status === "running"}
+          onConfirm={() =>
+            shareWithWorkspace.mutate(thread.id, {
+              onSuccess: () => setShareOpen(false),
+            })
+          }
+        />
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
