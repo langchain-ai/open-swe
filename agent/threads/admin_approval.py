@@ -147,8 +147,7 @@ async def authorize_admin_write(
         sent = await post_slack_ephemeral_message(
             slack.channel_id,
             cfg.slack_thread.triggering_user_id,
-            "Review this admin action. Only you, as this thread's owner and a current admin, "
-            "can approve it. Approval expires in 15 minutes and authorizes one attempt.",
+            "Review this admin action. Approval expires in 15 minutes and authorizes one attempt.",
             thread_ts=slack.thread_ts,
             blocks=_blocks(tool, serialized, record.request_id),
         )
@@ -168,7 +167,7 @@ def _blocks(tool: str, arguments: str, request_id: str) -> list[dict[str, object
             "type": "section",
             "text": {
                 "type": "plain_text",
-                "text": f"Approve {tool}? Only the thread owner who is currently an admin may approve. One attempt; expires in 15 minutes.",
+                "text": f"Approve {tool}? One attempt; expires in 15 minutes.",
             },
         },
     ]
