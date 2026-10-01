@@ -394,5 +394,16 @@ test.describe("Expedited Slack review", () => {
     await expect(card(page)).toContainText("Expedited review: merged");
     await expect(card(page)).not.toContainText("Approved by");
     await shootCard(page, "merged");
+    await page.locator("#user").selectOption(author!.slack_id);
+    await page
+      .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
+      .click();
+    await expect(
+      page
+        .locator(".msg.bot")
+        .filter({ hasText: /Expedited review requested|Expedited review:/i }),
+    ).toHaveCount(1);
+    await expect(card(page)).toContainText("Expedited review: merged");
+    await expect(card(page).getByRole("button")).toHaveCount(0);
   });
 });

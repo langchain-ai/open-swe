@@ -38,7 +38,7 @@ from agent.slack.client import (
     upload_slack_thread_file,
     wait_for_slack_file,
 )
-from agent.slack.dm import send_dm
+from agent.slack.dm import note_for_concierge, send_dm_with_location
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -191,8 +191,11 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
                 "Could not deliver author-only ephemeral review card",
                 extra={"approval_id": str(approval.id)},
             )
-    if not await send_dm(author.slack_user_id, text, blocks=payload):
+    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+    approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
+    await approval.save()
     return None
 
 
@@ -277,8 +280,25 @@ async def render(
     )
 
 
+async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> None:
+    if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
+        return
+    text, blocks = await render(request, outcome)
+    ok, error = await update_slack_message(
+        request.slack_dm_channel_id, request.slack_dm_message_ts, text, blocks=block_payload(blocks)
+    )
+    if not ok:
+        logger.warning("Could not update author DM card", extra={"slack_error": error})
+        return
+    pr = request.pull_request
+    author = await User.get(pr.author_user_id) if pr.author_user_id else None
+    if author is not None and author.slack_user_id:
+        await note_for_concierge(author.slack_user_id, request.slack_dm_channel_id, text)
+
+
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
+    await _refresh_dm_card(request, outcome)
     if (
         request.kind == "expedited"
         and request.state == "open"
@@ -345,6 +365,7 @@ async def _repost(
                 row.slack_broadcast = broadcast
             return kept
 
+    await _refresh_dm_card(request, outcome)
     return await repost_thread_card(
         location,
         old_ts,

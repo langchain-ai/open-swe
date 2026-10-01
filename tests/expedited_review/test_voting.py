@@ -56,8 +56,6 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(voting, "get_valid_access_token", user_token)
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
-    monkeypatch.setattr(voting, "render", AsyncMock(return_value=("Ready", [])))
-    monkeypatch.setattr(voting, "send_dm", AsyncMock(return_value=True))
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
     monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
     monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))
@@ -207,13 +205,13 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     approval = await open_approval(awaiting_ready=True)
     private_messages: list[tuple[str, object]] = []
 
-    async def deliver(user: str, text: str, *, blocks: object) -> bool:
+    async def deliver(user: str, text: str, *, blocks: object) -> tuple[str, str]:
         private_messages.append((user, blocks))
-        return True
+        return "D_ADA", "4.0"
 
     ephemeral = AsyncMock(return_value=True)
     monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", ephemeral)
-    monkeypatch.setattr(lifecycle, "send_dm", deliver)
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
     from agent.expedited_review.eligibility import ChangedFile
@@ -280,7 +278,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
     open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(lifecycle, "send_dm", AsyncMock(return_value=False))
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", AsyncMock(return_value=False))
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
