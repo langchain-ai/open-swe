@@ -17,7 +17,7 @@ from agent.expedited_review import card as expedited_card
 from agent.expedited_review.channels import channel_choices, own_choices
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from agent.expedited_review.readiness import latest_review_states
+from agent.expedited_review.readiness import PullRequestSnapshot, latest_review_states
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import github_client
@@ -34,6 +34,7 @@ from agent.slack.client import (
     get_slack_permalink,
     post_slack_ephemeral_message,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
@@ -485,6 +486,7 @@ async def retire(
     updated = await transition(request.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
+    await update_blocked_reactions(updated)
     if state != "merged" and updated.kind == "expedited":
         await withdraw_reviews(updated)
     await refresh_card_in_thread(updated, outcome=outcome)
@@ -547,6 +549,29 @@ async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None =
         return
     if fallback is not None:
         await add_slack_reaction(location[0], location[1], fallback)
+
+
+async def update_blocked_reactions(
+    request: HumanReviewRequest, snapshot: PullRequestSnapshot | None = None
+) -> None:
+    """Keep a watched post's failure and conflict reactions in step with GitHub."""
+    if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
+        return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None:
+            return
+        failing = conflicted = False
+        if (
+            row.state == "open"
+            and snapshot is not None
+            and snapshot.state == "open"
+            and not snapshot.merged
+        ):
+            failing = snapshot.check_state in {"failure", "blocked"}
+            conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
+        for emoji, blocked in (("x", failing), ("construction", conflicted)):
+            react = add_slack_reaction if blocked else remove_slack_reaction
+            await react(row.slack_channel_id, row.slack_message_ts, emoji)
 
 
 async def mark_merged(request: HumanReviewRequest) -> None:
