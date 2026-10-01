@@ -6775,7 +6775,7 @@
     },
     "/dashboard/api/admin/evals/reviewer": {
       "get": {
-        "description": "Read-only status for the reviewer eval (triggered from the GitHub Action).",
+        "description": "Read-only status for the reviewer eval (launched in a LangSmith sandbox).",
         "operationId": "admin_get_reviewer_eval_dashboard_api_admin_evals_reviewer_get",
         "responses": {
           "200": {
