@@ -5,7 +5,7 @@ Author: {{ author }}
 {% if page %}
 Page: {{ page }}
 Expected: {{ expected }}
-Call `rollout_page_check` with the https URL of that page on this environment. The tool uses the server-side bot login and does not return the password. If the tool says the browser runtime is not installed, say the page check did not run. Do not invent what the page showed.
+Call `rollout_page_check` with the https URL of that page on this environment. When the sandbox browser is available, the tool opens that URL. It does not log in. If the tool returns browser_unavailable, say the page check did not run. Do not invent what the page showed.
 {% endif %}
 {% if metrics %}
 Metrics: {{ metrics }}

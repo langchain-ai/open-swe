@@ -3,7 +3,7 @@
 A scheduler cron polls Homebase ``releases.locate_commit`` every 15 minutes.
 The implementing thread is resumed only when an environment in the check newly
 contains the merge SHA (dev immediately, staging and prod after one quiet
-poll). The bot login is read by ``rollout_page_check`` and never enters a prompt.
+poll). ``rollout_page_check`` opens the page in the sandbox browser and does not log in.
 """
 
 import json

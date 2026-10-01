@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import shlex
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
@@ -429,33 +430,91 @@ async def test_record_rollout_check_skips_other_repositories(
     assert updated is False
 
 
-async def test_page_check_reports_config_without_the_password(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+class _Exec:
+    def __init__(self, exit_code: int, output: str = "") -> None:
+        self.exit_code = exit_code
+        self.output = output
+
+
+class _Browser:
+    def __init__(self, results: list[_Exec]) -> None:
+        self.results = results
+        self.commands: list[str] = []
+
+    async def aexecute(self, command: str, *, timeout: int | None = None) -> _Exec:
+        del timeout
+        self.commands.append(command)
+        return self.results.pop(0)
+
+
+def _allow_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        page_tool,
+        "resolve_and_validate",
+        lambda _url: (True, "", "smith.langchain.com", []),
+    )
+
+
+async def test_page_check_rejects_a_url_with_a_password(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "rollout-bot-test-secret"
-    monkeypatch.delenv("ROLLOUT_BOT_USERNAME", raising=False)
-    monkeypatch.setenv("ROLLOUT_BOT_EMAIL", "openswe@example.com")
     monkeypatch.setenv("ROLLOUT_BOT_PASSWORD", secret)
 
     rejected = await page_tool.rollout_page_check(
         f"https://user:{secret}@smith.langchain.com/o/org", "projects"
     )
+
     assert rejected == {"ok": False, "reason": "invalid_url"}
     assert secret not in json.dumps(rejected)
+
+
+async def test_page_check_reports_a_missing_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "rollout-bot-test-secret"
+    monkeypatch.setenv("ROLLOUT_BOT_PASSWORD", secret)
+    _allow_page(monkeypatch)
 
     unavailable = await page_tool.rollout_page_check(
         "https://smith.langchain.com/o/org", "projects"
     )
-    assert unavailable["reason"] == "browser_unavailable"
-    assert unavailable["email_configured"] is True
-    assert unavailable["password_configured"] is True
-    assert "username_configured" not in unavailable
+
+    assert unavailable == {"ok": False, "reason": "browser_unavailable"}
     assert secret not in json.dumps(unavailable)
 
-    monkeypatch.delenv("ROLLOUT_BOT_PASSWORD")
-    missing = await page_tool.rollout_page_check("https://smith.langchain.com/o/org", "projects")
-    assert missing == {
-        "ok": False,
-        "reason": "credentials_missing",
-        "missing": ["ROLLOUT_BOT_PASSWORD"],
-    }
+
+async def test_page_check_opens_the_page_when_cua_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "rollout-bot-test-secret"
+    page = "https://smith.langchain.com/o/org"
+    browser = _Browser([_Exec(0, "/usr/local/bin/cua\n"), _Exec(0, "")])
+    monkeypatch.setenv("ROLLOUT_BOT_PASSWORD", secret)
+    _allow_page(monkeypatch)
+    monkeypatch.setattr(
+        page_tool.RunConfig,
+        "from_runtime",
+        classmethod(lambda cls: type("Config", (), {"thread_id": "thread-1"})()),
+    )
+    monkeypatch.setattr(page_tool, "get_sandbox_backend", AsyncMock(return_value=browser))
+
+    opened = await page_tool.rollout_page_check(page, secret)
+
+    assert opened == {"ok": True, "reason": "browser_opened"}
+    assert browser.commands[0] == "command -v cua"
+    assert browser.commands[1] == f"cua do open {shlex.quote(page)}"
+    assert secret not in json.dumps(opened)
+    assert secret not in " ".join(browser.commands)
+
+
+async def test_page_check_reports_a_failed_browser_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    browser = _Browser([_Exec(0, "/usr/local/bin/cua\n"), _Exec(1, "display missing")])
+    _allow_page(monkeypatch)
+    monkeypatch.setattr(
+        page_tool.RunConfig,
+        "from_runtime",
+        classmethod(lambda cls: type("Config", (), {"thread_id": "thread-1"})()),
+    )
+    monkeypatch.setattr(page_tool, "get_sandbox_backend", AsyncMock(return_value=browser))
+
+    failed = await page_tool.rollout_page_check("https://smith.langchain.com/o/org", "projects")
+
+    assert failed == {"ok": False, "reason": "browser_unavailable"}
+    assert "display missing" not in json.dumps(failed)
