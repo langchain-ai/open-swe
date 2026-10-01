@@ -1624,8 +1624,10 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
-  adminListUsers: (page = 1, pageSize = 20) =>
-    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
+  adminListUsers: (page = 1, pageSize = 20, search = "") =>
+    request<AdminUsersPage>(
+      `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
+    ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   myPullRequests: (

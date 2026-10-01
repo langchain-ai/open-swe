@@ -6880,6 +6880,16 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
           }
         ],
         "responses": {
