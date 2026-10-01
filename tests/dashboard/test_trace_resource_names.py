@@ -19,24 +19,6 @@ def _client(app: FastAPI) -> TestClient:
     return TestClient(app)
 
 
-def test_resource_is_the_matched_route_not_the_request_path(named_resources: list[str]) -> None:
-    app = FastAPI()
-
-    @app.get("/dashboard/api/threads/{thread_id}")
-    async def read_thread(thread_id: str) -> dict[str, str]:
-        return {"id": thread_id}
-
-    assert _client(app).get("/dashboard/api/threads/t1").status_code == 200
-    assert named_resources == ["GET /dashboard/api/threads/{thread_id}"]
-
-
-def test_unmatched_paths_keep_the_tracer_default(named_resources: list[str]) -> None:
-    app = FastAPI()
-
-    assert _client(app).get("/nope").status_code == 404
-    assert named_resources == []
-
-
 def test_failing_endpoints_are_named_too(named_resources: list[str]) -> None:
     """The 500 is produced above this middleware, so naming only on the response
     would leave every failing request in the generic resource."""

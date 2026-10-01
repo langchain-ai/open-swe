@@ -30,7 +30,11 @@ async def _build_repo_payload(login: str) -> dict[str, Any]:
             for i in installations
         ],
         "repositories": [
-            {"full_name": r.get("full_name"), "private": r.get("private", False)}
+            {
+                "full_name": r.get("full_name"),
+                "private": r.get("private", False),
+                "archived": r.get("archived", False),
+            }
             for r in repositories
             if r.get("full_name")
         ],

@@ -12,6 +12,12 @@ import {
 } from "@/features/agents/lib/queries"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
+import { reportError } from "@/lib/errorReporting"
+
+export interface SubmitAgentMessageVariables extends SendAgentMessageVariables {
+  /** The stream can reject after the optimistic mutation has already resolved. */
+  onStartError?: () => void
+}
 
 function setPendingMessage(
   thread: AgentThread,
@@ -53,7 +59,8 @@ export function useSubmitAgentMessage(threadId: string) {
   const source = useThreadSource()
 
   return useMutation({
-    mutationFn: async (vars: SendAgentMessageVariables) => {
+    meta: { errorTitle: "Couldn't send message" },
+    mutationFn: async (vars: SubmitAgentMessageVariables) => {
       if (vars.content.trim() === "/offload") {
         if (source.isRunning) {
           throw new Error(
@@ -88,10 +95,10 @@ export function useSubmitAgentMessage(threadId: string) {
       // nothing may flip it back afterwards.
       setAgentThreadStatus(queryClient, threadId, "running")
 
-      const configurable: Record<string, unknown> = modelConfigurable({
-        modelId: vars.model_id,
-        effort: vars.effort,
-      })
+      const configurable = modelConfigurable(
+        { modelId: vars.model_id, effort: vars.effort },
+        vars.model_selection_changed
+      )
 
       void source
         .startRun({
@@ -112,6 +119,8 @@ export function useSubmitAgentMessage(threadId: string) {
             })
           )
           setAgentThreadStatus(queryClient, threadId, "error")
+          vars.onStartError?.()
+          reportError({ title: "Couldn't send message", error })
         })
     },
   })

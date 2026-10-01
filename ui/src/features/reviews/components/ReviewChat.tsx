@@ -19,10 +19,11 @@ import {
 import type { BaseMessage } from "@langchain/core/messages"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, reviewChatApiBase } from "@/lib/api"
+import { reviewChatApiBase } from "@/lib/api"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import {
   collectStructuredEntities,
@@ -307,6 +308,7 @@ function ChatBody({
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Array<ChatAttachment>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const autoScrollRef = useRef(true)
   const prevTopRef = useRef(0)
   const messages = stream.messages
@@ -326,11 +328,12 @@ function ChatBody({
   // Receive "add to chat" attachments from the diff column as composer pills.
   useEffect(() => {
     if (!composer) return
-    composer.registerSink((attachment) =>
+    composer.registerSink((attachment) => {
       setAttachments((prev) =>
         prev.some((a) => a.id === attachment.id) ? prev : [...prev, attachment]
       )
-    )
+      requestAnimationFrame(() => inputRef.current?.focus())
+    })
     return () => composer.registerSink(null)
   }, [composer])
 
@@ -546,6 +549,7 @@ function ChatBody({
           )}
           <div className="flex items-end gap-2 pl-2">
             <Textarea
+              ref={inputRef}
               value={value}
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={(event) => {
@@ -625,10 +629,7 @@ export function ReviewChat({
   /** A review has finished on this PR, so the chat can talk about its findings. */
   reviewed: boolean
 }) {
-  const meta = useQuery({
-    queryKey: ["review-chat", owner, repo, number],
-    queryFn: () => api.getReviewChat(owner, repo, number),
-  })
+  const meta = useQuery(reviewChatQuery({ owner, repo, number }))
 
   if (meta.isPending) {
     return (

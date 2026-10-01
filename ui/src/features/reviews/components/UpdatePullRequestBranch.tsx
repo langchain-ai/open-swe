@@ -54,7 +54,6 @@ export function UpdatePullRequestBranch({
       label={actionLabel(githubActions["update-branch"].labels, update)}
       disabled={!pr.headSha || update.isPending || update.isSuccess}
       onClick={() => update.mutate()}
-      errors={[update.error]}
     />
   )
 }

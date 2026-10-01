@@ -61,6 +61,7 @@ export function SubmitReviewPopover({
         event,
         body: body.trim(),
       }),
+    meta: { errorTitle: "Couldn't submit the review", silent: true },
     onSuccess: (result) => {
       setOpen(false)
       setBody("")

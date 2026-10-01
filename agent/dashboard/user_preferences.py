@@ -39,7 +39,7 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
         "local_tracing_project": project if isinstance(project, str) and project.strip() else None,
         "default_workspace": normalized_workspace,
         "follow_up_behavior": (
-            "steer" if (record or {}).get("follow_up_behavior") == "steer" else "queue"
+            "queue" if (record or {}).get("follow_up_behavior") == "queue" else "steer"
         ),
     }
 

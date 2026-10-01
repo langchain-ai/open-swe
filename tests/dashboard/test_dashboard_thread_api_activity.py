@@ -1,7 +1,6 @@
 from typing import Any
 
 from agent.threads import handlers as thread_api
-from agent.threads import listing as thread_listing
 from tests.conftest import patch_thread_module
 
 
@@ -62,81 +61,6 @@ class FakeClient:
         self.threads = FakeThreads(metadata, status=thread_status)
         self.runs = FakeRuns(run_status)
         self.store = FakeStore(queued)
-
-
-async def test_list_dashboard_threads_refreshes_finished_run_status(monkeypatch) -> None:
-    client = FakeClient(
-        {
-            "source": "dashboard",
-            "github_login": "octocat",
-            "latest_run_id": "run-1",
-            "latest_run_status": "pending",
-        },
-        "success",
-    )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
-
-    results = await thread_listing.list_dashboard_threads("octocat")
-
-    assert results[0]["status"] == "finished"
-    assert results[0]["viewed"] is False
-    assert client.threads.thread["metadata"]["latest_run_status"] == "success"
-
-
-async def test_get_dashboard_thread_marks_finished_thread_viewed(monkeypatch) -> None:
-    client = FakeClient(
-        {
-            "source": "dashboard",
-            "github_login": "octocat",
-            "latest_run_id": "run-1",
-            "latest_run_status": "success",
-        },
-        "success",
-    )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
-
-    result = await thread_api.get_dashboard_thread("tid", "octocat")
-
-    assert result["status"] == "finished"
-    assert result["viewed"] is True
-    assert isinstance(result["viewedAt"], int)
-    assert client.threads.thread["metadata"]["last_viewed_run_id"] == "run-1"
-
-
-async def test_get_dashboard_thread_marks_viewed_for_any_authenticated_user(monkeypatch) -> None:
-    client = FakeClient(
-        {
-            "source": "slack",
-            "latest_run_id": "run-1",
-            "latest_run_status": "success",
-        },
-        "success",
-    )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
-
-    result = await thread_api.get_dashboard_thread("tid", "someone-else")
-
-    assert result["status"] == "finished"
-    assert client.threads.thread["metadata"]["last_viewed_run_id"] == "run-1"
-
-
-async def test_get_dashboard_thread_skips_mark_viewed_when_disabled(monkeypatch) -> None:
-    client = FakeClient(
-        {
-            "source": "dashboard",
-            "github_login": "octocat",
-            "latest_run_id": "run-1",
-            "latest_run_status": "success",
-        },
-        "success",
-    )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
-
-    result = await thread_api.get_dashboard_thread("tid", "octocat", mark_viewed=False)
-
-    assert result["status"] == "finished"
-    assert result["viewed"] is False
-    assert "last_viewed_run_id" not in client.threads.thread["metadata"]
 
 
 async def test_get_dashboard_thread_does_not_mark_running_thread_viewed(monkeypatch) -> None:

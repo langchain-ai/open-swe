@@ -22,11 +22,14 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from agent.sandboxes.tool_data import ToolContext
 from agent.sandboxes.tool_runtime import ToolSurface
+from tests.conftest import FakeStore
+
+TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
 
 @pytest.fixture
 def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-tools-signing-key")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", TEST_SIGNING_KEY)
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://agent.example.test")
 
 
@@ -65,18 +68,30 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
     assert url == "https://agent.example.test/dashboard/api/sandbox-tools"
     claims = jwt.decode(
-        token, "test-tools-signing-key", algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        token, TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
     )
     assert claims["thread_id"] == "thread-a"
     assert claims["sandbox_id"] == "sandbox-a"
-    client = MagicMock()
-    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
-    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": "sandbox-a", tool_access.SANDBOX_HOST_THREAD_KEY: "thread-a"}
+    }
+    guest = await tool_access.issue_tool_access("thread-guest", "sandbox-a")
+    assert guest is not None
+    assert (
+        jwt.decode(
+            guest[1], TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        )["thread_id"]
+        == "thread-a"
+    )
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-a"}}
     assert (await tool_access.authenticate_tool_access(token)).thread_id == "thread-a"
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-b"}}
     with pytest.raises(HTTPException, match="Invalid sandbox capability"):
@@ -85,15 +100,24 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
         await tool_access.authenticate_tool_access("x" * 64)
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_proxy_refresh_preserves_tools_and_custom_rules(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    enabled: bool,
 ) -> None:
+    from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
     from agent.sandboxes.providers import langsmith
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
     await langsmith.configure_sandbox_proxy(
         "sandbox-a",
@@ -106,9 +130,15 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     rule = next(rule for rule in rules if rule["name"] == tool_access.TOOLS_RULE)
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
-    assert rule["env_vars"] == {
-        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools"
+    expected_env = {
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools",
     }
+    if enabled:
+        expected_env.update(
+            OPENAI_BASE_URL="https://agent.example.test/dashboard/api/sandbox-openai/v1",
+            OPENAI_API_KEY=tool_access.OPENAI_API_KEY_PLACEHOLDER,
+        )
+    assert rule["env_vars"] == expected_env
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
     await langsmith.configure_sandbox_proxy(
@@ -257,12 +287,12 @@ async def test_postgres_records_round_trip_and_isolate_threads(registry_db: None
 @pytest.mark.parametrize(
     "overrides,secret,algorithm",
     [
-        ({"sandbox_id": "other"}, "wrong-signing-secret", "HS256"),
-        ({"aud": "dashboard"}, "test-tools-signing-key", "HS256"),
-        ({"thread_id": None}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": 42}, "test-tools-signing-key", "HS256"),
-        ({"sandbox_id": ""}, "test-tools-signing-key", "HS256"),
-        ({}, "test-tools-signing-key", "HS384"),
+        ({"sandbox_id": "other"}, "wrong-signing-secret-" * 3, "HS256"),
+        ({"aud": "dashboard"}, TEST_SIGNING_KEY, "HS256"),
+        ({"thread_id": None}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": 42}, TEST_SIGNING_KEY, "HS256"),
+        ({"sandbox_id": ""}, TEST_SIGNING_KEY, "HS256"),
+        ({}, TEST_SIGNING_KEY, "HS384"),
     ],
 )
 async def test_invalid_claims_never_reach_thread_lookup(

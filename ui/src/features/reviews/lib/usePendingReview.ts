@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 
 import type { PendingReview, ReviewCommentCreate } from "@/lib/api"
 import { api } from "@/lib/api"
@@ -27,37 +26,25 @@ export function usePendingReview(owner: string, repo: string, number: number) {
   const add = useMutation({
     mutationFn: (comment: ReviewCommentCreate) =>
       api.addPendingReviewComment(owner, repo, number, comment),
+    meta: { errorTitle: "Couldn't add the comment to your review" },
     onSuccess: setPending,
-    onError: (error) =>
-      toast.error("Couldn't add the comment to your review", {
-        description: error.message,
-      }),
   })
   const update = useMutation({
     mutationFn: ({ id, body }: { id: number; body: string }) =>
       api.updatePendingReviewComment(owner, repo, number, id, body),
+    meta: { errorTitle: "Couldn't update the comment" },
     onSuccess: setPending,
-    onError: (error) =>
-      toast.error("Couldn't update the comment", {
-        description: error.message,
-      }),
   })
   const remove = useMutation({
     mutationFn: (id: number) =>
       api.deletePendingReviewComment(owner, repo, number, id),
+    meta: { errorTitle: "Couldn't delete the comment" },
     onSuccess: setPending,
-    onError: (error) =>
-      toast.error("Couldn't delete the comment", {
-        description: error.message,
-      }),
   })
   const discard = useMutation({
     mutationFn: () => api.discardPendingReview(owner, repo, number),
+    meta: { errorTitle: "Couldn't discard the review" },
     onSuccess: () => setPending(null),
-    onError: (error) =>
-      toast.error("Couldn't discard the review", {
-        description: error.message,
-      }),
   })
   return {
     review: query.data ?? null,

@@ -88,7 +88,7 @@ test.describe("Open SWE full flow", () => {
 
     const breakout = page
       .locator(".msg.bot")
-      .filter({ hasText: /Breakout thread:\* Add greet\(\) helper/ });
+      .filter({ hasText: /`\/breakout`: Add greet\(\) helper/ });
     await expect(breakout).toBeVisible({ timeout: 60_000 });
     const breakoutThreadTs = await breakout.getAttribute("data-thread-ts");
     expect(breakoutThreadTs).toBeTruthy();

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from agent.database import analytics as database
 from agent.database import postgres
-from tests.conftest import isolated_schema
+from tests.support.postgres import isolated_database
 
 
 async def initialize_database() -> None:
@@ -45,7 +45,7 @@ async def analytics_db(monkeypatch):
     if not uri:
         pytest.skip("TEST_ANALYTICS_POSTGRES_URI is required for PostgreSQL regressions")
     monkeypatch.setenv("ANALYTICS_SUMMARY_VERSION", "1")
-    async with isolated_schema(uri, monkeypatch):
+    async with isolated_database(uri, monkeypatch):
         async with postgres.connection() as conn:
             workspace = await conn.scalar(text("SELECT workspace_id FROM deployment_metadata"))
         monkeypatch.setattr(database, "_WORKSPACE_ID", workspace)

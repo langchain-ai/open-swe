@@ -2,8 +2,8 @@
 
 import json
 
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import ChangedFile
+from agent.human_review.requests import ChannelChoice, HumanReviewRequest
 from agent.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
     Block,
@@ -15,10 +15,15 @@ from agent.slack.blocks import (
     divider,
     escape,
     image,
+    option,
     section,
+    static_select,
 )
 
 BUTTON_TYPE = "expedited_review"
+SEND_BLOCK_ID = "expedited_review_send"
+CHANNEL_SELECT_ACTION = "expedited_review_channel"
+OTHER_CHANNEL = "other"
 
 _MAX_FILE_SECTIONS = 20
 # Slack refuses a section over 3000 characters, and refusing means no card at all.
@@ -26,18 +31,18 @@ _MAX_PATCH_LINES = 60
 _OVERFLOW_NOTE_RESERVE = 64
 
 
-def _button_value(action: str, approval: ExpeditedApproval) -> str:
+def _button_value(action: str, approval: HumanReviewRequest) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _vote_summary(approval: ExpeditedApproval, author: str) -> str:
+def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
     """``author`` and the approvers are Slack mentions, so none of this is escaped."""
     if not approval.approvals:
         return f"Needs one approval from someone other than {author}."
     return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
-def _header(approval: ExpeditedApproval, title: str, author: str) -> list[Block]:
+def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
     return [
@@ -92,19 +97,47 @@ def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
-def _vote_buttons(approval: ExpeditedApproval) -> tuple[ButtonElement, ...]:
-    return (
-        button(
-            "Approve",
-            action_id="open_swe_option_select_approve",
-            value=_button_value("approve", approval),
-            style="primary",
-        ),
-        _dismiss_button(approval),
+def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
+    approve = button(
+        "Approve",
+        action_id="open_swe_option_select_approve",
+        value=_button_value("approve", approval),
+        style="primary",
     )
+    return [approve, _dismiss_button(approval)]
 
 
-def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
+def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -> list[Block]:
+    """Send the card to its own channel or another one; offered once, while it awaits a vote."""
+    if not choices or approval.sent_elsewhere:
+        return []
+    other = button(
+        "Other channel…",
+        action_id="open_swe_option_select_other",
+        value=_button_value("other", approval),
+    )
+    if len(choices) == 1:
+        broadcast = button(
+            f"Broadcast in #{choices[0]['name']}",
+            action_id="open_swe_option_select_broadcast",
+            value=_button_value("broadcast", approval),
+        )
+        return [actions(broadcast, other, block_id=SEND_BLOCK_ID)]
+    options = [option(f"#{choice['name']}", choice["id"]) for choice in choices]
+    picker = static_select(
+        action_id=CHANNEL_SELECT_ACTION,
+        options=[*options, option("Other…", f"{OTHER_CHANNEL}:{approval.id}")],
+        initial=options[0],
+    )
+    send = button(
+        "Send",
+        action_id="open_swe_option_select_send",
+        value=_button_value("send", approval),
+    )
+    return [actions(picker, send, block_id=SEND_BLOCK_ID)]
+
+
+def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Mark ready for review",
         action_id="open_swe_option_select_ready",
@@ -113,7 +146,19 @@ def _ready_button(approval: ExpeditedApproval) -> ButtonElement:
     )
 
 
-def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
+def readiness_prompt(approval: HumanReviewRequest) -> tuple[str, list[Block]]:
+    """The author-only prompt; never included in the shared card."""
+    pr = approval.pull_request
+    text = f"Mark {pr.url} ready for review so someone else can approve it."
+    return text, [
+        section(
+            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> is a draft. Mark it ready for review?"
+        ),
+        actions(_ready_button(approval)),
+    ]
+
+
+def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Dismiss",
         action_id="open_swe_option_select_dismiss",
@@ -122,7 +167,7 @@ def _dismiss_button(approval: ExpeditedApproval) -> ButtonElement:
 
 
 def _voting_diff(
-    approval: ExpeditedApproval, files: list[ChangedFile], diff_image_id: str | None
+    approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
 ) -> list[Block]:
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
@@ -130,46 +175,57 @@ def _voting_diff(
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: ExpeditedApproval, author: str) -> list[Block]:
+def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
-            actions(_ready_button(approval), _dismiss_button(approval)),
+            section(f"*Draft.* Waiting for {author} to mark it ready for review."),
+            actions(_dismiss_button(approval)),
         ]
-    if approval.approved:
-        return [
-            section(
-                f"*{_vote_summary(approval, author)}* Merging once checks and reviews are clean."
-            )
-        ]
-    return [section(_vote_summary(approval, author)), actions(*_vote_buttons(approval))]
+    return [
+        section(_vote_summary(approval, author)),
+        actions(*_vote_buttons(approval)),
+        *_send_controls(approval, choices),
+    ]
 
 
 def open_card(
-    approval: ExpeditedApproval,
+    approval: HumanReviewRequest,
     *,
     title: str,
     author: str,
     files: list[ChangedFile],
     diff_image_id: str | None = None,
+    choices: list[ChannelChoice] | None = None,
+    thread_url: str | None = None,
 ) -> tuple[str, list[Block]]:
-    """Text fallback and blocks for an open card; diff and buttons go once it is approved.
+    """Text fallback and blocks for an open card; an approved one collapses to one line.
 
-    ``author`` is the PR author's Slack mention, from :meth:`ExpeditedApproval.author_mention`.
+    ``author`` is the PR author's Slack mention, from :meth:`HumanReviewRequest.author_mention`.
+    ``choices`` are the channels the card offers to be sent to, its own first. ``thread_url``
+    marks the copy posted in another channel, which links back and offers no sending.
     """
     pr = approval.pull_request
+    if approval.approved and not approval.awaiting_ready:
+        label = f"{pr.owner}/{pr.repo}#{pr.number}"
+        heading = f"Expedited review: {_vote_summary(approval, author)}"
+        return f"{heading} — {pr.url}", [
+            section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
+        ]
+    header = _header(approval, title, author)
+    if thread_url:
+        header.append(context(f"Sent from <{thread_url}|this thread>."))
     blocks: list[Block] = [
-        *_header(approval, title, author),
+        *header,
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        *_status(approval, author),
+        *_status(approval, author, [] if thread_url is not None else choices or []),
     ]
     text = f"Expedited review requested for {pr.url}"
     return text, blocks
 
 
 def closed_card(
-    approval: ExpeditedApproval,
+    approval: HumanReviewRequest,
     *,
     title: str,
     author: str,

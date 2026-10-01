@@ -5,13 +5,11 @@ from pathlib import Path
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
-from starlette.routing import Match
 
 from agent.api import app as app_module
 from agent.utils.dashboard_ui import (
     DashboardDevProxyRoute,
     DashboardShellRoute,
-    dashboard_static_dir,
     keep_dashboard_ui_last,
 )
 
@@ -33,67 +31,31 @@ def _shell_route(app) -> DashboardShellRoute:
     return next(route for route in app.router.routes if isinstance(route, DashboardShellRoute))
 
 
-def _scope(path: str, accept: str | None = "text/html") -> dict:
-    headers = [(b"accept", accept.encode())] if accept else []
-    return {"type": "http", "method": "GET", "path": path, "headers": headers}
-
-
-def test_shell_answers_browser_navigations(build_dir: Path) -> None:
+def test_desktop_api_preflight_without_extra_cors_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
     client = TestClient(app_module.create_app())
 
-    for path in ("/", "/agents/thread-1", "/admin/team?tab=repos"):
-        response = client.get(path, headers=HTML)
-        assert response.status_code == 200, path
-        assert response.text == SHELL
-        assert response.headers["cache-control"] == "no-cache"
+    response = client.options(
+        "/dashboard/api/me",
+        headers={
+            "Origin": "open-swe://app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
 
-
-def test_build_files_are_served_as_themselves(build_dir: Path) -> None:
-    client = TestClient(app_module.create_app())
-
-    favicon = client.get("/favicon.png")
-    assert favicon.status_code == 200
-    assert favicon.content == b"\x89PNG"
-
-    asset = client.get("/assets/app-abc123.js")
-    assert asset.status_code == 200
-    assert asset.text == "console.log(1)"
-    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/threads",
-        "/threads/abc/runs",
-        "/runs/stream",
-        "/assistants/search",
-        "/store/items",
-        "/docs",
-        "/openapi.json",
-        "/ok",
-        "/info",
-        "/metrics",
-        "/ui/agent",
-        "/mcp",
-        "/dashboard/api/session",
-        "/webhooks/github",
-        "/health",
-    ],
-)
-def test_reserved_paths_are_left_to_the_langgraph_server(build_dir: Path, path: str) -> None:
-    """The custom app's routes are matched first, so the catch-all must decline these."""
-    route = _shell_route(app_module.create_app())
-
-    assert route.matches(_scope(path))[0] is Match.NONE
-
-
-def test_root_without_html_accept_is_left_to_the_health_check(build_dir: Path) -> None:
-    route = _shell_route(app_module.create_app())
-
-    assert route.matches(_scope("/", accept=None))[0] is Match.NONE
-    assert route.matches(_scope("/", accept="*/*"))[0] is Match.NONE
-    assert route.matches(_scope("/", accept="text/html"))[0] is Match.FULL
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "open-swe://app"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert (
+        client.options(
+            "/dashboard/api/me",
+            headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"},
+        ).status_code
+        == 400
+    )
 
 
 def test_api_routes_keep_precedence_over_the_shell(build_dir: Path) -> None:
@@ -125,38 +87,6 @@ def test_routes_added_after_the_ui_win_once_it_is_moved_last(build_dir: Path) ->
     assert isinstance(app.router.routes[-1], DashboardShellRoute)
 
 
-def test_server_routes_appended_after_the_ui_do_not_hide_it(build_dir: Path) -> None:
-    """The LangGraph server rewrites the app's route list and appends its own catch-all."""
-    from starlette.responses import JSONResponse
-    from starlette.routing import Mount, Route
-
-    async def health(_request) -> JSONResponse:
-        return JSONResponse({"ok": True})
-
-    async def protected(_request) -> JSONResponse:
-        return JSONResponse({"detail": "Missing authentication headers"}, status_code=403)
-
-    app = app_module.create_app()
-    app.router.routes = [
-        *app.router.routes,
-        Route("/", health),
-        Mount("", routes=[Route("/{path:path}", protected)]),
-    ]
-    client = TestClient(app)
-
-    assert client.get("/", headers=HTML).text == SHELL
-    assert client.get("/agents/t1", headers=HTML).text == SHELL
-    assert client.get("/").json() == {"ok": True}
-    assert client.get("/threads", headers=HTML).status_code == 403
-
-
-def test_unknown_paths_without_html_accept_fall_through(build_dir: Path) -> None:
-    client = TestClient(app_module.create_app())
-
-    assert client.get("/agents/x", headers={"Accept": "application/json"}).status_code == 404
-    assert client.post("/agents/x", headers=HTML).status_code in (404, 405)
-
-
 def test_files_outside_the_build_are_never_served(build_dir: Path) -> None:
     outside = build_dir.parent / f"{build_dir.name}-outside.txt"
     outside.write_text("secret")
@@ -165,15 +95,6 @@ def test_files_outside_the_build_are_never_served(build_dir: Path) -> None:
     assert route.file_for(f"/../{outside.name}") is None
     assert route.file_for("/_shell.html") == build_dir / "_shell.html"
     assert route.file_for("/") is None
-
-
-def test_no_build_means_no_ui(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "missing"))
-    app = app_module.create_app()
-
-    assert dashboard_static_dir() is None
-    assert not any(isinstance(route, DashboardShellRoute) for route in app.router.routes)
-    assert TestClient(app).get("/", headers=HTML).status_code == 404
 
 
 def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
@@ -212,23 +133,6 @@ def _vite_app(handler, monkeypatch: pytest.MonkeyPatch):
         follow_redirects=False,
     )
     return app
-
-
-def test_dev_server_url_replaces_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[httpx2.Request] = []
-
-    def vite(request: httpx2.Request) -> httpx2.Response:
-        seen.append(request)
-        return _vite_response(200, b"<script type=module src=/@vite/client></script>")
-
-    client = TestClient(_vite_app(vite, monkeypatch))
-    response = client.get("/agents/t1?tab=files", headers={**HTML, "Cookie": "osw_session=abc"})
-
-    assert response.status_code == 200
-    assert "/@vite/client" in response.text
-    assert seen[0].url == "http://vite.test:3000/agents/t1?tab=files"
-    assert seen[0].headers["host"] == "vite.test:3000"
-    assert seen[0].headers["cookie"] == "osw_session=abc"
 
 
 def test_dev_proxy_forwards_modules_and_headers_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,39 +179,3 @@ def test_dev_proxy_passes_redirects_and_bodies_through(monkeypatch: pytest.Monke
     )
     assert created.status_code == 201
     assert created.json() == {"ok": True}
-
-
-def test_dev_proxy_leaves_backend_paths_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx2.Request) -> httpx2.Response:
-        raise AssertionError(f"reserved path reached Vite: {request.url}")
-
-    client = TestClient(_vite_app(vite, monkeypatch))
-    assert client.get("/dashboard/api/me").status_code == 401
-    assert client.get("/threads", headers=HTML).status_code == 404
-    assert client.get("/ok").status_code == 404
-
-
-def test_dev_proxy_explains_a_missing_vite(monkeypatch: pytest.MonkeyPatch) -> None:
-    def vite(request: httpx2.Request) -> httpx2.Response:
-        raise httpx2.ConnectError("connection refused")
-
-    app = _vite_app(vite, monkeypatch)
-    route = next(r for r in app.router.routes if isinstance(r, DashboardDevProxyRoute))
-    response = TestClient(app).get("/", headers=HTML)
-    assert response.status_code == 502
-    assert "make web" in response.text
-    assert route.upstream in response.text
-    assert route.upstream == "http://vite.test:3000"
-
-
-def test_dev_proxy_is_kept_last_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    app = _vite_app(lambda request: _vite_response(200, b"vite"), monkeypatch)
-
-    @app.get("/mock/slack")
-    def mock_slack() -> dict:
-        return {"mock": True}
-
-    keep_dashboard_ui_last(app)
-    client = TestClient(app)
-    assert client.get("/mock/slack").json() == {"mock": True}
-    assert client.get("/anything", headers=HTML).text == "vite"

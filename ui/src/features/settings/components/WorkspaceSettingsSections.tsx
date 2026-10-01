@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, type ReactNode } from "react"
-import type { ModelOption, WorkspaceSettings } from "@/lib/api"
+import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import {
@@ -59,6 +59,7 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
+      badgeClassName={!inherits ? "text-destructive" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}
@@ -66,7 +67,6 @@ export function TierRow({
             <Button
               size="sm"
               variant="ghost"
-              disabled={settings.saving}
               onClick={() => settings.reset(...fields)}
               aria-label={`Reset ${label} to the instance value`}
             >
@@ -77,11 +77,6 @@ export function TierRow({
       }
     />
   )
-}
-
-function SaveError({ settings }: { settings: ScopedSettings }) {
-  if (!settings.error) return null
-  return <p className="px-4 pb-3 text-xs text-destructive">{settings.error}</p>
 }
 
 export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
@@ -112,7 +107,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
                 if (value === null && scoped) settings.reset("gateway_enabled")
                 else settings.save({ gateway_enabled: value })
               }}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             >
               <SelectTrigger className="w-48">
                 <SelectValue />
@@ -130,7 +125,6 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -156,12 +150,11 @@ export function FableSection({ scope }: { scope: SettingsScope }) {
             <Switch
               checked={!!settings.data?.fable_enabled}
               onCheckedChange={(next) => settings.save({ fable_enabled: next })}
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -171,8 +164,8 @@ export function DefaultRepoSection({
   repositories,
 }: {
   scope: SettingsScope
-  /** On a workspace, its own repositories; on the instance, every repository the installation can see. */
-  repositories: Array<string>
+  /** Every repository the installation can see: any workspace may default to any of them. */
+  repositories: Array<Repository>
 }) {
   const settings = useScopedSettings(scope)
   const scoped = scope.kind === "workspace"
@@ -181,7 +174,7 @@ export function DefaultRepoSection({
       title="Default repository"
       description={
         scoped
-          ? "Where a run in this workspace lands when nothing names a repository. An inherited instance default only applies if this workspace owns it."
+          ? "Where a run in this workspace lands when nothing names a repository. Any repository the GitHub App can access will do."
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
@@ -194,20 +187,20 @@ export function DefaultRepoSection({
           control={
             <div className="w-56">
               <RepoSelector
-                repos={repositories.map((full_name) => ({ full_name }))}
+                repos={repositories}
+                allowArchived
                 selectedRepo={settings.data?.default_repo ?? null}
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
                 dropdownClassName="w-56"
-                disabled={!settings.data || settings.saving}
+                disabled={!settings.data}
               />
             </div>
           }
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }
@@ -254,7 +247,7 @@ function ModelRow({
           model={settings.data?.[modelField] ?? null}
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
-          disabled={!settings.data || settings.saving}
+          disabled={!settings.data}
           inheritLabel={
             inheritLabel && settings.scope.kind === "workspace"
               ? "Inherit instance setting"
@@ -305,7 +298,7 @@ export function ModelDefaultsSection({
               onCheckedChange={(next) =>
                 settings.save({ model_routing_enabled: next })
               }
-              disabled={!settings.data || settings.saving}
+              disabled={!settings.data}
             />
           }
         />
@@ -387,7 +380,6 @@ export function ModelDefaultsSection({
           inheritLabel="Agent default"
         />
       </div>
-      <SaveError settings={settings} />
     </SettingsSection>
   )
 }

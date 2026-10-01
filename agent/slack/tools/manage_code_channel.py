@@ -4,11 +4,8 @@ from typing import Any, Literal
 
 from agent.run_config import RunConfig
 from agent.slack.client import (
-    bind_slack_thread_id,
-    delete_slack_thread_associations,
     get_active_slack_thread,
     invite_to_slack_channel,
-    slack_thread_mutation_lock,
     slack_user_ids,
 )
 from agent.slack.code_channels import (
@@ -37,7 +34,8 @@ from agent.slack.code_channels import (
     set_view,
     store_block_suggestions,
 )
-from agent.source_context import SourceContext
+from agent.slack.move import SlackRebindError, rebind_slack_thread
+from agent.source_context import SlackThreadRef
 from agent.threads.summary import thread_is_private
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -303,64 +301,41 @@ async def _create(
     if not channel_id:
         return {"success": False, "error": error or "Slack could not create the code channel"}
 
-    new_slack = {
-        **{
-            key: active.get(key, "")
-            for key in (
-                "triggering_user_id",
-                "triggering_user_name",
-                "triggering_user_email",
-                "team_id",
-                "triggering_bot_id",
-                "triggering_bot_app_id",
-            )
-        },
-        "channel_id": channel_id,
-        "thread_ts": CODE_CHANNEL_SESSION_TS,
-        "triggering_event_ts": origin_message_ts,
-    }
-    bound = False
-    try:
-        async with slack_thread_mutation_lock(
-            client, source_channel, source_ts, thread_id=thread_id
-        ) as locked_active:
-            if not locked_active or (
-                locked_active.get("channel_id"),
-                locked_active.get("thread_ts"),
-            ) != (source_channel, source_ts):
-                raise RuntimeError("Slack thread moved concurrently; retry")
-            await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
-            bound = True
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={
-                    "source": "slack",
-                    "source_context": SourceContext.parse({"slack_thread": new_slack}).dump(),
-                },
-            )
-    except Exception as exc:  # noqa: BLE001
-        if bound:
-            with suppress(Exception):
-                await delete_slack_thread_associations(
-                    client, channel_id, CODE_CHANNEL_SESSION_TS, expected_thread_id=thread_id
+    new_slack = SlackThreadRef.model_validate(
+        {
+            **{
+                key: active.get(key, "")
+                for key in (
+                    "triggering_user_id",
+                    "triggering_user_name",
+                    "triggering_user_email",
+                    "team_id",
+                    "triggering_bot_id",
+                    "triggering_bot_app_id",
                 )
+            },
+            "channel_id": channel_id,
+            "thread_ts": CODE_CHANNEL_SESSION_TS,
+            "triggering_event_ts": origin_message_ts,
+        }
+    )
+    try:
+        await rebind_slack_thread(
+            client, thread_id, SlackThreadRef.model_validate(active), new_slack
+        )
+    except SlackRebindError as exc:
+        if exc.moved:
+            return {
+                "success": False,
+                "error": f"Code channel created but the source thread was not detached: {exc}",
+                "channel_id": channel_id,
+                "retryable": True,
+            }
         with suppress(Exception):
             await archive_code_channel(channel_id)
         return {
             "success": False,
             "error": f"Could not bind the code channel to this session: {exc}",
-            "retryable": True,
-        }
-
-    try:
-        await delete_slack_thread_associations(
-            client, source_channel, source_ts, expected_thread_id=thread_id
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "success": False,
-            "error": f"Code channel created but the source thread was not detached: {exc}",
-            "channel_id": channel_id,
             "retryable": True,
         }
 

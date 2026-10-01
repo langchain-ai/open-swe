@@ -46,6 +46,7 @@ export function ReviewPageActions({
           refreshPage()
         }}
         onReady={refreshPage}
+        onReviewPage
       />
     </div>
   )
