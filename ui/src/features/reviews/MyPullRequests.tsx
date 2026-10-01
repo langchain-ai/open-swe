@@ -393,6 +393,9 @@ export function MyPullRequests({
               login={login}
               outcome={settled[pullRequestKey(selectedRow)]}
               onClose={() => onFiltersChange({ pr: undefined })}
+              expandedFiles={filters.files}
+              scrollAnchor={filters.at}
+              onPositionChange={(changes) => onFiltersChange(changes, true)}
               onSettled={(outcome) =>
                 setSettled((previous) => ({
                   ...previous,

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { XIcon } from "@phosphor-icons/react"
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useRef, useState, type ReactNode } from "react"
 import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 
@@ -21,6 +21,7 @@ import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import { useScrollAnchor } from "@/features/reviews/lib/scrollAnchor"
 import {
   PullRequestActions,
   type PullRequestOutcome,
@@ -394,6 +395,9 @@ export function PullRequestDetail({
   onClose,
   onSettled,
   onReady,
+  expandedFiles,
+  scrollAnchor,
+  onPositionChange,
 }: {
   pr: OpenPullRequest
   login: string
@@ -401,9 +405,18 @@ export function PullRequestDetail({
   onClose: () => void
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
+  expandedFiles?: Array<string>
+  scrollAnchor?: string
+  onPositionChange: (changes: { files?: Array<string>; at?: string }) => void
 }) {
   const preview = useQuery(pullRequestPreviewQuery(pr))
   const data = preview.data
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const onScrollAnchor = useCallback(
+    (at: string | undefined) => onPositionChange({ at }),
+    [onPositionChange]
+  )
+  useScrollAnchor(scrollRef, scrollAnchor, onScrollAnchor, Boolean(data))
   const resolve = useResolveThreads(pr)
   const resolvableIds = (data?.unresolved ?? []).flatMap((thread) =>
     thread.thread_id ? [thread.thread_id] : []
@@ -464,7 +477,7 @@ export function PullRequestDetail({
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {preview.isPending && (
           <div className="space-y-3 p-5">
             <Skeleton className="h-4 w-1/3" />
@@ -532,7 +545,17 @@ export function PullRequestDetail({
                   No files changed.
                 </p>
               ) : (
-                <PullRequestFiles pr={pr} login={login} files={data.files} />
+                <PullRequestFiles
+                  pr={pr}
+                  login={login}
+                  files={data.files}
+                  expanded={expandedFiles ?? []}
+                  onExpandedChange={(files) =>
+                    onPositionChange({
+                      files: files.length ? files : undefined,
+                    })
+                  }
+                />
               )}
             </Section>
 

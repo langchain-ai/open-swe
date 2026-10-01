@@ -24,6 +24,7 @@ import {
   commentRangeLabel,
 } from "@/features/reviews/components/ReviewMainBody"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
@@ -183,18 +184,21 @@ export function PullRequestFiles({
   pr,
   login,
   files,
+  expanded,
+  onExpandedChange,
 }: {
   pr: PullRequestTarget
   login: string
   files: Array<PreviewFile>
+  expanded: ReadonlyArray<string>
+  onExpandedChange: (paths: Array<string>) => void
 }) {
   const [owner = "", name = ""] = pr.repo.split("/")
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [wanted, setWanted] = useState(false)
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, name, pr.number],
     queryFn: () => api.getReviewDiff(owner, name, pr.number),
-    enabled: wanted || expanded.size > 0,
+    enabled: wanted || expanded.length > 0,
   })
   const byPath = useMemo(
     () => new Map((diff.data?.files ?? []).map((file) => [file.path, file])),
@@ -207,18 +211,18 @@ export function PullRequestFiles({
   }
 
   const toggle = (path: string) =>
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (!next.delete(path)) next.add(path)
-      return next
-    })
+    onExpandedChange(
+      expanded.includes(path)
+        ? expanded.filter((item) => item !== path)
+        : [...expanded, path]
+    )
 
   return (
     <ul className="space-y-0.5" onPointerEnter={want} onFocus={want}>
       {files.map((file) => {
-        const open = expanded.has(file.path)
+        const open = expanded.includes(file.path)
         return (
-          <li key={file.path}>
+          <li key={file.path} {...{ [FILE_ANCHOR_ATTRIBUTE]: file.path }}>
             <FileRow
               file={file}
               open={open}
