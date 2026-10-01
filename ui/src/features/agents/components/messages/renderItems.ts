@@ -337,10 +337,3 @@ export function buildRenderItems(
   flushGroups()
   return items
 }
-
-export function summarizeExploration(
-  chunks: Array<ToolExecutionChunk>
-): string {
-  const count = chunks.length
-  return `Explored ${count} file${count === 1 ? "" : "s"}`
-}

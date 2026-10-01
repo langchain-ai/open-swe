@@ -196,12 +196,6 @@ class ReviewerSlackThread(TypedDict, total=False):
     thread_ts: str
 
 
-class ReviewerEvalPublication(TypedDict):
-    finding_ids: list[str]
-    severity_threshold: Severity
-    cap: int
-
-
 def new_finding_id() -> str:
     """Return a stable, short, URL-friendly finding id (``f_<hex>``)."""
     return f"f_{uuid.uuid4().hex[:10]}"
@@ -1096,10 +1090,6 @@ async def set_reviewer_thread_metadata(
         await client.threads.update(thread_id=thread_id, metadata=metadata)
     except LangGraphSDKNotFoundError as exc:
         raise ReviewerThreadMissingError(thread_id, exc) from exc
-
-
-def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:
-    return bool(metadata.get("watch"))
 
 
 def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:

@@ -254,11 +254,6 @@ async def _resolve_requested_workspace(
     return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
 
 
-def _resolve_repo_config(repo: str | None) -> dict[str, str]:
-    """Resolve the run's repo from the request, or ``{}`` when none is given."""
-    return _parse_repo(repo) or {}
-
-
 async def create_dashboard_thread_record(
     thread_id: str,
     *,

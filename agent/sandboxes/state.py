@@ -91,10 +91,6 @@ class SandboxBackendProxy(BaseSandbox):
     def has_backend(self) -> bool:
         return self._backend is not None
 
-    def cancel_startup(self) -> None:
-        if self._startup_task is not None:
-            self._startup_task.cancel()
-
     def set_reconnect(
         self,
         reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None,

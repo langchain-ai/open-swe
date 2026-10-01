@@ -2184,16 +2184,3 @@ async def lookup_slack_run_mapping(
         return None
     value = item.get("value")
     return value if isinstance(value, dict) else None
-
-
-async def lookup_run_id_for_slack_message(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    message_ts: str,
-) -> str | None:
-    """Look up the LangGraph run mapped to a specific Slack bot message."""
-    value = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
-    if not value:
-        return None
-    run_id = value.get("run_id")
-    return run_id if isinstance(run_id, str) and run_id else None
