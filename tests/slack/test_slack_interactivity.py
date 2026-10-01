@@ -154,10 +154,17 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     ("decision", "authorized", "status"),
     [("approve", False, "ignored"), ("approve", True, "accepted"), ("reject", True, "accepted")],
 )
+@pytest.mark.parametrize("parent_in_container", [False, True])
 async def test_admin_approval_uses_actual_location_and_only_queues_authorized_owner(
-    monkeypatch: pytest.MonkeyPatch, decision: str, authorized: bool, status: str
+    monkeypatch: pytest.MonkeyPatch,
+    decision: str,
+    authorized: bool,
+    status: str,
+    parent_in_container: bool,
 ) -> None:
     payload = _option_payload()
+    if parent_in_container:
+        payload["container"] = {"thread_ts": payload["message"].pop("thread_ts")}
     blocks = _blocks("privileged_tool", '{"secret_argument":"private value"}', "request-1")
     actions = blocks[-1]["elements"]
     assert isinstance(actions, list)
@@ -242,6 +249,7 @@ async def test_admin_approval_uses_actual_location_and_only_queues_authorized_ow
             assert request.user_id == "U1"
             assert request.thread_id == "thread-1"
             assert request.event_ts == "3.0"
+            assert request.thread_ts == "1.0"
         else:
             process.assert_not_awaited()
 

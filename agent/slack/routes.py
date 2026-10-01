@@ -865,6 +865,8 @@ async def slack_interactivity(
         user_id
     )
     thread_ts = CONCIERGE_TS if in_concierge_mode else interaction.thread_ts
+    if button.type == "admin_write_approval" and not in_concierge_mode:
+        thread_ts = interaction.message.thread_ts or interaction.container.thread_ts or thread_ts
     reply_thread_ts = (
         (interaction.message.thread_ts or interaction.container.thread_ts)
         if in_concierge_mode
