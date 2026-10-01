@@ -41,6 +41,7 @@ from agent.human_review.lifecycle import (
     post_standard_card,
     refresh_card,
     release_picks,
+    update_blocked_reactions,
 )
 from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
@@ -593,6 +594,7 @@ async def settle(request: HumanReviewRequest) -> bool:
     if snapshot.state != "open":
         await mark_closed(request)
         return True
+    await update_blocked_reactions(request, snapshot)
     async with github_client(token=token) as client:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
