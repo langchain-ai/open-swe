@@ -32,12 +32,13 @@ from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
     get_slack_permalink,
+    post_slack_ephemeral_message,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
 )
-from agent.slack.dm import send_dm
+from agent.slack.dm import note_for_concierge, send_dm_with_location
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,8 @@ async def post_card(
 
     Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
     """
+    if approval.awaiting_ready:
+        return None, "draft card is author-only"
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
@@ -162,9 +165,37 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     )
     if author is None or not author.slack_user_id:
         return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
-    text, blocks = expedited_card.readiness_prompt(approval)
-    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return "Could not read the diff for the author-only card; try again."
+    files = await fetch_changed_files(
+        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+    )
+    if files is None:
+        return "Could not read the diff for the author-only card; try again."
+    approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
+    await approval.save()
+    text, blocks = expedited_card.readiness_prompt(
+        approval,
+        title=pr.title,
+        author=await approval.author_mention(),
+        files=files,
+        diff_image_id=approval.slack_diff_file_id or None,
+    )
+    payload = block_payload(blocks)
+    if (location := approval.slack_location) is not None:
+        if not await post_slack_ephemeral_message(
+            location[0], author.slack_user_id, text, location[1], blocks=payload
+        ):
+            logger.warning(
+                "Could not deliver author-only ephemeral review card",
+                extra={"approval_id": str(approval.id)},
+            )
+    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+    approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
+    await approval.save()
     return None
 
 
@@ -262,8 +293,45 @@ async def render(
     )
 
 
+async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> None:
+    if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
+        return
+    text, blocks = await render(request, outcome)
+    ok, error = await update_slack_message(
+        request.slack_dm_channel_id, request.slack_dm_message_ts, text, blocks=block_payload(blocks)
+    )
+    if not ok:
+        logger.warning("Could not update author DM card", extra={"slack_error": error})
+        return
+    pr = request.pull_request
+    author = await User.get(pr.author_user_id) if pr.author_user_id else None
+    if author is not None and author.slack_user_id:
+        await note_for_concierge(author.slack_user_id, request.slack_dm_channel_id, text)
+
+
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
+    await _refresh_dm_card(request, outcome)
+    if (
+        request.kind == "expedited"
+        and request.state == "open"
+        and not request.awaiting_ready
+        and not request.slack_message_ts
+        and outcome is None
+    ):
+        token = await repo_token(request.pull_request.owner, request.pull_request.repo)
+        if token is None:
+            logger.warning("Could not publish ready expedited card without a GitHub token")
+            return
+        message_ts, error = await post_card(
+            request, title=request.pull_request.title, files=await _files_for(request, token)
+        )
+        if message_ts:
+            request.slack_message_ts = message_ts
+            await request.save()
+        else:
+            logger.warning("Could not publish ready expedited card", extra={"slack_error": error})
+        return
     if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
         return
     text, blocks = await render(request, outcome)
@@ -310,6 +378,7 @@ async def _repost(
                 row.slack_broadcast = broadcast
             return kept
 
+    await _refresh_dm_card(request, outcome)
     return await repost_thread_card(
         location,
         old_ts,

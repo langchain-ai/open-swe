@@ -146,15 +146,23 @@ def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     )
 
 
-def readiness_prompt(approval: HumanReviewRequest) -> tuple[str, list[Block]]:
-    """The author-only prompt; never included in the shared card."""
+def readiness_prompt(
+    approval: HumanReviewRequest,
+    *,
+    title: str,
+    author: str,
+    files: list[ChangedFile],
+    diff_image_id: str | None = None,
+) -> tuple[str, list[Block]]:
+    """The full author-only draft card."""
     pr = approval.pull_request
     text = f"Mark {pr.url} ready for review so someone else can approve it."
     return text, [
-        section(
-            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> is a draft. Mark it ready for review?"
-        ),
-        actions(_ready_button(approval)),
+        *_header(approval, title, author),
+        divider(),
+        *_voting_diff(approval, files, diff_image_id),
+        section("*Draft.* Mark it ready for review to request an approval in the thread."),
+        actions(_ready_button(approval), _dismiss_button(approval)),
     ]
 
 
