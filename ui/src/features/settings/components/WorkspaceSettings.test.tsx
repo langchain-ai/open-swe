@@ -487,7 +487,6 @@ describe("WorkspaceSettingsPanel", () => {
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
     expect(
-    expect(
       (await within(editor.closest("section")!).findByRole("alert")).textContent
     ).toContain("JSON object")
     expect(update).not.toHaveBeenCalled()
