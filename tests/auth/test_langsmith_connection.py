@@ -102,6 +102,30 @@ async def test_key_validation_preserves_existing_connection_and_redacts_errors(
 
 
 @pytest.mark.asyncio
+async def test_disconnect_cancels_pending_key_validation(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def validate(*args: object, **kwargs: object) -> httpx.Response:
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(credentials, "request", validate)
+    monkeypatch.setattr(credentials, "discover_tools", AsyncMock(return_value=[]))
+    saving = asyncio.create_task(
+        client.put("/dashboard/api/my-credentials/langsmith", json={"api_key": "pending-key"})
+    )
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    assert (await client.delete("/dashboard/api/my-credentials/langsmith")).status_code == 200
+    release.set()
+    assert (await saving).status_code == 409
+    assert not (await client.get("/dashboard/api/my-credentials/langsmith")).json()["connected"]
+    assert await credentials.load("alice") is None
+
+
+@pytest.mark.asyncio
 async def test_oauth_callback_is_bound_to_browser_and_validates_signed_identity(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -169,6 +193,7 @@ async def test_oauth_callback_is_bound_to_browser_and_validates_signed_identity(
     assert query["resource"] == [oauth.issuer(oauth.Region.EU) + "/mcp"]
     params = {"state": state, "code": "provider-code"}
     cookie = client.cookies.get("osw_langsmith_oauth_state")
+    assert cookie is not None
     client.cookies.delete("osw_langsmith_oauth_state")
     assert (await client.get("/dashboard/api/langsmith/callback", params=params)).status_code == 400
     client.cookies.set("osw_langsmith_oauth_state", cookie)
@@ -231,6 +256,15 @@ async def test_oauth_callback_is_bound_to_browser_and_validates_signed_identity(
         "/dashboard/api/langsmith/desktop/exchange", json={"code": handoff, "verifier": verifier}
     )
     assert replay.status_code == 400
+    started = await client.get("/dashboard/api/langsmith/login")
+    query = parse_qs(urlparse(started.headers["location"]).query)
+    state, nonce = query["state"][0], query["nonce"][0]
+    assert (await client.delete("/dashboard/api/my-credentials/langsmith")).status_code == 200
+    cancelled = await client.get(
+        "/dashboard/api/langsmith/callback", params={"state": state, "code": "cancelled-code"}
+    )
+    assert cancelled.status_code == 409
+    assert not (await client.get("/dashboard/api/my-credentials/langsmith")).json()["connected"]
 
 
 @pytest.mark.asyncio
@@ -257,16 +291,34 @@ async def test_refresh_rotation_and_disconnect_cannot_restore_credentials(
             access_token=SecretStr("new"), refresh_token=SecretStr("rotated"), expires_in=3600
         )
 
-    monkeypatch.setattr(credentials, "token_request", refresh)
+    refreshing = AsyncMock(side_effect=refresh)
+    monkeypatch.setattr(credentials, "token_request", refreshing)
     loading = asyncio.create_task(credentials.load("alice"))
-    await entered.wait()
-    disconnecting = asyncio.create_task(credentials.disconnect("alice"))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    competing = asyncio.create_task(credentials.load("alice"))
+    await asyncio.sleep(0.2)
     release.set()
-    connection = await loading
-    assert (
-        connection is not None and connection.connection_headers()["Authorization"] == "Bearer new"
-    )
-    await disconnecting
+    connection, concurrent_connection = await asyncio.gather(loading, competing)
+    assert connection is not None and concurrent_connection is not None
+    assert connection.connection_headers()["Authorization"] == "Bearer new"
+    assert concurrent_connection.connection_headers()["Authorization"] == "Bearer new"
+    refreshing.assert_awaited_once()
+    rotated = await credentials.store("alice").get("langsmith")
+    assert rotated is not None and decrypt_token(rotated.encrypted_refresh_token) == "rotated"
+    with monkeypatch.context() as fast_path:
+        fast_path.setattr(
+            credentials, "lock", AsyncMock(side_effect=AssertionError("valid tokens must not lock"))
+        )
+        assert await credentials.load("alice") is not None
+    await credentials.store("alice").put("langsmith", record)
+    entered.clear()
+    release.clear()
+    loading = asyncio.create_task(credentials.load("alice"))
+    await asyncio.wait_for(entered.wait(), timeout=5)
+    await asyncio.wait_for(credentials.disconnect("alice"), timeout=2)
+    assert not (await credentials.status("alice")).connected
+    release.set()
+    assert await loading is None
     assert await credentials.load("alice") is None
     await credentials.store("alice").put("langsmith", record)
     monkeypatch.setattr(

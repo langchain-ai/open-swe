@@ -83,6 +83,7 @@ class Flow(BaseModel):
     nonce: str
     redirect_uri: str
     expires_at: datetime
+    generation: str = ""
 
 
 def flows(login: str) -> TypedStore[Flow]:
@@ -136,6 +137,7 @@ async def login(
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
 ) -> RedirectResponse:
+    generation = await credentials.generation(session.sub)
     nonce = new_state_nonce()
     nonce_hash = hash_state_nonce(nonce)
     redirect_uri = f"{dashboard_api_base_url()}/dashboard/api/langsmith/callback"
@@ -161,6 +163,7 @@ async def login(
             nonce=nonce_hash,
             redirect_uri=redirect_uri,
             expires_at=datetime.now(UTC) + timedelta(seconds=STATE_TTL_SECONDS),
+            generation=generation,
         ),
     )
     response = RedirectResponse(url, status_code=302)
@@ -193,7 +196,9 @@ async def complete(login: str, nonce_hash: str, code: str) -> None:
             flow.region, tokens.id_token, client_id=flow.client_id, nonce=flow.nonce
         )
         await credentials.save(
-            login, credentials.oauth_record(tokens, flow.region, flow.client_id, identity)
+            login,
+            credentials.oauth_record(tokens, flow.region, flow.client_id, identity),
+            flow.generation,
         )
     except oauth.ConnectionError as exc:
         raise HTTPException(exc.status_code, str(exc)) from None

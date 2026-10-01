@@ -91,7 +91,11 @@ export function LangSmithConnection() {
               variant={connected ? "outline" : "default"}
               onClick={() => changeOpen(true)}
               disabled={
-                creds.isLoading || creds.isError || disconnect.isPending
+                creds.isLoading ||
+                creds.isError ||
+                disconnect.isPending ||
+                save.isPending ||
+                connecting
               }
             >
               {connected || creds.data?.reconnect_required
@@ -103,7 +107,7 @@ export function LangSmithConnection() {
                 size="sm"
                 variant="outline"
                 onClick={() => disconnect.mutate()}
-                disabled={disconnect.isPending}
+                disabled={disconnect.isPending || save.isPending || connecting}
               >
                 Disconnect
               </Button>
@@ -111,7 +115,12 @@ export function LangSmithConnection() {
           </div>
         }
       />
-      <Dialog open={open} onOpenChange={changeOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(value) => {
+          if (!save.isPending && !connecting) changeOpen(value)
+        }}
+      >
         <DialogPopup className="gap-4 p-6">
           <DialogTitle>Connect LangSmith</DialogTitle>
           <DialogDescription>

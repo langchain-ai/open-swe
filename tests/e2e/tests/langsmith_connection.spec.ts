@@ -110,6 +110,15 @@ test("LangSmith API-key validation, failure recovery and disconnect", async ({
   ).toBeDisabled();
   await expect(row.getByText("Not connected", { exact: true })).toBeVisible();
   await expect(dialog.getByLabel("API key", { exact: true })).toHaveValue("");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(
+    row.getByRole("button", {
+      name: "Connect",
+      exact: true,
+      includeHidden: true,
+    }),
+  ).toBeDisabled();
   saveGate.resolve();
   await expect(dialog).toBeHidden();
   await expect(row).toContainText("Connected with an API key · EU");
