@@ -129,8 +129,6 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
-  // The API-keys query runs in a section above the proxy editor; its rejection
-  // surfaces a page-level alert that wins `findByRole("alert")` races.
   vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
