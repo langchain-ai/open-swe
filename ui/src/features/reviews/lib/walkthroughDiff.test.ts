@@ -3,29 +3,23 @@ import { describe, expect, it } from "vitest"
 import { walkthroughFileDiff } from "@/features/reviews/lib/walkthroughDiff"
 import type { ReviewDiffFile } from "@/lib/api"
 
-const lines = (count: number) =>
-  Array.from({ length: count }, (_, i) => `line ${i + 1}\n`).join("")
-
-function file(original: string, modified: string): ReviewDiffFile {
+function file(): ReviewDiffFile {
   return {
+    baseSha: "a".repeat(40),
+    headSha: "b".repeat(40),
     path: "src/a.ts",
     previousPath: null,
     status: "modified",
     additions: 2,
     deletions: 2,
-    originalContent: original,
-    modifiedContent: modified,
+    patch:
+      "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -3,1 +3,1 @@\n-line 3\n+line three\n@@ -35,1 +35,1 @@\n-line 35\n+line thirty-five\n",
   }
 }
 
 describe("walkthroughFileDiff", () => {
-  const original = lines(40)
-  const modified = original
-    .replace("line 3\n", "line three\n")
-    .replace("line 35\n", "line thirty-five\n")
-
   it("keeps only the hunks holding the step's lines, at their real line numbers", () => {
-    const diff = walkthroughFileDiff(file(original, modified), {
+    const diff = walkthroughFileDiff(file(), {
       path: "src/a.ts",
       added: [[35, 35]],
       deleted: [],
@@ -41,7 +35,7 @@ describe("walkthroughFileDiff", () => {
   })
 
   it("matches deleted lines against the original file's numbering", () => {
-    const diff = walkthroughFileDiff(file(original, modified), {
+    const diff = walkthroughFileDiff(file(), {
       path: "src/a.ts",
       added: [],
       deleted: [[3, 3]],
@@ -52,7 +46,7 @@ describe("walkthroughFileDiff", () => {
 
   it("renders the whole file when the step owns every hunk", () => {
     expect(
-      walkthroughFileDiff(file(original, modified), {
+      walkthroughFileDiff(file(), {
         path: "src/a.ts",
         added: [
           [3, 3],

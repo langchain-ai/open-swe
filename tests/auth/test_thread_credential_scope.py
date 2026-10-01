@@ -389,6 +389,21 @@ async def test_public_pr_opens_as_a_named_participant(monkeypatch, thread_metada
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("run", ["background_completion", "no_requester"])
+async def test_named_participant_is_honored_whoever_started_the_run(
+    monkeypatch, thread_metadata, credentials, run
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata["participant_logins"] = {"alice": True, "bob": True}
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    run_config = config(login=None if run == "no_requester" else "alice")
+    run_config["configurable"]["background_task_completion"] = run == "background_completion"
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+
+    assert await opr._resolve_pr_author_token("bob") == ("bob-token", "user")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("participants", [{"bob": True}, {}, None])
 async def test_public_pr_rejects_an_author_who_never_posted(
     monkeypatch, thread_metadata, credentials, participants

@@ -15,6 +15,7 @@ from langgraph_sdk.client import LangGraphClient
 from agent.slack.client import (
     SlackStreamError,
     append_slack_stream,
+    lookup_slack_thread_id,
     set_slack_thread_status,
     start_slack_stream,
     stop_slack_stream,
@@ -25,6 +26,7 @@ from agent.source_context import SourceContext
 from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
+from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
 
@@ -431,6 +433,24 @@ async def _settle_after_run(
     location = location or last_known
     if not is_code_channel_session(location[1]):
         await clear_slack_thinking_status_if_idle(client, thread_id, *location)
+
+
+async def settle_slack_thread_status(channel_id: str, thread_ts: str) -> None:
+    """Hand a Slack thread's status back to the conversation mapped there, or clear it."""
+    client = langgraph_client()
+    try:
+        thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    except Exception:
+        logger.warning(
+            "Could not look up the conversation owning a Slack thread's status",
+            extra={"slack_channel": channel_id},
+            exc_info=True,
+        )
+        thread_id = None
+    if thread_id:
+        await sync_slack_background_status(client, thread_id, resume=True)
+    else:
+        await set_slack_thread_status(channel_id, thread_ts, "")
 
 
 async def release_slack_location_status(channel_id: str, thread_ts: str) -> None:
