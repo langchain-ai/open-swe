@@ -590,7 +590,7 @@ def with_slack_session_cost(
     """Replace cumulative and optional per-run costs in a live Slack footer."""
     label = format_slack_session_cost(cost)
     if run_cost is not None and run_cost < cost:
-        label += f" • +{format_slack_session_cost(run_cost)}"
+        label += f" ({format_slack_session_cost(run_cost)})"
     updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
