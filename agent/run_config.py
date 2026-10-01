@@ -23,13 +23,14 @@ trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
 
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.invocation import resolve_invocation_id
+from agent.openai_responses.client_tools import ClientToolSpec
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ class RunConfig(BaseModel):
     prepare_run_id: str | None = None
     invocation_started_at: str | None = None
     offload_conversation: bool = False
+    client_tools: list[ClientToolSpec] = Field(default_factory=list)
     source: str | None = None
     task: str | None = None
     environment: str | None = None
@@ -147,8 +149,11 @@ class RunConfig(BaseModel):
     # Model selection
     agent_model_id: str | None = None
     resolved_agent_model_id: str | None = None
+    resolved_agent_effort: str | None = None
     agent_effort: str | None = None
     model_selection: str | None = None
+    model_selection_changed: bool = False
+    model_override_reason: Literal["image_input"] | None = None
     reviewer_model_id: str | None = None
     reviewer_reasoning_effort: str | None = None
     reviewer_subagent_model_id: str | None = None
@@ -159,6 +164,8 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     stop_summary: bool | None = None
     slack_ask: bool | None = None
+    # First run of a thread broken out from another Slack thread.
+    slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
@@ -185,7 +192,6 @@ class RunConfig(BaseModel):
     # Eval harness
     eval: bool | None = None
     reviewer_eval: bool | None = None
-    reviewer_eval_cap: Int | None = None
     reviewer_eval_severity_threshold: str | None = None
 
     # Background jobs

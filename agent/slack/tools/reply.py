@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Annotated, Any, Literal
 
 from langgraph.config import get_config
@@ -8,6 +9,13 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 
 from agent.run_config import RunConfig
+from agent.slack.blocks import (
+    MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
+    SECTION_TEXT_MAX_CHARS,
+    block_payload,
+    section,
+)
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
@@ -17,20 +25,38 @@ from agent.slack.client import (
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
     slack_thread_detached,
 )
-from agent.slack.thinking import restore_slack_session_status, restore_slack_thinking_status
+from agent.slack.run_feedback import feedback_block
+from agent.slack.thinking import restore_slack_thinking_status
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_MARKDOWN_MAX_CHARS = 12000
+_NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+# The posting helpers append a dashboard-link context block.
+_WEB_LINK_BLOCKS = 1
+
+
+def _usage_with_effort(
+    usage: RunUsageSummary | None, state: dict[str, Any] | None, cfg: RunConfig
+) -> RunUsageSummary | None:
+    state = state or {}
+    selected = state.get("selected_model_id")
+    model_id = selected or cfg.resolved_agent_model_id
+    if usage is None or len(usage.models) != 1 or not model_id:
+        return usage
+    reported_model = usage.models[0].rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+    if model_id.rsplit("/", 1)[-1].rsplit(":", 1)[-1] != reported_model:
+        return usage
+    effort = state.get("selected_effort") if selected else cfg.resolved_agent_effort
+    return replace(usage, reasoning_effort=effort)
 
 
 async def slack_reply(
@@ -86,13 +112,24 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
-        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            if options:
-                return _oversized_options_error(message)
-            message = markdown_to_mrkdwn(message)
-            slack_blocks = None
-        usage = summarize_run_usage(state)
+        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            return _oversized_options_error(message)
+        feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        slack_blocks = blocks
+        if blocks is None:
+            slack_blocks = _reply_blocks(message, options, reserve=_WEB_LINK_BLOCKS + feedback)
+            if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+                message = markdown_to_mrkdwn(message)
+        if feedback and run_id:
+            if slack_blocks is None:
+                slack_blocks = block_payload(
+                    [
+                        section(message[start : start + SECTION_TEXT_MAX_CHARS])
+                        for start in range(0, len(message), SECTION_TEXT_MAX_CHARS)
+                    ]
+                )
+            slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
+        usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
         message_ts, slack_error = await _post_and_store_mapping(
             channel_id,
             thread_ts,
@@ -120,13 +157,9 @@ async def slack_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
-    if run_id:
-        # Slack drops the status when the app posts; a session keeps its on
-        # whichever message currently holds it rather than on the session itself.
-        if is_code_channel_session(str(thread_ts)):
-            await restore_slack_session_status(client, str(channel_id), str(thread_ts))
-        else:
-            await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if run_id and not is_code_channel_session(str(thread_ts)):
+        # Slack drops the status when the app posts.
+        await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
 
 
@@ -155,13 +188,11 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
     if blocks is None:
-        if native_markdown:
-            blocks = _build_option_blocks(message, None)
-        else:
+        blocks = _reply_blocks(message, None, reserve=_WEB_LINK_BLOCKS)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
-    usage = summarize_run_usage(state)
+    usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
     if response_url and await claim_slack_event(f"slack-ask-answer:{cfg.thread_id}"):
         if await replace_slack_command_message(
@@ -249,12 +280,22 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
     }
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+def _reply_blocks(
+    message: str, options: list[str] | None, *, reserve: int
+) -> list[dict[str, Any]] | None:
+    """``message`` then option buttons; ``None`` when they cannot fit in one message."""
+    actions = _option_actions(options)
+    body = markdown_blocks(message)
+    if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
+        return None
+    return [*block_payload(body), *actions]
+
+
+def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
     clean_options = [option.strip() for option in options or [] if option.strip()]
-    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return blocks
-    blocks.append(
+        return []
+    return [
         {
             "type": "actions",
             "elements": [
@@ -267,8 +308,7 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 for index, option in enumerate(clean_options[:5])
             ],
         }
-    )
-    return blocks
+    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

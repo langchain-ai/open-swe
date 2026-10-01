@@ -1,4 +1,4 @@
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
@@ -7,6 +7,7 @@ import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
 import { MCPOAuthFields } from "./MCPOAuthFields"
@@ -14,6 +15,26 @@ import { MCPOAuthFields } from "./MCPOAuthFields"
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
+
+function editableValues(connection?: MCPConnectionUpdate): string {
+  const oauth = connection?.oauth
+  return JSON.stringify([
+    connection?.name ?? "",
+    connection?.url ?? "",
+    connection?.transport ?? "streamable_http",
+    connection?.enabled ?? true,
+    [...(connection?.allowed_tools ?? [])].sort(),
+    oauth
+      ? [
+          oauth.token_url,
+          oauth.client_id,
+          oauth.scope ?? "",
+          oauth.token_endpoint_auth_method ?? "client_secret_post",
+          oauth.client_secret ?? "",
+        ]
+      : null,
+  ])
+}
 
 export type MCPScope = "instance" | "workspace" | "user"
 
@@ -97,6 +118,10 @@ export function MCPConnectionsSection({
   > | null>(null)
   const [catalog, setCatalog] = useState<Catalog>([])
   const [busy, setBusy] = useState(false)
+  const [pendingRows, setPendingRows] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const rowWritesInFlight = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -106,6 +131,13 @@ export function MCPConnectionsSection({
   const savedConnection = connections.data?.find(
     (connection) => connection.name === draft?.name
   )
+  const dirty =
+    draft !== null &&
+    (editableValues(draft) !==
+      editableValues(draft.existing ? savedConnection : undefined) ||
+      (replaceHeaders &&
+        (headers.length > 0 ||
+          (savedConnection?.header_names.length ?? 0) > 0)))
   const toolDescriptions = new Map(
     catalog.map((tool) => [tool.name, tool.description])
   )
@@ -200,6 +232,41 @@ export function MCPConnectionsSection({
       )
     }
     setBusy(false)
+  }
+
+  const optimistic = async (
+    name: string,
+    errorTitle: string,
+    apply: (list: MCPConnection[]) => MCPConnection[],
+    revert: (list: MCPConnection[]) => MCPConnection[],
+    action: () => Promise<void>
+  ) => {
+    setPendingRows((rows) => new Set(rows).add(name))
+    rowWritesInFlight.current++
+    await qc.cancelQueries({ queryKey })
+    qc.setQueryData<MCPConnection[]>(
+      queryKey,
+      (current) => current && apply(current)
+    )
+    try {
+      await action()
+    } catch (e) {
+      qc.setQueryData<MCPConnection[]>(
+        queryKey,
+        (current) => current && revert(current)
+      )
+      reportError({ title: errorTitle, error: e })
+    } finally {
+      setPendingRows((rows) => {
+        const next = new Set(rows)
+        next.delete(name)
+        return next
+      })
+      rowWritesInFlight.current--
+    }
+    // A refetch while another row's write is pending would revert that row.
+    if (rowWritesInFlight.current === 0)
+      await qc.invalidateQueries({ queryKey })
   }
 
   const save = async (discover: boolean) => {
@@ -641,7 +708,7 @@ export function MCPConnectionsSection({
             </Button>
           )}
           <Button type="button" size="sm" variant="ghost" onClick={closeEditor}>
-            Cancel
+            {dirty ? "Cancel" : "Close"}
           </Button>
         </div>
       </fieldset>
@@ -654,9 +721,9 @@ export function MCPConnectionsSection({
         {connections.isLoading && (
           <p className="text-sm text-muted-foreground">Loading connections…</p>
         )}
-        {((error && !draft) || connections.error) && (
+        {connections.error && (
           <p role="alert" className="text-sm text-destructive">
-            {connections.error?.message || error}
+            {connections.error.message}
           </p>
         )}
         {scope === "workspace" &&
@@ -741,20 +808,30 @@ export function MCPConnectionsSection({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await client.save({
-                          name: connection.name,
-                          url: connection.url,
-                          transport: connection.transport,
-                          enabled: !connection.enabled,
-                          allowed_tools: connection.allowed_tools,
-                        })
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
-                    }
+                    disabled={busy || pendingRows.has(connection.name)}
+                    onClick={() => {
+                      const withEnabled =
+                        (enabled: boolean) => (list: MCPConnection[]) =>
+                          list.map((c) =>
+                            c.name === connection.name ? { ...c, enabled } : c
+                          )
+                      void optimistic(
+                        connection.name,
+                        `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
+                        withEnabled(!connection.enabled),
+                        withEnabled(connection.enabled),
+                        async () => {
+                          await client.save({
+                            name: connection.name,
+                            url: connection.url,
+                            transport: connection.transport,
+                            enabled: !connection.enabled,
+                            allowed_tools: connection.allowed_tools,
+                          })
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
+                    }}
                     aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
                   >
                     {connection.enabled ? "Disable" : "Enable"}
@@ -762,13 +839,22 @@ export function MCPConnectionsSection({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || pendingRows.has(connection.name)}
                     onClick={() =>
-                      run(async () => {
-                        await client.remove(connection.name)
-                        await qc.invalidateQueries({ queryKey })
-                        if (draft?.name === connection.name) closeEditor()
-                      })
+                      void optimistic(
+                        connection.name,
+                        `Couldn't delete ${connection.name}`,
+                        (list) =>
+                          list.filter((c) => c.name !== connection.name),
+                        (list) =>
+                          list.some((c) => c.name === connection.name)
+                            ? list
+                            : [...list, connection],
+                        async () => {
+                          await client.remove(connection.name)
+                          if (draft?.name === connection.name) closeEditor()
+                        }
+                      )
                     }
                     aria-label={`Delete ${connection.name}`}
                   >

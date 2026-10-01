@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
 import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -66,6 +67,11 @@ const AssistantRoute = AssistantRouteImport.update({
 const CloudAgentsRoute = CloudAgentsRouteImport.update({
   id: '/cloud-agents',
   path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
+  id: '/feature-flags',
+  path: '/feature-flags',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IncidentsRoute = IncidentsRouteImport.update({
@@ -217,6 +223,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -250,6 +257,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/cloud-agents': typeof CloudAgentsRoute
+  '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
@@ -285,6 +293,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -322,6 +331,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/feature-flags'
     | '/incidents'
     | '/integrations'
     | '/login'
@@ -355,6 +365,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/cloud-agents'
+    | '/feature-flags'
     | '/integrations'
     | '/login'
     | '/my-settings'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/feature-flags'
     | '/incidents'
     | '/integrations'
     | '/login'
@@ -425,6 +437,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
+  FeatureFlagsRoute: typeof FeatureFlagsRoute
   IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -476,6 +489,13 @@ declare module '@tanstack/react-router' {
       path: '/cloud-agents'
       fullPath: '/cloud-agents'
       preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feature-flags': {
+      id: '/feature-flags'
+      path: '/feature-flags'
+      fullPath: '/feature-flags'
+      preLoaderRoute: typeof FeatureFlagsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/incidents': {
@@ -740,6 +760,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
+  FeatureFlagsRoute: FeatureFlagsRoute,
   IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,

@@ -1,4 +1,8 @@
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
+import type {
+  WorkspaceFileIndex,
+  WorkspacePath,
+} from "@/features/agents/lib/workspaceFiles"
 import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
 import type { Skill } from "@/lib/api"
 
@@ -237,7 +241,15 @@ declare global {
       deleteLocalThread: (threadId: string) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
+      getLocalPr: (threadId: string) => Promise<AgentPullRequest | null>
       getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
+      readWorkspacePath: (input: {
+        localSessionId: string
+        relativePath: string
+      }) => Promise<WorkspacePath>
+      listWorkspaceFiles: (
+        localSessionId: string
+      ) => Promise<WorkspaceFileIndex>
       terminal: DesktopTerminalBridge
     }
   }

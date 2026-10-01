@@ -1,23 +1,40 @@
 import { SettingsRow } from "@/components/AppShell"
 import { Switch } from "@/components/ui/switch"
 import {
-  buildProfileUpdate,
   useExperimentalAssistantUi,
   useOptions,
+  usePatchProfile,
   useProfile,
-  useSaveProfile,
 } from "@/lib/profile"
+
+import {
+  setUseStreamPreference,
+  useStreamPreference,
+} from "@/lib/streamPreference"
 
 export function AssistantUiPreference() {
   const profile = useProfile()
   const options = useOptions()
-  const save = useSaveProfile()
+  const save = usePatchProfile()
   const enabled = useExperimentalAssistantUi()
+  const preferStream = useStreamPreference()
   const defaults = options.data
-  const disabled = !profile.isSuccess || !defaults || save.isPending
+  const disabled = !profile.isSuccess || !defaults
 
   return (
     <>
+      <SettingsRow
+        label="SDK useStream (experimental)"
+        htmlFor="sdk-use-stream"
+        description="Use SDK streaming instead of the transcript with the same conversation UI. Applies only to this browser; legacy threads always use SDK streaming."
+        control={
+          <Switch
+            id="sdk-use-stream"
+            checked={preferStream}
+            onCheckedChange={setUseStreamPreference}
+          />
+        }
+      />
       <SettingsRow
         label="Assistant UI (experimental)"
         htmlFor="experimental-assistant-ui"
@@ -29,22 +46,18 @@ export function AssistantUiPreference() {
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
-              save.mutate(
-                buildProfileUpdate(
-                  profile.data,
-                  { experimental_assistant_ui: value },
-                  defaults.default_agent_model,
-                  defaults.default_agent_reasoning_effort
-                )
+              save.patch(
+                { experimental_assistant_ui: value },
+                defaults.default_agent_model,
+                defaults.default_agent_reasoning_effort
               )
             }}
           />
         }
       />
-      {(save.error || profile.error || options.error) && (
+      {(profile.error || options.error) && (
         <p role="alert" className="px-4 py-2 text-xs text-destructive">
-          Could not {save.error ? "save" : "load"} the conversation preference.
-          Please try again.
+          Could not load the conversation preference. Please try again.
         </p>
       )}
     </>

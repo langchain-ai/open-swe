@@ -24,6 +24,7 @@ from e2e_env import (
     OWNER,
     PR_TITLE,
     REPO,
+    REVIEW_CHANNEL,
     SECOND_FEATURE_BRANCH,
     SECOND_OWNER,
     SECOND_PR_TITLE,
@@ -71,6 +72,17 @@ EOF
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
 
+# Human review: a Slack request names an existing PR; `_HERE` names the review channel too.
+HUMAN_REVIEW_MARKER = "E2E_HUMAN_REVIEW"
+HUMAN_REVIEW_HERE_MARKER = "E2E_HUMAN_REVIEW_HERE"
+HUMAN_REVIEW_SUMMARY = "Makes the greeting punctuation consistent and covers it with a test."
+HUMAN_REVIEW_RESUMMARIZE_MARKER = "E2E_HUMAN_REVIEW_RESUMMARIZE"
+HUMAN_REVIEW_CORRECTED_SUMMARY = "Ends every greeting with one exclamation mark, with a test."
+HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
+HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
+HUMAN_REVIEW_PICK = "bob"
+_UNCLAIMED_MARKER = "Nobody has signed up to review"
+
 # The seeded remote holds only a README, so the first turn writes the file. Two
 # added lines keeps the pull request inside the eligibility limit.
 _EXPEDITE_SETUP_SCRIPT = f"""
@@ -91,8 +103,8 @@ git push origin {FEATURE_BRANCH}
 echo PUSHED_OK
 """.strip()
 
-# Only a test file changes, and it stays smaller than the source change so the
-# card never drew it: the votes cast on the first revision still count.
+# Only a test file changes, and the card never draws tests: the votes cast on
+# the first revision still count.
 _EXPEDITE_FIX_SCRIPT = f"""
 set -e
 cd repo
@@ -300,7 +312,13 @@ def _text(content: Any) -> str:
     return str(content)
 
 
-_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff")
+_REPLY_GUARD_SENDER_ID = "system:reply-guard"
+_FRAMING_SENDER_IDS = ("system:slack-context", "system:dashboard-handoff", _REPLY_GUARD_SENDER_ID)
+
+
+def _is_reply_nudge(message: BaseMessage) -> bool:
+    """A reply-guard nudge or its introduction: a retry of the same turn, not a new one."""
+    return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
 def _is_framing_block(header: str) -> bool:
@@ -476,6 +494,89 @@ def _expedite_fixed_reply_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "slack_reply",
                 "args": {"response_type": "final", "message": text},
                 "id": f"call-expedite-fix-reply-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _pr_url_in(text: str) -> str:
+    match = re.search(r"https?://[^\s\"'<>|]+/pull/\d+", text)
+    return match.group(0) if match else ""
+
+
+def _human_review_request_step(messages: list[BaseMessage]) -> AIMessage:
+    """Ask the review channel to review the pull request the user named."""
+    humans = _script_humans(messages)
+    text = _text(humans[0].content) if humans else ""
+    args: dict[str, Any] = {"pr_url": _pr_url_in(text), "inline_summary": HUMAN_REVIEW_SUMMARY}
+    if HUMAN_REVIEW_HERE_MARKER in text:
+        args["channel"] = REVIEW_CHANNEL
+    return AIMessage(
+        content="Asking for a human review in Slack.",
+        tool_calls=[
+            {
+                "name": "request_human_review",
+                "args": args,
+                "id": f"call-human-review-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _human_review_resummarize_step(messages: list[BaseMessage]) -> AIMessage:
+    """Correct the summary on the card this thread already posted."""
+    humans = _script_humans(messages)
+    text = _text(humans[0].content) if humans else ""
+    return AIMessage(
+        content="Correcting the review card's summary.",
+        tool_calls=[
+            {
+                "name": "request_human_review",
+                "args": {
+                    "pr_url": _pr_url_in(text),
+                    "inline_summary": HUMAN_REVIEW_CORRECTED_SUMMARY,
+                },
+                "id": f"call-human-review-resummarize-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
+    """Take down the review request this thread posted."""
+    humans = _script_humans(messages)
+    text = _text(humans[0].content) if humans else ""
+    return AIMessage(
+        content="Dismissing the review request.",
+        tool_calls=[
+            {
+                "name": "dismiss_human_review_request",
+                "args": {"pr_url": _pr_url_in(text), "reason": HUMAN_REVIEW_DISMISS_REASON},
+                "id": f"call-human-review-dismiss-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
+    """Nobody signed up: pick the reviewer the CODEOWNERS file names."""
+    humans = _script_humans(messages)
+    text = _text(humans[-1].content) if humans else ""
+    return AIMessage(
+        content="Picking a reviewer from CODEOWNERS.",
+        tool_calls=[
+            {
+                "name": "assign_human_reviewer",
+                "args": {
+                    "pr_url": _pr_url_in(text),
+                    "github_login": HUMAN_REVIEW_PICK,
+                    "reason": "They own greet.py in CODEOWNERS.",
+                },
+                "id": f"call-human-review-assign-{len(messages)}",
             }
         ],
         response_metadata={"model_name": "fake-scripted-model"},
@@ -774,7 +875,43 @@ def _resolve_thread_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
+# The review page's chat drafts comments and reviews through two tools. Each marker
+# selects one scripted reply; the file and lines match what review_page_chat.spec.ts seeds.
+REVIEW_CHAT_COMMENTS_MARKER = "E2E_REVIEW_CHAT_COMMENTS"
+REVIEW_CHAT_REVIEW_MARKER = "E2E_REVIEW_CHAT_REVIEW"
+REVIEW_CHAT_PLAIN_MARKER = "E2E_REVIEW_CHAT_PLAIN"
+REVIEW_CHAT_FILE = "zeta.py"
+
 SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
+    "review_chat_comments": (
+        _tool_step(
+            "Drafting the first comment.",
+            "propose_review_comment",
+            {
+                "file": REVIEW_CHAT_FILE,
+                "line": 5,
+                "body": "Rename ZETA_5 to something descriptive.",
+            },
+            "call-review-chat-comment-post",
+        ),
+        _tool_step(
+            "Drafting the second comment.",
+            "propose_review_comment",
+            {"file": REVIEW_CHAT_FILE, "line": 12, "body": "This constant looks unused."},
+            "call-review-chat-comment-discard",
+        ),
+        StepSpec(content="Two drafts are ready for you to post or discard."),
+    ),
+    "review_chat_review": (
+        _tool_step(
+            "Drafting a review.",
+            "propose_pr_review",
+            {"event": "COMMENT", "body": "Looks reasonable overall."},
+            "call-review-chat-review",
+        ),
+        StepSpec(content="The review draft is ready."),
+    ),
+    "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
     # Parent turn: delegate to two general-purpose subagents in one step so the
     # transcript renders a subagent card grid. The subagents run this same fake
     # model; their task description carries the marker that selects the
@@ -1017,6 +1154,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     ),
     # Someone approved the card, or the watch reported checks green.
     "expedite_merge": (_dynamic_step(_expedite_merge_step),),
+    "human_review": (
+        _dynamic_step(_human_review_request_step),
+        _tool_step(
+            "Replying with where the review was requested.",
+            "slack_reply",
+            {"message": "Asked for a review in Slack."},
+            "call-human-review-reply",
+        ),
+    ),
+    "human_review_resummarize": (
+        _dynamic_step(_human_review_resummarize_step),
+        _tool_step(
+            "Confirming the corrected summary.",
+            "slack_reply",
+            {"message": "Fixed the card's summary."},
+            "call-human-review-resummarize-reply",
+        ),
+    ),
+    "human_review_dismiss": (
+        _dynamic_step(_human_review_dismiss_step),
+        _tool_step(
+            "Confirming the dismissal.",
+            "slack_reply",
+            {"message": "Took the review request down."},
+            "call-human-review-dismiss-reply",
+        ),
+    ),
+    "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
+    # Woken because nobody signed up within 30 minutes.
+    "human_review_assign": (
+        _dynamic_step(_human_review_assign_step),
+        StepSpec(content="Assigned a reviewer from CODEOWNERS."),
+    ),
     "multi_pr": (
         _tool_step(
             "Acknowledging the cross-repository request before starting work.",
@@ -1102,7 +1272,10 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _tool_step(
             "The breakout thread is the reply.",
             "slack_no_reply_needed",
-            {"reason": "Breakout thread started; nothing to post in the original thread."},
+            {
+                "reason": "Breakout thread started; nothing to post in the original thread.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
             "call-breakout-no-reply",
         ),
     ),
@@ -1198,6 +1371,9 @@ def _is_pull_request_fix(text: str) -> bool:
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
+    ScriptRule("review_chat_comments", lambda ctx: REVIEW_CHAT_COMMENTS_MARKER in ctx.last_text),
+    ScriptRule("review_chat_review", lambda ctx: REVIEW_CHAT_REVIEW_MARKER in ctx.last_text),
+    ScriptRule("review_chat_plain", lambda ctx: REVIEW_CHAT_PLAIN_MARKER in ctx.last_text),
     ScriptRule("subagent_task", lambda ctx: SUBAGENT_TASK_MARKER in ctx.last_text),
     ScriptRule("delegate", lambda ctx: ctx.human_count <= 1 and DELEGATE_MARKER in ctx.first_text),
     ScriptRule(
@@ -1242,6 +1418,17 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         ),
     ),
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
+    ScriptRule("human_review_assign", lambda ctx: _UNCLAIMED_MARKER in ctx.last_text),
+    ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
+    ScriptRule(
+        "human_review_resummarize",
+        lambda ctx: HUMAN_REVIEW_RESUMMARIZE_MARKER in ctx.last_text,
+    ),
+    ScriptRule(
+        "human_review",
+        lambda ctx: ctx.human_count <= 1 and HUMAN_REVIEW_MARKER in ctx.first_text,
+    ),
     ScriptRule("followup", lambda ctx: _is_move_followup(ctx.last_text)),
     ScriptRule("move", lambda ctx: _is_move_request(ctx.first_text)),
     ScriptRule("plan", lambda ctx: ctx.human_count <= 1 and _is_plan_request(ctx.first_text)),
@@ -1310,7 +1497,12 @@ class FakeScriptedChatModel(BaseChatModel):
         script = _script_for(context)
 
         last_human = max(
-            (i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1
+            (
+                i
+                for i, m in enumerate(messages)
+                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+            ),
+            default=-1,
         )
         step_index = sum(1 for m in messages[last_human + 1 :] if isinstance(m, AIMessage))
 

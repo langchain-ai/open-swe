@@ -1,10 +1,20 @@
 /** @vitest-environment jsdom */
 
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AutomationEditor } from "./AutomationEditor"
 import { useSession } from "@/lib/session"
+
+const mocks = vi.hoisted(() => ({
+  createMutate: vi.fn(),
+  workspaces: [
+    { slug: "default", name: "Default", repos: [], is_default: true },
+    { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
+    { slug: "core", name: "Core", repos: [], is_default: false },
+  ],
+}))
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
@@ -14,7 +24,7 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useCreateAgentSchedule: () => ({
     error: null,
     isPending: false,
-    mutate: vi.fn(),
+    mutate: mocks.createMutate,
   }),
   useDeleteAgentSchedule: () => ({
     error: null,
@@ -25,6 +35,9 @@ vi.mock("@/features/agents/lib/queries", () => ({
     error: null,
     isPending: false,
     mutate: vi.fn(),
+  }),
+  useWorkspaceOptions: () => ({
+    data: { default_slug: "default", workspaces: mocks.workspaces },
   }),
 }))
 vi.mock("@/features/agents/lib/provider/useModelOptions", () => ({
@@ -38,6 +51,14 @@ vi.mock("@/lib/profile", () => ({
 }))
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
+}))
+vi.mock("@/lib/slack-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
+  useSlackChannelDirectory: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
 }))
 vi.mock("@/features/settings/components/RepoSelector", () => ({
   RepoSelector: () => <div />,
@@ -71,8 +92,24 @@ vi.mock("@/components/ui/select", () => ({
 }))
 
 afterEach(() => {
+  cleanup()
   vi.clearAllMocks()
 })
+
+const TEMPLATE = {
+  id: "nightly",
+  name: "Nightly",
+  description: "",
+  prompt: "Check dependencies",
+  schedule: "0 9 * * *",
+  icon: (() => null) as never,
+}
+
+function signInAsAdmin() {
+  vi.mocked(useSession).mockReturnValue({
+    data: { is_admin: true },
+  } as unknown as ReturnType<typeof useSession>)
+}
 
 describe("AutomationEditor", () => {
   it("shows the admin-thread checkbox only to admins", () => {
@@ -95,5 +132,94 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).not.toContain("Run as admin thread")
     expect(memberMarkup).toContain("This workspace automation is read-only")
     expect(memberMarkup).not.toContain("Save changes")
+  })
+
+  it("shows the workspace an existing automation runs in", () => {
+    vi.mocked(useSession).mockReturnValue({
+      data: { is_admin: true },
+    } as unknown as ReturnType<typeof useSession>)
+
+    const markup = renderToStaticMarkup(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Check dependencies",
+          schedule: "0 9 * * *",
+          trigger: "schedule",
+          scope: "workspace",
+          workspace: "core",
+          repo: "acme/oss",
+          slackNotificationMode: "always",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+
+    expect(markup).toContain(">Core<")
+    expect(markup).not.toContain(">OSS<")
+  })
+
+  it("starts a new automation in the default workspace", () => {
+    signInAsAdmin()
+    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+
+    expect(
+      screen.getByRole("button", { name: "Workspace" }).textContent
+    ).toContain("Default")
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
+      workspace: "default",
+    })
+  })
+
+  it("sends a workspace the user picked", () => {
+    signInAsAdmin()
+    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Core/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
+      workspace: "core",
+    })
+  })
+
+  it("lets an automation whose workspace was deleted move to the only one left", () => {
+    signInAsAdmin()
+    const previous = mocks.workspaces
+    mocks.workspaces = [previous[0]!]
+    try {
+      render(
+        <AutomationEditor
+          mode="edit"
+          schedule={{
+            id: "sched_1",
+            name: "Nightly",
+            prompt: "Check dependencies",
+            schedule: "0 9 * * *",
+            trigger: "schedule",
+            scope: "workspace",
+            workspace: "gone",
+            repo: null,
+            slackNotificationMode: "always",
+            adminThread: false,
+            model: "Default",
+            enabled: true,
+          }}
+        />
+      )
+
+      expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
+      expect(screen.getByRole("button", { name: /^Default/ })).toBeTruthy()
+    } finally {
+      mocks.workspaces = previous
+    }
   })
 })

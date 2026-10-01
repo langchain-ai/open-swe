@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
@@ -14,26 +15,33 @@ import {
 
 import { SettingsSection } from "@/components/AppShell"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
+import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   useWorkspaceOptions,
   workspaceOptionKeys,
 } from "@/features/agents/lib/queries"
-import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import {
+  api,
+  DEFAULT_WORKSPACE_SLUG,
+  type WorkspaceOption,
+  type WorkspaceRecord,
+} from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
   useSlackChannelDirectory,
-} from "./WorkspaceBindingPickers"
+} from "@/lib/slack-channels"
 import {
   draftFromWorkspace,
   WorkspaceEditor,
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
   FableSection,
@@ -41,7 +49,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
-import { useOptions } from "@/lib/profile"
+import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
 
@@ -50,11 +58,13 @@ function GeneralSection({
   workspaces,
   channelLabel,
   onSaved,
+  rebuildStatus,
 }: {
   record: WorkspaceRecord
   workspaces: Array<WorkspaceOption>
   channelLabel: (id: string) => string
   onSaved: (saved: WorkspaceRecord) => void
+  rebuildStatus: ReactNode
 }) {
   const [draft, setDraft] = useState<WorkspaceDraft>(() =>
     draftFromWorkspace(record)
@@ -72,6 +82,7 @@ function GeneralSection({
         name: draft.name.trim(),
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
+        kitchen_channel_ids: draft.kitchenChannelIds,
         prompt: draft.prompt,
       })
       onSaved(saved)
@@ -86,7 +97,7 @@ function GeneralSection({
   return (
     <SettingsSection
       title="General"
-      description="Its name, the instructions appended to every run, and what it owns. A repository or Slack channel belongs to exactly one workspace."
+      description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
       <WorkspaceEditor
         draft={draft}
@@ -97,20 +108,23 @@ function GeneralSection({
         channelLabel={channelLabel}
       />
       <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+        {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}
           </p>
         )}
         <div className="ml-auto flex gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!dirty || saving}
-            onClick={() => setDraft(draftFromWorkspace(record))}
-          >
-            Cancel
-          </Button>
+          {dirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={saving}
+              onClick={() => setDraft(draftFromWorkspace(record))}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             size="sm"
             disabled={!dirty || saving || !draft.name.trim()}
@@ -136,7 +150,24 @@ export function WorkspaceSettingsPanel({
 }) {
   const qc = useQueryClient()
   const [deleting, setDeleting] = useState(false)
+  const [repositoryRebuild, setRepositoryRebuild] = useState<{
+    slug: string
+    finishedAt: WorkspaceRecord["refresh_finished_at"]
+  } | null>(null)
+  const [repositoryRebuildTimedOut, setRepositoryRebuildTimedOut] =
+    useState(false)
+  useEffect(() => {
+    if (!repositoryRebuild) return
+    const timeout = setTimeout(() => setRepositoryRebuildTimedOut(true), 60_000)
+    return () => clearTimeout(timeout)
+  }, [repositoryRebuild])
+  const awaitingRepositoryRebuild = (workspace: WorkspaceRecord | undefined) =>
+    repositoryRebuild?.slug === slug &&
+    (!workspace ||
+      workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
+      !["success", "failed"].includes(workspace.refresh_status ?? "never"))
   const deleteWorkspace = useMutation({
+    meta: { errorTitle: "Couldn't delete workspace" },
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
       setDeleting(false)
@@ -150,9 +181,14 @@ export function WorkspaceSettingsPanel({
     // A rebuild runs in the background; keep the image state and the rebuild
     // button following it until it settles.
     refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ? 5000 : false,
+      query.state.data?.refresh_status === "refreshing" ||
+      (!repositoryRebuildTimedOut &&
+        awaitingRepositoryRebuild(query.state.data))
+        ? 5000
+        : false,
   })
   const options = useWorkspaceOptions(true)
+  const repositories = useRepos()
   // Model options follow the workspace: the Fable flag that gates some of
   // them is one of its settings.
   const modelOptions = useOptions(slug)
@@ -172,13 +208,30 @@ export function WorkspaceSettingsPanel({
     )
   }
 
+  const buildAction = record.data.snapshot_id ? "Rebuild" : "Build"
   const onSaved = (saved: WorkspaceRecord) => {
+    const previousRepos = new Set(
+      record.data.repos.map((repo) => repo.toLowerCase())
+    )
+    const savedRepos = new Set(saved.repos.map((repo) => repo.toLowerCase()))
+    if (
+      saved.setup_script &&
+      (previousRepos.size !== savedRepos.size ||
+        [...savedRepos].some((repo) => !previousRepos.has(repo)))
+    ) {
+      setRepositoryRebuildTimedOut(false)
+      setRepositoryRebuild({
+        slug,
+        finishedAt: saved.refresh_finished_at,
+      })
+    }
     qc.setQueryData(workspaceRecordKey(slug), saved)
     void qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
   }
-  const onRebuildStarted = () => {
+  const onRebuildStarted = async () => {
     // Show the run as underway at once, then let the poll confirm it, so a
     // second click cannot slip in before the record catches up.
+    await qc.cancelQueries({ queryKey: workspaceRecordKey(slug) })
     qc.setQueryData(
       workspaceRecordKey(slug),
       (current: WorkspaceRecord | undefined) =>
@@ -197,6 +250,45 @@ export function WorkspaceSettingsPanel({
         workspaces={options.data?.workspaces ?? []}
         channelLabel={channelLabel}
         onSaved={onSaved}
+        rebuildStatus={
+          (!repositoryRebuildTimedOut &&
+            awaitingRepositoryRebuild(record.data)) ||
+          record.data.refresh_status === "refreshing" ? (
+            <p
+              role="status"
+              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
+            >
+              <CircleNotchIcon
+                aria-hidden="true"
+                className="size-4 shrink-0 animate-spin"
+              />
+              {record.data.refresh_status === "refreshing"
+                ? `${buildAction}ing sandbox image…`
+                : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
+              Existing runs keep their current image.
+            </p>
+          ) : awaitingRepositoryRebuild(record.data) ? (
+            <p
+              role="alert"
+              className="min-w-48 flex-1 text-xs text-destructive"
+            >
+              Repositories saved, but the image {buildAction.toLowerCase()}{" "}
+              could not be confirmed. Check the sandbox image status or retry{" "}
+              {buildAction} image.
+            </p>
+          ) : repositoryRebuild?.slug === slug ? (
+            <p
+              role={
+                record.data.refresh_status === "failed" ? "alert" : "status"
+              }
+              className="min-w-48 flex-1 text-xs text-muted-foreground"
+            >
+              {record.data.refresh_status === "failed"
+                ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
+                : "Sandbox image built with the saved repositories."}
+            </p>
+          ) : null
+        }
       />
       <WorkspaceSandboxSection
         key={`sandbox:${record.data.setup_script ?? ""}:${record.data.update_script ?? ""}`}
@@ -204,38 +296,46 @@ export function WorkspaceSettingsPanel({
         onSaved={onSaved}
         onRebuildStarted={onRebuildStarted}
       />
+      <WorkspaceProxySection
+        key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
+        record={record.data}
+        canEdit={canEdit}
+        onSaved={onSaved}
+      />
       <ModelDefaultsSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
       />
-      <DefaultRepoSection scope={scope} repositories={record.data.repos} />
+      <DefaultRepoSection
+        scope={scope}
+        repositories={repositories.data?.repositories ?? []}
+      />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
+      {canEdit && (
+        <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
+      )}
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
-      {canEdit && (
+      {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-        >
-          <div className="px-4 py-3.5">
+          action={
             <Button
               size="sm"
               variant="destructive"
               aria-label={`Delete ${record.data.name}`}
-              onClick={() => {
-                deleteWorkspace.reset()
-                setDeleting(true)
-              }}
+              onClick={() => setDeleting(true)}
             >
               Delete
             </Button>
-          </div>
-        </SettingsSection>
+          }
+        />
       )}
       {canEdit && deleting && (
         <AlertDialog
@@ -253,11 +353,6 @@ export function WorkspaceSettingsPanel({
                 cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            {deleteWorkspace.error && (
-              <p role="alert" className="text-xs text-destructive">
-                {deleteWorkspace.error.message}
-              </p>
-            )}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={deleteWorkspace.isPending}>
                 Cancel

@@ -33,11 +33,6 @@ export function ClosePullRequest({
         pending={close.isPending}
         onSubmit={(reason, done) => close.mutate(reason, { onSuccess: done })}
       />
-      {close.error && (
-        <p role="alert" className="mt-1 text-destructive">
-          {close.error.message}
-        </p>
-      )}
     </div>
   )
 }

@@ -35,6 +35,8 @@ class ThreadSettings(TypedDict, total=False):
     subagent_model_id: str
     subagent_effort: str | None
     model_routing_enabled: bool
+    model_handoff_complete: bool
+    requested_model: str | None
     routing_models: dict[str, ThreadModel]
     repo_instructions: str | None
 
@@ -71,13 +73,17 @@ async def load_thread_settings(client: Any, thread_id: str) -> ThreadSettings:
         return {}
 
 
-async def store_thread_settings(client: Any, thread_id: str, settings: ThreadSettings) -> None:
+async def store_thread_settings(
+    client: Any, thread_id: str, settings: ThreadSettings, *, strict: bool = False
+) -> None:
     """Persist the thread's settings, replacing any previous snapshot."""
     try:
         await client.threads.update(
             thread_id=thread_id, metadata={THREAD_SETTINGS_KEY: dict(settings)}
         )
     except Exception:
+        if strict:
+            raise
         logger.debug("Could not store settings for thread %s", thread_id, exc_info=True)
         return
     ttl_cache.set_cached(_cache_key(thread_id), settings, _CACHE_TTL_SECONDS)

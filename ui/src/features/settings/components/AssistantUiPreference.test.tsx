@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { api } from "@/lib/api"
+import { api, type Profile } from "@/lib/api"
 import { AssistantUiPreference } from "./AssistantUiPreference"
 
 const session = vi.hoisted(() => ({ login: "alice" }))
@@ -24,13 +24,17 @@ afterEach(() => {
 })
 
 it("saves the account preference and isolates it when the account changes", async () => {
-  vi.spyOn(api, "profile").mockImplementation(async () => ({
-    login: session.login,
-    default_model: "openai:test",
-    reasoning_effort: "medium",
-    draft_prs: false,
-    experimental_assistant_ui: session.login === "alice",
-  }))
+  const stored = new Map<string, Profile>()
+  vi.spyOn(api, "profile").mockImplementation(
+    async () =>
+      stored.get(session.login) ?? {
+        login: session.login,
+        default_model: "openai:test",
+        reasoning_effort: "medium",
+        draft_prs: false,
+        experimental_assistant_ui: session.login === "alice",
+      }
+  )
   vi.spyOn(api, "options").mockResolvedValue({
     models: [],
     default_agent_model: "openai:test",
@@ -38,12 +42,15 @@ it("saves the account preference and isolates it when the account changes", asyn
     default_agent_subagent_model: "openai:test",
     default_agent_subagent_reasoning_effort: "medium",
   })
-  const save = vi
-    .spyOn(api, "saveProfile")
-    .mockImplementation(async (body) => ({
+  const save = vi.spyOn(api, "saveProfile").mockImplementation(async (body) => {
+    const saved = {
       ...body,
+      login: session.login,
       model_routing_enabled: body.model_routing_enabled ?? undefined,
-    }))
+    }
+    stored.set(session.login, saved)
+    return saved
+  })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })

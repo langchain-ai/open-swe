@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +15,7 @@ import httpx2
 from fastapi import BackgroundTasks, HTTPException, Request
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
+from pydantic import BaseModel
 
 from agent.analytics.usage import update_agent_pr_usage_from_webhook
 from agent.config import ENV
@@ -52,6 +53,7 @@ from agent.github.comments import (
     extract_pr_context,  # noqa: F401
     fetch_issue_comments,  # noqa: F401
     fetch_pr_comments_since_last_tag,  # noqa: F401
+    fetch_pr_event_comments,  # noqa: F401
     format_github_comment_body_for_prompt,
     mentions_open_swe,  # noqa: F401
     react_to_github_comment,  # noqa: F401
@@ -67,8 +69,9 @@ from agent.github.thread_token import (
 from agent.github.token import (
     is_bot_token_only_mode,
 )
+from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from agent.linear.comments import get_recent_comments  # noqa: F401
-from agent.prompts import render_prompt
+from agent.prompts import prompt
 from agent.review.enabled_repos import is_review_repo_enabled
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -127,6 +130,7 @@ from agent.slack.feedback import (
 from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
+from agent.threads.creation import create_thread, ensure_titled_thread
 from agent.threads.summary import thread_is_private, thread_is_promptable
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
@@ -208,6 +212,7 @@ __all__ = [
     "run_id_for_logging",
     "store_current_reviewer_run_id",
     "thread_exists",
+    "track_review_check_run",
     "trigger_or_queue_run",
     "append_finding_interaction",
     "build_pr_prompt",
@@ -226,6 +231,7 @@ __all__ = [
     "fetch_image_block",
     "fetch_issue_comments",
     "fetch_pr_comments_since_last_tag",
+    "fetch_pr_event_comments",
     "fetch_pr_review_threads",
     "fetch_slack_thread_messages",
     "format_github_comment_body_for_prompt",
@@ -512,7 +518,7 @@ async def upsert_agent_thread_metadata(
     repo_config: dict[str, str] | None = None,
     github_login: str = "",
     user_email: str = "",
-    title: str = "",
+    title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
     workspace: str | None = None,
@@ -521,6 +527,7 @@ async def upsert_agent_thread_metadata(
     owner_login: str = "",
     owner_type: str = "user",
     unlisted: bool = False,
+    token_repositories: Sequence[str] | None = None,
 ) -> bool:
     """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
 
@@ -529,7 +536,9 @@ async def upsert_agent_thread_metadata(
     Webhook-triggered runs only pass ``source``/``github_login`` through the run
     config; the Agents UI lists threads by thread *metadata*, so we mirror the
     sender onto the thread's participants here. ``visibility`` and ``owner_login``
-    are stamped once, when the thread is created, and never changed afterwards.
+    are stamped once, when the thread is created, and never changed afterwards, as
+    is ``token_repositories``, the repositories the thread's GitHub token is
+    narrowed to (see :mod:`agent.github.token_scope`).
     Slack events on an existing thread also pass ``slack_participant_user_ids`` so
     every linked human in the Slack thread becomes an Open SWE participant of the
     agent thread.
@@ -630,14 +639,20 @@ async def upsert_agent_thread_metadata(
     ):
         metadata["visibility"] = visibility
         metadata["owner_type"] = owner_type
+        if token_repositories is not None:
+            metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(token_repositories)
         initiating_login = owner_login.strip() or sender_login.strip()
         if initiating_login and owner_type == "user":
             metadata["owner_login"] = initiating_login
 
     try:
         if existing is None:
-            await langgraph_client.threads.create(
-                thread_id=thread_id, if_exists="do_nothing", metadata=metadata
+            await create_thread(
+                langgraph_client,
+                thread_id,
+                title=title[:80],
+                if_exists="do_nothing",
+                metadata=metadata,
             )
             if owner_type == "system":
                 saved = as_thread_dict(await langgraph_client.threads.get(thread_id))
@@ -677,10 +692,10 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    A named repository takes precedence over a Slack channel's workspace
-    binding and a deployment-wide default behind it, so routing needs to tell
-    the two apart. ``explicit`` is true only for a repository the thread or the
-    channel description named.
+    A named repository may pick the workspace when no Slack channel is bound,
+    while a deployment-wide default behind it never does, so routing needs to
+    tell the two apart. ``explicit`` is true only for a repository the thread
+    or the channel description named.
     """
 
     repo: Repo | None = None
@@ -808,10 +823,10 @@ async def thread_exists(thread_id: str) -> bool:
 
 
 async def ensure_thread_exists_for_metadata(
-    thread_id: str, langgraph_client: LangGraphClient
+    thread_id: str, langgraph_client: LangGraphClient, *, title: str
 ) -> bool:
     try:
-        await langgraph_client.threads.create(thread_id=thread_id, if_exists="do_nothing")
+        await ensure_titled_thread(langgraph_client, thread_id, title=title)
         return True
     except Exception:
         logger.exception("Failed to ensure thread %s exists before metadata update", thread_id)
@@ -1040,8 +1055,13 @@ async def trigger_or_queue_run(
     github_user_id: int | None,
     repo_config: dict[str, str],
     pr_number: int,
-) -> None:
-    """Create a new agent run or queue the message if the thread is busy."""
+    token_repositories: Sequence[str] | None = None,
+) -> bool:
+    """Return whether a new agent run was created or queued for a busy thread.
+
+    ``token_repositories`` is recorded if this creates the thread; a thread that
+    must be narrowed but could not record it is not started.
+    """
     await authorize_github_thread(thread_id, github_login)
     # An existing thread keeps the workspace it started in even if its
     # repository has since moved: the settings and MCP connections a
@@ -1049,15 +1069,22 @@ async def trigger_or_queue_run(
     workspace = await get_thread_workspace(thread_id) or await workspace_for_repo_config(
         repo_config
     )
-    await upsert_agent_thread_metadata(
+    persisted = await upsert_agent_thread_metadata(
         thread_id,
         source="github",
         repo_config=repo_config,
         github_login=github_login,
-        title=f"PR #{pr_number}" if pr_number else "",
+        title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
         workspace=workspace,
+        token_repositories=token_repositories,
     )
+    if not persisted and token_repositories is not None:
+        logger.error(
+            "Not starting a GitHub run whose token scope could not be recorded",
+            extra={"agent_thread_id": thread_id},
+        )
+        return False
     logger.info("Dispatching LangGraph run for thread %s from GitHub PR comment", thread_id)
     await dispatch_agent_run(
         thread_id,
@@ -1072,10 +1099,12 @@ async def trigger_or_queue_run(
             "environment": workspace,
         },
         source="github",
+        thread_title=None,
         input=input,
         metadata=AGENT_VERSION_METADATA,
     )
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+    return True
 
 
 async def fetch_github_pr_metadata(pr_ref: GitHubPrRef, *, token: str) -> dict[str, Any] | None:
@@ -1122,6 +1151,17 @@ def repo_private_from_payload(payload: dict[str, Any]) -> bool | None:
     return private if isinstance(private, bool) else None
 
 
+def event_thread_token_repositories(
+    repo_config: dict[str, str], payload: dict[str, Any]
+) -> list[str] | None:
+    """The token scope for a thread a GitHub event on ``repo_config`` starts."""
+    return event_token_repositories(
+        repo_config.get("owner", ""),
+        repo_config.get("name", ""),
+        private=repo_private_from_payload(payload),
+    )
+
+
 def repo_id_from_payload(payload: dict[str, Any]) -> int | None:
     repo = payload.get("repository")
     repo_id = repo.get("id") if isinstance(repo, dict) else None
@@ -1147,6 +1187,51 @@ async def store_current_reviewer_run_id(thread_id: str, run: Any) -> None:
     run_id = run.get("run_id") if isinstance(run, dict) else None
     if isinstance(run_id, str) and run_id:
         await set_reviewer_thread_metadata(thread_id, extra={"current_reviewer_run_id": run_id})
+
+
+class _TrackedReviewCheck(BaseModel):
+    review_check_run_id: int | None = None
+    superseded_review_check_run_ids: list[int] = []
+
+
+async def track_review_check_run(
+    thread_id: str, *, owner: str, repo: str, token: str, check_run_id: int
+) -> None:
+    """Track ``check_run_id`` as the thread's review check, closing the ones it supersedes.
+
+    The run that owned the previous check is interrupted by the new one and never
+    settles it, so it would otherwise stay "in progress" on its commit forever.
+    Checks that fail to close are kept and retried on the next call.
+    """
+    tracked = _TrackedReviewCheck.model_validate(await get_thread_metadata_safe(thread_id) or {})
+    superseded = [
+        stale
+        for stale in dict.fromkeys(
+            [*tracked.superseded_review_check_run_ids, tracked.review_check_run_id]
+        )
+        if stale is not None and stale != check_run_id
+    ]
+    unsettled = [
+        stale
+        for stale in superseded
+        if not await complete_review_check_run(
+            owner=owner,
+            repo=repo,
+            check_run_id=stale,
+            token=token,
+            conclusion="neutral",
+            title="Superseded by a newer review",
+            summary="A newer Open SWE review run replaced this one.",
+        )
+    ]
+    await set_reviewer_thread_metadata(
+        thread_id,
+        extra={
+            "review_check_run_id": check_run_id,
+            "review_check_pending_result": None,
+            "superseded_review_check_run_ids": unsettled,
+        },
+    )
 
 
 async def build_reviewer_configurable(
@@ -1501,8 +1586,8 @@ def build_queued_finding_reply_prompt(
 ) -> str:
     safe_body = _escape_review_reply_data(reply_body)
     safe_author = _escape_review_reply_attr(reply_author)
-    return render_prompt(
-        "reviewer/queued-finding-reply.md",
+    return prompt(
+        "reviewer/queued-finding-reply",
         reply_author=reply_author,
         finding_id=finding_id,
         pr_number=pr_number,
