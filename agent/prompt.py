@@ -44,11 +44,20 @@ def _render_source_guidance(
     slack_ask: bool = False,
     slack_breakout: bool = False,
     concierge_mode: bool = False,
+    slack_by_the_way: bool = False,
 ) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "concierge" if concierge_mode else "slack-ask" if slack_ask else "slack"
+        name = (
+            "concierge"
+            if concierge_mode
+            else "slack-by-the-way"
+            if slack_by_the_way
+            else "slack-ask"
+            if slack_ask
+            else "slack"
+        )
     elif source in {"linear", "github", "schedule", "dashboard"}:
         name = source
     else:
@@ -126,6 +135,7 @@ def construct_system_prompt(
     slack_ask: bool = False,
     slack_breakout: bool = False,
     concierge_mode: bool = False,
+    slack_by_the_way: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
@@ -165,7 +175,7 @@ def construct_system_prompt(
         source_guidance_section=prompt(
             "system/source-context",
             source_guidance=_render_source_guidance(
-                source, slack_context, slack_ask, slack_breakout, concierge_mode
+                source, slack_context, slack_ask, slack_breakout, concierge_mode, slack_by_the_way
             ),
         ),
         default_prompt_section=_load_default_prompt(),

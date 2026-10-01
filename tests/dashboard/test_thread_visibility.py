@@ -30,7 +30,7 @@ def private_thread(monkeypatch):
             get_state=AsyncMock(return_value={"values": {}}),
             update_state=AsyncMock(),
         ),
-        runs=SimpleNamespace(cancel_many=AsyncMock()),
+        runs=SimpleNamespace(cancel_many=AsyncMock(), list=AsyncMock(return_value=[])),
     )
     for module in (access, handlers, listing, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
@@ -129,6 +129,49 @@ async def test_private_candidates_filtered_before_pagination(private_thread, mon
         client, [{}], viewer_login="alice", include_private=False
     )
     assert [item["thread_id"] for item in result] == ["public-thread"]
+
+
+async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
+    private_thread, monkeypatch
+):
+    thread, client = private_thread
+    thread["metadata"].update(admin_thread=True, unlisted=True, sandbox_id="sbx")
+    mirror = AsyncMock()
+    monkeypatch.setattr(handlers, "mirror_thread_metadata", mirror)
+    shared = await handlers.share_thread_with_workspace("private-thread", "ALICE")
+    assert summary.thread_is_readable(shared, "bob")
+    assert summary.thread_is_promptable(shared, "bob")
+    assert shared["visibility"] == "public"
+    assert shared["admin_thread"] is False
+    assert shared["unlisted"] is False
+    assert shared["owner_login"] == "alice"
+    assert shared["sandbox_id"] == "sbx"
+    mirror.assert_awaited_once_with(
+        "private-thread", client.threads.update.call_args.kwargs["metadata"]
+    )
+
+
+@pytest.mark.parametrize("login", ["bob", "admin"])
+async def test_only_owner_can_publish_even_when_admin_can_read(private_thread, login):
+    _, client = private_thread
+    with pytest.raises(HTTPException):
+        await handlers.share_thread_with_workspace("private-thread", login)
+    client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["busy", "pending", "running"])
+async def test_publish_refuses_live_runs(private_thread, status):
+    thread, client = private_thread
+    if status == "busy":
+        thread["status"] = status
+    else:
+        client.runs.list.side_effect = lambda *_, **kw: (
+            [{"run_id": "r"}] if kw["status"] == status else []
+        )
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
 
 
 async def test_continue_privately_copies_transcript_and_drops_linkage(private_thread):
