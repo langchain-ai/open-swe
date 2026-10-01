@@ -9,7 +9,21 @@ Call `rollout_page_check` with the https URL of that page on this environment. T
 {% endif %}
 {% if metrics %}
 Metrics: {{ metrics }}
-Query Datadog and compare this revision to the previous one. Staging uses the tag env:staging. Prod uses env:prod, env:eu-prod, and the other prod regions, and only when this environment is prod. Skip Datadog on dev. A prod metric move is the whole revision, not proof this commit caused it.
+Query Datadog and compare this revision to the previous one. The env tag on each cluster is:
+- dev: env:dev
+- staging: env:staging
+- GCP US prod: env:prod
+- EU prod: env:eu-prod
+- APAC prod: env:apac-prod
+- AWS prod: env:aws-prod
+{% if env == "prod" %}
+This check is prod. Query env:prod, env:eu-prod, env:apac-prod, and env:aws-prod.
+{% elif env == "staging" %}
+This check is staging. Query env:staging.
+{% elif env == "dev" %}
+This check is dev. Query env:dev.
+{% endif %}
+A prod metric move is the whole revision, not proof this commit caused it.
 {% endif %}
 {% if not page and not metrics %}
 No page or metric check was stored.

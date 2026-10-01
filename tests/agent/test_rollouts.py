@@ -164,8 +164,9 @@ async def test_dev_wakes_once_and_staging_waits_a_poll(
     verdict = dispatch.await_args_list[1].args[1]
     assert "staging" in verdict
     assert "gh pr comment" in verdict
-    assert "env:staging" in verdict
-    assert "env:dev" not in verdict
+    assert "Query env:staging." in verdict
+    for tag in ("env:dev", "env:staging", "env:prod", "env:eu-prod", "env:apac-prod", "env:aws-prod"):
+        assert tag in verdict
     watch = await rollouts.WATCHES.get("acme/repo#7")
     assert watch is not None and watch.active is False
     assert client.threads.updated[-1]["metadata"]["resolved"] is True
