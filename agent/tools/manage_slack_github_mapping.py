@@ -6,7 +6,7 @@ import re
 from fastapi import HTTPException
 
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
-from agent.tools.admin_gate import require_admin
+from agent.tools.access import Policy, access, ack
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 _SLACK_USER_ID = re.compile(r"^[UW][A-Z0-9]{2,99}$")
 
 
+@access(Policy(trusted="admin_thread", actor="admin", sole=ack()))
 async def manage_slack_github_mapping(slack_user_id: str, github_login: str) -> dict[str, object]:
     """Link a verified Slack member ID to an existing Open SWE GitHub user."""
-    if error := await require_admin("manage Slack-to-GitHub mappings"):
-        return {"success": False, "error": error}
     slack_user_id = slack_user_id.strip()
     github_login = github_login.strip()
     if not _SLACK_USER_ID.fullmatch(slack_user_id):

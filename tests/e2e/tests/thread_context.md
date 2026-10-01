@@ -21,7 +21,7 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 
 ```xml
 <input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-1>">
-add a greet() helper
+@open-swe add a greet() helper
 </input-message>
 ```
 
@@ -47,7 +47,7 @@ Then: her envelope alone — the channel is described, her turn-1 message and th
 ### dispatch appends
 ```xml
 <input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-2>">
-also add a docstring
+@open-swe also add a docstring
 </input-message>
 ```
 
@@ -62,7 +62,7 @@ Then: the run adds his block; Alice's is not re-sent, and dispatch does not desc
 ### dispatch appends
 ```xml
 <input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-3>">
-make it return bytes
+@open-swe make it return bytes
 </input-message>
 ```
 
@@ -116,7 +116,7 @@ Then: only Bob's block is re-sent, now carrying his instructions
 ### dispatch appends
 ```xml
 <input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-4>">
-open the PR
+@open-swe open the PR
 </input-message>
 ```
 

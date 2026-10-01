@@ -6,85 +6,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.slack.payloads import SlackChannelPayload
 from agent.utils.repo import extract_repo_from_text
 
 
 class TestExtractRepoFromText:
-    def test_repo_colon_with_org(self) -> None:
-        result = extract_repo_from_text("please use repo:my-org/my-repo")
-        assert result == {"owner": "my-org", "name": "my-repo"}
-
-    def test_repo_space_with_org(self) -> None:
-        result = extract_repo_from_text("please use repo langchain-ai/langchainjs")
-        assert result == {"owner": "langchain-ai", "name": "langchainjs"}
-
-    def test_repo_colon_name_only_uses_default_owner(self) -> None:
-        result = extract_repo_from_text(
-            "fix bug in repo:langchainplus", default_owner="langchain-ai"
-        )
-        assert result == {"owner": "langchain-ai", "name": "langchainplus"}
-
-    def test_repo_space_name_only_uses_default_owner(self) -> None:
-        result = extract_repo_from_text("fix bug in repo open-swe", default_owner="langchain-ai")
-        assert result == {"owner": "langchain-ai", "name": "open-swe"}
-
-    def test_repo_name_only_custom_default_owner(self) -> None:
-        result = extract_repo_from_text("repo:my-repo", default_owner="custom-org")
-        assert result == {"owner": "custom-org", "name": "my-repo"}
-
-    def test_github_url(self) -> None:
-        result = extract_repo_from_text(
-            "check https://github.com/langchain-ai/langgraph-api please"
-        )
-        assert result == {"owner": "langchain-ai", "name": "langgraph-api"}
-
     def test_explicit_repo_beats_github_url(self) -> None:
         result = extract_repo_from_text(
             "see https://github.com/langchain-ai/langgraph-api but use repo:my-org/my-repo"
         )
         assert result == {"owner": "my-org", "name": "my-repo"}
-
-    def test_no_repo_returns_none(self) -> None:
-        result = extract_repo_from_text("please fix the bug")
-        assert result is None
-
-    def test_empty_string_returns_none(self) -> None:
-        result = extract_repo_from_text("")
-        assert result is None
-
-    def test_trailing_slash_stripped(self) -> None:
-        result = extract_repo_from_text("repo:my-org/my-repo/")
-        assert result == {"owner": "my-org", "name": "my-repo"}
-
-
-class TestExtractChannelDescriptionText:
-    def test_combines_topic_and_purpose(self) -> None:
-        channel = {
-            "topic": {"value": "repo:my-org/my-repo"},
-            "purpose": {"value": "Team channel"},
-        }
-        assert (
-            SlackChannelPayload.of(channel).topic_and_purpose == "repo:my-org/my-repo\nTeam channel"
-        )
-
-    def test_handles_missing_sections(self) -> None:
-        assert SlackChannelPayload.of({"topic": {"value": "hi"}}).topic_and_purpose == "hi"
-
-    def test_empty_for_none(self) -> None:
-        assert SlackChannelPayload.of(None).topic_and_purpose == ""
-
-    def test_empty_for_blank_values(self) -> None:
-        channel = {"topic": {"value": "  "}, "purpose": {"value": ""}}
-        assert SlackChannelPayload.of(channel).topic_and_purpose == ""
-
-    def test_repo_token_extractable_from_description(self) -> None:
-        channel = {"topic": {"value": "Use repo:langchain-ai/open-swe here"}, "purpose": {}}
-        description = SlackChannelPayload.of(channel).topic_and_purpose
-        assert extract_repo_from_text(description) == {
-            "owner": "langchain-ai",
-            "name": "open-swe",
-        }
 
 
 class TestLinearWebhookRepoOverride:

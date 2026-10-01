@@ -6,7 +6,7 @@ from langchain.tools import ToolRuntime
 from pydantic import Field
 
 from agent.analytics.feedback import record_feedback_submission
-from agent.middleware.model_selection import ModelSelectionState, Route, normalize_route
+from agent.middleware.model_selection import ModelSelectionState, SelectedRoute, normalize_route
 from agent.run_config import RunConfig
 from agent.thread_feedback import Feedback, feedback_store
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -33,7 +33,7 @@ async def submit_thread_feedback(
     normalized_comment = comment.strip()
     run_id = str(runtime.config.get("run_id") or cfg.run_id or "")
     persisted_route = runtime.state.get("model_route") if runtime.state else None
-    route: Route | None = normalize_route(persisted_route) if persisted_route else None
+    route: SelectedRoute | None = normalize_route(persisted_route) if persisted_route else None
     async with agent_thread_pr_state_lock(langgraph_client(), cfg.thread_id):
         record = await feedback_store().get(cfg.thread_id)
         record = record or Feedback(event_id=f"tool:{run_id}", answer_run_id=run_id)

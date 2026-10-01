@@ -74,9 +74,13 @@ from agent.dashboard.agent_overrides import (
 )
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
+    ModelOption,
+    available_requested_models,
     canonical_model_pair,
+    default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
+    model_supports_images,
 )
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -107,22 +111,23 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
+    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
     task_on_failure,
     task_retry_on,
 )
+from agent.middleware.client_tools import ClientToolsMiddleware
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
@@ -133,6 +138,8 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.transcript import TranscriptMiddleware
+from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
+from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from agent.prompt import construct_system_prompt
 from agent.prompts import apply_tool_descriptions, load_prompt
 from agent.run_config import RunConfig
@@ -163,9 +170,11 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
-from agent.threads.summary import DASHBOARD_SOURCE, thread_is_private
+from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
+    assign_human_reviewer,
+    auto_assign_human_reviewer,
     background_execute,
     background_task,
     configure_repository,
@@ -175,6 +184,7 @@ from agent.tools import (
     delete_organization_skill,
     delete_user_skill,
     delete_workspace,
+    dismiss_human_review_request,
     expedite_pr_approval,
     expose_port,
     fetch_url,
@@ -182,8 +192,10 @@ from agent.tools import (
     http_request,
     link_pull_request,
     list_automations,
+    list_event_types,
     list_threads,
     list_workspaces,
+    listen_events,
     manage_baby_sit,
     manage_code_channel,
     manage_incident,
@@ -199,6 +211,7 @@ from agent.tools import (
     recreate_sandbox,
     refresh_workspace_start,
     report_platform_issue,
+    request_human_review,
     request_pr_review,
     save_organization_skill,
     save_plan,
@@ -223,14 +236,14 @@ from agent.tools import (
     update_automation,
     web_search,
 )
+from agent.tools.access import permitted, resolve_access
 from agent.tools.admin_gate import (
     actor_has_admin_context,
     actor_is_admin,
-    is_private_admin_surface,
     participant_is_admin,
 )
-from agent.tools.manage_review_approval_policy import manage_review_approval_policy
-from agent.tools.save_user_settings import personal_settings_run_allowed
+from agent.tools.manage_feature_flags import manage_feature_flags
+from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -368,6 +381,20 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
+async def _human_review_requests_enabled(login: str | None) -> bool:
+    if not login:
+        return False
+    try:
+        return (await User.preferences_for_login(login)).human_review_requests
+    except Exception:
+        logger.warning(
+            "Could not load the human review preference; leaving the tool out",
+            extra={"profile_login": login},
+            exc_info=True,
+        )
+        return False
+
+
 async def _user_for_login(login: str) -> User | None:
     """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
     try:
@@ -481,7 +508,12 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
+        "request_human_review",
+        "assign_human_reviewer",
+        "auto_assign_human_reviewer",
+        "dismiss_human_review_request",
         "manage_baby_sit",
+        "listen_events",
         "manage_thread",
         "link_pull_request",
         "open_pull_request",
@@ -558,6 +590,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "manage_code_channel",
         "manage_incident",
         "list_threads",
+        "listen_events",
         "manage_thread",
         "notify_automation_channel",
         "read_incident",
@@ -622,7 +655,7 @@ def _general_purpose_subagent(
     return subagent
 
 
-# Added to an admin thread's tools; see the admin-thread section of the prompt.
+# Workspace-admin tools; each declares where it may run with `@access`.
 ADMIN_TOOLS = (
     list_automations,
     create_automation,
@@ -652,18 +685,6 @@ async def _workspace_admin(config: RunnableConfig, profile_login: str | None) ->
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
-
-
-async def _private_thread(thread_id: str | None) -> bool:
-    """Whether only this thread's owner can read it. Fails closed."""
-    if not thread_id:
-        return False
-    try:
-        thread = await client.threads.get(thread_id=thread_id)
-    except Exception:
-        logger.debug("Could not read visibility for thread %s", thread_id, exc_info=True)
-        return False
-    return thread_is_private(thread_metadata(thread))
 
 
 async def _bridged_thread(thread_id: str | None) -> bool:
@@ -818,10 +839,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         recent_thread_context_enabled: bool,
         admin_workspaces: bool,
+        sole_writer: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
+        requested_models: Mapping[str, ModelOption] | None = None,
+        saved_requested_model: str | None = None,
     ) -> None:
+        self._saved_requested_model = saved_requested_model
+        self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
         self._profile_login = profile_login
@@ -837,6 +863,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
+        self._sole_writer = sole_writer
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
@@ -908,13 +935,131 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         blocks = [person_introduction(p.as_person()) for p in ordered]
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
 
-    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+    async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, object]:
+        decision = ModelSelectionDecision(requested_model=self._saved_requested_model)
+        cfg = RunConfig.from_config(self._config)
+        if cfg.model_selection == "explicit":
+            decision.reason = "explicit_selection"
+        elif (
+            cfg.source == "dashboard"
+            and cfg.model_selection == "auto"
+            and cfg.model_selection_changed
+        ):
+            decision.reason = "deliberate_auto_reset"
+        elif self._saved_requested_model:
+            decision.outcome = "reused_saved_choice"
+            decision.reason = "saved_opening_request"
+            decision.pin_persisted = True
+        async with model_selection_trace() as span:
+            prepared: dict[str, object] = {}
+            try:
+                prepared = await self._prepare_with_decision(state, runtime, decision)
+                return prepared
+            finally:
+                span.end(
+                    outputs={
+                        "requested_model": decision.requested_model,
+                        "classifier": vars(decision.classifier),
+                        "outcome": decision.outcome,
+                        "reason": decision.reason,
+                        "pin_persisted": decision.pin_persisted,
+                        "selected_model_id": prepared.get("selected_model_id"),
+                        "selected_effort": prepared.get("selected_effort"),
+                        "route": prepared.get("model_route"),
+                    },
+                    error=None if prepared else "Model selection preparation failed",
+                )
+
+    async def _prepare_with_decision(
+        self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
+    ) -> dict[str, object]:  # noqa: ARG002
         schedule_thread_title_generation(
             thread_id=self._thread_id,
             messages=state.get("messages") or [],
             model=self._title_model,
             client=client,
         )
+        requested_model: str | None = None
+        if self._requested_models is not None and self._model_selection is not None:
+            settings = (await load_thread_settings(client, self._thread_id)).copy()
+            if not settings.get("model_handoff_complete"):
+                handoff_config = RunConfig.from_config(self._config)
+                handoff = await infer_requested_model(
+                    messages=state.get("messages") or [],
+                    requested_models=self._requested_models,
+                    decision=decision.classifier,
+                    slack_event_ts=(
+                        handoff_config.slack_thread.triggering_event_ts
+                        if handoff_config.slack_thread is not None
+                        else None
+                    ),
+                )
+                decision.outcome = "classifier_failure" if handoff is None else "no_request"
+                decision.reason = (
+                    "no_model_request" if handoff is not None else decision.classifier.reason
+                )
+                if decision.classifier.outcome == "low_confidence":
+                    decision.outcome = "low_confidence"
+                if handoff is not None:
+                    requested_model = handoff.requested_model
+                    decision.requested_model = requested_model
+                    if handoff.unavailable_model or (
+                        requested_model and requested_model not in self._requested_models
+                    ):
+                        decision.outcome = "unavailable_request"
+                        decision.reason = "model_unavailable"
+                        raise ValueError(
+                            "The requested runtime model is unavailable; select an available model."
+                        )
+                settings["model_handoff_complete"] = True
+                settings["requested_model"] = requested_model
+                if requested_model:
+                    option = self._requested_models[requested_model]
+                    if not option["supports_images"] and any(
+                        block.get("type") == "image"
+                        for message in state.get("messages", [])
+                        if isinstance(message, HumanMessage)
+                        for block in message.content_blocks
+                    ):
+                        decision.outcome = "incompatible_request"
+                        decision.reason = "image_input_unsupported"
+                        raise ValueError(
+                            "The requested runtime model does not support image input; "
+                            "select an image-capable model."
+                        )
+                    settings.update(
+                        model_id=requested_model,
+                        effort=option["default_effort"],
+                        model_routing_enabled=False,
+                    )
+                try:
+                    await store_thread_settings(client, self._thread_id, settings, strict=True)
+                except Exception:
+                    decision.outcome = "persistence_failure"
+                    decision.reason = "settings_write_failed"
+                    raise
+                decision.pin_persisted = bool(requested_model)
+            else:
+                requested_model = settings.get("requested_model")
+                decision.requested_model = requested_model
+                decision.outcome = "reused_saved_choice" if requested_model else "not_classified"
+                decision.reason = (
+                    "saved_opening_request" if requested_model else "handoff_already_complete"
+                )
+                decision.pin_persisted = bool(requested_model)
+            if requested_model:
+                option = self._requested_models[requested_model]
+                try:
+                    self._model_selection.use_requested_model(requested_model)
+                except Exception:
+                    decision.outcome = "selection_failure"
+                    decision.reason = "model_initialization_failed"
+                    raise
+                if decision.outcome != "reused_saved_choice":
+                    decision.outcome = "accepted_request"
+                    decision.reason = "validated_and_persisted"
+                self._model_id = requested_model
+                self._effort = option["default_effort"]
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
@@ -1007,10 +1152,23 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             attribution_effort = self._effort
             attribution_route = None
             if self._model_selection is not None:
-                attribution_route = await self._model_selection.select_route(
-                    cast(ModelSelectionState, state)
+                routing_state = cast(ModelSelectionState, state).copy()
+                if (
+                    cfg.source == "dashboard"
+                    and cfg.model_selection == "auto"
+                    and cfg.model_selection_changed
+                ):
+                    routing_state.pop("model_route", None)
+                    routing_state.pop("requested_model", None)
+                attribution_route = (
+                    "default"
+                    if requested_model
+                    else await self._model_selection.select_route(routing_state)
                 )
-                attribution_model_id, attribution_effort = self._routing_defaults[attribution_route]
+                if attribution_route != "default":
+                    attribution_model_id, attribution_effort = self._routing_defaults[
+                        attribution_route
+                    ]
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
             bot_id = (
@@ -1046,7 +1204,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         "model": attribution_model_id,
                         "effort": attribution_effort,
                         "source": self._source,
-                        **({"model_route": attribution_route} if attribution_route else {}),
+                        **(
+                            {"model_route": attribution_route}
+                            if attribution_route is not None
+                            else {}
+                        ),
                     },
                 )
                 if cfg.invocation_id:
@@ -1084,10 +1246,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
         return {
             "work_dir": work_dir,
+            "requested_model": requested_model,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
-            **({"model_route": attribution_route} if attribution_route else {}),
+            **({"model_route": attribution_route} if attribution_route is not None else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
                 dashboard_base_url=dashboard_base_url(),
@@ -1098,7 +1261,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 repo_custom_instructions=self._repo_instructions,
                 workspace_name=workspace.name if workspace else None,
                 workspace_instructions=workspace.instructions if workspace else None,
+                workspace_repos=workspace.repos if workspace else None,
                 admin_workspaces=self._admin_workspaces,
+                sole_writer=self._sole_writer,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
@@ -1171,6 +1336,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
+    reset_model_selection = (
+        cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
+    )
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
@@ -1199,7 +1367,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         async with aphase(thread_id, "factory.settings_defaults"):
             settings, profile = await asyncio.gather(
                 cached_workspace_settings(settings_workspace),
-                _cached_profile(None if thread_settings.get("model_id") else profile_login),
+                _cached_profile(
+                    profile_login
+                    if reset_model_selection or not thread_settings.get("model_id")
+                    else None
+                ),
             )
             model_defaults = settings.default_model_pair("agent")
             routing_defaults = dict(settings.agent_routing_models)
@@ -1250,7 +1422,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     if adaptive_model_routing is None:
         adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
-    if isinstance(stored_model, str):
+    if isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model
         profile_effort = thread_settings.get("effort")
         subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
@@ -1258,31 +1430,50 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
         logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
 
-    if cfg.source == "dashboard" and cfg.model_selection in {"auto", "explicit"}:
-        adaptive_model_routing = cfg.model_selection == "auto"
+    if cfg.model_selection == "explicit":
+        adaptive_model_routing = False
+        thread_settings["requested_model"] = None
+        thread_settings["model_handoff_complete"] = True
+        settings_changed = True
+    elif cfg.source == "dashboard" and cfg.model_selection == "auto":
+        if reset_model_selection:
+            thread_settings["requested_model"] = None
+            thread_settings["model_handoff_complete"] = True
+            settings_changed = True
+        adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
-    # An explicit per-run model choice is the one thing allowed to move a thread
-    # off its stored settings; the new choice is then stored in turn.
+    # Capability fallbacks can temporarily replace a pinned text-only model.
+    image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
     canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
     if canonical_per_thread is not None:
         per_thread_model, per_thread_effort = canonical_per_thread
     if (
-        isinstance(per_thread_model, str)
+        (
+            not thread_settings.get("requested_model")
+            or cfg.model_selection == "explicit"
+            or (cfg.model_override_reason == "image_input" and not model_supports_images(model_id))
+        )
+        and isinstance(per_thread_model, str)
+        and (not reset_model_selection or cfg.model_override_reason == "image_input")
         and per_thread_model in SUPPORTED_MODEL_IDS
         and isinstance(per_thread_effort, str)
         and model_supports_effort(per_thread_model, per_thread_effort)
     ):
         logger.info(
-            "Applying per-thread model override: model=%s effort=%s",
-            per_thread_model,
-            per_thread_effort,
+            "Applying per-thread model override",
+            extra={"model_id": per_thread_model, "effort": per_thread_effort},
         )
-        model_id = per_thread_model
-        profile_effort = per_thread_effort
-        subagent_model_id = per_thread_model
-        subagent_effort = per_thread_effort
+        if (
+            thread_settings.get("requested_model") or reset_model_selection
+        ) and cfg.model_override_reason == "image_input":
+            image_model_override = (per_thread_model, per_thread_effort)
+        else:
+            model_id = per_thread_model
+            profile_effort = per_thread_effort
+            subagent_model_id = per_thread_model
+            subagent_effort = per_thread_effort
 
     async with aphase(thread_id, "factory.sender_profile"):
         sender_profile = profile if profile is not None else await _cached_profile(profile_login)
@@ -1304,6 +1495,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         "subagent_model_id": subagent_model_id,
         "subagent_effort": subagent_effort,
         "model_routing_enabled": adaptive_model_routing,
+        "model_handoff_complete": thread_settings.get("model_handoff_complete", bool(stored_model)),
         "routing_models": {
             route: {"model_id": routed_model_id, "effort": effort}
             for route, (routed_model_id, effort) in routing_defaults.items()
@@ -1315,6 +1507,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     ):
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
+
+    if image_model_override is not None:
+        model_id, profile_effort = image_model_override
+        subagent_model_id, subagent_effort = image_model_override
 
     # A `/oswe` question runs on the asker's own default model, and never routes
     # adaptively: one question gets one answer, so there is nothing to route.
@@ -1353,18 +1549,22 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         max_tokens=TITLE_GENERATION_MAX_TOKENS,
     )
 
-    fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(model_id)
-    fallback_middleware: list[Any] = []
-    if fallback_model_id and fallback_model_id != model_id:
+    def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
+        fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
+            primary_model_id
+        )
+        if not fallback_model_id or fallback_model_id == primary_model_id:
+            return None
         fallback_kwargs: ModelKwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
         if fallback_model_id.startswith("openai:"):
             fallback_kwargs["reasoning"] = DEFAULT_LLM_REASONING
-        fallback_middleware.append(
-            ModelFallbackMiddleware(
-                _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
-            )
+        logger.info(
+            "Configured model fallback",
+            extra={"primary_model_id": primary_model_id, "fallback_model_id": fallback_model_id},
         )
-        logger.info("Configured model fallback %s -> %s", model_id, fallback_model_id)
+        return _make_model_or_defer(fallback_model_id, use_gateway=use_gateway, **fallback_kwargs)
+
+    fallback_middleware = ModelFallbackMiddleware(make_fallback_model(model_id))
 
     source = cfg.source or "dashboard"
     configurable["source"] = source
@@ -1374,14 +1574,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
-    private_admin_surface = admin_thread and is_private_admin_surface(cfg)
-    if admin_thread:
-        logger.info("Admin thread %s: adding workspace management tools", thread_id)
-
-    # Channel history pulls messages into the transcript, so everyone who can
-    # read the thread reads them. Only a private thread gets the tool at all.
-    async with aphase(thread_id, "factory.private_thread"):
-        private_thread = await _private_thread(thread_id)
+    async with aphase(thread_id, "factory.tool_access"):
+        tool_access = await resolve_access(cfg, login=profile_login)
 
     stop_summary_mode = cfg.stop_summary is True
     async with aphase(thread_id, "factory.bridged_thread"):
@@ -1428,7 +1622,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         background_task,
         save_plan,
         save_user_instructions,
-        *((save_user_settings,) if personal_settings_run_allowed(cfg) else ()),
+        save_user_settings,
         save_user_skill,
         delete_user_skill,
         list_threads,
@@ -1438,6 +1632,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_baby_sit,
         expedite_pr_approval,
         merge_expedited_pr,
+        request_human_review,
+        assign_human_reviewer,
+        auto_assign_human_reviewer,
+        dismiss_human_review_request,
         notify_automation_channel,
         open_pull_request,
         link_pull_request,
@@ -1452,6 +1650,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        listen_events,
+        list_event_types,
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
@@ -1466,27 +1666,33 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_start_new_thread,
         submit_thread_feedback,
         submit_review_assessment_feedback,
-        *(ADMIN_TOOLS if admin_thread else ()),
+        *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
-        *((read_only_sql, manage_review_approval_policy) if private_admin_surface else ()),
+        read_only_sql,
+        manage_feature_flags,
+        manage_review_approval_mode,
     ]
-    if credential_login is None:
-        personal_tools = (
-            save_user_instructions,
-            save_user_settings,
-            save_user_skill,
-            delete_user_skill,
-            read_user_settings,
-        )
-        static_tools = [tool for tool in static_tools if tool not in personal_tools]
-    if not private_thread:
-        static_tools = [tool for tool in static_tools if tool is not slack_read_channel_messages]
+    static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
         static_tools = [tool for tool in static_tools if tool not in slack_tools]
     elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
+    if local_run or not ENV.SLACK_BOT_TOKEN.get():
+        static_tools = [
+            tool
+            for tool in static_tools
+            if tool
+            not in (
+                request_human_review,
+                assign_human_reviewer,
+                auto_assign_human_reviewer,
+                dismiss_human_review_request,
+            )
+        ]
+    elif not await _human_review_requests_enabled(profile_login):
+        static_tools = [tool for tool in static_tools if tool is not request_human_review]
     if (
         local_run
         or not ENV.SLACK_BOT_TOKEN.get()
@@ -1522,6 +1728,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    # A client's tool replaces any server tool of the same name, so the endpoint's
+    # view of which calls the client runs matches the graph's.
+    client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
+    client_tools = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+    if client_tools is not None:
+        excluded_tools = (excluded_tools | CLIENT_OWNED_SERVER_TOOLS) - client_tool_names
+    main_tools = [
+        tool for tool in static_tools if _registered_tool_name(tool) not in client_tool_names
+    ]
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
@@ -1565,29 +1780,87 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
-    model_selection: ModelSelectionMiddleware | None = None
-    if adaptive_model_routing:
-        assert model_routing_mode is not None
-        routing_models = {
-            route: _make_model_or_defer(
-                routed_model_id,
+    requested_models = (
+        available_requested_models(fable_enabled=fable_enabled)
+        if (adaptive_model_routing or source == "slack")
+        and not thread_settings.get("model_handoff_complete", bool(stored_model))
+        and source in {"dashboard", "slack"}
+        and not local_run
+        and not stop_summary_mode
+        and incident_session is None
+        and not cfg.background_task_completion
+        and not cfg.continued_from_thread_id
+        else None
+    )
+    image_fallback: ImageModelFallbackMiddleware | None = None
+    if (
+        not model_supports_images(model_id)
+        or any(not option["supports_images"] for option in (requested_models or {}).values())
+        or (
+            adaptive_model_routing
+            and any(
+                not model_supports_images(route_id) for route_id, _ in routing_defaults.values()
+            )
+        )
+    ):
+        vision_model = main_model
+        if not model_supports_images(model_id):
+            vision_model_id, vision_effort = default_vision_model_pair()
+            vision_model = _make_model_or_defer(
+                vision_model_id,
                 use_gateway=use_gateway,
                 **provider_model_kwargs(
-                    routed_model_id,
-                    effort,
-                    max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
                 ),
             )
-            for route, (routed_model_id, effort) in routing_defaults.items()
-        }
-        model_selection = ModelSelectionMiddleware(
-            routing_models,
-            routing_models["fast"],
-            route_model_ids={
-                route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()
-            },
-            routing_mode=model_routing_mode,
+        image_fallback = ImageModelFallbackMiddleware(vision_model)
+        if not model_supports_images(model_id):
+            image_fallback.add_text_only_model(main_model)
+
+    configurable["image_model_fallback_enabled"] = image_fallback is not None
+
+    def requested_model_factory(requested_model: str) -> BaseChatModel:
+        option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
+        model = _make_model_or_defer(
+            requested_model,
+            use_gateway=use_gateway,
+            **provider_model_kwargs(
+                requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
+            ),
         )
+        if image_fallback is not None and not option["supports_images"]:
+            image_fallback.add_text_only_model(model)
+        fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
+        return model
+
+    # Keep checkpointed routing tasks resumable after a handoff disables routing.
+    routing_models = {
+        route: _make_model_or_defer(
+            routed_model_id,
+            use_gateway=use_gateway,
+            **provider_model_kwargs(
+                routed_model_id,
+                effort,
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
+            ),
+        )
+        for route, (routed_model_id, effort) in routing_defaults.items()
+        if adaptive_model_routing
+    }
+    if image_fallback is not None:
+        for route, model in routing_models.items():
+            if not model_supports_images(routing_defaults[route][0]):
+                image_fallback.add_text_only_model(model)
+    model_selection = ModelSelectionMiddleware(
+        routing_models,
+        main_model,
+        route_model_ids={
+            **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
+            "default": model_id,
+        },
+        routing_mode=model_routing_mode,
+        requested_model_factory=requested_model_factory if requested_models else None,
+    )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1607,7 +1880,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         graph = create_deep_agent(
             model=main_model,
             system_prompt="",
-            tools=static_tools,
+            tools=main_tools,
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
@@ -1621,7 +1894,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     guard_middleware=_subagent_guard_middleware(local_run),
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
-                        *((model_selection.name,) if model_selection else ()),
+                        deliver_event_matches_before_model.name,
+                        model_selection.name,
                     ),
                 ),
             ],
@@ -1654,17 +1928,20 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                             else False
                         ),
                         admin_workspaces=admin_thread,
+                        sole_writer=tool_access.sole,
                         model_selection=model_selection,
                         routing_defaults=routing_defaults,
+                        requested_models=requested_models,
+                        saved_requested_model=thread_settings.get("requested_model"),
                     ),
                     TranscriptMiddleware(),
+                    *([client_tools] if client_tools else []),
                     *(
                         [IncidentMiddleware(incident_session)]
                         if incident_session is not None
                         else []
                     ),
                     *([workspace_skills] if workspace_skills else []),
-                    SanitizeToolInputsMiddleware(),
                     ValidateImageReadsMiddleware(),
                     ModelCallLimitMiddleware(
                         run_limit=incident_session.policy.max_model_calls
@@ -1686,8 +1963,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
                     refresh_github_proxy_before_model,
-                    *([] if stop_summary_mode else [check_message_queue_before_model]),
-                    TimeoutWrapupMiddleware(),
+                    *(
+                        []
+                        if stop_summary_mode
+                        else [check_message_queue_before_model, deliver_event_matches_before_model]
+                    ),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),
                         _registered_tool_name(slack_no_reply_needed),
@@ -1702,8 +1982,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     notify_step_limit_reached,
                     record_run_usage,
-                    *([model_selection] if model_selection else []),
-                    *fallback_middleware,
+                    model_selection,
+                    fallback_middleware,
+                    *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),

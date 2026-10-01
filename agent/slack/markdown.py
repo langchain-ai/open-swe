@@ -1,9 +1,51 @@
+import re
 from html import escape
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+from agent.slack.blocks import (
+    MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
+    SECTION_TEXT_MAX_CHARS,
+    Block,
+    code_blocks,
+    markdown,
+    section,
+    split_lines,
+)
+
 _parser = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
+_SLACK_TOKEN = re.compile(r"(<[@#!][A-Za-z0-9^]+(?:\|[^<>]*)?>)")
+
+
+def markdown_blocks(text: str) -> list[Block] | None:
+    """``text`` as blocks that keep code highlighted past Slack's native Markdown limit.
+
+    ``None`` when it needs more blocks than a message holds.
+    """
+    if len(text) <= MARKDOWN_TEXT_MAX_CHARS:
+        return [markdown(text)]
+    lines = text.splitlines(keepends=True)
+    blocks: list[Block] = []
+    start = 0
+    for token in _parser.parse(text):
+        if token.level or token.type not in {"fence", "code_block"} or token.map is None:
+            continue
+        begin, end = token.map
+        blocks.extend(_prose(lines[start:begin]))
+        language = token.info.split()[0] if token.info.strip() else None
+        blocks.extend(code_blocks(token.content, language=language))
+        start = end
+    blocks.extend(_prose(lines[start:]))
+    return blocks if len(blocks) <= MESSAGE_MAX_BLOCKS else None
+
+
+def _prose(lines: list[str]) -> list[Block]:
+    return [
+        section(chunk)
+        for chunk in split_lines(markdown_to_mrkdwn("".join(lines)), SECTION_TEXT_MAX_CHARS)
+    ]
 
 
 def markdown_to_mrkdwn(markdown: str) -> str:
@@ -67,7 +109,10 @@ def _render_inline(tokens: list[Token]) -> str:
     }
     for token in tokens:
         if token.type == "text":
-            output.append(escape(token.content, quote=False))
+            output.extend(
+                part if index % 2 else escape(part, quote=False)
+                for index, part in enumerate(_SLACK_TOKEN.split(token.content))
+            )
         elif token.type in markers:
             output.append(markers[token.type])
         elif token.type == "code_inline":

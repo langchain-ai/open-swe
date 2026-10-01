@@ -28,7 +28,9 @@ export interface SidebarPrefs {
   expandedRepoKeys: Array<string>
   /** Which of "pinned" | "repos" | "recents" are collapsed. */
   collapsedSectionKeys: Array<string>
-  /** Thread rows whose subagent sub-threads are folded away. */
+  /** Whether subagent sub-threads start folded away. */
+  collapseSubagentsByDefault: boolean
+  /** Thread rows whose fold state differs from the default. */
   collapsedSubagentKeys: Array<string>
   organize: OrganizeMode
   sortChats: ChatSort
@@ -43,6 +45,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
+  collapseSubagentsByDefault: true,
   collapsedSubagentKeys: [],
   organize: "workspace",
   sortChats: "created",
@@ -123,7 +126,14 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
     collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys).map((key) =>
       key === "projects" ? "repos" : key
     ),
-    collapsedSubagentKeys: asStringArray(raw.collapsedSubagentKeys),
+    collapseSubagentsByDefault:
+      typeof raw.collapseSubagentsByDefault === "boolean"
+        ? raw.collapseSubagentsByDefault
+        : DEFAULT_SIDEBAR_PREFS.collapseSubagentsByDefault,
+    collapsedSubagentKeys:
+      typeof raw.collapseSubagentsByDefault === "boolean"
+        ? asStringArray(raw.collapsedSubagentKeys)
+        : [],
     organize: asEnum(
       raw.organize === "project" ? "repo" : raw.organize,
       ORGANIZE_MODES,
@@ -254,6 +264,15 @@ export function useSidebarPrefs() {
     []
   )
 
+  const setCollapseSubagentsByDefault = useCallback(
+    (collapseSubagentsByDefault: boolean) =>
+      setPrefs((prev) => ({
+        ...prev,
+        collapseSubagentsByDefault,
+        collapsedSubagentKeys: [],
+      })),
+    []
+  )
   const toggleSubagentsCollapsed = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -290,6 +309,7 @@ export function useSidebarPrefs() {
     toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
+    setCollapseSubagentsByDefault,
     toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,

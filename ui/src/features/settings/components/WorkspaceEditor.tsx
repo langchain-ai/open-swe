@@ -1,9 +1,11 @@
 import { QuestionIcon } from "@phosphor-icons/react"
 
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
+import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 
 /** Turns a chip's value into a URL; a chip becomes a link when provided. */
@@ -49,7 +51,10 @@ export interface WorkspaceDraft {
   name: string
   repos: Array<string>
   slackChannelIds: Array<string>
+  kitchenChannelIds: Array<string>
   prompt: string
+  setupScript: string
+  updateScript: string
 }
 
 export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
@@ -57,7 +62,10 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     name: workspace.name,
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
+    kitchenChannelIds: workspace.kitchen_channel_ids,
     prompt: workspace.prompt,
+    setupScript: "",
+    updateScript: "",
   }
 }
 
@@ -65,7 +73,46 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   name: "",
   repos: [],
   slackChannelIds: [],
+  kitchenChannelIds: [],
   prompt: "",
+  setupScript: "",
+  updateScript: "",
+}
+
+function SlackChannelRows({
+  draft,
+  onChange,
+  channelLabel,
+}: {
+  draft: WorkspaceDraft
+  onChange: (next: WorkspaceDraft) => void
+  channelLabel: (id: string) => string
+}) {
+  const kitchen = new Set(draft.kitchenChannelIds)
+  return (
+    <ul className="w-full divide-y divide-border rounded-md border border-border">
+      {draft.slackChannelIds.map((id) => (
+        <li
+          key={id}
+          className="flex items-center justify-between gap-3 px-2.5 py-1.5"
+        >
+          <span className="truncate text-xs">{channelLabel(id)}</span>
+          <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+            Kitchen
+            <Switch
+              aria-label={`Kitchen mode for ${channelLabel(id)}`}
+              checked={kitchen.has(id)}
+              onCheckedChange={(on) => {
+                if (on) kitchen.add(id)
+                else kitchen.delete(id)
+                onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
+              }}
+            />
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 export function WorkspaceEditor({
@@ -96,7 +143,7 @@ export function WorkspaceEditor({
       </label>
       <div className="text-sm">
         <span className="inline-flex items-center gap-1.5">
-          Repositories
+          Bound repositories
           <Tooltip>
             <TooltipTrigger
               aria-label="About workspace repositories"
@@ -106,17 +153,17 @@ export function WorkspaceEditor({
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
             <TooltipPopup className="max-w-72">
-              Assigning a repository makes this the workspace for requests
-              targeting that repository, whether submitted from the dashboard,
-              Slack, GitHub issues, or pull requests. Runs use this
-              workspace&apos;s sandbox, instructions, settings, and connections.
-              Each repository can belong to only one workspace.
+              Threads in any workspace can use any repository the GitHub App can
+              access. Binding a repository routes its GitHub issues, pull
+              requests, Linear tickets, and automations to this workspace and
+              preloads it into this workspace&apos;s sandbox image. A repository
+              is bound to one workspace.
             </TooltipPopup>
           </Tooltip>
         </span>
         <div
           role="group"
-          aria-label="Repositories"
+          aria-label="Bound repositories"
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (
@@ -133,21 +180,49 @@ export function WorkspaceEditor({
         </div>
       </div>
       <div className="text-sm">
-        Slack channels
+        <span className="inline-flex items-center gap-1.5">
+          Slack channels
+          <Tooltip>
+            <TooltipTrigger
+              aria-label="About kitchen channels"
+              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              type="button"
+            >
+              <QuestionIcon size={15} weight="fill" />
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-72">
+              Mentions in these channels start runs in this workspace. Turn on
+              Kitchen for a channel to let every top-level message start a
+              thread and replies continue it without mentioning Open SWE.
+            </TooltipPopup>
+          </Tooltip>
+        </span>
         <div
           role="group"
           aria-label="Slack channels"
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.slackChannelIds.length > 0 ? (
-            <Chips values={draft.slackChannelIds.map(channelLabel)} />
+            <SlackChannelRows
+              draft={draft}
+              onChange={onChange}
+              channelLabel={channelLabel}
+            />
           ) : (
-            <span className="text-xs text-muted-foreground">None yet</span>
+            <span className="text-xs text-muted-foreground">
+              None yet. Add a channel to turn on Kitchen mode for it.
+            </span>
           )}
           <SlackChannelPicker
             selected={draft.slackChannelIds}
             onChange={(slackChannelIds) =>
-              onChange({ ...draft, slackChannelIds })
+              onChange({
+                ...draft,
+                slackChannelIds,
+                kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
+                  slackChannelIds.includes(id)
+                ),
+              })
             }
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}
@@ -156,13 +231,44 @@ export function WorkspaceEditor({
       </div>
       <label className="block text-sm">
         Instructions
-        <Textarea
+        <SlackChannelTextarea
           aria-label="Instructions"
           placeholder={promptHint}
           value={draft.prompt}
-          onChange={(e) => onChange({ ...draft, prompt: e.target.value })}
+          onValueChange={(prompt) => onChange({ ...draft, prompt })}
         />
       </label>
+      {workspaceSlug === null && (
+        <>
+          <div className="text-sm">
+            <div>Setup script (optional)</div>
+            <p className="text-xs text-muted-foreground">
+              Builds the image from the base snapshot immediately after creation
+              and nightly. Use OPENSWE_WORKSPACE_REPOS to preload bound
+              repositories. Without a setup script, no image is built.
+            </p>
+            <WorkspaceScriptEditor
+              label="Setup script"
+              value={draft.setupScript}
+              onChange={(setupScript) => onChange({ ...draft, setupScript })}
+              description="Edit the shell script, then create the workspace to save it and start building the image."
+            />
+          </div>
+          <div className="text-sm">
+            <div>Update script (optional)</div>
+            <p className="text-xs text-muted-foreground">
+              Runs after setup and refreshes the current image while it is in
+              use.
+            </p>
+            <WorkspaceScriptEditor
+              label="Update script"
+              value={draft.updateScript}
+              onChange={(updateScript) => onChange({ ...draft, updateScript })}
+              description="Edit the shell script, then create the workspace to save it."
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }

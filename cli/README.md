@@ -63,8 +63,20 @@ oswe login --backend https://dev.open-swe.langchain.dev
 This is the desktop app's sign-in: your browser opens the GitHub login the
 dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
-dashboard's own `osw_session` cookie. The session and backend URL live in
-`~/.open-swe/config.json` (mode 0600), and `oswe logout` deletes the file.
+dashboard's own `osw_session` cookie. The session is stored in
+`~/.open-swe/config.json` (mode 0600) under the backend that minted it, and
+`oswe logout` forgets the current backend's session. `--backend` also makes
+that backend the shared one, so it repoints the desktop app too.
+
+### Check the credential
+
+```sh
+oswe auth status
+```
+
+Prints the backend, which credential is in use and where it came from, then
+asks the server whether it accepts it: a session reports who it signs in as.
+Exits 1 when there is no credential or the server rejects it.
 
 ### Run in GitHub Actions
 
@@ -86,10 +98,10 @@ steps:
 | `OPEN_SWE_BACKEND_URL` | the backend to call |
 | `OPEN_SWE_DESKTOP_URL` | the same, checked second |
 
-With neither set, the backend comes from `~/.open-swe/config.json`, then
-from the backend the desktop app was last pointed at
-(`desktop-config.json` in its application-support directory), then
-`http://localhost:2024` — the desktop app's own development default.
+With neither set, the backend is `backendUrl` in `~/.open-swe/config.json`,
+the one file the CLI and the desktop app share, then `http://localhost:2024`
+— the desktop app's own development default. Development builds of the
+desktop app keep a separate profile and never change the shared file.
 
 The binary never reads a `.env`. It is compiled with
 `--no-compile-autoload-dotenv`, because it runs inside your repository and a
@@ -146,6 +158,40 @@ Options:
 Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
 prompt when no arguments are given. Stdin is only read when it is a pipe or a
 redirected file, so a CI runner's open stdin never blocks a run.
+
+## MCP server
+
+`oswe mcp` serves a [Model Context Protocol](https://modelcontextprotocol.io)
+server on stdio, signed in with the same credential as the rest of the CLI:
+
+```json
+{ "mcpServers": { "oswe": { "command": "oswe", "args": ["mcp"] } } }
+```
+
+Every tool needs a person's session; API keys and CI tokens cannot use them.
+
+`list_threads` lists your threads newest first with the dashboard sidebar's
+filters: `repo` (owner/name) or `no_repo`, `include_archived`,
+`include_automations`, `sort` (`created` or `updated`), plus `status`, `unread`,
+`source`, `query`, `limit` and `offset`. Archived threads and automation runs
+are left out unless asked for.
+
+`upload_session` moves a local coding session into a new Open SWE thread. It
+takes `type` (`claude`), `transcript_path` (the session's JSONL, sent verbatim),
+where the working directory was pushed — `repo` and `branch`, or `pr_url` — and
+`visibility` (`workspace` by default, or `private`). Commit and push the whole
+working directory first: the cloud agent sees only the pushed branch. No run
+starts; continue the thread from the dashboard. A Claude Code transcript lives
+at `~/.claude/projects/<cwd with non-alphanumerics as ->/$CLAUDE_CODE_SESSION_ID.jsonl`.
+
+`request_human_review` posts a pull request's review card in its repository's
+Slack review channel (or `channel`), with `inline_summary` as the card's
+summary. It needs **Request human reviews in Slack** turned on for you on the
+dashboard's Feature Flags page. Asking again for a pull request you already
+asked about replaces the open card's summary.
+
+`dismiss_human_review_request` takes a pull request's open review request down,
+as the card's Dismiss button does, with an optional `reason` shown on the card.
 
 ## Environment the agent gets
 

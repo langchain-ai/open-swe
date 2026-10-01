@@ -35,6 +35,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.transcript.mirror import mirror_thread_metadata
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -594,6 +595,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
 ) -> None:
@@ -744,7 +746,13 @@ async def _record_pr_telemetry(
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
+            if record_opening and retitle_thread and isinstance(pr_title, str) and pr_title:
+                metadata.update({"title": pr_title, "title_seed": None})
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            if "title" in metadata:
+                await mirror_thread_metadata(
+                    thread_id, {"title": metadata["title"], "title_seed": None}
+                )
             origin = (
                 cfg.slack_thread
                 if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
@@ -984,6 +992,7 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1075,6 +1084,7 @@ async def _open_pull_request(
                     base=base,
                     pr=pr,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     creation_response=pr,
                 )
             return {
@@ -1100,6 +1110,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     record_opening=False,
                 )
                 return {
@@ -1150,6 +1161,7 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str = "",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
@@ -1163,6 +1175,7 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        retitle_thread=retitle_thread,
         author=author or None,
         state=state,
     )

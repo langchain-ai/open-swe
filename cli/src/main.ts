@@ -6,17 +6,18 @@ import pkg from "../package.json"
 import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
 import { Bridge } from "./bridge.ts"
 import {
-  clearConfig,
+  forgetSession,
   readBridgeMemory,
   readBackend,
   readConfig,
   rememberThreadBridge,
-  writeConfig,
+  storeSession,
 } from "./config.ts"
 import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
+import { serveMcp } from "./mcp.ts"
 import {
   followRun,
   RESULT_TOOL,
@@ -27,9 +28,12 @@ import {
 const USAGE = `oswe — run a cloud Open SWE agent against this directory
 
 Usage:
-  oswe login [--backend <url>]      Sign in and store the session
-  oswe logout                       Forget the stored session
+  oswe login [--backend <url>]      Sign in; --backend also repoints the desktop app
+  oswe logout                       Forget the session for the current backend
+  oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
+  oswe mcp                          Serve an MCP server on stdio (list_threads,
+                                    upload_session)
   oswe --help | --version
 
 Run options:
@@ -82,13 +86,46 @@ async function loginCommand(
 ): Promise<number> {
   const backend = await resolveBackend(backendOption)
   const session = await login(backend)
-  const path = await writeConfig({ backend, session })
+  const path = await storeSession(backend, session, backendOption !== undefined)
   out(`Signed in to ${backend}. Session stored in ${path}.`)
   return 0
 }
 
 async function logoutCommand(): Promise<number> {
-  out((await clearConfig()) ? "Signed out." : "No stored session.")
+  const backend = normalizeBackend(await readBackend())
+  out(
+    (await forgetSession(backend))
+      ? `Signed out of ${backend}.`
+      : `No stored session for ${backend}.`
+  )
+  return 0
+}
+
+async function authStatusCommand(): Promise<number> {
+  const config = await readConfig()
+  if (config === null) {
+    out(`Backend: ${normalizeBackend(await readBackend())}`)
+    fail("not signed in — run `oswe login`, or set OPEN_SWE_API_KEY")
+    return 1
+  }
+  const { credential } = config
+  out(`Backend: ${config.backend}`)
+  out(`Credential: ${credential.source}`)
+  const api = new ApiClient(config.backend, credential)
+  try {
+    if (credential.machine) {
+      await api.verifyMachine()
+      out("Accepted.")
+    } else {
+      const me = await api.me()
+      const email = me.email ? ` <${me.email}>` : ""
+      out(`Signed in as ${me.login}${email}${me.is_admin ? " (admin)" : ""}`)
+    }
+  } catch (cause) {
+    if (!(cause instanceof ApiError && cause.status === 401)) throw cause
+    fail(credential.rejected)
+    return 1
+  }
   return 0
 }
 
@@ -333,6 +370,14 @@ export async function main(argv: readonly string[]): Promise<number> {
       return await loginCommand(values.backend)
     case "logout":
       return await logoutCommand()
+    case "auth":
+      if (positionals[1] === "status" && positionals.length === 2)
+        return await authStatusCommand()
+      fail("usage: oswe auth status")
+      return 2
+    case "mcp":
+      await serveMcp(pkg.version)
+      return 0
     case "run":
       return await runCommand({
         thread: values.thread,

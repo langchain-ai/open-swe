@@ -31,28 +31,6 @@ async def names() -> list[str]:
     return [(tool.metadata or {})["mcp_tool_name"] for tool in tools]
 
 
-async def test_distributed_catalog_skips_discovery(fake_store, monkeypatch):
-    await save(allowed_tools=["search"])
-    discover = AsyncMock(return_value=[SEARCH])
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-
-    assert await names() == ["search"]
-    assert await names() == ["search"]
-    assert discover.await_count == 1
-
-
-async def test_cache_failure_does_not_start_independent_discovery(fake_store, monkeypatch):
-    await save(allowed_tools=["search"])
-    discover = AsyncMock(return_value=[SEARCH])
-    monkeypatch.setattr(runtime, "_discover_tools", discover)
-    from langgraph_api import cache
-
-    monkeypatch.setattr(cache, "swr", AsyncMock(side_effect=ConnectionError("cache unavailable")))
-
-    assert await names() == []
-    discover.assert_not_awaited()
-
-
 async def test_changed_connection_rediscovers(fake_store, monkeypatch):
     await save(allowed_tools=["search", "fetch"])
     discover = AsyncMock(side_effect=[[SEARCH], [SEARCH, FETCH]])

@@ -521,7 +521,7 @@ class User(Base):
         )
 
     @classmethod
-    def _with_identities(cls, statement: Select[tuple[Self]]) -> Select[tuple[Self]]:
+    def _with_identities(cls, statement: Select[Self]) -> Select[Self]:
         return statement.options(selectinload(cls.identities))
 
 

@@ -415,8 +415,12 @@ export function AgentsSidebar({
   const localGroups = repoMode
     ? groupSidebarThreadsByRepo(
         filterThreads(unpinnedLocalItems, prefs.filters),
-        sidebarRepoOptions(unpinnedLocalItems, localRepos),
-        prefs.sortChats
+        sidebarRepoOptions(unpinnedLocalItems, localRepos).map((repo) => ({
+          ...repo,
+          key: aliases.get(repo.label.trim().toLowerCase()) ?? repo.key,
+        })),
+        prefs.sortChats,
+        true
       ).repos
     : []
   const repoGroups: Array<HydratedRepoGroup> = repoMode
@@ -444,9 +448,9 @@ export function AgentsSidebar({
           .map((group) => ({
             ...group,
             repoFullName: null,
-            localRepoPath: group.threads.find(
-              (thread) => thread.location === "local"
-            )?.thread.cwd,
+            localRepoPath: localRepos.find(
+              (repo) => sidebarRepoKey(repo.cwd) === group.key
+            )?.cwd,
             updatedAt: group.threads[0]?.updatedAt ?? 0,
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
@@ -458,8 +462,8 @@ export function AgentsSidebar({
   const unpinnedGroups = repoGroups.filter(
     (group) => !pinnedRepoKeys.has(group.key)
   )
-  // Every repository sits in exactly one workspace, so the unpinned repo
-  // folders nest cleanly under workspace headers; local-only folders (no
+  // Each repository folder sits under the workspace that prefers it, even
+  // though threads from other workspaces may use it; local-only folders (no
   // server-side repo) fall under the default workspace.
   const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
     key,

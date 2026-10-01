@@ -28,9 +28,12 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
     get_sandbox_metadata,
+    narrowed_repositories,
     set_sandbox_backend,
+    thread_token_repositories,
     unwrap_sandbox_backend,
 )
+from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -46,8 +49,6 @@ from agent.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 client = get_client()
-
-_SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 def _owner_login(metadata: dict[str, Any]) -> str | None:
@@ -426,7 +427,7 @@ async def ensure_sandbox_for_thread(
             return set_sandbox_backend(
                 thread_id, await BridgeSandboxBackend.connect(thread_id, bridge_id)
             )
-    metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
         if isinstance(metadata_proxy_config, dict)
@@ -435,6 +436,10 @@ async def ensure_sandbox_for_thread(
     owner_login = _owner_login(sandbox_metadata)
     created = False
     created_proxy_config: dict[str, Any] | None = None
+    async with aphase(thread_id, "sandbox.token_scope"):
+        github_proxy_repositories = narrowed_repositories(
+            github_proxy_repositories, await thread_token_repositories(thread_id)
+        )
 
     if sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
@@ -496,7 +501,7 @@ async def ensure_sandbox_for_thread(
     if created:
         sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
         if created_proxy_config is not None:
-            sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
+            sandbox_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
         async with aphase(thread_id, "sandbox.bind_thread"):
             await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
 
@@ -533,6 +538,7 @@ async def recreate_sandbox_for_thread(
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
+        github_proxy_repositories=await thread_token_repositories(thread_id),
         workspace_slug=workspace_slug,
         source=source,
         owner_login=_owner_login(metadata),
@@ -544,7 +550,7 @@ async def recreate_sandbox_for_thread(
     sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
     base_proxy_config = get_recorded_proxy_base_config(thread_id)
     if base_proxy_config is not None:
-        sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config
+        sandbox_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config
     await client.threads.update(
         thread_id=thread_id,
         metadata=sandbox_metadata,

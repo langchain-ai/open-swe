@@ -8,12 +8,14 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.credential_scope import private_credential_login
+from agent.dashboard.feature_flags import feature_flag_names
 from agent.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.dashboard.user_preferences import get_user_preferences
-from agent.users import User
+from agent.tools.access import Policy, access
+from agent.users import User, UserPreferencesPatch
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,9 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     if own_settings:
         preferences = await User.preferences_for_login(login)
         profile_settings["concierge_mode"] = preferences.concierge_mode
+        profile_settings.update(
+            {key: getattr(preferences, key) for key in feature_flag_names(UserPreferencesPatch)}
+        )
     return {
         "login": login,
         "profile": profile_settings,
@@ -61,6 +66,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     }
 
 
+@access(Policy(trusted="private", actor="owner"))
 async def read_user_settings() -> dict[str, Any]:
     """Implement the `read_user_settings` tool."""
     config = get_config()

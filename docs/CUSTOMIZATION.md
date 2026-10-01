@@ -144,7 +144,7 @@ LLM_MODEL_ID="anthropic:claude-opus-5-5"
 LLM_REASONING_EFFORT="high"
 ```
 
-When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
+When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
 Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
@@ -161,7 +161,7 @@ Use the `provider:model` format:
 model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
 
 # OpenAI (uses Responses API by default)
-model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+model = make_model("openai:gpt-6.1-sol", max_tokens=128_000, reasoning={"effort": "medium"})
 
 # Google
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
@@ -193,10 +193,30 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
     else:
         # Full model for code changes from Linear
-        model = make_model("openai:gpt-6-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+        model = make_model("openai:gpt-6.1-sol", max_tokens=128_000, reasoning={"effort": "medium"})
     
     return create_deep_agent(model=model, ...)
 ```
+
+### Auto model routing with Jev
+
+Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`. When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe. Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`. Routing is independent of the provider-proxy gateway toggle below. The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
+
+Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+
+### Choosing a model in the opening request
+
+New Slack threads and Auto/routed dashboard threads also use Jev to recognize explicit runtime model requests such as "use Opus" or `/model Oppus`. This classification uses the first human request (the triggering message in Slack), up to 8,000 characters, and the available model catalog. It shares Auto routing's credentials, three-second deadline, and confidence cutoff. Title generation runs independently in the background.
+
+A recognized model is checked for availability and image support, assigned a compatible default effort, and persisted before work begins. It remains selected on follow-ups; explicit UI/API model choices take precedence. A clearly unavailable model or failure to persist the selection stops the run. No clear request, low confidence, or a classifier failure keeps the usual default/routing behavior.
+
+Run the live intent cases from the repository root with an activated Python environment and configured TypeSafe or gateway credentials:
+
+```bash
+LANGSMITH_TRACING=false python -m evals.model_request
+```
+
+The cases cover typos, ambiguous names, quoted and forwarded requests, model mentions as task subjects, and unavailable models. They call Jev and are separate from the deterministic unit tests.
 
 ### Routing through the LangSmith LLM Gateway
 

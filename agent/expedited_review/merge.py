@@ -7,51 +7,25 @@ and there is no admin bypass.
 """
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Literal
 
-import httpx2
-
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.expedited_review.eligibility import (
     Ineligible,
     assess_eligibility,
     fetch_changed_files,
     fingerprint_matches,
 )
-from agent.expedited_review.lifecycle import mark_merged, repo_token, retire
 from agent.expedited_review.readiness import assess_readiness
-from agent.expedited_review.reviews import github_error, submit_approval
-from agent.github.app import (
-    get_github_app_installation_id_for_repo,
-    get_github_app_installation_token,
-)
+from agent.expedited_review.reviews import submit_approval
 from agent.github.ci import fetch_pr
 from agent.github.comments import post_github_comment
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.http import github_client
 from agent.github.pull_request_status import fetch_unresolved_review_threads
+from agent.human_review.lifecycle import mark_merged, retire
+from agent.human_review.merging import MergeResult, merge_pull_request
+from agent.human_review.people import repo_token
+from agent.human_review.requests import HumanReviewRequest
 
 logger = logging.getLogger(__name__)
-
-_MERGE_PERMISSIONS = {"contents": "write", "pull_requests": "write"}
-
-MergeStatus = Literal[
-    "merged",
-    "not_ready",
-    "needs_approvals",
-    "diff_changed",
-    "invalidated",
-    "closed",
-    "refused",
-    "error",
-]
-
-
-@dataclass(frozen=True, slots=True)
-class MergeResult:
-    status: MergeStatus
-    message: str
-
 
 _NO_APPROVALS = MergeResult(
     "needs_approvals",
@@ -59,23 +33,12 @@ _NO_APPROVALS = MergeResult(
 )
 
 
-async def _merge_token(owner: str, repo: str) -> str | None:
-    installation_id = await get_github_app_installation_id_for_repo(owner, repo)
-    if installation_id is None:
-        return None
-    return await get_github_app_installation_token(
-        installation_id=installation_id,
-        repositories=[repo],
-        permissions=_MERGE_PERMISSIONS,
-    )
-
-
 async def _keep_approval(
-    approval: ExpeditedApproval, fingerprint: str, reason: str, token: str
-) -> ExpeditedApproval | None:
+    approval: HumanReviewRequest, fingerprint: str, reason: str, token: str
+) -> HumanReviewRequest | None:
     """Carry the votes over to the current diff once the PR says why no re-review was needed."""
     pr = approval.pull_request
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return None
         if not await post_github_comment(
@@ -91,11 +54,11 @@ async def _keep_approval(
         "Kept expedited approval across a diff change",
         extra={"approval_id": str(approval.id)},
     )
-    return await ExpeditedApproval.get(approval.id)
+    return await HumanReviewRequest.get(approval.id)
 
 
 async def merge_approved(
-    approval: ExpeditedApproval, keep_approval_reason: str = ""
+    approval: HumanReviewRequest, keep_approval_reason: str = ""
 ) -> MergeResult:
     pr = approval.pull_request
     token = await repo_token(pr.owner, pr.repo)
@@ -160,7 +123,7 @@ async def merge_approved(
         return MergeResult("not_ready", "Not ready to merge: " + "; ".join(readiness.blockers))
 
     # Held through the merge so a Dismiss or second merge call waits for it.
-    async with ExpeditedApproval.locked(approval.id) as (_, row):
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return MergeResult(
                 "closed", "The expedited review closed before the merge; nothing was merged."
@@ -194,34 +157,9 @@ async def merge_approved(
             failed = await submit_approval(row, vote, snapshot.head_sha)
             if failed is not None:
                 return MergeResult("error", failed)
-        result = await _merge(row, snapshot.head_sha, snapshot.allowed_merge_methods, token)
+        result = await merge_pull_request(
+            row, snapshot.head_sha, snapshot.allowed_merge_methods, token
+        )
     if result.status == "merged":
         await mark_merged(approval)
     return result
-
-
-async def _merge(
-    approval: ExpeditedApproval, head_sha: str, allowed_methods: list[str], token: str
-) -> MergeResult:
-    pr = approval.pull_request
-    merge_token = await _merge_token(pr.owner, pr.repo) or token
-    methods = allowed_methods or ["merge"]
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/merge"
-    payload: dict[str, Any] = {"sha": head_sha, "merge_method": methods[0]}
-    try:
-        async with github_client(token=merge_token) as client:
-            response = await github_request(client, "PUT", url, json=payload)
-    except httpx2.HTTPError:
-        logger.warning(
-            "Expedited merge request did not complete",
-            extra={"approval_id": str(approval.id)},
-            exc_info=True,
-        )
-        return MergeResult("error", "GitHub did not answer the merge request. Try again.")
-    if response.status_code == 200:
-        return MergeResult("merged", f"Merged {pr.url}.")
-    return MergeResult(
-        "refused",
-        f"GitHub refused the merge: {github_error(response)}. Open SWE never bypasses branch "
-        "protection; ask a maintainer if the rules need someone else's approval.",
-    )

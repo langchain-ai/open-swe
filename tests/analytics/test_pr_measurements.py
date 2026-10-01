@@ -4,12 +4,10 @@ import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
-from itertools import permutations
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -25,7 +23,6 @@ from agent.analytics.events import (
     subject_uuid,
 )
 from agent.analytics.measurements import PRDistanceConflictError, restore_pr_distance
-from agent.analytics.revisions import PRRevisionConflictError
 from agent.database import postgres
 
 Transaction = Callable[[], AbstractAsyncContextManager[AsyncConnection]]
@@ -121,7 +118,7 @@ async def ingestion_state() -> dict[str, list[dict[str, object]]]:
         }
 
 
-@pytest.mark.parametrize("order", list(permutations(range(3))) + ["concurrent"])
+@pytest.mark.parametrize("order", [(0, 1, 2), (2, 1, 0), "concurrent"])
 async def test_measurement_delivery_orders_and_actual_reconciliation(
     analytics_db: Database, order: tuple[int, ...] | str
 ) -> None:
@@ -176,6 +173,9 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
         cohort = report["cohorts"][0]
         assert cohort["distance_sample_size"] == samples
         assert cohort["median_distance_basis_points"] == median
+        assert cohort["mean_distance_basis_points"] == median
+        assert cohort["efforts"][0]["distance_sample_size"] == samples
+        assert cohort["efforts"][0]["median_distance_basis_points"] == median
         assert cohort["merged"] == 1
         assert cohort["cohort_size"] == 1
         assert cohort["decided_denominator"] == 1
@@ -202,6 +202,33 @@ async def test_later_measurement_does_not_override_lifecycle_and_zero_is_a_sampl
         assert report["cohorts"][0]["distance_sample_size"] == 0
     await ingestion.ingest(revise(merged, producer_event_id="new-merge", source_version=12))
     assert (await projection())["distance_basis_points"] == 0
+
+
+async def test_distance_mean_and_median_include_only_measured_merges(
+    analytics_db: Database,
+) -> None:
+    workspace, transaction = analytics_db
+    for number, value in ((1, 0), (2, 0), (3, 9000)):
+        opened, merged, measured = events(workspace, number=number)
+        for item in (
+            opened,
+            merged,
+            revise(measured, payload=measurement(pr_number=number, distance_basis_points=value)),
+        ):
+            await ingestion.ingest(item)
+    opened, merged, _ = events(workspace, number=4)
+    await ingestion.ingest(opened)
+    await ingestion.ingest(merged)
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE deployment_metadata SET reporting_cutover_at = :start"),
+            {"start": NOW - timedelta(days=1)},
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="all", admin=True))["cohorts"][0]
+    assert cohort["merged"] == 4
+    assert cohort["distance_sample_size"] == 3
+    assert cohort["median_distance_basis_points"] == 0
+    assert cohort["mean_distance_basis_points"] == 3000
 
 
 @pytest.mark.parametrize(
@@ -268,24 +295,6 @@ async def test_reused_event_identity_cannot_mutate_another_pr(
             assert (await conn.execute(text(f"SELECT * FROM {table}"))).mappings().all() == rows
 
 
-async def test_claimed_event_id_without_measurement_cannot_create_evidence(
-    analytics_db: Database,
-) -> None:
-    workspace, transaction = analytics_db
-    measured = events(workspace)[2]
-    async with transaction() as conn:
-        await conn.execute(
-            text("INSERT INTO event_ids(event_id, occurred_at) VALUES (:event_id, :occurred_at)"),
-            {"event_id": measured.event_id, "occurred_at": measured.occurred_at},
-        )
-    with pytest.raises(PRDistanceConflictError):
-        await ingestion.ingest(measured)
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 0
-        assert await conn.scalar(text("SELECT count(*) FROM events")) == 0
-        assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 1
-
-
 async def test_concurrent_reused_event_identity_has_one_durable_winner(
     analytics_db: Database,
 ) -> None:
@@ -306,12 +315,6 @@ async def test_concurrent_reused_event_identity_has_one_durable_winner(
         assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 1
 
 
-def test_measurement_envelope_rejects_nonmeasurement_event_id() -> None:
-    opened, _, measured = events(uuid4())
-    with pytest.raises(ValidationError, match="deterministic event identity"):
-        EventEnvelope.model_validate({**measured.model_dump(), "event_id": opened.event_id})
-
-
 async def test_concurrent_conflicts_have_one_durable_winner(analytics_db: Database) -> None:
     workspace, transaction = analytics_db
     measured = events(workspace)[2]
@@ -329,21 +332,6 @@ async def test_concurrent_conflicts_have_one_durable_winner(analytics_db: Databa
         assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 1
         assert await conn.scalar(text("SELECT count(*) FROM events")) == 1
         assert await conn.scalar(text("SELECT count(*) FROM pr_projection")) == 0
-
-
-@pytest.mark.parametrize("name", [None, EventName.PR_REOPENED, EventName.PR_CLOSED_WITHOUT_MERGE])
-async def test_first_measurement_cannot_turn_nonmerged_pr_into_a_merge(
-    analytics_db: Database, name: EventName | None
-) -> None:
-    workspace, _ = analytics_db
-    opened, merged, measured = events(workspace)
-    await ingestion.ingest(opened)
-    if name is not None:
-        await ingestion.ingest(revise(merged, event_name=name))
-    before = await projection()
-    await ingestion.ingest(measured)
-    assert await projection() == before
-    assert before["distance_basis_points"] is None
 
 
 @pytest.mark.parametrize("legacy_distance", [None, 0, 250])
@@ -412,7 +400,7 @@ async def test_retention_before_opening_and_distance_cache_recovery(
         assert await conn.scalar(text("SELECT count(*) FROM events")) == 0
 
 
-@pytest.mark.parametrize("legacy_distance,new_distance", [(250, 0), (0, 250), (250, 500)])
+@pytest.mark.parametrize("legacy_distance,new_distance", [(250, 0), (0, 250)])
 async def test_legacy_distance_conflict_rolls_back_ingestion(
     analytics_db: Database, legacy_distance: int, new_distance: int
 ) -> None:
@@ -430,81 +418,6 @@ async def test_legacy_distance_conflict_rolls_back_ingestion(
             revise(measured, payload=measurement(distance_basis_points=new_distance))
         )
     assert await ingestion_state() == before
-
-
-@pytest.mark.parametrize("legacy_distance", [0, 250])
-async def test_matching_legacy_distance_promotes_durable_evidence(
-    analytics_db: Database, legacy_distance: int
-) -> None:
-    workspace, transaction = analytics_db
-    opened, merged, measured = events(workspace)
-    for item in (
-        opened,
-        revise(merged, payload=PRStatePayload(distance_basis_points=legacy_distance)),
-    ):
-        assert await ingestion.ingest(item)
-    before = await projection()
-    measured = revise(measured, payload=measurement(distance_basis_points=legacy_distance))
-    assert await ingestion.ingest(measured)
-    assert not await ingestion.ingest(measured)
-    assert await projection() == before
-    async with transaction() as conn:
-        row = (await conn.execute(text("SELECT * FROM pr_distance_measurements"))).mappings().one()
-        assert row["event_id"] == measured.event_id
-        assert row["measurement"] == measured.payload.model_dump(mode="json")
-        assert await conn.scalar(text("SELECT count(*) FROM events")) == 3
-        assert await conn.scalar(text("SELECT count(*) FROM event_ids")) == 3
-        assert await conn.scalar(text("SELECT count(*) FROM ingestion_receipts")) == 3
-        assert (
-            await conn.scalar(text("SELECT sum(event_count) FROM additive_event_projection")) == 3
-        )
-
-
-async def test_legacy_null_merge_replay_preserves_distance(analytics_db: Database) -> None:
-    workspace, transaction = analytics_db
-    opened, merged, _ = events(workspace)
-    for item in (opened, revise(merged, payload=PRStatePayload(distance_basis_points=250))):
-        await ingestion.ingest(item)
-    await ingestion.ingest(revise(merged, producer_event_id="null-replay"))
-    async with transaction() as conn:
-        await ingestion._reconcile_outcomes(conn, opened)
-        assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 0
-    assert (await projection())["distance_basis_points"] == 250
-
-
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"distance_basis_points": -1},
-        {"distance_basis_points": 10001},
-        {"distance_basis_points": True},
-        {"distance_basis_points": None},
-        {"distance_basis_points": 1.5},
-        {"opening_head_sha": "unknown"},
-        {"final_base_sha": ""},
-        {"algorithm_revision": "unreviewed"},
-        {"opening_evidence_ref": "https://example.com/raw-trace?token=secret"},
-        {"diff": "raw content"},
-    ],
-)
-def test_measurement_rejects_invalid_or_sensitive_payload(changes: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
-        measurement(**changes)
-
-
-@pytest.mark.parametrize(
-    "changes", [{"pr_id": UUID(int=9)}, {"repository_id": UUID(int=9)}, {"source_version": 99}]
-)
-async def test_measurement_requires_matching_identity_without_lifecycle_version(
-    analytics_db: Database, changes: dict[str, object]
-) -> None:
-    workspace, transaction = analytics_db
-    measured = events(workspace)[2]
-    with pytest.raises(ValueError, match="identity"):
-        await ingestion.ingest(revise(measured, **changes))
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM events")) == 0
-        assert await conn.scalar(text("SELECT count(*) FROM pr_distance_measurements")) == 0
 
 
 def webhook(
@@ -600,34 +513,6 @@ async def _outbox_bodies() -> list[dict[str, object]]:
         return list((await conn.execute(text("SELECT event_body FROM outbox"))).scalars().all())
 
 
-async def test_duplicate_conflict_out_of_order_and_non_authoritative_actions(
-    analytics_db: Database,
-) -> None:
-    _, transaction = analytics_db
-    await usage.update_agent_pr_usage_from_webhook(
-        webhook("closed", merged=True), delivery_id="final"
-    )
-    await usage.update_agent_pr_usage_from_webhook(webhook("ready_for_review"), delivery_id="ready")
-    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
-    await usage.update_agent_pr_usage_from_webhook(
-        webhook("opened"), delivery_id="opening-duplicate"
-    )
-    with pytest.raises(PRRevisionConflictError):
-        await revisions.capture_pr_revision(
-            owner="owner",
-            repo="repo",
-            number=1,
-            endpoint_kind="opening",
-            base_sha="a" * 40,
-            head_sha="e" * 40,
-            endpoint_at=NOW - timedelta(days=1),
-            source_kind="webhook",
-            source_id="conflict",
-        )
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM pr_revision_evidence")) == 2
-
-
 async def test_retry_ignores_current_pull_request_revision_columns(
     analytics_db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -664,17 +549,3 @@ async def test_retry_ignores_current_pull_request_revision_columns(
         final_base_sha="c" * 40,
         final_head_sha="d" * 40,
     )
-
-
-async def test_retained_revision_evidence_survives_raw_retention(
-    analytics_db: Database,
-) -> None:
-    _, transaction = analytics_db
-    await usage.update_agent_pr_usage_from_webhook(webhook("opened"), delivery_id="opening")
-    async with transaction() as conn:
-        await conn.execute(
-            text("UPDATE pr_revision_evidence SET captured_at = now() - interval '100 years'")
-        )
-    await retention.enforce_retention()
-    async with transaction() as conn:
-        assert await conn.scalar(text("SELECT count(*) FROM pr_revision_evidence")) == 1

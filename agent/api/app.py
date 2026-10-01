@@ -14,6 +14,7 @@ from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
+from agent.openai_responses.routes import router as sandbox_openai_router
 from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
@@ -37,12 +38,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.dashboard.oauth import validate_github_login_allowlist
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
+    from agent.schedules.store import migrate_automation_workspaces
     from agent.transcript import listener as transcript_listener
     from agent.users import User
     from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
     from agent.utils.model import validate_local_dev_llm_config
-    from agent.workspaces.store import import_store_records
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -50,20 +51,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     validate_local_dev_llm_config()
     database.require_configured()
     await database.migrate()
-    try:
-        # Workspaces used to live in the LangGraph Store; this empties it into
-        # the tables and is a no-op once it has.
-        imported = await import_store_records()
-    except Exception:  # noqa: BLE001
-        # Startup continues, but repository routing fails closed until an import
-        # succeeds: the tables this failed to fill make every repository read as
-        # unowned, and GitHub retries a 503 while it drops a 200.
-        logger.exception("Importing workspaces from the LangGraph Store failed")
-    else:
-        logger.info(
-            "Imported workspaces from the LangGraph Store",
-            extra={"imported_workspaces": imported},
-        )
     try:
         # People used to be Store records keyed by GitHub login; this moves them
         # into the users table and is a no-op once it has.
@@ -85,6 +72,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: opted-in people get a thread per DM message until
         # an import succeeds.
         logger.exception("Importing concierge mode from the LangGraph Store failed")
+    try:
+        # Automations used to run in their repository's workspace; this moves
+        # the ones saved without a workspace to `default` and is a no-op once
+        # every one carries a workspace.
+        moved_automations = await migrate_automation_workspaces()
+    except Exception:  # noqa: BLE001
+        # Startup continues: an automation without a workspace still launches
+        # in `default` until the migration succeeds.
+        logger.exception("Moving automations without a workspace to default failed")
+    else:
+        logger.info(
+            "Moved automations without a workspace to default",
+            extra={"moved_automations": moved_automations},
+        )
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -125,15 +126,14 @@ def create_app() -> FastAPI:
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
-    if allowed_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[*allowed_origins, "open-swe://app"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
     add_trace_resource_names(app)
     add_request_ids(app)
     app.include_router(dashboard_router)
@@ -144,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(github_webhook_router)
     app.include_router(sandbox_tool_router)
+    app.include_router(sandbox_openai_router)
     mount_dashboard_ui(app)
     return app
 

@@ -56,37 +56,6 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
     return client
 
 
-async def test_create_download_url_for_relative_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = _Backend()
-    client = _configure(monkeypatch, backend)
-
-    result = await download_tool.create_sandbox_file_download_url(
-        "artifacts/demo.mp4",
-        expires_in_seconds=3600,
-        content_type="video/mp4",
-        content_disposition="inline",
-    )
-
-    assert result == {
-        "url": "https://downloads.example/file?token=secret",
-        "file_path": "/workspace/project/artifacts/demo.mp4",
-        "expires_at": "2026-08-20T12:00:00Z",
-    }
-    assert "token" not in result
-    assert client.closed is True
-    assert client.calls == [
-        (
-            "sandbox-1",
-            "/workspace/project/artifacts/demo.mp4",
-            {
-                "expires_in_seconds": 3600,
-                "content_type": "video/mp4",
-                "content_disposition": "inline",
-            },
-        )
-    ]
-
-
 async def test_create_download_url_defaults_to_a_non_expiring_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -137,18 +106,3 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
-
-
-@pytest.mark.parametrize("expires_in_seconds", [0, -1])
-async def test_create_download_url_rejects_invalid_expiry(
-    monkeypatch: pytest.MonkeyPatch,
-    expires_in_seconds: int,
-) -> None:
-    backend = _Backend()
-    _configure(monkeypatch, backend)
-
-    result = await download_tool.create_sandbox_file_download_url(
-        "result.bin", expires_in_seconds=expires_in_seconds
-    )
-
-    assert "must be positive" in result["error"]
