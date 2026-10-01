@@ -41,7 +41,6 @@ __all__ = [
     "ModelCallTimeoutMiddleware",
     "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
-    "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
@@ -74,7 +73,6 @@ if TYPE_CHECKING:
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from agent.middleware.model_errors import ModelErrorMiddleware
     from agent.middleware.model_fallback import ModelFallbackMiddleware
-    from agent.middleware.model_selection import ModelSelectionMiddleware
     from agent.middleware.notify_step_limit import notify_step_limit_reached
     from agent.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState

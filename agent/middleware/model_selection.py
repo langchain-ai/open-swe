@@ -1,20 +1,24 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Literal, NotRequired
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Literal, NotRequired, cast
 
+from langchain.agents.middleware import ModelRoutingMiddleware
+from langchain.agents.middleware.model_routing import (
+    ModelRoutingConfig,
+    ModelRoutingInput,
+    ModelRoutingState,
+)
 from langchain.agents.middleware.types import (
-    AgentState,
-    ModelRequest,
-    ModelResponse,
     OmitFromOutput,
 )
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
 from agent.input_messages import input_message_text, message_sender_id
-from agent.middleware.trace import OpenSWEMiddleware
+from agent.middleware.trace import SCRUBBED_TRACE_POLICY
 from agent.prompts import prompt
 from agent.utils.jev import select_jev_choice
 
@@ -53,24 +57,23 @@ def _latest_human_task(messages: Sequence[object]) -> str:
 ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
 
 
-def _route_criteria() -> dict[Route, str]:
-    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
-
-
-async def _select_jev_route(task: str) -> SelectedRoute:
+async def _classify_route(inputs: ModelRoutingInput) -> str:
     return (
         await select_jev_choice(
-            task,
+            inputs["messages"][0].text,
             question="route",
-            instructions=prompt("model-selection/instructions"),
-            criteria=_route_criteria(),
+            instructions=inputs["system_prompt"],
+            criteria={route: inputs["criteria"][route] for route in ROUTES},
         )
         or "default"
     )
 
 
-class ModelSelectionState(AgentState):
-    model_route: NotRequired[PersistedRoute]
+def _routing_messages(state: ModelRoutingState) -> list[HumanMessage]:
+    return [HumanMessage(content=_latest_human_task(state["messages"])[-8_000:])]
+
+
+class ModelSelectionState(ModelRoutingState):
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
@@ -97,67 +100,45 @@ async def _emit_routed_model(
         logger.debug("Failed to emit model_routed event", exc_info=True)
 
 
-class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
-    state_schema = ModelSelectionState
+def create_model_router(
+    models: Mapping[str, BaseChatModel], default_model: BaseChatModel
+) -> ModelRoutingMiddleware:
+    configs: dict[str, ModelRoutingConfig] = {
+        route: {
+            "model": models.get(route, default_model),
+            "criteria": prompt(f"model-selection/{route}"),
+        }
+        for route in ROUTES
+    }
+    configs["default"] = {"model": default_model, "criteria": ""}
+    router = ModelRoutingMiddleware(
+        models=configs,
+        decision_model=RunnableLambda(_classify_route),
+        system_prompt=prompt("model-selection/instructions"),
+        input_extractor=_routing_messages,
+        fallback_route="default",
+    )
+    router.trace_policy = SCRUBBED_TRACE_POLICY
+    return router
 
-    def __init__(
-        self,
-        models: Mapping[str, BaseChatModel],
-        default_model: BaseChatModel,
-        *,
-        route_model_ids: Mapping[str, str] | None = None,
-        routing_mode: RoutingMode | None = "auto",
-        requested_model_factory: Callable[[str], BaseChatModel] | None = None,
-    ) -> None:
-        self._models = {**models, "default": default_model}
-        self._route_model_ids = dict(route_model_ids or {})
-        self._routing_mode = routing_mode
-        self._requested_model_factory = requested_model_factory
-        self._requested_models: dict[str, BaseChatModel] = {}
 
-    def use_requested_model(self, model_id: str) -> None:
-        if self._requested_model_factory is None:
-            raise ValueError("Requested model selection is not enabled")
-        if model_id not in self._requested_models:
-            self._requested_models[model_id] = self._requested_model_factory(model_id)
-        self._models["default"] = self._requested_models[model_id]
-        self._route_model_ids["default"] = model_id
-
-    async def select_route(
-        self,
-        state: ModelSelectionState,
-    ) -> SelectedRoute:
-        """Select the model route for a turn."""
-        if requested_model := state.get("requested_model"):
-            if self._requested_model_factory is not None:
-                self.use_requested_model(requested_model)
-                return "default"
-        if self._routing_mode is None:
-            return "default"
-        if model_route := state.get("model_route"):
-            return normalize_route(model_route)
-        if self._routing_mode == "fast":
-            return "fast"
-        messages = state.get("messages", [])
-        task = _latest_human_task(messages)[-8_000:]
-        return await _select_jev_route(task)
-
-    async def abefore_model(
-        self,
-        state: ModelSelectionState,
-        runtime: Runtime,
-    ) -> dict[str, SelectedRoute]:
-        del runtime
-        route = await self.select_route(state)
-        if self._routing_mode == "auto" or state.get("requested_model"):
-            await _emit_routed_model(self._models, self._route_model_ids, route)
-        return {"model_route": route}
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "default")
-        model = self._models.get(normalize_route(route)) or self._models["default"]
-        return await handler(request.override(model=model))
+async def prepare_model_route(
+    router: ModelRoutingMiddleware,
+    state: ModelRoutingState,
+    runtime: Runtime,
+    *,
+    routing_mode: RoutingMode | None = "auto",
+    route_model_ids: Mapping[str, str] | None = None,
+    requested_model: str | None = None,
+) -> str:
+    routing_state = state.copy()
+    if requested_model or routing_mode is None:
+        routing_state["model_route"] = "default"
+    elif state.get("model_route") == "fast_alt":
+        routing_state["model_route"] = "fast"
+    elif routing_mode == "fast" and not state.get("model_route"):
+        routing_state["model_route"] = "fast"
+    route = (await router.abefore_model(routing_state, runtime))["model_route"]
+    if routing_mode == "auto" or requested_model:
+        await _emit_routed_model(router.models, route_model_ids or {}, cast(SelectedRoute, route))
+    return route

@@ -43,7 +43,11 @@ from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    ModelRoutingMiddleware,
+    ToolRetryMiddleware,
+)
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -105,7 +109,6 @@ from agent.middleware import (
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
-    ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     SanitizeFireworksMessagesMiddleware,
@@ -128,7 +131,12 @@ from agent.middleware import (
 from agent.middleware.client_tools import ClientToolsMiddleware
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
-from agent.middleware.model_selection import ModelSelectionState, RoutingMode
+from agent.middleware.model_selection import (
+    ModelSelectionState,
+    RoutingMode,
+    create_model_router,
+    prepare_model_route,
+)
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
@@ -846,7 +854,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         recent_thread_context_enabled: bool,
         admin_workspaces: bool,
         sole_writer: bool = False,
-        model_selection: ModelSelectionMiddleware | None = None,
+        model_selection: ModelRoutingMiddleware | None = None,
+        routing_mode: RoutingMode | None = None,
+        route_model_ids: Mapping[str, str] | None = None,
+        requested_model_factory: Callable[[str], BaseChatModel] | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
@@ -871,6 +882,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._admin_workspaces = admin_workspaces
         self._sole_writer = sole_writer
         self._model_selection = model_selection
+        self._routing_mode = routing_mode
+        self._route_model_ids = dict(route_model_ids or {})
+        self._requested_model_factory = requested_model_factory
         self._routing_defaults = dict(routing_defaults or {})
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
@@ -1056,7 +1070,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             if requested_model:
                 option = self._requested_models[requested_model]
                 try:
-                    self._model_selection.use_requested_model(requested_model)
+                    if self._requested_model_factory is None:
+                        raise ValueError("Requested model selection is not enabled")
+                    self._model_selection.models["default"] = self._requested_model_factory(
+                        requested_model
+                    )
+                    self._route_model_ids["default"] = requested_model
                 except Exception:
                     decision.outcome = "selection_failure"
                     decision.reason = "model_initialization_failed"
@@ -1166,10 +1185,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 ):
                     routing_state.pop("model_route", None)
                     routing_state.pop("requested_model", None)
-                attribution_route = (
-                    "default"
-                    if requested_model
-                    else await self._model_selection.select_route(routing_state)
+                attribution_route = await prepare_model_route(
+                    self._model_selection,
+                    routing_state,
+                    runtime,
+                    routing_mode=self._routing_mode,
+                    route_model_ids=self._route_model_ids,
+                    requested_model=requested_model,
                 )
                 if attribution_route != "default":
                     attribution_model_id, attribution_effort = self._routing_defaults[
@@ -1861,16 +1883,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         for route, model in routing_models.items():
             if not model_supports_images(routing_defaults[route][0]):
                 image_fallback.add_text_only_model(model)
-    model_selection = ModelSelectionMiddleware(
-        routing_models,
-        main_model,
-        route_model_ids={
-            **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
-            "default": model_id,
-        },
-        routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory if requested_models else None,
-    )
+    model_selection = create_model_router(routing_models, main_model)
     subagent_model = _make_model_or_defer(
         subagent_model_id,
         use_gateway=use_gateway,
@@ -1941,6 +1954,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         admin_workspaces=admin_thread,
                         sole_writer=tool_access.sole,
                         model_selection=model_selection,
+                        routing_mode=model_routing_mode,
+                        route_model_ids={
+                            route: routed_model_id
+                            for route, (routed_model_id, _) in routing_defaults.items()
+                        }
+                        | {"default": model_id},
+                        requested_model_factory=requested_model_factory
+                        if requested_models
+                        else None,
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),

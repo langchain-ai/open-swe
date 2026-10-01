@@ -13,9 +13,9 @@ from langsmith.run_trees import RunTree
 import agent.server as server
 from agent.dashboard.options import available_requested_models
 from agent.middleware.model_selection import (
-    ModelSelectionMiddleware,
     ModelSelectionState,
     SelectedRoute,
+    create_model_router,
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.model_request import ModelRequestIntent
@@ -106,12 +106,9 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         admin_workspaces=False,
     )
     middleware._requested_models = available_requested_models(fable_enabled=False)
-    middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode="fast",
-        requested_model_factory=lambda _: MagicMock(),
-    )
+    middleware._model_selection = create_model_router({"fast": MagicMock()}, MagicMock())
+    middleware._routing_mode = "fast"
+    middleware._requested_model_factory = lambda _: MagicMock()
     middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
     return Handoff(middleware, settings, store, record)
 
@@ -210,9 +207,9 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     handoff.middleware._requested_models = None
     selection = handoff.middleware._model_selection
     assert selection is not None
-    selection._routing_mode = "auto"
+    handoff.middleware._routing_mode = "auto"
     classify = AsyncMock(return_value=fresh_route)
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
         "model_route": previous_route,
@@ -226,7 +223,8 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
         "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6.1-sol"
     )
     assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
-    classify.assert_awaited_once_with("Fix the typo")
+    classify.assert_awaited_once()
+    assert classify.await_args.args[0] == "Fix the typo"
 
 
 @pytest.mark.parametrize(
@@ -270,7 +268,7 @@ async def test_handoff_validates_and_persists_before_selecting_model(
     state: PrepareRunState = {"messages": [HumanMessage(content=content)]}
     if failure:
         select = MagicMock()
-        monkeypatch.setattr(handoff.middleware._model_selection, "use_requested_model", select)
+        monkeypatch.setattr(handoff.middleware, "_requested_model_factory", select)
         error = RuntimeError if failure == "persistence" else ValueError
         match = {
             "persistence": "write failed",
@@ -312,7 +310,7 @@ async def test_later_run_traces_saved_choice_without_classification(
     handoff.middleware._model_id = model
     handoff.middleware._effort = "high"
     assert handoff.middleware._model_selection is not None
-    handoff.middleware._model_selection._routing_mode = None
+    handoff.middleware._routing_mode = None
     infer = AsyncMock()
     monkeypatch.setattr(server, "infer_requested_model", infer)
     posted: list[RunTree] = []
