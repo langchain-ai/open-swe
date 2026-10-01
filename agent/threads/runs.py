@@ -32,7 +32,12 @@ from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
 from agent.database import postgres
-from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_agent_run
+from agent.dispatch import (
+    FOLLOW_UP_PICKUP_KIND,
+    _run_user_id,
+    create_durable_run,
+    dispatch_agent_run,
+)
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.input_messages import (
     PersonIdentity,
@@ -994,7 +999,14 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+                if key
+                not in {
+                    "visibility",
+                    "owner_type",
+                    "owner_login",
+                    "system_authorization",
+                    "user_id",
+                }
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1014,7 +1026,20 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    params["config"] = {**client_config, "configurable": merged_configurable}
+    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    if user_id:
+        run_metadata["user_id"] = user_id
+    config_metadata = client_config.get("metadata")
+    if not isinstance(config_metadata, dict):
+        config_metadata = {}
+    params["config"] = {
+        **client_config,
+        "configurable": merged_configurable,
+        "metadata": {
+            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **run_metadata,
+        },
+    }
     params["metadata"] = run_metadata
     command["params"] = params
     return command
