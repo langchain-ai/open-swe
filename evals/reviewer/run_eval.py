@@ -301,12 +301,14 @@ async def _record_costs(experiment: str, reviewer_project: str | None) -> None:
         )
 
 
-def _examples_without_results(dataset_name: str, experiment: str) -> list[Example]:
+def _examples_without_results(dataset_name: str, experiments: list[str]) -> list[Example]:
     client = Client()
-    project = client.read_project(project_name=experiment)
     succeeded = {
         run.reference_example_id
-        for run in client.list_runs(project_id=project.id, is_root=True)
+        for experiment in experiments
+        for run in client.list_runs(
+            project_id=client.read_project(project_name=experiment).id, is_root=True
+        )
         if run.end_time and not run.error and run.outputs
     }
     return [
@@ -347,8 +349,10 @@ async def main() -> None:
     )
     ap.add_argument(
         "--rerun-from-experiment",
-        dest="rerun_from_experiment",
-        help="Run only the examples that have no successful result in this experiment.",
+        dest="rerun_from_experiments",
+        action="append",
+        help="Run only the examples with no successful result in any of these experiments "
+        "(repeatable).",
     )
     ap.add_argument(
         "--no-cleanup",
@@ -385,11 +389,11 @@ async def main() -> None:
     )
 
     data: str | list[Example]
-    if args.rerun_from_experiment:
-        data = _examples_without_results(dataset_name, args.rerun_from_experiment)
+    if args.rerun_from_experiments:
+        data = _examples_without_results(dataset_name, args.rerun_from_experiments)
         logger.info(
             "Rerunning examples without a successful result",
-            extra={"source_experiment": args.rerun_from_experiment, "examples": len(data)},
+            extra={"source_experiments": args.rerun_from_experiments, "examples": len(data)},
         )
         if args.limit:
             data = data[: args.limit]
