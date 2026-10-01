@@ -11,7 +11,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
-_PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
+_PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox", "_backend")
+WORKSPACE_DIR = "/workspace"
 
 
 async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
@@ -21,25 +22,6 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
 
     work_dir = await resolve_sandbox_work_dir(sandbox_backend)
     return posixpath.join(work_dir, repo_name)
-
-
-def repo_dir_command(repo_name: str) -> str:
-    """Shell that prints the checkout of ``repo_name`` under the cwd, ``$HOME``, or /workspace."""
-    name = shlex.quote(posixpath.basename(repo_name))
-    return (
-        f'for d in "$PWD"/{name} "$HOME"/{name} /workspace/{name}; do '
-        'if [ -e "$d/.git" ]; then printf %s "$d"; exit 0; fi; done; exit 1'
-    )
-
-
-async def resolve_thread_repo_dir(
-    sandbox_backend: SandboxBackendProtocol, repo_name: str
-) -> str | None:
-    """The thread repository's checkout, wherever the agent cloned it."""
-    if not repo_name:
-        return None
-    result = await sandbox_backend.aexecute(repo_dir_command(repo_name))
-    return _normalize_path(result.output) if result.exit_code == 0 else None
 
 
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:

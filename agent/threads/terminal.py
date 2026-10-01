@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import posixpath
+import shlex
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -86,12 +88,12 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1013, reason="Cloud terminal capacity reached")
         return
     try:
-        from agent.sandboxes.paths import repo_dir_command
         from agent.sandboxes.providers.langsmith import connect_async_langsmith_sandbox
 
         client, sandbox = await connect_async_langsmith_sandbox(sandbox_id)
-        found = await sandbox.run(repo_dir_command(repo_name)) if repo_name else None
-        cwd = found.stdout.strip() if found and found.success else "/workspace"
+        cwd = posixpath.join("/workspace", repo_name) if repo_name else "/workspace"
+        if not (await sandbox.run(f"test -d {shlex.quote(cwd)}")).success:
+            cwd = "/workspace"
         handle = await sandbox.run(
             "exec ${SHELL:-/bin/bash} -l",
             cwd=cwd,

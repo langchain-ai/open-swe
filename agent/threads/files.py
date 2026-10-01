@@ -3,6 +3,7 @@
 import base64
 import json
 import logging
+import posixpath
 from functools import cache
 from importlib import resources
 from typing import Annotated, Literal
@@ -73,7 +74,7 @@ async def _run_workspace_script(
     mode: Literal["path", "index"],
     path: str,
 ) -> dict[str, object]:
-    from agent.sandboxes.paths import resolve_sandbox_work_dir, resolve_thread_repo_dir
+    from agent.sandboxes.paths import resolve_sandbox_work_dir
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     # Reading the live sandbox is shell-equivalent access, so it follows the
@@ -87,10 +88,9 @@ async def _run_workspace_script(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not connect to sandbox for files", extra={"sandbox": sandbox_id})
         raise HTTPException(503, "Could not connect to the workspace.") from exc
+    work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
-    root = await resolve_thread_repo_dir(sandbox, repo_name) or await resolve_sandbox_work_dir(
-        sandbox
-    )
+    root = posixpath.join(work_dir, repo_name) if repo_name else work_dir
     result = await sandbox.aexecute(
         _workspace_path_command(root, mode, path), timeout=_WORKSPACE_PATH_TIMEOUT_SECONDS
     )
