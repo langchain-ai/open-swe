@@ -730,8 +730,17 @@ export interface WorkspaceCreate {
   update_script?: string
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
   repos?: Array<string>
@@ -739,6 +748,9 @@ export interface WorkspaceUpdate {
   kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
+  vcpus?: number | null
+  mem_bytes?: number | null
+  fs_capacity_bytes?: number | null
 }
 
 export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
@@ -749,6 +761,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  create_params?: Record<string, JsonValue>
   slug: string
   name: string
   prompt: string
