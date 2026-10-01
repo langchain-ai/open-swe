@@ -30,8 +30,10 @@ def _config() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("breakout", [False, True])
 async def test_kickoff_stays_until_a_subsequent_reply_posts(
     monkeypatch: pytest.MonkeyPatch,
+    breakout: bool,
 ) -> None:
     from tests.slack.test_slack_thread_mapping import _Client
 
@@ -45,6 +47,7 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
                 "thread_id": "thread-one",
                 "source": "slack",
                 "slack_kickoff_eligible": True,
+                "slack_breakout": breakout,
                 "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
             }
         },
@@ -68,9 +71,11 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
     }
     deleted.assert_not_awaited()
     assert await slack_reply_tool.slack_reply("Update", "progress") == {"success": True}
-    deleted.assert_awaited_once_with(channel="C1", ts="1.1")
     assert await slack_reply_tool.slack_reply("Done", "final") == {"success": True}
-    deleted.assert_awaited_once()
+    if breakout:
+        deleted.assert_not_awaited()
+    else:
+        deleted.assert_awaited_once_with(channel="C1", ts="1.1")
 
 
 async def test_kickoff_delete_failure_does_not_interrupt_update(

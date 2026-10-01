@@ -161,7 +161,7 @@ async def slack_reply(
                     str(thread_ts),
                     message_ts,
                     response_type=response_type,
-                    eligible=cfg.slack_kickoff_eligible is True,
+                    eligible=cfg.slack_kickoff_eligible is True and not cfg.slack_breakout,
                 )
             except Exception:
                 logger.exception(
