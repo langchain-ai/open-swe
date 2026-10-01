@@ -1727,7 +1727,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     static_tools = apply_tool_descriptions(
         static_tools,
-        {"expose_port": {"jwks_url": service_identity_jwks_url()}},
+        {
+            "expose_port": {
+                "jwks_url": service_identity_jwks_url(),
+                "port": "<port>",
+            }
+        },
     )
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
