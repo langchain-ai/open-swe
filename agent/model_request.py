@@ -21,12 +21,16 @@ MAX_MODEL_REQUEST_CHARS = 8_000
 class ModelRequestIntent:
     requested_model: str | None = None
     unavailable_model: bool = False
+    requested_effort: str | None = None
+    unavailable_effort: bool = False
 
 
 @dataclass
 class ModelSelectionDecision:
     classifier: JevDecision = field(default_factory=JevDecision)
+    effort_classifier: JevDecision = field(default_factory=JevDecision)
     requested_model: str | None = None
+    requested_effort: str | None = None
     outcome: Literal[
         "not_classified",
         "no_request",
@@ -81,6 +85,7 @@ async def infer_requested_model(
     requested_models: Mapping[str, ModelOption],
     slack_event_ts: str | None = None,
     decision: JevDecision | None = None,
+    effort_decision: JevDecision | None = None,
 ) -> ModelRequestIntent | None:
     task = original_human_task(messages, slack_event_ts=slack_event_ts)
     if not task:
@@ -93,20 +98,42 @@ async def infer_requested_model(
         no_request=prompt("model-request/no-request"),
         unavailable=prompt("model-request/unavailable"),
     )
-    choice = await asyncio.create_task(
-        select_jev_choice(
-            task[:MAX_MODEL_REQUEST_CHARS],
-            question="runtime_model",
-            instructions=prompt("model-request/instructions"),
-            criteria=criteria,
-            decision=decision,
-        ),
-        context=contextvars.Context(),
+    efforts = {effort for option in requested_models.values() for effort in option["efforts"]}
+    effort_criteria = {
+        effort: prompt("model-request/effort-available", effort=effort)
+        for effort in sorted(efforts)
+    }
+    effort_criteria.update(
+        no_request=prompt("model-request/effort-no-request"),
+        unavailable=prompt("model-request/effort-unavailable"),
     )
-    if choice is None:
+    choice, effort_choice = await asyncio.gather(
+        asyncio.create_task(
+            select_jev_choice(
+                task[:MAX_MODEL_REQUEST_CHARS],
+                question="runtime_model",
+                instructions=prompt("model-request/instructions"),
+                criteria=criteria,
+                decision=decision,
+            ),
+            context=contextvars.Context(),
+        ),
+        asyncio.create_task(
+            select_jev_choice(
+                task[:MAX_MODEL_REQUEST_CHARS],
+                question="runtime_effort",
+                instructions=prompt("model-request/effort-instructions"),
+                criteria=effort_criteria,
+                decision=effort_decision,
+            ),
+            context=contextvars.Context(),
+        ),
+    )
+    if choice is None or choice not in criteria:
         return None
-    if choice == "no_request":
-        return ModelRequestIntent()
-    if choice == "unavailable":
-        return ModelRequestIntent(unavailable_model=True)
-    return ModelRequestIntent(requested_model=choice)
+    return ModelRequestIntent(
+        requested_model=choice if choice in requested_models else None,
+        unavailable_model=choice == "unavailable",
+        requested_effort=effort_choice if effort_choice in efforts else None,
+        unavailable_effort=effort_choice == "unavailable",
+    )
