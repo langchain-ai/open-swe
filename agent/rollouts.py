@@ -1,9 +1,9 @@
 """Durable watch for a merged OpenSWE pull request.
 
 A scheduler cron polls the configured locate tool every 15 minutes. The
-implementing thread is resumed only when an environment in the check newly
-contains the merge SHA. The first environment is reported immediately. Each
-later environment waits one quiet poll. ``rollout_page_check`` opens the page
+implementing thread is resumed when dev, staging, or prod newly contains the
+merge SHA. Each stage waits one quiet poll, then runs the same check. A stage
+with no configured targets is skipped. ``rollout_page_check`` opens the page
 in the sandbox browser and does not log in.
 """
 
@@ -40,6 +40,7 @@ MAX_WATCH_AGE = timedelta(days=7)
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+_STAGES = ("dev", "staging", "prod")
 
 
 @asynccontextmanager
@@ -172,18 +173,22 @@ def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
 
 
 def rollout_envs() -> list[RolloutEnv]:
-    """Ordered environments from ``ROLLOUT_ENVS``. Invalid entries are dropped."""
-    specs: list[RolloutEnv] = []
-    seen: set[str] = set()
+    """Dev, staging, and prod from ``ROLLOUT_ENVS``, in that order.
+
+    A stage is omitted when it has no targets. Extra entries for one stage are
+    combined. Any other name is ignored.
+    """
+    grouped: dict[str, list[str]] = {stage: [] for stage in _STAGES}
     for item in ENV.ROLLOUT_ENVS.get_list():
         name, sep, raw_targets = item.partition(":")
         env_name = _name(name)
-        targets = tuple(target for part in raw_targets.split("|") if (target := _name(part)))
-        if not sep or not env_name or not targets or env_name in seen:
+        if not sep or env_name not in grouped:
             continue
-        seen.add(env_name)
-        specs.append(RolloutEnv(env_name, targets))
-    return specs
+        for part in raw_targets.split("|"):
+            target = _name(part)
+            if target and target not in grouped[env_name]:
+                grouped[env_name].append(target)
+    return [RolloutEnv(stage, tuple(grouped[stage])) for stage in _STAGES if grouped[stage]]
 
 
 def rollout_env_names() -> list[str]:
@@ -633,20 +638,15 @@ async def evaluate_rollout(key: str) -> str:
         targets: list[Any] = raw_targets if isinstance(raw_targets, list) else []
         ready = envs_ready(targets)
         changed = False
-        immediate = watch.envs[0] if watch.envs else ""
         for env in watch.envs:
             if env in watch.dispatched or env not in ready:
                 continue
-            if env != immediate and env not in watch.seen:
+            if env not in watch.seen:
                 watch.seen.append(env)
                 changed = True
                 continue
             last = set(watch.dispatched) | {env} >= set(watch.envs)
-            content = (
-                prompt("runs/rollout-dev", env=env, sha=watch.sha, pr_url=watch.pr_url)
-                if env == immediate and not last
-                else _check_prompt(watch, env, last=last)
-            )
+            content = _check_prompt(watch, env, last=last)
             if not await _dispatch(watch, content):
                 await WATCHES.save(watch)
                 return "dispatch_failed"

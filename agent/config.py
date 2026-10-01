@@ -284,7 +284,8 @@ ENV.var(
 )
 ENV.var(
     "ROLLOUT_ENVS",
-    "Ordered environments as name:target|target. An environment is ready when every listed "
+    "Dev, staging, and prod targets as name:target|target. Only those three names are used, "
+    "in that order. A name with no targets is skipped. A name is ready when every listed "
     "target contains the commit. Example: dev:target-dev,prod:target-a|target-b. Empty watches none.",
 )
 ENV.var(

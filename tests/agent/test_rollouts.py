@@ -145,20 +145,18 @@ def test_envs_ready_waits_for_every_configured_target(
     assert rollouts.envs_ready(targets) == {"dev", "prod"}
 
 
-def test_envs_ready_can_treat_one_region_as_its_own_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_missing_stage_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "ROLLOUT_ENVS",
-        "dev:gcp-dev,apac-prod:gcp-apac-prod,aws-prod:aws-us-prod",
+        "prod:gcp-apac-prod|aws-us-prod,apac-prod:gcp-apac-prod,staging:gcp-staging",
     )
+    assert rollouts.rollout_env_names() == ["staging", "prod"]
     targets: list[dict[str, Any]] = [
-        {"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""},
+        {"id": "gcp-staging", "label": "GCP Staging", "contains": True, "error": ""},
         {"id": "gcp-apac-prod", "label": "GCP APAC Prod", "contains": True, "error": ""},
         {"id": "aws-us-prod", "label": "AWS US Prod", "contains": False, "error": ""},
-        {"id": "self-hosted-main", "label": "Self-hosted main", "contains": True, "error": ""},
     ]
-    assert rollouts.envs_ready(targets) == {"dev", "apac-prod"}
+    assert rollouts.envs_ready(targets) == {"staging"}
 
 
 def test_rollout_repos_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,7 +168,7 @@ def test_rollout_repos_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     assert not rollouts.rollout_repo_allowed("langchain-ai", "open-swe")
 
 
-async def test_dev_wakes_once_and_staging_waits_a_poll(
+async def test_every_environment_waits_one_poll(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await rollouts.start_watch(
@@ -197,17 +195,18 @@ async def test_dev_wakes_once_and_staging_waits_a_poll(
     monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
 
     assert await rollouts.evaluate_rollout("acme/repo#7") == "waiting"
-    assert dispatch.await_count == 1
-    dev_reply = dispatch.await_args.args[1]
-    assert "Do not query Datadog" in dev_reply
-    assert "gh pr comment" not in dev_reply
-    assert "slack_reply" in dev_reply
-    assert "langsmith-releases" not in dev_reply
-    assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
-    assert dispatch.await_args.kwargs["source_context"].slack_thread.channel_id == "C1"
+    assert dispatch.await_count == 0
 
     assert await rollouts.evaluate_rollout("acme/repo#7") == "done"
     assert dispatch.await_count == 2
+    dev_reply = dispatch.await_args_list[0].args[1]
+    assert "env:dev" in dev_reply
+    assert "gh pr comment" not in dev_reply
+    assert "Do not query Datadog" not in dev_reply
+    assert "slack_reply" in dev_reply
+    assert "langsmith-releases" not in dev_reply
+    assert dispatch.await_args_list[0].kwargs["multitask_strategy"] == "enqueue"
+    assert dispatch.await_args_list[0].kwargs["source_context"].slack_thread.channel_id == "C1"
     verdict = dispatch.await_args_list[1].args[1]
     assert "staging" in verdict
     assert "gh pr comment" in verdict
