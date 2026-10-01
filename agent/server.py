@@ -41,7 +41,7 @@ from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
-from deepagents.middleware.filesystem import FilesystemState
+from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -169,6 +169,7 @@ from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.blobs import blob_namespace
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -283,6 +284,7 @@ DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
+BLOBS_ROUTE = "/blobs/"
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -1782,6 +1784,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
+        # Offloaded images live in the store so they can be read without the sandbox.
+        skill_routes[BLOBS_ROUTE] = StoreBackend(
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+        )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
@@ -1909,6 +1915,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             middleware=cast(
                 list[AgentMiddleware[Any, Any, Any]],
                 [
+                    FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True
                     ),
