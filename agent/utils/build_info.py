@@ -66,6 +66,7 @@ def backend_build_info() -> dict[str, str | None]:
     """Identifiers the backend knows its own running code by; values never assumed."""
     info = _read_build_info(_backend_sidecar_path())
     return {
+        "environment": ENV.OPENSWE_ENV.optional(),
         "revision_id": ENV.LANGCHAIN_REVISION_ID.optional(),
         "commit": info.get("commit") or ENV.LANGSMITH_LANGGRAPH_GIT_REF_SHA.optional(),
         "built_at": info.get("built_at"),

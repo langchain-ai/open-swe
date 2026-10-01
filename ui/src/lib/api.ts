@@ -168,6 +168,7 @@ export interface SessionUser {
 /** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
 export interface BuildInfo {
   backend: {
+    environment?: string | null
     /** LangGraph Platform revision id — opaque, never a git SHA. */
     revision_id: string | null
     commit: string | null
@@ -194,6 +195,7 @@ export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
       : undefined
   return {
     backend: {
+      environment: typeof b.environment === "string" ? b.environment : null,
       revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
       commit: typeof b.commit === "string" ? b.commit : null,
       built_at: typeof b.built_at === "string" ? b.built_at : null,
