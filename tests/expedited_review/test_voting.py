@@ -56,6 +56,8 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(voting, "get_valid_access_token", user_token)
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
+    monkeypatch.setattr(voting, "render", AsyncMock(return_value=("Ready", [])))
+    monkeypatch.setattr(voting, "send_dm", AsyncMock(return_value=True))
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
     monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
     monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))

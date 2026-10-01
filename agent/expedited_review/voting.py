@@ -27,6 +27,7 @@ from agent.human_review.lifecycle import (
     notify_agent,
     refresh_card,
     refresh_card_in_thread,
+    render,
 )
 from agent.human_review.people import (
     Outcome,
@@ -38,6 +39,8 @@ from agent.human_review.people import (
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.input_messages import PersonIdentity, split_person_id
 from agent.prompts import prompt
+from agent.slack.blocks import block_payload
+from agent.slack.dm import send_dm
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -167,6 +170,11 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     if current is None:
         return Outcome(marked)
     await refresh_card(current)
+    current = await HumanReviewRequest.get(approval.id) or current
+    if voter.user.slack_user_id:
+        text, blocks = await render(current, None)
+        if not await send_dm(voter.user.slack_user_id, text, blocks=block_payload(blocks)):
+            return Outcome(f"{marked} Could not send the DM controls; broadcast from the thread.")
     return Outcome(marked)
 
 
