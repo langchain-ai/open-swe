@@ -145,6 +145,26 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
     )
     assert "user_id" not in client.runs.created[-1]["metadata"]
 
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        config={
+            "configurable": {
+                "background_task_completion": True,
+                "github_login": "mason-gh",
+                "slack_thread": {"triggering_user_id": "U123"},
+            },
+            "metadata": {"user_id": str(user_id)},
+        },
+        client=client,
+    )
+    completion = client.runs.created[-1]
+    assert "user_id" not in completion["metadata"]
+    assert "user_id" not in completion["config"]["configurable"]
+
 
 @pytest.mark.asyncio
 async def test_create_durable_run_preserves_existing_prepare_id_and_resumable_opt_out(

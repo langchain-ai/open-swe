@@ -253,6 +253,8 @@ async def _run_user_id(
     if not isinstance(configurable, Mapping):
         return None
     cfg = RunConfig.parse(dict(configurable))
+    if cfg.background_task_completion:
+        return None
     try:
         if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
