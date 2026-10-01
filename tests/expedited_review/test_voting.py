@@ -209,6 +209,8 @@ async def test_readiness_button_is_delivered_only_to_the_author(
         private_messages.append((user, blocks))
         return True
 
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
@@ -232,6 +234,9 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     recipient, private_blocks = private_messages[0]
     assert recipient == "U_ADA"
     assert "+fixed" in str(private_blocks)
+    assert ephemeral.call_args.args[:2] == ("C1", "U_ADA")
+    assert ephemeral.call_args.args[3] == "1.0"
+    assert ephemeral.call_args.kwargs["blocks"] == private_blocks
     assert "open_swe_option_select_ready" in str(private_blocks)
     assert "open_swe_option_select_ready" not in str(shared_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
@@ -274,6 +279,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     monkeypatch.setattr(lifecycle, "send_dm", AsyncMock(return_value=False))
+    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", AsyncMock(return_value=False))
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))

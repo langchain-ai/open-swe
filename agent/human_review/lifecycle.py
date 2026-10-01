@@ -32,6 +32,7 @@ from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
     get_slack_permalink,
+    post_slack_ephemeral_message,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
@@ -181,7 +182,16 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
     )
-    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
+    payload = block_payload(blocks)
+    if (location := approval.slack_location) is not None:
+        if not await post_slack_ephemeral_message(
+            location[0], author.slack_user_id, text, location[1], blocks=payload
+        ):
+            logger.warning(
+                "Could not deliver author-only ephemeral review card",
+                extra={"approval_id": str(approval.id)},
+            )
+    if not await send_dm(author.slack_user_id, text, blocks=payload):
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     return None
 
