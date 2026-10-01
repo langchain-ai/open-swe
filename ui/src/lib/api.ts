@@ -1131,8 +1131,6 @@ export interface ReviewDiffFile {
   // large files), which is what `unrenderable` reports.
   patch: string | null
   unrenderable?: boolean
-  /** GitHub's hunk patch, present even when the full blobs are too large to send. */
-  patch?: string | null
 }
 
 export interface ReviewFileContents {

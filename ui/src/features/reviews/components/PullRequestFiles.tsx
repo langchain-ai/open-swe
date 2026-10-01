@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon, XIcon } from "@phosphor-icons/react"
-import { getSingularPatch } from "@pierre/diffs"
-import { FileDiff as PatchDiff, MultiFileDiff } from "@pierre/diffs/react"
+import { PatchDiff } from "@pierre/diffs/react"
 import {
   useCallback,
   useEffect,
@@ -13,7 +12,7 @@ import {
 import { IoLogoGithub } from "react-icons/io5"
 import type {
   DiffLineAnnotation,
-  FileDiffMetadata,
+  FileDiffLoadedFiles,
   SelectedLineRange,
 } from "@pierre/diffs"
 
@@ -41,6 +40,7 @@ import {
   commentRangeLabel,
 } from "@/features/reviews/lib/lineRange"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
@@ -254,6 +254,7 @@ export function PullRequestFiles({
                   </p>
                 ) : (
                   <FileDiff
+                    pr={pr}
                     path={file.path}
                     file={byPath.get(file.path)}
                     comments={comments}
@@ -316,10 +317,12 @@ function FileRow({
 }
 
 function FileDiff({
+  pr,
   path,
   file,
   comments,
 }: {
+  pr: PullRequestTarget
   path: string
   file: ReviewDiffFile | undefined
   comments: ReturnType<typeof useLineComments>
@@ -330,9 +333,30 @@ function FileDiff({
     (range: SelectedLineRange) => setDraft({ path, range, body: "" }),
     [path, setDraft]
   )
+  // Pierre calls this the first time context is expanded past the patch's hunks.
+  const loadDiffFiles = useCallback(async (): Promise<FileDiffLoadedFiles> => {
+    if (!file) throw new Error("This file is not in the loaded diff")
+    const [owner = "", repo = ""] = pr.repo.split("/")
+    const contents = await loadReviewFileContents(owner, repo, pr.number, file)
+    const original = contents.originalContent ?? ""
+    const modified = contents.modifiedContent ?? ""
+    return {
+      oldFile: {
+        name: file.previousPath ?? file.path,
+        contents: original,
+        cacheKey: fileContentsCacheKey(file.path, "old", original),
+      },
+      newFile: {
+        name: file.path,
+        contents: modified,
+        cacheKey: fileContentsCacheKey(file.path, "new", modified),
+      },
+    }
+  }, [pr, file])
   const options = useMemo(
     () => ({
       ...diffOptions,
+      loadDiffFiles,
       enableLineSelection: true,
       enableGutterUtility: true,
       onGutterUtilityClick: startDraft,
@@ -340,7 +364,7 @@ function FileDiff({
         if (range) startDraft(range)
       },
     }),
-    [diffOptions, startDraft]
+    [diffOptions, loadDiffFiles, startDraft]
   )
   const fileDraft = draft?.path === path ? draft : null
   const annotations = useMemo<Array<DiffLineAnnotation<FileAnnotation>>>(
@@ -416,34 +440,7 @@ function FileDiff({
     },
     [setDraft, send, removeFromBatch]
   )
-  const oldFile = useMemo(
-    () => ({
-      name: path,
-      contents: file?.originalContent ?? "",
-      cacheKey: fileContentsCacheKey(path, "old", file?.originalContent),
-    }),
-    [path, file?.originalContent]
-  )
-  const newFile = useMemo(
-    () => ({
-      name: path,
-      contents: file?.modifiedContent ?? "",
-      cacheKey: fileContentsCacheKey(path, "new", file?.modifiedContent),
-    }),
-    [path, file?.modifiedContent]
-  )
-
-  const hasContents =
-    file != null &&
-    !file.unrenderable &&
-    file.originalContent != null &&
-    file.modifiedContent != null
-  const patch = useMemo(
-    () => (file && !hasContents ? patchFileDiff(file) : null),
-    [file, hasContents]
-  )
-
-  if (!file || (!hasContents && !patch)) {
+  if (!file || file.unrenderable || !file.patch) {
     return (
       <p className="p-3 text-center text-xs text-muted-foreground">
         {file
@@ -454,50 +451,18 @@ function FileDiff({
   }
   return (
     <div className="overflow-x-auto bg-card font-mono text-[11px] leading-5">
-      {patch ? (
-        <PatchDiff<FileAnnotation>
-          fileDiff={patch}
-          disableWorkerPool
-          options={options}
-          lineAnnotations={annotations}
-          selectedLines={fileDraft?.range ?? null}
-          renderAnnotation={renderAnnotation}
-        />
-      ) : (
-        <MultiFileDiff<FileAnnotation>
-          oldFile={oldFile}
-          newFile={newFile}
-          options={options}
-          lineAnnotations={annotations}
-          selectedLines={fileDraft?.range ?? null}
-          renderAnnotation={renderAnnotation}
-        />
-      )}
+      <PatchDiff<FileAnnotation>
+        patch={file.patch}
+        // Pierre's worker pool highlights partial diffs out of step with the
+        // rendered window, as on the full review page.
+        disableWorkerPool
+        options={options}
+        lineAnnotations={annotations}
+        selectedLines={fileDraft?.range ?? null}
+        renderAnnotation={renderAnnotation}
+      />
     </div>
   )
-}
-
-/** The file's hunks from GitHub's patch, for when its full contents were not sent. */
-function patchFileDiff(file: ReviewDiffFile): FileDiffMetadata | null {
-  if (!file.patch) return null
-  const previous = file.previousPath ?? file.path
-  const text = file.patch.startsWith("diff --git")
-    ? file.patch
-    : [
-        `diff --git a/${previous} b/${file.path}`,
-        `--- ${file.status === "added" ? "/dev/null" : `a/${previous}`}`,
-        `+++ ${file.status === "removed" ? "/dev/null" : `b/${file.path}`}`,
-        file.patch.endsWith("\n") ? file.patch : `${file.patch}\n`,
-      ].join("\n")
-  try {
-    return getSingularPatch(text)
-  } catch (error) {
-    console.error("Could not parse a pull request file patch", {
-      path: file.path,
-      error,
-    })
-    return null
-  }
 }
 
 function Composer({
