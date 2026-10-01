@@ -48,6 +48,16 @@ def classify_exception(exc: BaseException) -> str | None:
         if isinstance(inner, dict):
             provider_code = str(inner.get("type") or inner.get("code") or "")
     haystack = f"{provider_code} {exc}".lower()
+    error_body = body.get("error", body) if isinstance(body, dict) else {}
+    if isinstance(error_body, dict) and any(
+        error_body.get(key) in {"content_filter", "content_policy_violation"}
+        for key in ("type", "code")
+        if isinstance(error_body.get(key), str)
+    ):
+        return "provider_refused"
+    if type(exc).__name__ == "APIError" and type(exc).__module__.startswith("openai"):
+        if "this content was flagged for possible cybersecurity risk" in str(exc).lower():
+            return "provider_refused"
 
     if status == 429 or "rate_limit" in haystack:
         return "provider_rate_limited"

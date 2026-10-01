@@ -87,6 +87,7 @@ _REASON_TEXT = {
     "provider_overloaded": "the model provider was overloaded and never recovered",
     "provider_rate_limited": "the model provider rate-limited it",
     "provider_unavailable": "the model provider kept returning errors",
+    "provider_refused": "the model provider refused the request on content-policy grounds",
     "provider_timeout": "a model call timed out",
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
@@ -95,6 +96,7 @@ _REASON_TEXT = {
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
+    "provider_refused": "Try rephrasing the request.",
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
 }

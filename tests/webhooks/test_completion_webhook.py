@@ -1,10 +1,39 @@
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
+import openai
 import pytest
 
 from agent import completion
 from agent.slack import thinking as slack_thinking
+from agent.utils.errors import classify_exception
+
+
+@pytest.mark.parametrize(
+    "body",
+    [None, {"error": {"type": "invalid_request_error", "code": "content_filter"}}],
+)
+def test_refusal_survives_scrubbed_completion_error(body: dict[str, object] | None) -> None:
+    exc = openai.APIError(
+        "This content was flagged for possible cybersecurity risk." if body is None else "Rejected",
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        body=body,
+    )
+    metadata = {
+        "last_model_error": {
+            "run_id": "run-1",
+            "error_type": "APIError",
+            "code": classify_exception(exc),
+        }
+    }
+    reason = completion._failure_reason_code({"error": "APIError"}, metadata, "run-1")
+    assert reason == "provider_refused"
+    text = completion._failure_text("error", reason_code=reason)
+    assert "content-policy" in text
+    assert "rephras" in text
+    assert "kept returning errors" not in text
+    assert "Send another message" not in text
 
 
 class _FakeThreads:
