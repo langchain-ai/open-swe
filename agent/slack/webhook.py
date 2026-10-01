@@ -1114,6 +1114,7 @@ async def _process_slack_mention_impl(
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
+        "slack_kickoff_eligible": False,
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -1138,6 +1139,12 @@ async def _process_slack_mention_impl(
         configurable["model_selection"] = "explicit"
 
     is_first_mention = not await common.thread_exists(thread_id)
+    configurable["slack_kickoff_eligible"] = (
+        is_first_mention
+        and not code_channel
+        and not concierge_mode
+        and not request.context_thread_ts
+    )
     langgraph_client = get_langgraph_client()
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without

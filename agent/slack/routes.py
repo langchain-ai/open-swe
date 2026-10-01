@@ -40,6 +40,7 @@ from agent.slack.payloads import (
     SlackInteractionMessage,
     parse_json_object,
 )
+from agent.slack.pr_links import SlackPullRequestLink
 from agent.slack.request import SlackRequest
 from agent.slack.responses import (
     BlockSuggestionResponse,
@@ -296,12 +297,7 @@ async def slack_webhook(
         "slack",
         event_type=envelope.kind if envelope else "",
         delivery_id=envelope.event_id if envelope else "",
-        refs=EventRefs(
-            slack_user_id=envelope.event.resolve_user_id(),
-            slack_channel_id=envelope.event.resolve_channel_id(),
-        )
-        if envelope and envelope.event
-        else None,
+        refs=EventRefs.slack(envelope) if envelope else None,
     )
     if payload is None:
         common.logger.warning("Failed to parse Slack webhook JSON")
@@ -319,6 +315,8 @@ async def slack_webhook(
     raw_event = payload.get("event")
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
+
+    await SlackPullRequestLink.record(envelope)
 
     from agent.incidents import channels as incidents
 
