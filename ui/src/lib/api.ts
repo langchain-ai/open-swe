@@ -1110,14 +1110,22 @@ export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput 
 }
 
 export interface ReviewDiffFile {
+  baseSha: string
+  headSha: string
   path: string
   previousPath: string | null
   status: "added" | "removed" | "modified" | "renamed"
   additions: number
   deletions: number
-  originalContent: string
-  modifiedContent: string
+  // A full per-file git patch. null when GitHub omits one (binary or very
+  // large files), which is what `unrenderable` reports.
+  patch: string | null
   unrenderable?: boolean
+}
+
+export interface ReviewFileContents {
+  originalContent: string | null
+  modifiedContent: string | null
 }
 
 export type PreviewFileStatus =
@@ -1731,6 +1739,19 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
+    ),
+  getReviewFileContents: (
+    owner: string,
+    repo: string,
+    number: number,
+    path: string,
+    originalPath: string,
+    baseSha: string,
+    headSha: string
+  ) =>
+    request<ReviewFileContents>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/file-contents` +
+        `?path=${encodeURIComponent(path)}&original_path=${encodeURIComponent(originalPath)}&base_sha=${encodeURIComponent(baseSha)}&head_sha=${encodeURIComponent(headSha)}`
     ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
