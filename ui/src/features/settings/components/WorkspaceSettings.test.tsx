@@ -489,9 +489,7 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
-    await waitFor(() =>
-      expect(update).not.toHaveBeenCalled()
-    )
+    await waitFor(() => expect(update).not.toHaveBeenCalled())
     // The API-keys and repositories sections also fail while the real fetch is
     // blocked, so match the alert that names the rejected configuration.
     await waitFor(() =>
