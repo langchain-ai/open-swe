@@ -89,6 +89,10 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "30d": "Last 30 days",
   all: "All time",
 }
+const PERIOD_ITEMS = Object.entries(PERIOD_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
 
 function UsagePage() {
   const session = useSession()
@@ -149,6 +153,7 @@ export function UsageDateRange({
         Date range
       </label>
       <Select
+        items={PERIOD_ITEMS}
         value={activePeriod}
         onValueChange={(value) =>
           onPeriodChange(value as UsageLeaderboardPeriod)
@@ -158,7 +163,7 @@ export function UsageDateRange({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+          {PERIOD_ITEMS.map(({ value, label }) => (
             <SelectItem key={value} value={value}>
               {label}
             </SelectItem>

@@ -23,12 +23,17 @@ export function WorkspaceSelect({
   onChange: (slug: string) => void
 }) {
   if (workspaces.length < 2) return null
+  const items = workspaces.map((workspace) => ({
+    value: workspace.slug,
+    label: workspace.name,
+  }))
   return (
     <div className="flex items-center gap-2 px-1">
       <span className="text-xs font-medium text-muted-foreground">
         Workspace
       </span>
       <Select
+        items={items}
         value={value}
         onValueChange={(next) => {
           if (next) onChange(next)
@@ -38,9 +43,9 @@ export function WorkspaceSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {workspaces.map((workspace) => (
-            <SelectItem key={workspace.slug} value={workspace.slug}>
-              {workspace.name}
+          {items.map((workspace) => (
+            <SelectItem key={workspace.value} value={workspace.value}>
+              {workspace.label}
             </SelectItem>
           ))}
         </SelectContent>
