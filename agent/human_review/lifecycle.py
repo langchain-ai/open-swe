@@ -128,6 +128,8 @@ async def post_card(
 
     Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
     """
+    if approval.awaiting_ready:
+        return None, "draft card is author-only"
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
@@ -162,7 +164,23 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     )
     if author is None or not author.slack_user_id:
         return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
-    text, blocks = expedited_card.readiness_prompt(approval)
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return "Could not read the diff for the author-only card; try again."
+    files = await fetch_changed_files(
+        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+    )
+    if files is None:
+        return "Could not read the diff for the author-only card; try again."
+    approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
+    await approval.save()
+    text, blocks = expedited_card.readiness_prompt(
+        approval,
+        title=pr.title,
+        author=await approval.author_mention(),
+        files=files,
+        diff_image_id=approval.slack_diff_file_id or None,
+    )
     if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     return None
@@ -251,6 +269,26 @@ async def render(
 
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
+    if (
+        request.kind == "expedited"
+        and request.state == "open"
+        and not request.awaiting_ready
+        and not request.slack_message_ts
+        and outcome is None
+    ):
+        token = await repo_token(request.pull_request.owner, request.pull_request.repo)
+        if token is None:
+            logger.warning("Could not publish ready expedited card without a GitHub token")
+            return
+        message_ts, error = await post_card(
+            request, title=request.pull_request.title, files=await _files_for(request, token)
+        )
+        if message_ts:
+            request.slack_message_ts = message_ts
+            await request.save()
+        else:
+            logger.warning("Could not publish ready expedited card", extra={"slack_error": error})
+        return
     if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
         return
     text, blocks = await render(request, outcome)
