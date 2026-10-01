@@ -301,7 +301,7 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("rolls a rejected merge back to the merge action", async () => {
+  it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
@@ -322,7 +322,7 @@ describe("My PRs", () => {
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Merge",
+          name: "Retry merge",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(false)
@@ -346,7 +346,7 @@ describe("My PRs", () => {
       within(card).getByRole("link", { name: "Reviewer" }).getAttribute("href")
     ).toBe("/agents/reviews/acme/app/1")
   })
-  it("shows pending checks as Pending, preserving draft and conflict priority", async () => {
+  it("shows pending checks as Pending alongside the PR's other conditions", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -360,15 +360,15 @@ describe("My PRs", () => {
     await screen.findByText("Change 4")
     expect(cards().map(statuses)).toEqual([
       ["Pending"],
-      ["Pending"],
-      ["Draft"],
-      ["Conflicted"],
+      ["Pending", "Approved"],
+      ["Draft", "Pending"],
+      ["Conflicted", "Pending"],
     ])
     fireEvent.click(screen.getByLabelText("Filter by status"))
     fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Pending" })
+      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
     )
-    expect(titles()).toEqual(["Change 1", "Change 2"])
+    expect(titles()).toEqual(["Change 4"])
   })
   it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({

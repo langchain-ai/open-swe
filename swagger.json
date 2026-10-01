@@ -712,6 +712,44 @@
         "title": "CloseAction",
         "type": "object"
       },
+      "CommentBatchIntent": {
+        "properties": {
+          "comments": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "line": "#/components/schemas/LineComment",
+                  "thread": "#/components/schemas/ThreadComment"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/LineComment"
+                },
+                {
+                  "$ref": "#/components/schemas/ThreadComment"
+                }
+              ]
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Comments",
+            "type": "array"
+          },
+          "intent": {
+            "const": "comments",
+            "title": "Intent",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "comments"
+        ],
+        "title": "CommentBatchIntent",
+        "type": "object"
+      },
       "CommentBody": {
         "properties": {
           "anchor": {
@@ -1530,6 +1568,62 @@
         "type": "string"
       },
       "JsonValue": {},
+      "LineComment": {
+        "description": "A comment on diff lines that lives only in the agent's prompt, not on GitHub.",
+        "properties": {
+          "body": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "kind": {
+            "const": "line",
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "minimum": 1.0,
+            "title": "Line",
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "side": {
+            "default": "RIGHT",
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Line"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "line",
+          "body"
+        ],
+        "title": "LineComment",
+        "type": "object"
+      },
       "MCPConnectionPublic": {
         "description": "Connection settings safe to return to the dashboard; credentials stay server-side.",
         "properties": {
@@ -2704,6 +2798,24 @@
         "title": "PlanUpdate",
         "type": "object"
       },
+      "PostedReviewComment": {
+        "properties": {
+          "html_url": {
+            "title": "Html Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "html_url"
+        ],
+        "title": "PostedReviewComment",
+        "type": "object"
+      },
       "PreviewCheck": {
         "properties": {
           "conclusion": {
@@ -2772,6 +2884,41 @@
         "title": "PreviewFile",
         "type": "object"
       },
+      "PreviewReply": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "PreviewReply",
+        "type": "object"
+      },
       "PreviewThread": {
         "properties": {
           "author": {
@@ -2803,6 +2950,14 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "replies": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PreviewReply"
+            },
+            "title": "Replies",
+            "type": "array"
           },
           "thread_id": {
             "anyOf": [
@@ -4762,6 +4917,33 @@
           "end"
         ],
         "title": "TextAnchor",
+        "type": "object"
+      },
+      "ThreadComment": {
+        "properties": {
+          "comment_url": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment Url",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 10000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "kind": {
+            "const": "thread",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "comment_url"
+        ],
+        "title": "ThreadComment",
         "type": "object"
       },
       "ThreadFeedbackResponse": {
@@ -10802,6 +10984,7 @@
                   "mapping": {
                     "address-comment": "#/components/schemas/AddressCommentIntent",
                     "address-comments": "#/components/schemas/AddressCommentsIntent",
+                    "comments": "#/components/schemas/CommentBatchIntent",
                     "fix": "#/components/schemas/FixIntent",
                     "open": "#/components/schemas/OpenThreadIntent"
                   },
@@ -10819,6 +11002,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/AddressCommentIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CommentBatchIntent"
                   }
                 ],
                 "title": "Body"
@@ -11838,6 +12024,80 @@
           }
         ],
         "summary": "Api List Review Comments",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "post": {
+        "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingReviewCommentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostedReviewComment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Post Review Comment",
         "tags": [
           "dashboard",
           "review"
