@@ -704,8 +704,8 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_id"] == expected_model
     assert snapshot["effort"] == expected_effort
-    assert snapshot["subagent_model_id"] == expected_model
-    assert snapshot["subagent_effort"] == expected_effort
+    assert snapshot["subagent_model_id"] == (expected_model if profile else "openai:gpt-6.1-sol")
+    assert snapshot["subagent_effort"] == "low"
 
     followup = _base_config()
     followup["configurable"].update(source="dashboard", model_selection="auto")
