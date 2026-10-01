@@ -1864,10 +1864,23 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function connectService(provider: "slack" | "notion") {
+export function connectService(
+  provider: "slack" | "notion",
+  redirectTo?: string,
+  target: "_self" | "_blank" = "_self"
+) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)
+    const query =
+      provider === "notion" && redirectTo
+        ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+        : ""
+    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
+    if (target === "_blank") {
+      window.open(url, "_blank", "noopener,noreferrer")
+    } else {
+      window.location.assign(url)
+    }
   }
   return pending
 }

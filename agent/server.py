@@ -82,6 +82,7 @@ from agent.dashboard.options import (
     model_supports_effort,
     model_supports_images,
 )
+from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -213,6 +214,7 @@ from agent.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
+    request_service_connection,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -604,6 +606,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "request_service_connection",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -728,8 +731,15 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
 async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
         return []
+    try:
+        status = (await get_notion_status(profile_login))["notion"]
+    except Exception:
+        logger.warning("Could not read Notion connection status", exc_info=True)
+        return []
+    if not status.get("connected"):
+        return []
     return await _cached_tool_loader(
-        f"tools:notion:{profile_login}",
+        f"tools:notion:{profile_login}:{status.get('updated_at')}",
         300,
         lambda: load_notion_tools(profile_login),
     )
@@ -1691,6 +1701,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
+        request_service_connection,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
