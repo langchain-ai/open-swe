@@ -174,6 +174,18 @@
       },
       "ApiKeyCreate": {
         "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -217,6 +229,28 @@
           "created_by": {
             "title": "Created By",
             "type": "string"
+          },
+          "created_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "expires_at": {
             "format": "date-time",
@@ -2039,6 +2073,28 @@
             "title": "Created By",
             "type": "string"
           },
+          "created_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -2938,6 +2994,17 @@
             ],
             "title": "Draft Prs"
           },
+          "experimental_act_as_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Act As Approval"
+          },
           "experimental_assistant_ui": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -2949,6 +3016,18 @@
               }
             ],
             "title": "Experimental Assistant Ui"
+          },
+          "experimental_background_callbacks": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Background Callbacks"
           },
           "human_review_requests": {
             "anyOf": [
@@ -12409,6 +12488,120 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/file-contents": {
+      "get": {
+        "operationId": "api_get_review_file_contents_dashboard_api_reviews__owner___repo___pr_number__file_contents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_sha",
+            "required": true,
+            "schema": {
+              "title": "Base Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head_sha",
+            "required": true,
+            "schema": {
+              "title": "Head Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "original_path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Original Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Get Review File Contents Dashboard Api Reviews  Owner   Repo   Pr Number  File Contents Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review File Contents",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/image": {
       "get": {
         "operationId": "api_get_review_image_dashboard_api_reviews__owner___repo___pr_number__image_get",
@@ -13492,6 +13685,78 @@
           }
         },
         "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
+      "post": {
+        "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9-]{1,128}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Background Task Complete",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/heartbeat": {
+      "post": {
+        "operationId": "background_task_heartbeat_dashboard_api_sandbox_tools_background_tasks__task_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9-]{1,128}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Background Task Heartbeat",
         "tags": [
           "sandbox-tools"
         ]
@@ -16465,6 +16730,56 @@
           }
         ],
         "summary": "Api Cancel Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/share-to-workspace": {
+      "post": {
+        "operationId": "api_share_thread_with_workspace_dashboard_api_threads__thread_id__share_to_workspace_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Share Thread With Workspace Dashboard Api Threads  Thread Id  Share To Workspace Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Share Thread With Workspace",
         "tags": [
           "dashboard",
           "threads"

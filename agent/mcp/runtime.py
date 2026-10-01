@@ -50,6 +50,7 @@ class MCPSource:
     namespace: tuple[str, ...]
     list_connections: Callable[[], Awaitable[list[MCPConnection]]]
     get_connection: Callable[[str], Awaitable[MCPConnection | None]]
+    authorize: Callable[[], Awaitable[None]] | None = None
 
 
 async def _resolve_connection(
@@ -153,6 +154,9 @@ def _wrap_tool(
     async def invoke(**arguments: Any) -> Any:
         is_error = True
         try:
+            for bound_source in sources:
+                if bound_source.namespace == namespace and bound_source.authorize is not None:
+                    await bound_source.authorize()
             resolved = await _resolve_connection(name, sources)
             if resolved is None:
                 raise ToolException("MCP is disabled or disconnected")
