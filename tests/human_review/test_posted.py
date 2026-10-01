@@ -1,10 +1,11 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
 from agent.github.pull_requests import PullRequest
-from agent.human_review import standard
+from agent.human_review import lifecycle, standard
 from agent.human_review.posted import linked_pull_request
 from agent.human_review.requests import HumanReviewRequest
 from tests.support.slack_api import SlackAPI
@@ -93,3 +94,58 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions({"merged"})
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.state == "merged"
+
+
+async def test_retirement_clears_in_flight_and_stale_blockers(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pr = await PullRequest(owner="lc", repo="repo", number=7).save()
+    request = await HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="posted",
+        slack_channel_id="C1",
+        slack_message_ts="1.0",
+    ).save()
+    snapshot = PullRequestSnapshot(
+        state="open",
+        merged=False,
+        draft=False,
+        head_sha="abc",
+        title="Fix",
+        author="ada",
+        mergeable=False,
+        mergeable_state="dirty",
+        check_state="failure",
+        unresolved_threads=0,
+    )
+    adding = asyncio.Event()
+    release = asyncio.Event()
+    retiring = asyncio.Event()
+    reactions: set[str] = set()
+
+    async def add(channel: str, timestamp: str, emoji: str) -> bool:
+        adding.set()
+        await release.wait()
+        reactions.add(emoji)
+        return True
+
+    async def remove(channel: str, timestamp: str, emoji: str) -> bool:
+        reactions.discard(emoji)
+        return True
+
+    async def retire() -> None:
+        retiring.set()
+        await lifecycle.retire(request, "merged", "merged")
+
+    monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
+    monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(lifecycle.update_blocked_reactions(request, snapshot))
+        await asyncio.wait_for(adding.wait(), timeout=5)
+        tasks.create_task(retire())
+        await retiring.wait()
+        release.set()
+    assert not reactions
+    await lifecycle.update_blocked_reactions(request, snapshot)
+    assert not reactions

@@ -475,13 +475,21 @@ async def update_blocked_reactions(
     """Keep a watched post's failure and conflict reactions in step with GitHub."""
     if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
         return
-    failing = conflicted = False
-    if snapshot is not None and snapshot.state == "open" and not snapshot.merged:
-        failing = snapshot.check_state in {"failure", "blocked"}
-        conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
-    for emoji, blocked in (("x", failing), ("construction", conflicted)):
-        react = add_slack_reaction if blocked else remove_slack_reaction
-        await react(request.slack_channel_id, request.slack_message_ts, emoji)
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None:
+            return
+        failing = conflicted = False
+        if (
+            row.state == "open"
+            and snapshot is not None
+            and snapshot.state == "open"
+            and not snapshot.merged
+        ):
+            failing = snapshot.check_state in {"failure", "blocked"}
+            conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
+        for emoji, blocked in (("x", failing), ("construction", conflicted)):
+            react = add_slack_reaction if blocked else remove_slack_reaction
+            await react(row.slack_channel_id, row.slack_message_ts, emoji)
 
 
 async def mark_merged(request: HumanReviewRequest) -> None:
