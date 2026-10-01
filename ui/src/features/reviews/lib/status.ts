@@ -71,10 +71,12 @@ export const statusTones: Record<string, string> = {
   Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
 }
 
-export function isFixable(pr: OpenPullRequest) {
-  return (
-    pr.mergeable === false || pr.mergeState === "dirty" || pr.ci === "failing"
-  )
+export function isConflicted(pr: OpenPullRequest) {
+  return pr.mergeable === false || pr.mergeState === "dirty"
+}
+
+export function hasFailingChecks(pr: OpenPullRequest) {
+  return pr.ci === "failing"
 }
 
 // An unreadable count must not hide the action: the conversations may well be

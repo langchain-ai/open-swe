@@ -1279,10 +1279,19 @@
             "const": "fix",
             "title": "Intent",
             "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "conflicts",
+              "checks"
+            ],
+            "title": "Scope",
+            "type": "string"
           }
         },
         "required": [
-          "intent"
+          "intent",
+          "scope"
         ],
         "title": "FixIntent",
         "type": "object"
@@ -16475,6 +16484,20 @@
             "schema": {
               "title": "Number",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "enum": [
+                "conflicts",
+                "checks",
+                "comments"
+              ],
+              "title": "Scope",
+              "type": "string"
             }
           }
         ],

@@ -210,10 +210,10 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fix in progress",
+      name: "Fixing checks",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
     fireEvent.click(button)
     expect(api.fixPullRequest).not.toHaveBeenCalled()
   })
@@ -387,9 +387,13 @@ describe("My PRs", () => {
     expect(within(shown[0]!).getByText("Conflicted")).toBeTruthy()
     expect(within(shown[1]!).getByText("Failing")).toBeTruthy()
     expect(within(shown[2]!).queryByText("Conflicted")).toBeNull()
-    expect(within(shown[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(shown[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(shown[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
+    const fixes = (card: HTMLElement) =>
+      within(card)
+        .queryAllByRole("button", { name: /^Fix / })
+        .map((button) => button.textContent)
+    expect(fixes(shown[0]!)).toEqual(["Fix conflicts"])
+    expect(fixes(shown[1]!)).toEqual(["Fix checks"])
+    expect(fixes(shown[2]!)).toEqual([])
   })
 
   it("hides the review node and banner when the review backend is unavailable", async () => {
@@ -577,7 +581,9 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Failing")).toBeTruthy()
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(
+      within(card).getByRole("button", { name: "Fix checks" })
+    ).toBeTruthy()
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
   })
 
@@ -940,19 +946,22 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Fix checks" }))
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Fix queued",
+          name: "Check fix queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
     expect(api.fixPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining(payload.pullRequests[0]!)
+      expect.objectContaining(payload.pullRequests[0]!),
+      "checks"
     )
     resolve({ thread_id: "fix-thread", already_running: false })
-    const queued = await screen.findByRole("button", { name: "Fix queued" })
+    const queued = await screen.findByRole("button", {
+      name: "Check fix queued",
+    })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)
     expect(api.fixPullRequest).toHaveBeenCalledTimes(1)

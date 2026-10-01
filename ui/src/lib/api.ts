@@ -978,10 +978,17 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
-  | { intent: "fix"; context: OpenPullRequest | null }
+  | {
+      intent: "fix"
+      scope: PullRequestFixScope
+      context: OpenPullRequest | null
+    }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
+
+/** One kind of PR problem a fix run handles; comments go through address-comments. */
+export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1656,8 +1663,12 @@ export const api = {
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
+  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
+    pullRequestThread(pr.repo, pr.number, {
+      intent: "fix",
+      scope,
+      context: pr,
+    }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (

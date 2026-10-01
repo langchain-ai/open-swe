@@ -82,24 +82,35 @@ class OpenThreadIntent(_PullRequestIntentBase):
         return self.title
 
 
+FixScope = Literal["conflicts", "checks"]
+
+# The snapshot carries only the fields its scope concerns, so a conflict fix is
+# never handed failing checks to chase, nor a check fix the merge state.
+_SNAPSHOT_EXCLUDES: dict[FixScope, set[str]] = {
+    "conflicts": {"ci", "failing_checks", "pending_checks", "review_decision"},
+    "checks": {"mergeable", "merge_state", "review_decision"},
+}
+
+
 class FixIntent(_PullRequestIntentBase):
     intent: Literal["fix"]
+    scope: FixScope
     context: PullRequestFixContext | None = None
 
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        text = prompt("runs/pull-request-fix", url=url)
+        text = prompt("runs/pull-request-fix", url=url, scope=self.scope)
         if self.context is None:
             return text
         snapshot = prompt(
             "runs/pull-request-fix-context",
-            snapshot=self.context.model_dump_json(indent=2),
+            snapshot=self.context.model_dump_json(indent=2, exclude=_SNAPSHOT_EXCLUDES[self.scope]),
         )
         return f"{text}\n\n{snapshot}"
 
     def thread_title(self, full_name: str, number: int) -> str:
-        return f"Fix {full_name}#{number}"
+        return f"Fix {self.scope} on {full_name}#{number}"
 
 
 class AddressCommentsIntent(_PullRequestIntentBase):

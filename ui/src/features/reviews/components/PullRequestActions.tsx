@@ -3,8 +3,9 @@ import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
   canUpdateBranch,
+  hasFailingChecks,
   hasUnresolvedConversations,
-  isFixable,
+  isConflicted,
 } from "../lib/status"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
@@ -55,8 +56,15 @@ export function PullRequestActions({
         hidden={Boolean(outcome)}
         className="flex flex-wrap items-center gap-x-2 gap-y-2"
       >
-        {isFixable(pr) && (
-          <PullRequestThreadAction pr={pr} login={login} action="fix" />
+        {isConflicted(pr) && (
+          <PullRequestThreadAction
+            pr={pr}
+            login={login}
+            action="fix-conflicts"
+          />
+        )}
+        {hasFailingChecks(pr) && (
+          <PullRequestThreadAction pr={pr} login={login} action="fix-checks" />
         )}
         {hasUnresolvedConversations(pr) && (
           <PullRequestThreadAction
