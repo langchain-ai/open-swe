@@ -34,7 +34,6 @@ function ReviewerEvalPage() {
       user={session.data}
       title="Reviewer eval"
       description="Launched in a LangSmith sandbox with evals.reviewer.launch. Progress streams here live."
-      backTo={{ to: "/admin", label: "Back to Admin" }}
     >
       <ReviewerEvalStatusSection />
       <ReviewerEvalLogs />
