@@ -96,7 +96,7 @@ async def test_report_platform_issue_logs_report_and_thread_details(
     }
     assert result["export_status"] == "exported"
     assert len(export) == 1
-    assert export[0]["args"] == ("thread-1", "platform_issue")
+    assert export[0]["args"] == ("thread-1", f"platform_issue:{report_id}")
     assert export[0]["kwargs"] == {
         "score": 0.0,
         "comment": "The sandbox command timed out",

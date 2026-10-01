@@ -80,7 +80,7 @@ async def report_platform_issue(
         try:
             exported = await create_langsmith_thread_feedback(
                 thread_id,
-                "platform_issue",
+                f"platform_issue:{report_id}",
                 score=0.0,
                 comment=description,
                 source_info={
@@ -90,5 +90,8 @@ async def report_platform_issue(
                 },
             )
         except Exception:
-            logger.exception("Could not export platform issue report %s", report_id)
+            logger.exception(
+                "Could not export platform issue report",
+                extra={"platform_issue_report_id": report_id},
+            )
     return {"report_id": report_id, "export_status": "exported" if exported else "logged_only"}
