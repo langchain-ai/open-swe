@@ -10,7 +10,6 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 
-import * as apiModule from "@/lib/api"
 import { api } from "@/lib/api"
 import { ServiceConnectionCard } from "./ServiceConnectionCard"
 
@@ -52,19 +51,29 @@ it("requires a click and does not treat cancelled desktop consent as connected",
   expect((button as HTMLButtonElement).disabled).toBe(false)
 })
 
-it("leaves the web connection retryable when navigation does not complete", async () => {
-  vi.spyOn(api, "getMyNotionStatus").mockResolvedValue({ connected: false })
-  const connect = vi
-    .spyOn(apiModule, "connectService")
-    .mockReturnValue(undefined)
+it("opens consent separately, stays retryable, and refreshes on return", async () => {
+  const status = vi
+    .spyOn(api, "getMyNotionStatus")
+    .mockResolvedValue({ connected: false })
+  const open = vi.spyOn(window, "open").mockReturnValue(null)
+  const chatUrl = window.location.href
   renderCard()
   const button = await screen.findByRole("button", { name: "Connect Notion" })
+  expect(open).not.toHaveBeenCalled()
   fireEvent.click(button)
   expect((button as HTMLButtonElement).disabled).toBe(false)
   expect(screen.queryByText("Connected to your account")).toBeNull()
+  expect(window.location.href).toBe(chatUrl)
   fireEvent.click(button)
-  expect(connect).toHaveBeenCalledTimes(2)
-  expect(connect).toHaveBeenLastCalledWith("notion", window.location.href)
+  expect(open).toHaveBeenCalledTimes(2)
+  expect(open).toHaveBeenLastCalledWith(
+    `/dashboard/api/notion/login?${new URLSearchParams({ redirect_to: chatUrl })}`,
+    "_blank",
+    "noopener,noreferrer"
+  )
+  status.mockResolvedValue({ connected: true })
+  fireEvent.focus(window)
+  await screen.findByText("Connected to your account")
 })
 
 it("shows connected only after reading the current viewer's persisted status", async () => {

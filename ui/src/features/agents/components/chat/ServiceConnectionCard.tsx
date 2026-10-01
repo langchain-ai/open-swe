@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowUpRight, Check, Loader2 } from "lucide-react"
 import { SiNotion } from "react-icons/si"
@@ -11,7 +11,14 @@ export function ServiceConnectionCard() {
   const credentials = useQuery({
     queryKey: ["myNotion"],
     queryFn: api.getMyNotionStatus,
+    refetchOnWindowFocus: "always",
   })
+  const { refetch } = credentials
+  useEffect(() => {
+    const refresh = () => void refetch()
+    window.addEventListener("focus", refresh)
+    return () => window.removeEventListener("focus", refresh)
+  }, [refetch])
   const [connecting, setConnecting] = useState(false)
   const [cancelled, setCancelled] = useState(false)
   const connected = credentials.data?.connected === true
@@ -20,7 +27,7 @@ export function ServiceConnectionCard() {
     setConnecting(true)
     setCancelled(false)
     try {
-      const pending = connectService("notion", window.location.href)
+      const pending = connectService("notion", window.location.href, "_blank")
       if (pending) {
         const completed = await pending
         setCancelled(!completed)
@@ -60,8 +67,9 @@ export function ServiceConnectionCard() {
       </div>
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
         For your account only, in private threads you own. Connecting does not
-        give other participants or shared channels access. Consent opens outside
-        this chat; it does not resume the task automatically.
+        give other participants or shared channels access. Consent opens in a
+        new browser tab; return here afterward. It does not resume the task
+        automatically.
       </p>
       {cancelled && (
         <p role="status" className="mt-3 text-xs text-muted-foreground">

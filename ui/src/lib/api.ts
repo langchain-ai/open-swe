@@ -1788,7 +1788,8 @@ export function loginUrl(redirectTo?: string): string {
  */
 export function connectService(
   provider: "slack" | "notion",
-  redirectTo?: string
+  redirectTo?: string,
+  target: "_self" | "_blank" = "_self"
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
@@ -1796,9 +1797,12 @@ export function connectService(
       provider === "notion" && redirectTo
         ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
         : ""
-    window.location.assign(
-      `${API_BASE}/dashboard/api/${provider}/login${query}`
-    )
+    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
+    if (target === "_blank") {
+      window.open(url, "_blank", "noopener,noreferrer")
+    } else {
+      window.location.assign(url)
+    }
   }
   return pending
 }
