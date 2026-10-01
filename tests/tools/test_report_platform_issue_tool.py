@@ -1,6 +1,7 @@
 import importlib
 import logging
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
