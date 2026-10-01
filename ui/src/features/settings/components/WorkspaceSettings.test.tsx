@@ -155,6 +155,14 @@ describe("WorkspaceSettingsPanel", () => {
 
     expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+    const repository = screen.getByRole("link", { name: "acme/oss" })
+    expect(repository.getAttribute("href")).toBe("https://github.com/acme/oss")
+    expect(repository.getAttribute("target")).toBe("_blank")
+    const channel = await screen.findByRole("link", { name: "#oss-help" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C1"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
   })
 
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
