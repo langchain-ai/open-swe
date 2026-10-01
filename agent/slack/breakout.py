@@ -15,7 +15,6 @@ from agent.slack.client import (
 )
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
-from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks import common
@@ -236,7 +235,7 @@ async def process_slack_breakout(
             workspace=workspace,
             repo=repo.routing_repo if repo else None,
             tag=parse_workspace_tag(command.instruction)[0],
-            login=await User.login_for_slack(request.user_id) if request.user_id else None,
+            login=await service.slack_login(request.user_id) if request.user_id else None,
         )
         target = destination.channel_id
         for channel_id in dict.fromkeys((request.channel_id, target)):

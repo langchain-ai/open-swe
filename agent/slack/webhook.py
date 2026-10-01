@@ -658,7 +658,7 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     return Repo.model_validate(scoped) if scoped else candidate
 
 
-async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
+async def slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
     if login := await User.login_for_slack(user_id):
         return login
@@ -685,7 +685,7 @@ async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
     try:
-        owner_login = await _slack_login(request.user_id)
+        owner_login = await slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
         concierge_mode = request.concierge_mode or is_concierge_thread(
             request.channel_context, request.thread_ts
@@ -829,7 +829,7 @@ async def _process_slack_mention_impl(
         await persist_display_name(user_id, user_name)
 
     thread_metadata = await common.authorize_github_thread(
-        thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
+        thread_id, (await slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
     thread_messages = (
@@ -960,7 +960,7 @@ async def _process_slack_mention_impl(
         + image_urls_from_links
     )
 
-    mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
+    mapped_login = await slack_login(user_id, user_email) if allowed_bot is None else None
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
     thread_model_choice = (
