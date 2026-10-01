@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 GITHUB_APP_ID = ENV.GITHUB_APP_ID.get()
 GITHUB_APP_PRIVATE_KEY = ENV.GITHUB_APP_PRIVATE_KEY.get()
 GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
-GITHUB_DEV_TOKEN = ENV.GITHUB_DEV_TOKEN.get()
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh

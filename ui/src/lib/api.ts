@@ -1074,6 +1074,8 @@ export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput 
 }
 
 export interface ReviewDiffFile {
+  baseSha: string
+  headSha: string
   path: string
   previousPath: string | null
   status: "added" | "removed" | "modified" | "renamed"
@@ -1681,11 +1683,13 @@ export const api = {
     repo: string,
     number: number,
     path: string,
-    originalPath: string
+    originalPath: string,
+    baseSha: string,
+    headSha: string
   ) =>
     request<ReviewFileContents>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/file-contents` +
-        `?path=${encodeURIComponent(path)}&original_path=${encodeURIComponent(originalPath)}`
+        `?path=${encodeURIComponent(path)}&original_path=${encodeURIComponent(originalPath)}&base_sha=${encodeURIComponent(baseSha)}&head_sha=${encodeURIComponent(headSha)}`
     ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(

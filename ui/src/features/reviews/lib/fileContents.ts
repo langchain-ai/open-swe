@@ -20,7 +20,12 @@ export function loadReviewFileContents(
   prNumber: number,
   file: ReviewDiffFile
 ): Promise<ReviewFileContents> {
-  const cacheKey = key(owner, repo, prNumber, file.path)
+  const cacheKey = key(
+    owner,
+    repo,
+    prNumber,
+    `${file.baseSha}:${file.headSha}:${file.previousPath}:${file.path}`
+  )
   const cached = pending.get(cacheKey)
   if (cached) return cached
   const request = api
@@ -29,8 +34,18 @@ export function loadReviewFileContents(
       repo,
       prNumber,
       file.path,
-      file.previousPath ?? file.path
+      file.previousPath ?? file.path,
+      file.baseSha,
+      file.headSha
     )
+    .then((contents) => {
+      if (
+        contents.originalContent === null ||
+        contents.modifiedContent === null
+      )
+        throw new Error("File contents are unavailable for this revision")
+      return contents
+    })
     .catch((error: unknown) => {
       pending.delete(cacheKey)
       throw error

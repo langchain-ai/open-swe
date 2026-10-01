@@ -11456,6 +11456,24 @@
           },
           {
             "in": "query",
+            "name": "base_sha",
+            "required": true,
+            "schema": {
+              "title": "Base Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head_sha",
+            "required": true,
+            "schema": {
+              "title": "Head Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "original_path",
             "required": false,
             "schema": {

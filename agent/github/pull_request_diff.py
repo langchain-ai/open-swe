@@ -38,7 +38,7 @@ async def _fetch_file_at_ref(
             headers={"Accept": "application/vnd.github.raw+json"},
         )
     if response.status_code == 404:
-        return ""
+        return None
     if response.status_code != 200:
         return None
     if len(response.content) > PR_DIFF_MAX_FILE_BYTES:
@@ -58,6 +58,14 @@ async def fetch_file_versions(
     head_ref: str,
 ) -> dict[str, str | None]:
     """Return one path's contents at both refs, for hydrating a partial diff."""
+    for candidate in (path, original_path):
+        if (
+            not candidate
+            or candidate.startswith("/")
+            or "\\" in candidate
+            or any(segment in (".", "..", "") for segment in candidate.split("/"))
+        ):
+            raise HTTPException(400, "invalid repository-relative file path")
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
     original, modified = await asyncio.gather(
         _fetch_file_at_ref(client, semaphore, full_name, original_path, base_ref),

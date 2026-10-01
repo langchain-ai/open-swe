@@ -28,7 +28,6 @@ from agent.github.http import github_client
 from agent.github.pull_request_diff import (
     build_pr_diff_files,
     fetch_file_versions,
-    pull_request_diff_refs,
 )
 from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
@@ -1249,7 +1248,12 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     files = diff["files"]
     return {
         "files": [
-            {key: value for key, value in f.items() if key not in _CONTENT_KEYS} for f in files
+            {
+                **{key: value for key, value in f.items() if key not in _CONTENT_KEYS},
+                "baseSha": diff["base_sha"],
+                "headSha": diff["head_sha"],
+            }
+            for f in files
         ],
         "total_additions": sum(f["additions"] for f in files),
         "total_deletions": sum(f["deletions"] for f in files),
@@ -1261,13 +1265,20 @@ _CONTENT_KEYS = frozenset({"originalContent", "modifiedContent"})
 
 
 async def get_review_file_contents(
-    owner: str, repo: str, pr_number: int, path: str, original_path: str
+    owner: str,
+    repo: str,
+    pr_number: int,
+    path: str,
+    original_path: str,
+    base_sha: str,
+    head_sha: str,
 ) -> dict[str, str | None]:
     """Return one file's contents at the PR's merge base and head."""
+    if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in (base_sha, head_sha)):
+        raise HTTPException(400, "invalid diff revision")
     full_name = f"{owner}/{repo}"
     token = await _require_app_token()
     async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
-        base_sha, head_sha = await pull_request_diff_refs(client, full_name, pr_number)
         return await fetch_file_versions(
             client, full_name, path, original_path or path, base_sha, head_sha
         )

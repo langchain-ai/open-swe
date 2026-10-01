@@ -241,11 +241,15 @@ async def api_get_review_file_contents(
     repo: str,
     pr_number: int,
     path: str,
+    base_sha: str,
+    head_sha: str,
     original_path: str = "",
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, str | None]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_file_contents(owner, repo, pr_number, path, original_path)
+    return await get_review_file_contents(
+        owner, repo, pr_number, path, original_path, base_sha, head_sha
+    )
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/image")

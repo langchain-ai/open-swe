@@ -1122,19 +1122,29 @@ function ReviewBodyInner({
       if (!file) return
       setSideTab("chat")
       setSidePanelOpen(true)
-      setUserSelection(null)
-      const contents = await loadReviewFileContents(
-        detail.owner,
-        detail.repo,
-        detail.number,
-        file
-      )
-      for (const attachment of buildSelectionAttachments(
-        file,
-        contents,
-        range
-      )) {
-        composer?.addAttachment(attachment)
+      try {
+        const contents = await loadReviewFileContents(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          file
+        )
+        for (const attachment of buildSelectionAttachments(
+          file,
+          contents,
+          range
+        )) {
+          composer?.addAttachment(attachment)
+        }
+        setUserSelection(null)
+      } catch (error) {
+        setUserSelection({ file: path, range })
+        toast.error("Couldn’t add selection to chat", {
+          description:
+            error instanceof Error
+              ? error.message
+              : "Failed to load file contents",
+        })
       }
     },
     [composer, detail.owner, detail.repo, detail.number]

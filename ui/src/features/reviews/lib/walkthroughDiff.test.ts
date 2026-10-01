@@ -5,6 +5,8 @@ import type { ReviewDiffFile } from "@/lib/api"
 
 function file(): ReviewDiffFile {
   return {
+    baseSha: "a".repeat(40),
+    headSha: "b".repeat(40),
     path: "src/a.ts",
     previousPath: null,
     status: "modified",
