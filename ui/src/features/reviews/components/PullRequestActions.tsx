@@ -26,6 +26,7 @@ export function PullRequestActions({
   login,
   outcome,
   onSettled,
+  onSettledConfirmed,
   onReady,
   onReviewPage = false,
 }: {
@@ -33,6 +34,8 @@ export function PullRequestActions({
   login: string
   outcome?: PullRequestOutcome
   onSettled: (outcome: PullRequestOutcome | undefined) => void
+  /** Runs once GitHub confirms a merge or close; the list leaves it unset to keep the row. */
+  onSettledConfirmed?: () => void
   onReady: () => void
   onReviewPage?: boolean
 }) {
@@ -73,7 +76,7 @@ export function PullRequestActions({
           <MergePullRequest
             pr={pr}
             apply={() => settle("merged")}
-            onMerged={onReady}
+            onMerged={onSettledConfirmed}
           />
         )}
         {pr.missingChecks.length > 0 && (
@@ -84,7 +87,7 @@ export function PullRequestActions({
         <ClosePullRequest
           pr={pr}
           apply={() => settle("closed")}
-          onClosed={onReady}
+          onClosed={onSettledConfirmed}
         />
       </div>
       <PullRequestLinks

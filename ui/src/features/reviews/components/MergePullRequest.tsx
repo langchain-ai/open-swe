@@ -26,7 +26,7 @@ export function MergePullRequest({
 }: {
   pr: OpenPullRequest
   apply: () => () => void
-  onMerged: () => void
+  onMerged?: () => void
 }) {
   const [choice, setChoice] = useState<MergeMethod | "">("")
   const [preferred] = useState(readPreferredMergeMethod)
@@ -58,7 +58,7 @@ export function MergePullRequest({
     apply,
     onDone: () => {
       if (method) writePreferredMergeMethod(method)
-      onMerged()
+      onMerged?.()
     },
   })
   return (

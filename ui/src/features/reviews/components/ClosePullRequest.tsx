@@ -12,7 +12,7 @@ export function ClosePullRequest({
 }: {
   pr: OpenPullRequest
   apply: () => () => void
-  onClosed: () => void
+  onClosed?: () => void
 }) {
   const close = usePullRequestAction({
     pr,

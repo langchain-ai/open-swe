@@ -42,6 +42,7 @@ export function ReviewPageActions({
         login={session.data.login}
         outcome={outcome}
         onSettled={setOutcome}
+        onSettledConfirmed={refreshPage}
         onReady={refreshPage}
         onReviewPage
       />
