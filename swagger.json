@@ -12386,6 +12386,120 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/file-contents": {
+      "get": {
+        "operationId": "api_get_review_file_contents_dashboard_api_reviews__owner___repo___pr_number__file_contents_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_sha",
+            "required": true,
+            "schema": {
+              "title": "Base Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head_sha",
+            "required": true,
+            "schema": {
+              "title": "Head Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "original_path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Original Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Get Review File Contents Dashboard Api Reviews  Owner   Repo   Pr Number  File Contents Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review File Contents",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/image": {
       "get": {
         "operationId": "api_get_review_image_dashboard_api_reviews__owner___repo___pr_number__image_get",
