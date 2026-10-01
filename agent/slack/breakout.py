@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from agent.slack import webhook as service
+from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -17,6 +18,7 @@ from agent.slack.request import SlackRequest
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks import common
+from agent.workspaces.store import parse_workspace_tag
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,6 @@ class BreakoutCommand:
             channel_id=channel["channel_id"] if channel else "",
             prior_text=prior_text,
         )
-
-    def target_channel(self, request: SlackRequest) -> str:
-        return self.channel_id or request.channel_id
 
 
 def _title(instruction: str) -> str:
@@ -157,7 +156,18 @@ async def _start(
     target: str,
     repo: common.SlackRepoResolution | None,
     prior_text: str = "",
+    *,
+    inherited_workspace: str | None = None,
 ) -> None:
+    if (
+        target != request.channel_id
+        and request.thread_id
+        and await common.thread_exists(request.thread_id)
+    ):
+        metadata = thread_metadata(await langgraph_client().threads.get(request.thread_id))
+        if common.thread_is_private(metadata):
+            await _tell_sender(request, "Private threads cannot be broken out to another channel.")
+            return
     heading = f"`/breakout`: {_title(instruction)}"
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
@@ -200,6 +210,7 @@ async def _start(
             }
         ),
         repo,
+        inherited_workspace=inherited_workspace,
     )
 
 
@@ -215,7 +226,18 @@ async def process_slack_breakout(
                 "autocomplete: `/breakout #channel`.",
             )
             return
-        target = command.target_channel(request)
+        workspace = (
+            await common.get_thread_workspace(request.thread_id) if request.thread_id else None
+        )
+        destination = await resolve_breakout_destination(
+            request.channel_id,
+            command.channel_id,
+            workspace=workspace,
+            repo=repo.routing_repo if repo else None,
+            tag=parse_workspace_tag(command.instruction)[0],
+            login=await service.slack_login(request.user_id) if request.user_id else None,
+        )
+        target = destination.channel_id
         for channel_id in dict.fromkeys((request.channel_id, target)):
             channel = await SlackChannel.load(channel_id, use_cache=False)
             if channel is None or not channel.public:
@@ -226,7 +248,14 @@ async def process_slack_breakout(
                 )
                 return
         if command.instruction:
-            await _start(request, command.instruction, target, repo, command.prior_text)
+            await _start(
+                request,
+                command.instruction,
+                target,
+                repo,
+                command.prior_text,
+                inherited_workspace=destination.workspace if not command.channel_id else None,
+            )
         else:
             await _move(request, target)
     except Exception:
