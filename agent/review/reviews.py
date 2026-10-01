@@ -25,7 +25,10 @@ from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
 from agent.github.http import github_client
-from agent.github.pull_request_diff import build_pr_diff_files
+from agent.github.pull_request_diff import (
+    build_pr_diff_files,
+    fetch_file_versions,
+)
 from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
@@ -1233,21 +1236,52 @@ async def get_pull_request_preview(
 
 
 async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """Return the PR's changed files with full original/modified contents.
+    """Return the PR's changed files as per-file git patches.
 
     Uses the App installation token so the diff is available regardless of who
-    is viewing the review. The client renders these with pierre's MultiFileDiff.
+    is viewing the review. The client renders these with pierre's PatchDiff and
+    calls :func:`get_review_file_contents` to expand context on demand.
     """
     token = await _require_app_token()
     async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
-        diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number)
+        diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number, with_contents=False)
     files = diff["files"]
     return {
-        "files": files,
+        "files": [
+            {
+                **{key: value for key, value in f.items() if key not in _CONTENT_KEYS},
+                "baseSha": diff["base_sha"],
+                "headSha": diff["head_sha"],
+            }
+            for f in files
+        ],
         "total_additions": sum(f["additions"] for f in files),
         "total_deletions": sum(f["deletions"] for f in files),
         "truncated": diff["truncated"],
     }
+
+
+_CONTENT_KEYS = frozenset({"originalContent", "modifiedContent"})
+
+
+async def get_review_file_contents(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    path: str,
+    original_path: str,
+    base_sha: str,
+    head_sha: str,
+) -> dict[str, str | None]:
+    """Return one file's contents at the PR's merge base and head."""
+    if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in (base_sha, head_sha)):
+        raise HTTPException(400, "invalid diff revision")
+    full_name = f"{owner}/{repo}"
+    token = await _require_app_token()
+    async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
+        return await fetch_file_versions(
+            client, full_name, path, original_path or path, base_sha, head_sha
+        )
 
 
 # --- PR description image proxy ----------------------------------------------

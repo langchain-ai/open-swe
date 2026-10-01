@@ -49,10 +49,6 @@ on:
           - medium
           - high
           - critical
-      cap:
-        description: Max surfaced findings per PR (surfaced_findings only)
-        type: string
-        default: "6"
       limit:
         description: Run only the first N examples (blank = full dataset)
         type: string
@@ -80,7 +76,7 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked
       - name: Run reviewer eval
@@ -99,7 +95,6 @@ jobs:
           INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
           INPUT_SCORE_MODE: ${{ inputs.score_mode }}
           INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
-          INPUT_CAP: ${{ inputs.cap }}
           INPUT_LIMIT: ${{ inputs.limit }}
           INPUT_LANGSMITH_PROJECT: ${{ inputs.langsmith_project }}
           INPUT_ASSISTANT_ID: ${{ inputs.assistant_id }}
@@ -121,7 +116,6 @@ jobs:
             --max-concurrency "${INPUT_MAX_CONCURRENCY}" \
             --score-mode "${INPUT_SCORE_MODE}" \
             --severity-threshold "${INPUT_SEVERITY_THRESHOLD}" \
-            --cap "${INPUT_CAP}" \
             --langsmith-project "${INPUT_LANGSMITH_PROJECT}" \
             --assistant-id "${INPUT_ASSISTANT_ID}" \
             "${limit_args[@]}"

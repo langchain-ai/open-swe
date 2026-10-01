@@ -65,7 +65,6 @@ REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 MAX_SUGGESTION_LINES = 4
 MAX_FINDING_TITLE_LENGTH = 120
 DEFAULT_FINDING_TITLE = "Code review finding"
-REVIEW_FINDING_CAP = 6
 FINDING_FINGERPRINT_VERSION = 1
 
 
@@ -1132,7 +1131,6 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int | None = None,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
@@ -1140,7 +1138,6 @@ def filter_findings_for_publish(
     - severity must be at or above ``severity_threshold``
     - sorted by the reviewer's ``rank``; unranked findings follow by severity
       descending, then file/start_line for stable ordering
-    - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [
@@ -1158,4 +1155,4 @@ def filter_findings_for_publish(
             f.get("start_line") or 0,
         )
     )
-    return eligible[:cap]
+    return eligible

@@ -146,6 +146,26 @@ def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     )
 
 
+def readiness_prompt(
+    approval: HumanReviewRequest,
+    *,
+    title: str,
+    author: str,
+    files: list[ChangedFile],
+    diff_image_id: str | None = None,
+) -> tuple[str, list[Block]]:
+    """The full author-only draft card."""
+    pr = approval.pull_request
+    text = f"Mark {pr.url} ready for review so someone else can approve it."
+    return text, [
+        *_header(approval, title, author),
+        divider(),
+        *_voting_diff(approval, files, diff_image_id),
+        section("*Draft.* Mark it ready for review to request an approval in the thread."),
+        actions(_ready_button(approval), _dismiss_button(approval)),
+    ]
+
+
 def _dismiss_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
         "Dismiss",
@@ -166,8 +186,8 @@ def _voting_diff(
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(f"*Draft.* {author}, mark it ready for review so someone else can approve it."),
-            actions(_ready_button(approval), _dismiss_button(approval)),
+            section(f"*Draft.* Waiting for {author} to mark it ready for review."),
+            actions(_dismiss_button(approval)),
         ]
     return [
         section(_vote_summary(approval, author)),

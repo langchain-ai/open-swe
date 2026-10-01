@@ -49,6 +49,7 @@ class ApiKey(Base):
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    description: Mapped[str | None] = mapped_column(default=None)
 
     @property
     def status(self) -> ApiKeyStatus:
@@ -73,6 +74,7 @@ class ApiKey(Base):
         name: str,
         expires_at: datetime,
         created_by: str,
+        description: str | None = None,
     ) -> tuple[Self, str]:
         """Mint a key, returning the record and the plaintext secret exactly once."""
         secret = KEY_PREFIX + secrets.token_urlsafe(SECRET_BYTES)
@@ -84,6 +86,7 @@ class ApiKey(Base):
             key_suffix=secret[-SUFFIX_CHARS:],
             created_by=created_by,
             expires_at=expires_at,
+            description=description,
         )
         async with postgres.session() as session:
             session.add(key)

@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
+  getLocalPr: (threadId) =>
+    ipcRenderer.invoke("desktop:get-local-pr", threadId),
   getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
   readWorkspacePath: (input) =>
     ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),

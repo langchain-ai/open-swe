@@ -20,6 +20,8 @@ _TOOL_MODULES = {
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
+    "list_event_types": ".listen_events",
+    "listen_events": ".listen_events",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
@@ -60,6 +62,7 @@ _TOOL_MODULES = {
     "start_thread": ".threads",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
+    "slack_list_channel_members": "agent.slack.tools.channels",
     "slack_list_channels": "agent.slack.tools.channels",
     "slack_move_thread": "agent.slack.tools.move_thread",
     "slack_no_reply_needed": "agent.slack.tools.no_reply_needed",
@@ -93,6 +96,8 @@ __all__ = [
     "get_thread",
     "http_request",
     "list_automations",
+    "list_event_types",
+    "listen_events",
     "list_workspaces",
     "list_findings",
     "list_review_findings",
@@ -133,6 +138,7 @@ __all__ = [
     "start_thread",
     "slack_add_reaction",
     "slack_attach_html",
+    "slack_list_channel_members",
     "slack_list_channels",
     "slack_move_thread",
     "slack_no_reply_needed",
@@ -154,7 +160,11 @@ if TYPE_CHECKING:
     from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
-    from agent.slack.tools.channels import slack_list_channels, slack_post_message
+    from agent.slack.tools.channels import (
+        slack_list_channel_members,
+        slack_list_channels,
+        slack_post_message,
+    )
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.no_reply_needed import slack_no_reply_needed
@@ -181,6 +191,7 @@ if TYPE_CHECKING:
     from agent.tools.http_request import http_request
     from agent.tools.list_findings import list_findings
     from agent.tools.list_review_findings import list_review_findings
+    from agent.tools.listen_events import list_event_types, listen_events
     from agent.tools.manage_baby_sit import manage_baby_sit
     from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
