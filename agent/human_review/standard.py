@@ -432,8 +432,31 @@ def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str
     return f"{who}, Open SWE picked you to review {label}.", False
 
 
+async def _github_approvers(request: HumanReviewRequest) -> list[str]:
+    """Who has approved the pull request on GitHub; empty when GitHub cannot be read."""
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return []
+    async with github_client(token=token) as client:
+        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
+    if states is None:
+        logger.warning(
+            "Could not read reviews before picking a reviewer",
+            extra={"request_id": str(request.id)},
+        )
+        return []
+    return [login for login, state in states.items() if state == "APPROVED"]
+
+
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
+    if approvers := await _github_approvers(request):
+        names = ", ".join(f"@{login}" for login in approvers)
+        return _failure(
+            f"{names} already approved this pull request on GitHub, so it needs no reviewer. "
+            "Do not pick anyone."
+        )
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
@@ -667,23 +690,6 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
     return True
 
 
-async def _approved_on_github(request: HumanReviewRequest) -> bool:
-    """Whether anyone has approved the pull request; ``False`` when GitHub cannot be read."""
-    pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        return False
-    async with github_client(token=token) as client:
-        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
-    if states is None:
-        logger.warning(
-            "Could not read reviews before picking a reviewer",
-            extra={"request_id": str(request.id)},
-        )
-        return False
-    return "APPROVED" in states.values()
-
-
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     """Scheduler entry point for the unclaimed and auto-merge deadlines."""
     try:
@@ -697,7 +703,7 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
-        if request.kind == "standard" and await _approved_on_github(request):
+        if request.kind == "standard" and await _github_approvers(request):
             return {"status": "approved"}
         return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":
