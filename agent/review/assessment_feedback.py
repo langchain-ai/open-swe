@@ -20,7 +20,6 @@ class PublishedAssessment(ReviewAssessment):
     repo: str
     pr_number: int
     approved: bool = False
-    dry_run: bool = False
     run_id: str | None = None
 
 

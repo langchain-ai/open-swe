@@ -1109,8 +1109,6 @@ export interface ScoutProgress {
 }
 
 export interface PublishedReviewAssessment {
-  approved?: boolean
-  dry_run?: boolean
   review_id: number
   head_sha: string
   risk_score: number
