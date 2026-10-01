@@ -12,9 +12,10 @@ import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from agent.audit_logs.context import bind_workspace
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
@@ -750,9 +751,12 @@ async def api_get_workspace_settings(
 async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
     try:
-        return await upsert_workspace_overrides(await _existing_workspace(workspace), body)
+        slug = await _existing_workspace(workspace)
+        await bind_workspace(request, slug)
+        return await upsert_workspace_overrides(slug, body)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
