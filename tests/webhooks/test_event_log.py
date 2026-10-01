@@ -124,11 +124,11 @@ async def test_record_links_a_github_pr_comment_to_its_rows(
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
 
 
-@pytest.mark.parametrize("kind", ["message", "edit", "multiple", "unknown"])
+@pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])
 async def test_slack_event_links_a_single_known_pr_without_dispatching(
     registry_db: None,
     monkeypatch: pytest.MonkeyPatch,
-    kind: Literal["message", "edit", "multiple", "unknown"],
+    kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(common, "verify_slack_signature", lambda **kwargs: True)
@@ -174,6 +174,8 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
         if kind == "edit"
         else {"type": "message", "channel": "C1", **message}
     )
+    if kind == "me_message":
+        event["subtype"] = "me_message"
     payload = {"type": "event_callback", "team_id": "T1", "event_id": "Ev1", "event": event}
     body = json.dumps(payload).encode()
 
@@ -204,5 +206,11 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
     assert tuple(row) == (
         ids["user"],
         None if kind == "multiple" else ids["repository"],
-        ids["pull_request"] if kind in {"message", "edit"} else None,
+        ids["pull_request"] if kind in {"message", "me_message", "edit"} else None,
     )
+    if kind == "me_message":
+        async with transaction() as conn:
+            link = (
+                await conn.execute(text("SELECT thread_ts, pr_url FROM slack_pull_request_link"))
+            ).one()
+        assert tuple(link) == ("1786573300.000000", "https://github.com/acme/widgets/pull/7")

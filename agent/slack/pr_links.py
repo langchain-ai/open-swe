@@ -41,7 +41,14 @@ def event_pull_requests(envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
         or event is None
         or event.type not in {"message", "app_mention"}
         or event.subtype
-        not in {"", "file_share", "thread_broadcast", "bot_message", "message_changed"}
+        not in {
+            "",
+            "file_share",
+            "thread_broadcast",
+            "bot_message",
+            "message_changed",
+            "me_message",
+        }
     ):
         return []
     message = event.message if event.subtype == "message_changed" else event
