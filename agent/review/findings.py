@@ -1097,6 +1097,13 @@ def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
+    pr = metadata.get("pr")
+    if not isinstance(pr, dict):
+        return None
+    return cast(ReviewerPRMeta, pr)
+
+
 def get_thread_slack_ref(metadata: dict[str, Any]) -> ReviewerSlackThread | None:
     slack_thread = metadata.get("slack_thread")
     if not isinstance(slack_thread, dict):

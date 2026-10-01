@@ -5328,6 +5328,19 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WalkthroughDismissed": {
+        "properties": {
+          "dismissed": {
+            "title": "Dismissed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "title": "WalkthroughDismissed",
+        "type": "object"
+      },
       "WebSearchAction": {
         "properties": {
           "query": {
@@ -13190,6 +13203,73 @@
           }
         ],
         "summary": "Api Mark Review Viewed",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/walkthrough": {
+      "delete": {
+        "description": "Drop the stored walkthrough so the next scout run rebuilds it.",
+        "operationId": "api_dismiss_walkthrough_dashboard_api_reviews__owner___repo___pr_number__walkthrough_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkthroughDismissed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Dismiss Walkthrough",
         "tags": [
           "dashboard",
           "review"
