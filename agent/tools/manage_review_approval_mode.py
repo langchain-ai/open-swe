@@ -1,4 +1,4 @@
-"""Read or set a repository's approval mode on private admin surfaces."""
+"""Read approval modes privately or change them through authorized admin writes."""
 
 from typing import Literal
 

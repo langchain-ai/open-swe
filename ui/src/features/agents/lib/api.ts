@@ -316,6 +316,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  shareThreadWithWorkspace: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
+      { method: "POST" }
+    ),
   continueThreadPrivately: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/continue-private`,

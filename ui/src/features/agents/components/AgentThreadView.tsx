@@ -218,6 +218,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
 
   const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [droppedFiles, setDroppedFiles] = useState<{
+    key: number
+    files: Array<File>
+  } | null>(null)
   const restoreQueuedToComposer = useCallback(
     (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
       if (texts.length === 0 && images.length === 0) return
@@ -588,7 +592,33 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             </Alert>
           </div>
         )}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+          onDragOver={(event) => {
+            if (canPost && event.dataTransfer.types.includes("Files"))
+              event.preventDefault()
+          }}
+          onDrop={(event) => {
+            if (
+              !canPost ||
+              !event.dataTransfer.types.includes("Files") ||
+              (event.target instanceof Element &&
+                event.target.closest("[data-chat-composer]"))
+            )
+              return
+            event.preventDefault()
+            const files = Array.from(event.dataTransfer.files).filter((file) =>
+              ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+                file.type
+              )
+            )
+            if (files.length)
+              setDroppedFiles((previous) => ({
+                key: (previous?.key ?? 0) + 1,
+                files,
+              }))
+          }}
+        >
           {hydrationFailed || hydrationTimedOut ? (
             <LoadError
               title="Unable to load messages"
@@ -622,7 +652,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <Messages
                   messages={visibleMessages}
                   threadId={thread.id}
-                  showUserNames={thread.visibility !== "private"}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
@@ -705,6 +734,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
+                droppedFiles={droppedFiles}
                 models={models}
                 routed={routed}
                 selection={activeSelection}
