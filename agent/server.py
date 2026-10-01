@@ -169,6 +169,7 @@ from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.blobs import blob_namespace
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -284,7 +285,6 @@ USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
 BLOBS_ROUTE = "/blobs/"
-THREAD_BLOBS_NAMESPACE = "thread_blobs"
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -1786,7 +1786,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             skill_sources.insert(0, USER_SKILLS_ROUTE)
         # Offloaded images live in the store so they can be read without the sandbox.
         skill_routes[BLOBS_ROUTE] = StoreBackend(
-            namespace=lambda _runtime, thread_id=thread_id: (THREAD_BLOBS_NAMESPACE, thread_id)
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
         )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
