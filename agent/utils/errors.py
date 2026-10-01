@@ -46,9 +46,16 @@ def classify_exception(exc: BaseException) -> str | None:
     if isinstance(body, dict):
         inner = body.get("error")
         if isinstance(inner, dict):
-            provider_code = str(inner.get("type") or inner.get("code") or "")
+            provider_code = " ".join(
+                str(value) for value in (inner.get("type"), inner.get("code")) if value
+            )
     haystack = f"{provider_code} {exc}".lower()
 
+    if "flagged for possible" in haystack or any(
+        code in haystack
+        for code in ("content_filter", "content_policy_violation", "invalid_prompt")
+    ):
+        return "provider_refused"
     if status == 429 or "rate_limit" in haystack:
         return "provider_rate_limited"
     if status == 529 or "overloaded" in haystack:

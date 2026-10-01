@@ -94,10 +94,12 @@ def _should_fallback(exc: BaseException) -> bool:
     # Catches OverloadedError (529) and other 5xx/429 surfaced as APIStatusError.
     if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
         status = getattr(exc, "status_code", None)
-        if isinstance(status, int) and status in _RETRYABLE_STATUS_CODES:
+        if classify_exception(exc) == "provider_refused" or (
+            isinstance(status, int) and status in _RETRYABLE_STATUS_CODES
+        ):
             return True
     if type(exc) is openai.APIError:
-        return classify_exception(exc) == "provider_overloaded"
+        return classify_exception(exc) in {"provider_overloaded", "provider_refused"}
     return False
 
 

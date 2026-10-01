@@ -7,6 +7,14 @@ from agent import completion
 from agent.slack import thinking as slack_thinking
 
 
+def test_content_policy_failure_text_recommends_rephrasing_or_switching_model() -> None:
+    text = completion._failure_text("error", reason_code="provider_refused")
+
+    assert "kept returning errors" not in text
+    assert "Send another message" not in text
+    assert "rephrase" in text or "different model" in text
+
+
 class _FakeThreads:
     def __init__(self, metadata: dict[str, Any]) -> None:
         self._metadata = metadata

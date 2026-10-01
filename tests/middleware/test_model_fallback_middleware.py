@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage
 
 from agent.middleware.model_fallback import (
     ModelFallbackMiddleware,
+    _should_fallback,
 )
 
 
@@ -27,7 +28,38 @@ def _make_request() -> ModelRequest[None]:
     return cast(ModelRequest[None], request)
 
 
+def _openai_content_policy_refusal() -> openai.APIError:
+    return openai.APIError(
+        "This content was flagged for possible cybersecurity risk. "
+        "If this seems wrong, try rephrasing your request.",
+        request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+        body=None,
+    )
+
+
+def _openai_content_policy_status_refusal() -> openai.APIStatusError:
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(
+        400, request=request, json={"error": {"type": "content_policy_violation"}}
+    )
+    return openai.APIStatusError("Bad request", response=response, body=response.json())
+
+
 class TestModelFallbackMiddleware:
+    def test_openai_content_policy_refusal_is_fallback_eligible(self) -> None:
+        assert _should_fallback(_openai_content_policy_refusal())
+
+    def test_openai_content_policy_status_error_is_fallback_eligible(self) -> None:
+        assert _should_fallback(_openai_content_policy_status_refusal())
+
+    def test_openai_overload_remains_fallback_eligible(self) -> None:
+        exc = openai.APIError(
+            "Our servers are currently overloaded. Please try again later.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body=None,
+        )
+        assert _should_fallback(exc)
+
     @pytest.mark.parametrize("default_fallback_enabled", [True, False])
     @pytest.mark.parametrize("requested_fallback_enabled", [True, False])
     async def test_handoff_fallback_does_not_change_other_model_calls(
