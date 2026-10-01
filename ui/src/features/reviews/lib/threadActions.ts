@@ -11,7 +11,6 @@ export interface ThreadActionLabels {
   running: string
   checking: string
   unavailable: string
-  queuing: string
   queued: string
   retry: string
 }
@@ -36,7 +35,6 @@ export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
         running: "Fix in progress",
         checking: "Checking…",
         unavailable: "Fix unavailable",
-        queuing: "Queuing fix…",
         queued: "Fix queued",
         retry: "Retry fix",
       },
@@ -53,7 +51,6 @@ export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
         running: "Addressing comments",
         checking: "Checking…",
         unavailable: "Address comments unavailable",
-        queuing: "Queuing comment fixes…",
         queued: "Comment fixes queued",
         retry: "Retry address comments",
       },

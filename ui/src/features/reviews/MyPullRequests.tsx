@@ -67,7 +67,9 @@ export function MyPullRequests({
   const [growth, setGrowth] = useState({ key: "", rows: chunkSize })
   // A merged or closed PR keeps its row until the next refresh: dropping it
   // immediately would pull every card below it up under the pointer.
-  const [settled, setSettled] = useState<Record<string, PullRequestOutcome>>({})
+  const [settled, setSettled] = useState<
+    Partial<Record<string, PullRequestOutcome>>
+  >({})
   const pages = query.data?.pages ?? []
   const latest = pages.at(-1)
   const rows = pages.flatMap((loaded) => loaded.pullRequests)

@@ -948,6 +948,12 @@ export type PullRequestThreadIntent =
   | { intent: "fix"; context: OpenPullRequest | null }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
+  | ({ intent: "line-comment" } & Omit<ReviewCommentCreate, "start_side">)
+
+export interface PostedReviewComment {
+  id: number
+  html_url: string
+}
 
 export interface ResolveReviewThreadsResult {
   resolved: Array<string>
@@ -1103,6 +1109,12 @@ export interface PreviewFile {
   deletions: number
 }
 
+export interface PreviewReply {
+  author: string | null
+  body: string
+  url: string | null
+}
+
 export interface PreviewThread {
   thread_id: string | null
   author: string | null
@@ -1110,6 +1122,7 @@ export interface PreviewThread {
   path: string
   line: number | null
   url: string | null
+  replies: Array<PreviewReply>
 }
 
 export interface PreviewCheck {
@@ -1595,6 +1608,19 @@ export const api = {
       comment_url: commentUrl,
       instructions,
     }),
+  sendLineCommentToAgent: (
+    repo: string,
+    number: number,
+    comment: ReviewCommentCreate
+  ) =>
+    pullRequestThread(repo, number, {
+      intent: "line-comment",
+      path: comment.path,
+      line: comment.line,
+      side: comment.side,
+      start_line: comment.start_line ?? null,
+      body: comment.body,
+    }),
   resolveReviewThreads: (
     repo: string,
     number: number,
@@ -1754,6 +1780,16 @@ export const api = {
     request<SubmittedReview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
       { method: "POST", body: JSON.stringify(review) }
+    ),
+  postReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    comment: ReviewCommentCreate
+  ) =>
+    request<PostedReviewComment>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
     ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(

@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import type {
   OpenPullRequest,
   PreviewCheck,
-  PreviewFile,
   PreviewThread,
   PullRequestPreview,
 } from "@/lib/api"
@@ -17,30 +16,15 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
+import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 import {
   PullRequestActions,
   type PullRequestOutcome,
 } from "./PullRequestActions"
-
-const fileMarks: Record<string, string> = {
-  added: "A",
-  removed: "D",
-  modified: "M",
-  renamed: "R",
-  copied: "C",
-  changed: "M",
-  unchanged: "·",
-}
-
-const fileTones: Record<string, string> = {
-  added: "text-emerald-700 dark:text-emerald-400",
-  removed: "text-destructive",
-  renamed: "text-sky-700 dark:text-sky-400",
-  copied: "text-sky-700 dark:text-sky-400",
-}
 
 const skippedConclusions = new Set(["neutral", "skipped"])
 
@@ -85,33 +69,6 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function FileRow({ file }: { file: PreviewFile }) {
-  const cut = file.path.lastIndexOf("/")
-  return (
-    <li className="flex items-baseline gap-2.5 py-1 font-mono text-xs">
-      <span
-        aria-hidden="true"
-        className={cn("w-3 shrink-0", fileTones[file.status])}
-        title={file.status}
-      >
-        {fileMarks[file.status] ?? "M"}
-      </span>
-      <span className="min-w-0 flex-1 truncate" title={file.path}>
-        <span className="text-muted-foreground">
-          {cut < 0 ? "" : file.path.slice(0, cut + 1)}
-        </span>
-        <span className="text-foreground">{file.path.slice(cut + 1)}</span>
-      </span>
-      <span className="shrink-0 text-emerald-700 tabular-nums dark:text-emerald-400">
-        +{file.additions}
-      </span>
-      <span className="w-12 shrink-0 text-destructive tabular-nums">
-        −{file.deletions}
-      </span>
-    </li>
   )
 }
 
@@ -217,19 +174,27 @@ function useResolveThreads(target: PullRequestRef) {
     mutationFn: (threadIds: Array<string>) =>
       api.resolveReviewThreads(target.repo, target.number, threadIds),
     meta: { errorTitle: "Couldn't resolve conversations" },
-    onSuccess: (result) => {
-      const resolved = new Set(result.resolved)
-      queryClient.setQueryData<PullRequestPreview>(previewKey, (current) =>
-        current?.unresolved
-          ? {
-              ...current,
-              unresolved: current.unresolved.filter(
-                (thread) =>
-                  thread.thread_id === null || !resolved.has(thread.thread_id)
-              ),
-            }
-          : current
+    onMutate: async (threadIds) => {
+      const resolving = new Set(threadIds)
+      const undo = await optimisticUpdate<PullRequestPreview>(
+        queryClient,
+        previewKey,
+        (current) =>
+          current.unresolved
+            ? {
+                ...current,
+                unresolved: current.unresolved.filter(
+                  (thread) =>
+                    thread.thread_id === null ||
+                    !resolving.has(thread.thread_id)
+                ),
+              }
+            : current
       )
+      return { undo }
+    },
+    onError: (_error, _threadIds, context) => context?.undo(),
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: previewKey })
       void queryClient.invalidateQueries({ queryKey: ["my-pr-details"] })
       if (result.failed.length)
@@ -269,18 +234,19 @@ function SendToAgent({
   return (
     <TextPopover
       trigger={
-        <Button size="sm" variant="outline" disabled={send.isPending}>
-          {send.isPending ? "Sending…" : "Send to agent"}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={send.isPending || send.isSuccess}
+        >
+          {send.isPending || send.isSuccess ? "Sent to agent" : "Send to agent"}
         </Button>
       }
       title="Send this comment to the agent"
       description="The agent addresses it on the PR branch and replies on the thread."
       placeholder="Instructions (optional)"
       submitLabel="Send"
-      pending={send.isPending}
-      onSubmit={(instructions, done) =>
-        send.mutate(instructions, { onSuccess: done })
-      }
+      onSubmit={(instructions) => send.mutateAsync(instructions)}
     />
   )
 }
@@ -296,10 +262,6 @@ function Conversation({
 }) {
   const [open, setOpen] = useState(false)
   const [clamped, setClamped] = useState(false)
-  const resolving =
-    resolve.isPending &&
-    thread.thread_id !== null &&
-    resolve.variables.includes(thread.thread_id)
   // Only offer the toggle when there is something hidden to show.
   const measure = useCallback((node: HTMLParagraphElement | null) => {
     if (node) setClamped(node.scrollHeight > node.clientHeight + 1)
@@ -323,10 +285,9 @@ function Conversation({
             <Button
               size="sm"
               variant="outline"
-              disabled={resolve.isPending}
               onClick={() => resolve.mutate([thread.thread_id!])}
             >
-              {resolving ? "Resolving…" : "Resolve"}
+              Resolve
             </Button>
           )}
           {thread.url && (
@@ -345,6 +306,18 @@ function Conversation({
       {open ? (
         <div className="mt-1 max-w-[72ch]">
           <Markdown content={thread.body} />
+          {thread.replies.length > 0 && (
+            <ul className="mt-2 space-y-2 border-t border-border pt-2">
+              {thread.replies.map((reply, index) => (
+                <li key={reply.url ?? index}>
+                  <span className="text-xs font-medium text-foreground">
+                    {reply.author ?? "Someone"}
+                  </span>
+                  <Markdown content={reply.body} />
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <p
@@ -354,13 +327,17 @@ function Conversation({
           {thread.body}
         </p>
       )}
-      {(clamped || open) && (
+      {(clamped || open || thread.replies.length > 0) && (
         <button
           type="button"
           onClick={() => setOpen(!open)}
           className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
         >
-          {open ? "Show less" : "Show more"}
+          {open
+            ? "Show less"
+            : thread.replies.length > 0
+              ? `Show more · ${thread.replies.length} ${thread.replies.length === 1 ? "reply" : "replies"}`
+              : "Show more"}
         </button>
       )}
     </li>
@@ -422,7 +399,7 @@ export function PullRequestDetail({
   login: string
   outcome?: PullRequestOutcome
   onClose: () => void
-  onSettled: (outcome: PullRequestOutcome) => void
+  onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
   const preview = useQuery(pullRequestPreviewQuery(pr))
@@ -532,13 +509,9 @@ export function PullRequestDetail({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={resolve.isPending}
                     onClick={() => resolve.mutate(resolvableIds)}
                   >
-                    {resolve.isPending &&
-                    resolve.variables.length === resolvableIds.length
-                      ? "Resolving…"
-                      : "Resolve all"}
+                    Resolve all
                   </Button>
                 )
               }
@@ -559,11 +532,7 @@ export function PullRequestDetail({
                   No files changed.
                 </p>
               ) : (
-                <ul>
-                  {data.files.map((file) => (
-                    <FileRow key={file.path} file={file} />
-                  ))}
-                </ul>
+                <PullRequestFiles pr={pr} login={login} files={data.files} />
               )}
             </Section>
 

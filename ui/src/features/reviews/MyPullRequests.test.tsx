@@ -285,8 +285,7 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
-    const merging = await screen.findByRole("button", { name: "Merging…" })
-    expect((merging as HTMLButtonElement).disabled).toBe(true)
+    expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
@@ -302,7 +301,7 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("keeps a rejected merge visible with a retry action", async () => {
+  it("rolls a rejected merge back to the merge action", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
@@ -319,9 +318,13 @@ describe("My PRs", () => {
       "Required checks have not passed"
     )
     expect(screen.getByText("Change 1")).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
     expect(
-      (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
-        .disabled
+      (
+        (await screen.findByRole("button", {
+          name: "Merge",
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 
@@ -941,7 +944,7 @@ describe("My PRs", () => {
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Queuing fix…",
+          name: "Fix queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
@@ -1107,7 +1110,7 @@ describe("My PRs", () => {
     expect(
       (
         (await within(card).findByRole("button", {
-          name: "Queuing comment fixes…",
+          name: "Comment fixes queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)

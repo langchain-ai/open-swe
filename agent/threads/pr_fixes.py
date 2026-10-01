@@ -59,6 +59,8 @@ class PullRequestThreadRun(BaseModel):
 
 class _PullRequestIntentBase(BaseModel):
     dispatches_run: ClassVar[bool]
+    # Distinct content per request, so a busy thread gets it queued instead of dropped.
+    queues_behind_running: ClassVar[bool] = False
 
     def prompt(self, url: str) -> str:
         raise NotImplementedError
@@ -133,8 +135,35 @@ class AddressCommentIntent(_PullRequestIntentBase):
         return f"Address comment on {full_name}#{number}"
 
 
+class LineCommentIntent(_PullRequestIntentBase):
+    intent: Literal["line-comment"]
+    path: str = Field(min_length=1, max_length=1000)
+    line: int = Field(ge=1)
+    side: Literal["LEFT", "RIGHT"] = "RIGHT"
+    start_line: int | None = Field(default=None, ge=1)
+    body: str = Field(min_length=1, max_length=10_000)
+
+    dispatches_run: ClassVar[bool] = True
+    queues_behind_running: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        low = min(self.start_line or self.line, self.line)
+        lines = f"line {self.line}" if low == self.line else f"lines {low}-{self.line}"
+        return prompt(
+            "runs/pull-request-line-comment",
+            url=url,
+            path=self.path,
+            lines=lines,
+            side="old" if self.side == "LEFT" else "new",
+            body=self.body.strip(),
+        )
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Address comment on {full_name}#{number}"
+
+
 PullRequestThreadIntent = Annotated[
-    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent,
+    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent | LineCommentIntent,
     Field(discriminator="intent"),
 ]
 
@@ -284,7 +313,8 @@ async def start_pull_request_thread(
         _assert_thread_postable(thread_metadata(current), login, email)
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
-        if current.get("status") == "busy":
+        busy = current.get("status") == "busy"
+        if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
@@ -305,7 +335,7 @@ async def start_pull_request_thread(
             client=client,
             multitask_strategy="enqueue",
         )
-        return PullRequestThreadRun(thread_id=thread_id)
+        return PullRequestThreadRun(thread_id=thread_id, already_running=busy)
 
 
 async def dispatch_pull_request_prompt(

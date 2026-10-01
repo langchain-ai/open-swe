@@ -41,10 +41,7 @@ export function ReviewPageActions({
         pr={pr.data}
         login={session.data.login}
         outcome={outcome}
-        onSettled={(settled) => {
-          setOutcome(settled)
-          refreshPage()
-        }}
+        onSettled={setOutcome}
         onReady={refreshPage}
         onReviewPage
       />

@@ -68,7 +68,7 @@ it("blocks the sibling action as soon as one is queued", async () => {
   await waitFor(() => expect(address.hasAttribute("disabled")).toBe(false))
 
   fireEvent.click(fix)
-  await screen.findByRole("button", { name: "Queuing fix…" })
+  await screen.findByRole("button", { name: "Fix queued" })
   finish({ thread_id: "t", already_running: false })
 
   await screen.findByRole("button", { name: "Fix queued" })

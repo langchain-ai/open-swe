@@ -45,7 +45,7 @@ export function PullRequestCard({
   compact?: boolean
   selected?: boolean
   onSelect: () => void
-  onSettled: (outcome: PullRequestOutcome) => void
+  onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
   if (compact) {

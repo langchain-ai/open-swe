@@ -528,7 +528,7 @@ function selectionSideToGithub(
 // Map a Pierre selection range to a GitHub inline-comment payload. GitHub
 // forbids multi-line ranges that span sides, so a cross-side selection collapses
 // to a single line on the end side; same-side ranges keep their start_line.
-function buildCommentPayload(
+export function buildCommentPayload(
   path: string,
   range: SelectedLineRange,
   body: string
@@ -558,7 +558,7 @@ function buildCommentPayload(
   }
 }
 
-function commentRangeLabel(range: SelectedLineRange): string {
+export function commentRangeLabel(range: SelectedLineRange): string {
   const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
   const lo = Math.min(range.start, range.end)
   const hi = Math.max(range.start, range.end)
