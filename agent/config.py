@@ -298,6 +298,16 @@ ENV.var(
     "MCP tool that reports which targets contain a commit. Example: releases.locate_commit. "
     "Empty skips the poll.",
 )
+ENV.var(
+    "ROLLOUT_WATCH_SCHEDULE",
+    "Five-field cron schedule for rollout polls.",
+    default="*/15 * * * *",
+)
+ENV.var(
+    "ROLLOUT_MAX_WATCH_AGE_DAYS",
+    "Days a rollout watch runs before it stops and reports what is still waiting.",
+    default="7",
+)
 
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)

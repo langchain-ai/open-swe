@@ -1,7 +1,8 @@
 """Durable watch for a merged OpenSWE pull request.
 
-A scheduler cron polls the configured locate tool every 15 minutes. The
-implementing thread is resumed when dev, staging, or prod newly contains the
+A scheduler cron polls the configured locate tool on ``ROLLOUT_WATCH_SCHEDULE``
+(every 15 minutes by default). The implementing thread is resumed when dev,
+staging, or prod newly contains the
 merge SHA. Each stage waits one quiet poll, then runs the same check. A stage
 with no configured targets is skipped. ``rollout_page_check`` opens the page
 in the sandbox browser and does not log in.
@@ -34,9 +35,10 @@ logger = logging.getLogger(__name__)
 
 WATCH_NAMESPACE = ["rollout_watches"]
 WATCH_CRON_KIND = "rollout_watch"
-WATCH_SCHEDULE = "*/15 * * * *"
 WATCH_LOCK_TTL_MINUTES = 5
-MAX_WATCH_AGE = timedelta(days=7)
+_DEFAULT_WATCH_SCHEDULE = "*/15 * * * *"
+_DEFAULT_MAX_WATCH_DAYS = 7
+_CRON_FIELD = re.compile(r"^[A-Za-z0-9*,/\-]+$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
@@ -270,6 +272,29 @@ def _payload(raw: Any) -> dict[str, Any] | None:
     return None
 
 
+def watch_schedule() -> str:
+    """Cron for rollout polls. Invalid values use every 15 minutes."""
+    raw = ENV.ROLLOUT_WATCH_SCHEDULE.get().strip()
+    fields = raw.split()
+    if len(fields) == 5 and all(_CRON_FIELD.fullmatch(field) for field in fields):
+        return raw
+    logger.warning("ROLLOUT_WATCH_SCHEDULE is not a five-field cron; using the default")
+    return _DEFAULT_WATCH_SCHEDULE
+
+
+def max_watch_age() -> timedelta:
+    """How long a watch runs. Invalid values use 7 days."""
+    try:
+        days = ENV.ROLLOUT_MAX_WATCH_AGE_DAYS.get_int(_DEFAULT_MAX_WATCH_DAYS)
+    except ValueError:
+        logger.warning("ROLLOUT_MAX_WATCH_AGE_DAYS is not an integer; using the default")
+        return timedelta(days=_DEFAULT_MAX_WATCH_DAYS)
+    if days < 1:
+        logger.warning("ROLLOUT_MAX_WATCH_AGE_DAYS must be at least 1; using the default")
+        return timedelta(days=_DEFAULT_MAX_WATCH_DAYS)
+    return timedelta(days=days)
+
+
 def _expired(watch: RolloutWatch) -> bool:
     try:
         created = datetime.fromisoformat(watch.created_at)
@@ -277,7 +302,7 @@ def _expired(watch: RolloutWatch) -> bool:
         return False
     if created.tzinfo is None:
         created = created.replace(tzinfo=UTC)
-    return datetime.now(UTC) - created >= MAX_WATCH_AGE
+    return datetime.now(UTC) - created >= max_watch_age()
 
 
 def _merge_sha(payload: Mapping[str, Any]) -> str:
@@ -312,7 +337,7 @@ def _repo_identity(payload: Mapping[str, Any]) -> tuple[str, str, int] | None:
 async def _create_watch_cron(key: str) -> str:
     cron = await get_client().crons.create(
         "scheduler",
-        schedule=WATCH_SCHEDULE,
+        schedule=watch_schedule(),
         input={"task": "rollout", "watch_key": key},
         config={"configurable": {"task": "rollout", "watch_key": key}},
         metadata={"kind": WATCH_CRON_KIND, "watch_key": key},
@@ -625,6 +650,7 @@ async def evaluate_rollout(key: str) -> str:
                     pr_url=watch.pr_url,
                     sha=watch.sha,
                     waiting=waiting,
+                    days=max_watch_age().days,
                 ),
             )
             if not sent:

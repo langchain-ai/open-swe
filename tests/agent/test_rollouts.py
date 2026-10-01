@@ -159,6 +159,23 @@ def test_a_missing_stage_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rollouts.envs_ready(targets) == {"staging"}
 
 
+def test_watch_schedule_and_age_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROLLOUT_WATCH_SCHEDULE", raising=False)
+    monkeypatch.delenv("ROLLOUT_MAX_WATCH_AGE_DAYS", raising=False)
+    assert rollouts.watch_schedule() == "*/15 * * * *"
+    assert rollouts.max_watch_age() == timedelta(days=7)
+
+    monkeypatch.setenv("ROLLOUT_WATCH_SCHEDULE", "*/5 * * * *")
+    monkeypatch.setenv("ROLLOUT_MAX_WATCH_AGE_DAYS", "3")
+    assert rollouts.watch_schedule() == "*/5 * * * *"
+    assert rollouts.max_watch_age() == timedelta(days=3)
+
+    monkeypatch.setenv("ROLLOUT_WATCH_SCHEDULE", "not a cron")
+    monkeypatch.setenv("ROLLOUT_MAX_WATCH_AGE_DAYS", "0")
+    assert rollouts.watch_schedule() == "*/15 * * * *"
+    assert rollouts.max_watch_age() == timedelta(days=7)
+
+
 def test_rollout_repos_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ROLLOUT_REPOS", raising=False)
     assert not rollouts.rollout_repo_allowed("langchain-ai", "langchainplus")
