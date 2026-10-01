@@ -907,7 +907,7 @@ describe("My PRs", () => {
     expect(screen.getByText("Not reviewed")).toBeTruthy()
   })
 
-  it("ranks conflicts and failing checks above review decisions, and keeps both on a draft", async () => {
+  it("shows a pill for every condition a PR is in", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -923,8 +923,8 @@ describe("My PRs", () => {
     await screen.findByText("Change 6")
     expect(cards().map(statuses)).toEqual([
       ["Draft", "Conflicted", "Failing"],
-      ["Conflicted"],
-      ["Failing"],
+      ["Conflicted", "Failing"],
+      ["Failing", "Approved"],
       ["Changes Requested"],
       ["Approved"],
       ["Reviewable"],
