@@ -7,7 +7,10 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 
+import { useQuery } from "@tanstack/react-query"
+
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -15,9 +18,11 @@ import { useSession } from "@/lib/session"
 import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents")({
   component: AgentsLayout,
+  head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
 /**
@@ -47,8 +52,25 @@ function AgentsLayout() {
     from: "/agents/local/$sessionId",
     shouldThrow: false,
   })
+  const reviewMatch = useMatch({
+    from: "/agents/reviews/$owner/$repo/$number",
+    shouldThrow: false,
+  })
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
+  const reviewNumber = Number(reviewMatch?.params.number)
+  // A review page's sidebar row is the user's review chat thread.
+  const reviewChat = useQuery({
+    ...reviewChatQuery({
+      owner: reviewMatch?.params.owner ?? "",
+      repo: reviewMatch?.params.repo ?? "",
+      number: reviewNumber,
+    }),
+    enabled: Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0,
+  })
+  const activeReviewThreadId = reviewMatch
+    ? reviewChat.data?.thread_id
+    : undefined
   const homeMatch = useMatch({ from: "/agents/", shouldThrow: false })
   const [desktopSource] = useDesktopThreadSource()
   const localHome =
@@ -118,7 +140,7 @@ function AgentsLayout() {
     <AgentsShell
       user={session.data ?? null}
       localOnly={localOnly}
-      activeThreadId={activeThreadId}
+      activeThreadId={activeThreadId ?? activeReviewThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
       {awaitingRuntimeChoice ? (

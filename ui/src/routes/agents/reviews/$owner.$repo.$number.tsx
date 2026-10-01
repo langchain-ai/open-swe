@@ -8,14 +8,29 @@ import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewComments
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { useSidebarControls } from "@/components/sidebar-layout"
+import {
+  markReviewViewed,
+  reviewChatQuery,
+} from "@/features/agents/lib/queries"
+import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
+  head: ({
+    params,
+  }: {
+    params: { owner: string; repo: string; number: string }
+  }) => ({
+    meta: [
+      { title: pageTitle(`${params.owner}/${params.repo} #${params.number}`) },
+    ],
+  }),
 })
 
 function ReviewDetailPage() {
@@ -24,6 +39,8 @@ function ReviewDetailPage() {
   const session = useSession()
   const sidebar = useSidebarControls()
   const sidebarCollapsed = sidebar?.collapsed ?? false
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   // A comment picked from the dropdown, shown inline in the diff (not GitHub).
   const [activeComment, setActiveComment] = useState<PrReviewComment | null>(
     null
@@ -40,12 +57,15 @@ function ReviewDetailPage() {
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
   const sidebarRef = useRef(sidebar)
+  const openedFromSidebar = useRef(
+    reviewOpenedFromSidebar({ owner, repo, number: prNumber })
+  )
   useEffect(() => {
     sidebarRef.current = sidebar
   }, [sidebar])
   useEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed) return
+    if (!controls || controls.collapsed || openedFromSidebar.current) return
     controls.setCollapsed(true)
     return () => controls.setCollapsed(false)
   }, [])
@@ -68,6 +88,11 @@ function ReviewDetailPage() {
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
   const seenShaRef = useRef(headSha)
+  const prTitle = detail.data?.pr.title
+  const documentTitle = pageTitle(prTitle ?? `${owner}/${repo} #${prNumber}`)
+  useEffect(() => {
+    document.title = documentTitle
+  }, [documentTitle])
   useEffect(() => {
     if (headSha && seenShaRef.current && headSha !== seenShaRef.current) {
       void queryClient.invalidateQueries({
@@ -76,6 +101,21 @@ function ReviewDetailPage() {
     }
     if (headSha) seenShaRef.current = headSha
   }, [headSha, queryClient, owner, repo, prNumber])
+
+  const reviewChatThreadId = useQuery({
+    ...reviewChatQuery({ owner, repo, number: prNumber }),
+    enabled: !!session.data && Number.isFinite(prNumber),
+  }).data?.thread_id
+  // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
+  const walkthroughSha = detail.data?.walkthrough?.head_sha
+  useEffect(() => {
+    if (!reviewChatThreadId) return
+    markReviewViewed(
+      queryClient,
+      { owner, repo, number: prNumber },
+      reviewChatThreadId
+    )
+  }, [queryClient, owner, repo, prNumber, reviewChatThreadId, walkthroughSha])
 
   if (session.isLoading) {
     return (
@@ -89,10 +129,11 @@ function ReviewDetailPage() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
       <header
+        data-desktop-drag-region=""
         className={cn(
           "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
           // Clear room for the fixed collapse toggle when the sidebar is hidden.
-          sidebarCollapsed ? "pl-14" : "pl-4"
+          sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
         )}
       >
         <Link

@@ -3,6 +3,7 @@ import { CatchBoundary } from "@tanstack/react-router"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
+import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -12,8 +13,14 @@ import {
   threadDetailFailed,
   threadDetailResolved,
 } from "@/lib/perf/threadLoad"
+import { pageTitle } from "@/lib/pageTitle"
 
-export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
+export function AgentThreadPage(props: {
+  threadId: string
+  active?: boolean
+  /** Show this subagent's transcript instead of the thread's own. */
+  subagentId?: string
+}) {
   return (
     <CatchBoundary
       getResetKey={() => props.threadId}
@@ -34,9 +41,11 @@ export function AgentThreadPage(props: { threadId: string; active?: boolean }) {
 function AgentThreadContent({
   threadId,
   active = true,
+  subagentId,
 }: {
   threadId: string
   active?: boolean
+  subagentId?: string
 }) {
   const threadQuery = useAgentThread(threadId)
   const transcript = threadQuery.data?.transcript === "v2"
@@ -59,10 +68,10 @@ function AgentThreadContent({
 
   useEffect(() => {
     if (!active || !title) return
-    const documentTitle = `${title} - Open SWE`
+    const documentTitle = pageTitle(title)
     document.title = documentTitle
     return () => {
-      if (document.title === documentTitle) document.title = "Open SWE"
+      if (document.title === documentTitle) document.title = pageTitle("Agents")
     }
   }, [active, title])
 
@@ -90,7 +99,15 @@ function AgentThreadContent({
   return (
     <AgentThreadStreamBoundary active={active}>
       <ThreadSourceProvider threadId={threadId} transcript={transcript}>
-        <AgentThreadView thread={threadQuery.data} />
+        {subagentId ? (
+          <SubagentThreadView
+            key={subagentId}
+            thread={threadQuery.data}
+            subagentId={subagentId}
+          />
+        ) : (
+          <AgentThreadView thread={threadQuery.data} />
+        )}
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
   )

@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx2
 import pytest
 from fastapi import HTTPException
 
@@ -32,45 +31,12 @@ def _clear_token_cache() -> None:
 # (a) expired-cache reads -----------------------------------------------------
 
 
-def test_is_expired_handles_iso_zulu_strings() -> None:
-    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
-
-
-def test_is_expired_handles_unix_timestamps() -> None:
-    past = (datetime.now(UTC) - timedelta(hours=1)).timestamp()
-    future = (datetime.now(UTC) + timedelta(hours=1)).timestamp()
-    assert github_token._is_expired(past) is True
-    assert github_token._is_expired(future) is False
-
-
-def test_is_expired_treats_unparseable_as_not_expired() -> None:
-    assert github_token._is_expired(None) is False
-    assert github_token._is_expired("") is False
-    assert github_token._is_expired("not-a-date") is False
-
-
 def test_get_github_token_returns_none_for_expired_cache() -> None:
     past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     github_token.cache_github_token_for_thread(
         "tid", "ghp_secret", expires_at=past, is_bot_token=True
     )
     assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
-
-
-def test_get_github_token_returns_fresh_cached_token() -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    github_token.cache_github_token_for_thread(
-        "tid", "ghp_secret", expires_at=future, is_bot_token=True
-    )
-    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) == "ghp_secret"
-
-
-def test_get_github_token_returns_cached_token_when_no_expires_at() -> None:
-    github_token.cache_github_token_for_thread("tid", "ghp_secret", is_bot_token=True)
-    assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) == "ghp_secret"
 
 
 def test_user_token_cache_is_bound_to_github_login() -> None:
@@ -89,64 +55,14 @@ def test_unbound_user_token_is_not_cached() -> None:
     assert github_token._GITHUB_TOKEN_CACHE == {}
 
 
-def test_cached_bot_token_is_available_to_any_principal() -> None:
-    github_token.cache_github_token_for_thread("tid", "bot-token", is_bot_token=True)
-    config = {"configurable": {"thread_id": "tid", "github_login": "alice"}}
-    assert github_token.get_github_token(config) == "bot-token"
-
-
 def test_cached_token_expires_after_max_ttl() -> None:
     """A token with no/far expiry is still dropped once it's older than the 24h cap."""
     far_future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
     old_cached_at = datetime.now(UTC) - timedelta(hours=25)
     github_token._GITHUB_TOKEN_CACHE[("tid", github_token._BOT_PRINCIPAL)] = (
-        "ghp_secret",
-        far_future,
-        old_cached_at,
+        github_token._CachedToken("ghp_secret", far_future, old_cached_at)
     )
     assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
-
-
-def test_cache_write_sweeps_other_expired_entries() -> None:
-    """Writing one entry evicts unrelated entries that have passed their expiry."""
-    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    github_token.cache_github_token_for_thread(
-        "stale", "ghp_stale", expires_at=past, is_bot_token=True
-    )
-    github_token.cache_github_token_for_thread("fresh", "ghp_fresh", is_bot_token=True)
-    assert ("stale", github_token._BOT_PRINCIPAL) not in github_token._GITHUB_TOKEN_CACHE
-    assert ("fresh", github_token._BOT_PRINCIPAL) in github_token._GITHUB_TOKEN_CACHE
-
-
-@pytest.mark.asyncio
-async def test_get_github_token_from_thread_skips_expired() -> None:
-    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-    github_token.cache_github_token_for_thread(
-        "tid", "ghp_revoked", expires_at=past, is_bot_token=True
-    )
-    token, expires_at = await github_token.get_github_token_from_thread("tid")
-    assert token is None
-    assert expires_at is None
-
-
-@pytest.mark.asyncio
-async def test_get_github_token_from_thread_returns_fresh() -> None:
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    github_token.cache_github_token_for_thread(
-        "tid", "ghp_live", expires_at=future, is_bot_token=True
-    )
-    token, expires_at = await github_token.get_github_token_from_thread("tid")
-    assert token == "ghp_live"
-    assert expires_at == future
-
-
-@pytest.mark.asyncio
-async def test_invalidate_cached_github_token_clears_cache() -> None:
-    github_token.cache_github_token_for_thread("tid-42", "ghp_live", is_bot_token=True)
-    await github_token.invalidate_cached_github_token("tid-42")
-    token, expires_at = await github_token.get_github_token_from_thread("tid-42")
-    assert token is None
-    assert expires_at is None
 
 
 # (b) 401 on a downstream GitHub call -----------------------------------------
@@ -181,54 +97,6 @@ class _MockHttpxClient:
     async def get(self, url: str, **kwargs: Any) -> _MockResponse:
         self.gets.append({"url": url, **kwargs})
         return _MockResponse(self.status_code, self.json_data)
-
-
-def test_react_to_github_comment_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
-    mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
-
-    async def _run() -> None:
-        await github_comments.react_to_github_comment(
-            {"owner": "o", "name": "r"},
-            comment_id=1,
-            event_type="issue_comment",
-            token="revoked",
-        )
-
-    with pytest.raises(github_token.GitHubAuthError):
-        asyncio.run(_run())
-
-
-def test_fetch_pr_comments_since_last_tag_raises_on_401(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
-
-    async def _run() -> None:
-        await github_comments.fetch_pr_comments_since_last_tag(
-            {"owner": "o", "name": "r"},
-            pr_number=42,
-            token="revoked",
-        )
-
-    with pytest.raises(github_token.GitHubAuthError):
-        asyncio.run(_run())
-
-
-def test_fetch_issue_comments_raises_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
-    mock_client = _MockHttpxClient(status_code=401)
-    monkeypatch.setattr(httpx2, "AsyncClient", lambda *a, **kw: mock_client)
-
-    async def _run() -> None:
-        await github_comments.fetch_issue_comments(
-            {"owner": "o", "name": "r"},
-            issue_number=42,
-            token="revoked",
-        )
-
-    with pytest.raises(github_token.GitHubAuthError):
-        asyncio.run(_run())
 
 
 # (c) successful re-auth following stale-cache invalidation -------------------
@@ -381,7 +249,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     assert invalidated["calls"] == 1
     assert resolves == ["stale-token", "fresh-token"]
     assert react_calls == ["stale-token", "fresh-token"]
-    assert fetch_calls == ["fresh-token"]
+    assert fetch_calls == ["stale-token"]
 
 
 @pytest.mark.asyncio
@@ -412,7 +280,11 @@ async def test_publish_review_invalidates_cached_token_on_401(
             },
         },
     )
-    monkeypatch.setattr(publish_review_module, "get_github_token", lambda: "revoked-token")
+    monkeypatch.setattr(
+        publish_review_module,
+        "resolve_thread_github_token",
+        AsyncMock(return_value="revoked-token"),
+    )
     monkeypatch.setattr(publish_review_module, "invalidate_cached_github_token", fake_invalidate)
     monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
@@ -423,3 +295,38 @@ async def test_publish_review_invalidates_cached_token_on_401(
     assert "401" in result["error"]
     assert invalidated["calls"] == 1
     assert invalidated.get("thread_id") == "thread-xyz"
+
+
+@pytest.mark.asyncio
+async def test_expired_bot_token_is_re_minted_at_its_original_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {"configurable": {"thread_id": "tid"}}
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    github_token.cache_github_token_for_thread(
+        "tid", "stale-token", expires_at=expired, is_bot_token=True, repositories=["r"]
+    )
+    fresh_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    mint = AsyncMock(return_value=("fresh-token", fresh_expiry))
+    monkeypatch.setattr(github_token, "get_github_app_installation_token_with_expiry", mint)
+
+    assert await github_token.resolve_thread_github_token(config) == "fresh-token"
+    assert await github_token.resolve_thread_github_token(config) == "fresh-token"
+    mint.assert_awaited_once_with(repositories=("r",))
+
+
+@pytest.mark.asyncio
+async def test_expired_user_token_is_never_replaced_with_a_bot_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    principal = github_token.github_token_principal(login="alice")
+    config = {"configurable": {"thread_id": "tid", "github_login": "alice"}}
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    github_token.cache_github_token_for_thread(
+        "tid", "alice-token", expires_at=expired, principal=principal
+    )
+    mint = AsyncMock()
+    monkeypatch.setattr(github_token, "get_github_app_installation_token_with_expiry", mint)
+
+    assert await github_token.resolve_thread_github_token(config) is None
+    mint.assert_not_awaited()

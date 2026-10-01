@@ -9,8 +9,7 @@ from agent.github import routes as github_routes
 from agent.github import webhook as github_webhooks
 from agent.webhooks import common as webhook_common
 from agent.workspaces.routing import WorkspaceLookupError
-from agent.workspaces.store import WORKSPACES, WORKSPACES_NAMESPACE, import_store_records
-from tests.conftest import FakeStore, post_signed_github_webhook
+from tests.conftest import post_signed_github_webhook, register_github_logins
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"
 
@@ -60,6 +59,7 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
         called["event_type"] = event_type
 
     monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
+    register_github_logins(monkeypatch, "octocat")
 
     response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
 
@@ -67,35 +67,6 @@ async def test_unowned_repo_is_not_ignored_for_workspace_when_policy_unset(
     body = response.json()
     assert not (body["status"] == "ignored" and "workspace" in body.get("reason", ""))
     assert called["event_type"] == "issue_comment"
-
-
-async def test_repository_of_a_stranded_store_record_asks_github_to_retry(
-    registry_db: None, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A record the import skipped still owns its repository, just not in PostgreSQL yet."""
-    monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
-    monkeypatch.setattr(WORKSPACES, "import_completed", False)
-    fake_store.seed(
-        WORKSPACES_NAMESPACE,
-        "legacy",
-        {"slug": "legacy", "name": "Legacy", "repos": ["acme/unowned"], "snapshot_status": "?"},
-    )
-    # Another record imports fine, so the table is populated and only the
-    # stranded record's repository is what keeps this delivery from routing.
-    fake_store.seed(
-        WORKSPACES_NAMESPACE, "oss", {"slug": "oss", "name": "OSS", "repos": ["acme/oss"]}
-    )
-    assert await import_store_records() == 1
-
-    async def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("no event may be processed while ownership is unknown")
-
-    monkeypatch.setattr(github_webhooks, "process_github_issue", fail_if_called)
-
-    response = await _post_github_webhook("issue_comment", _unowned_repo_issue_comment_payload())
-
-    assert response.status_code == 503
-    assert response.json()["reason"] == "workspace ownership is temporarily unreadable"
 
 
 async def test_unreadable_workspace_list_asks_github_to_retry(

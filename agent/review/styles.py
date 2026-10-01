@@ -5,7 +5,6 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
-from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -19,10 +18,8 @@ REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
 
 
-async def get_approval_policy(owner: str, repo: str, settings: Mapping[str, object]) -> str | None:
-    record = await REVIEW_STYLES.get(f"{owner}/{repo}") if owner and repo else None
-    policy = (record.approval_policy if record else None) or settings.get("approval_policy")
-    return policy.strip() or None if isinstance(policy, str) else None
+# What a positive approval assessment does; a repository with no mode set is ``dry_run``.
+ApprovalMode = Literal["off", "dry_run", "approve"]
 
 
 _TERMINAL_SUCCESS = frozenset({"success", "completed"})
@@ -55,7 +52,7 @@ class ReviewStyleCreate(BaseModel):
 
 class ReviewStylePromptUpdate(BaseModel):
     custom_prompt: str | None = None
-    approval_policy: str | None = Field(default=None, max_length=10_000)
+    approval_mode: ApprovalMode | None = None
 
     @field_validator("custom_prompt")
     @classmethod
@@ -73,7 +70,7 @@ class ReviewStyle(BaseModel):
     name: str = ""
     status: AnalysisStatus = "idle"
     custom_prompt: str | None = None
-    approval_policy: str | None = None
+    approval_mode: ApprovalMode | None = None
     analysis_summary: str | None = None
     top_reviewers: list[str] = Field(default_factory=list)
     prs_sampled: int = 0
@@ -102,6 +99,10 @@ class ReviewStyle(BaseModel):
     @property
     def has_saved_prompt(self) -> bool:
         return bool(self.custom_prompt and self.custom_prompt.strip())
+
+
+def effective_approval_mode(record: ReviewStyle | None) -> ApprovalMode:
+    return (record.approval_mode if record else None) or "dry_run"
 
 
 class ReviewStyleStore(TypedStore[ReviewStyle]):
@@ -138,8 +139,8 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
             if record.status == "running":
                 record.status = "completed"
                 record.error = None
-        if "approval_policy" in update.model_fields_set:
-            record.approval_policy = (update.approval_policy or "").strip() or None
+        if "approval_mode" in update.model_fields_set:
+            record.approval_mode = update.approval_mode
         return await self.save(record)
 
     async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:

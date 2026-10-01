@@ -8,6 +8,7 @@ from collections import OrderedDict
 from langgraph_sdk import get_client
 
 from agent.config import ENV
+from agent.threads.creation import create_lock_thread
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ async def _claim_remotely(claim_key: str) -> bool | None:
     client = get_client(url=LANGGRAPH_URL)
     claim_thread_id = _claim_thread_id(claim_key)
     try:
-        await client.threads.create(thread_id=claim_thread_id, if_exists="raise", ttl=10)
+        await create_lock_thread(client, claim_thread_id, ttl_minutes=10)
     except Exception:  # noqa: BLE001
         try:
             await client.threads.get(claim_thread_id)

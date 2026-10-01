@@ -43,6 +43,7 @@ class SlackChannelOption(BaseModel):
     is_private: bool
     is_member: bool
     is_ext_shared: bool
+    is_pending_ext_shared: bool = False
     num_members: int | None = None
 
 
@@ -111,11 +112,12 @@ def _channel_option(
         is_private=channel.get("is_private") is True,
         is_member=channel.get("is_member") is True if member is None else member,
         is_ext_shared=channel.get("is_ext_shared") is True,
+        is_pending_ext_shared=channel.get("is_pending_ext_shared") is True,
         num_members=members if isinstance(members, int) and not isinstance(members, bool) else None,
     )
 
 
-async def list_slack_channels() -> SlackChannelDirectory:
+async def list_slack_channels(*, refresh: bool = False) -> SlackChannelDirectory:
     """The unarchived channels the bot can see, by name.
 
     The channels the bot belongs to come first, from ``users.conversations``:
@@ -173,4 +175,8 @@ async def list_slack_channels() -> SlackChannelDirectory:
                 )
             return directory
 
+        if refresh:
+            directory = await load()
+            ttl_cache.set_cached(key, directory, DIRECTORY_TTL_SECONDS)
+            return directory
         return await ttl_cache.cached_stale_while_revalidate(key, DIRECTORY_TTL_SECONDS, load)

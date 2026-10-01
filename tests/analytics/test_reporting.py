@@ -213,6 +213,44 @@ async def _ingest_model_effort_prs(efforts: list[str]) -> None:
         )
 
 
+async def test_merge_rates_measure_each_effort_separately(reporting_db):
+    await _ingest_model_effort_prs(["high", "low"])
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE pr_projection p SET current_state = 'merged', "
+                "outcome_at = p.opened_at + CASE WHEN r.configured_effort = 'high' "
+                "THEN interval '1 hour' ELSE interval '3 hours' END, "
+                "distance_basis_points = CASE WHEN r.configured_effort = 'high' "
+                "THEN 100 ELSE 300 END "
+                "FROM run_projection r WHERE p.opening_run_id = r.run_id "
+                "AND p.workspace_id = r.workspace_id"
+            )
+        )
+        await conn.execute(
+            text(
+                "UPDATE run_projection r SET started_at = p.opened_at - "
+                "CASE WHEN r.configured_effort = 'high' "
+                "THEN interval '2 hours' ELSE interval '4 hours' END "
+                "FROM pr_projection p WHERE p.opening_run_id = r.run_id "
+                "AND p.workspace_id = r.workspace_id"
+            )
+        )
+    cohort = (await queries.pr_merge_rate_by_model(period="all", admin=True))["cohorts"][0]
+    efforts = {effort["effort"]: effort for effort in cohort["efforts"]}
+    assert cohort["median_distance_basis_points"] == 200
+    assert cohort["avg_merge_seconds"] == 2 * 3600
+    assert cohort["avg_delivery_seconds"] == 3 * 3600
+    assert efforts["high"]["median_distance_basis_points"] == 100
+    assert efforts["low"]["median_distance_basis_points"] == 300
+    assert efforts["high"]["distance_sample_size"] == 1
+    assert efforts["low"]["distance_sample_size"] == 1
+    assert efforts["high"]["avg_merge_seconds"] == 3600
+    assert efforts["low"]["avg_merge_seconds"] == 3 * 3600
+    assert efforts["high"]["avg_delivery_seconds"] == 2 * 3600
+    assert efforts["low"]["avg_delivery_seconds"] == 4 * 3600
+
+
 async def test_merge_rates_suppress_effort_breakdown_below_threshold(reporting_db, monkeypatch):
     monkeypatch.setenv("ANALYTICS_MIN_COHORT_SIZE", "3")
     await _ingest_model_effort_prs(["high", "high", "high", "low"])
@@ -341,6 +379,7 @@ async def test_avg_time_to_pr_measures_opening_run_start_to_pr_creation(reportin
     cohort = report["cohorts"][0]
     assert cohort["cohort_size"] == 4
     assert cohort["avg_delivery_seconds"] == (2 * 3600 + 3600) / 2
+    assert cohort["efforts"][0]["avg_delivery_seconds"] == cohort["avg_delivery_seconds"]
 
 
 async def test_avg_time_to_pr_is_null_without_valid_timing(reporting_db):
@@ -368,6 +407,7 @@ async def test_avg_time_to_pr_is_null_without_valid_timing(reporting_db):
     report = await queries.pr_merge_rate_by_model(period="all", admin=True)
     cohort = report["cohorts"][0]
     assert cohort["avg_delivery_seconds"] is None
+    assert cohort["efforts"][0]["avg_delivery_seconds"] is None
 
 
 async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db, monkeypatch):
@@ -436,6 +476,7 @@ async def test_merge_rates_separate_decisions_maturity_and_waiting(reporting_db,
     assert cohort["mature_denominator"] == 3
     assert cohort["mature_cohort_merge_share"] == 2 / 3
     assert cohort["avg_merge_seconds"] == 2 * 86400
+    assert cohort["efforts"][0]["avg_merge_seconds"] == cohort["avg_merge_seconds"]
 
     report = await queries.pr_merge_rate_by_model(period="7d", admin=True)
     cohort = report["cohorts"][0]

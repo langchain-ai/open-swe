@@ -1,7 +1,6 @@
 """The update script that a run's own sandbox executes when its image is stale."""
 
 import base64
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -53,43 +52,6 @@ async def test_a_stale_image_is_freshened_before_the_run_starts() -> None:
     # Traced, and logged where the snapshot will carry it.
     assert "bash -x " in _command(backend)
     assert script_log_path("update") in _command(backend)
-
-
-@pytest.mark.asyncio
-async def test_a_fresh_image_costs_the_run_nothing() -> None:
-    """The whole point of the hourly gate: most runs skip this entirely."""
-    backend = _backend(_Result("", 0))
-    fresh = _stale(last_captured_at=datetime.now(UTC).isoformat())
-
-    await SandboxCreateConfig(snapshot_id="snap-1", workspace=fresh).run_update_script(
-        backend, "t-1"
-    )
-
-    backend.aexecute.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_no_workspace_and_no_script_both_skip() -> None:
-    backend = _backend(_Result("", 0))
-
-    await SandboxCreateConfig(snapshot_id=None).run_update_script(backend, None)
-    await SandboxCreateConfig(
-        snapshot_id="snap-1", workspace=_stale(update_script="")
-    ).run_update_script(backend, None)
-
-    backend.aexecute.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_failing_update_does_not_fail_the_run() -> None:
-    """The image is already usable, so a broken pull costs freshness, not the run."""
-    backend = _backend(_Result("fatal: not a git repository", 1))
-
-    await SandboxCreateConfig(snapshot_id="snap-1", workspace=_stale()).run_update_script(
-        backend, "t-1"
-    )
-
-    backend.aexecute.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from agent.review.walkthrough import FileLines, StepDraft
-from agent.review_scout.git import OTHER_TITLE, commit_staged, finalize, setup_working_tree
+from agent.review_scout.git import (
+    OTHER_TITLE,
+    commit_staged,
+    committed_kinds,
+    finalize,
+    setup_working_tree,
+)
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
@@ -88,7 +94,6 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
         StepDraft(title="Call `c`", files=[FileLines(path="cli.py", added=[(1, 2)])]),
         StepDraft(
             title=OTHER_TITLE,
-            summary=steps[-1].summary,
             is_other=True,
             files=[
                 FileLines(path="core.py", added=[(2, 2), (5, 5)], deleted=[(4, 4)]),
@@ -97,6 +102,41 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
         ),
     ]
     assert _git(repo, "rev-parse", "HEAD^{tree}") == _git(repo, "rev-parse", f"{head}^{{tree}}")
+
+
+async def test_other_committed_first_is_shown_last(pr_repo: tuple[Path, str, str]) -> None:
+    repo, base, head = pr_repo
+    shell = _LocalShell()
+    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    assert await committed_kinds(shell, str(repo), base_sha=base, head_sha=head) == []
+
+    _git(repo, "rm", "-q", "--cached", "--", "gone.txt")
+    assert await commit_staged(shell, str(repo), title="Other", summary="Drops.", other=True)
+    _git(repo, "add", "--", "cli.py", "core.py")
+    assert await commit_staged(shell, str(repo), title="Add `c`", summary="", other=False)
+    assert await committed_kinds(shell, str(repo), base_sha=base, head_sha=head) == [True, False]
+
+    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+
+    assert [(step.title, step.is_other) for step in steps] == [
+        ("Add `c`", False),
+        (OTHER_TITLE, True),
+    ]
+    assert steps[-1].files == [FileLines(path="gone.txt", deleted=[(1, 1)])]
+
+
+async def test_an_empty_other_commit_adds_no_step(pr_repo: tuple[Path, str, str]) -> None:
+    repo, base, head = pr_repo
+    shell = _LocalShell()
+    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+
+    assert await commit_staged(shell, str(repo), title="Other", summary="", other=True)
+    _git(repo, "add", "-A")
+    assert await commit_staged(shell, str(repo), title="Everything", summary="", other=False)
+
+    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+
+    assert [step.title for step in steps] == ["Everything"]
 
 
 async def test_owned_lines_are_exactly_the_pr_diffs_changed_lines(tmp_path: Path) -> None:

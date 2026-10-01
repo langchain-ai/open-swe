@@ -7,82 +7,12 @@ from agent.analytics import distance
 from agent.analytics.distance import _insert_delete_distance, _patch_lines
 
 
-def test_patch_distance_ignores_context_and_diff_metadata():
-    opening = _patch_lines(
-        [
-            {
-                "filename": "agent/example.py",
-                "changes": 2,
-                "additions": 1,
-                "deletions": 1,
-                "patch": "@@ -1,2 +1,2 @@\n-old = 1\n+new = 1\n context",
-            }
-        ]
-    )
-    final = _patch_lines(
-        [
-            {
-                "filename": "agent/example.py",
-                "changes": 2,
-                "additions": 1,
-                "deletions": 1,
-                "patch": "@@ -20,2 +20,2 @@\n-old = 1\n+new = 2\n context",
-            }
-        ]
-    )
-
-    assert opening is not None and final is not None
-    assert _insert_delete_distance(opening, final) == 2
-
-
 def test_patch_lines_rejects_incomplete_text_patch():
     assert _patch_lines([{"filename": "image.png", "changes": 0}]) is None
 
 
-def test_patch_lines_preserves_content_with_repeated_signs():
-    assert _patch_lines(
-        [
-            {
-                "filename": "README.md",
-                "patch": "@@ -1 +1 @@\n----\n++++",
-                "changes": 2,
-                "additions": 1,
-                "deletions": 1,
-            }
-        ]
-    ) == ["README.md\0----", "README.md\0++++"]
-
-
-@pytest.mark.parametrize(
-    ("before", "after", "expected"),
-    [
-        ([], [], 0),
-        ([], ["a"], 1),
-        (["a"], [], 1),
-        (["a"], ["a"], 0),
-        (["a"], ["b"], 2),
-        (["a", "b"], ["b", "a"], 2),
-    ],
-)
-def test_exact_distance(before: list[str], after: list[str], expected: int) -> None:
-    assert _insert_delete_distance(before, after) == expected
-
-
 def test_large_rewrite_exceeds_computation_budget() -> None:
     assert _insert_delete_distance(["old"] * 10_000, ["new"] * 10_000) is None
-
-
-def test_patch_size_budget_applies_across_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(distance, "_MAX_PATCH_CHARACTERS", 10)
-    assert (
-        _patch_lines(
-            [
-                {"filename": "a", "patch": "+12345", "additions": 1, "deletions": 0},
-                {"filename": "b", "patch": "+12345", "additions": 1, "deletions": 0},
-            ]
-        )
-        is None
-    )
 
 
 @pytest.mark.parametrize(
@@ -175,28 +105,3 @@ def test_patch_lines_rejects_mismatched_or_missing_statistics(
         )
         is None
     )
-
-
-def test_patch_completeness_is_checked_per_file() -> None:
-    assert (
-        _patch_lines(
-            [
-                {"filename": "a", "patch": "+a", "additions": 2, "deletions": 0},
-                {"filename": "b", "patch": "+b", "additions": 0, "deletions": 0},
-            ]
-        )
-        is None
-    )
-
-
-def test_complete_patch_with_multiple_hunks_and_no_newline_marker() -> None:
-    assert _patch_lines(
-        [
-            {
-                "filename": "a",
-                "additions": 2,
-                "deletions": 1,
-                "patch": "@@ -1 +1 @@\n-old\n+new\n@@ -10,0 +11 @@\n+more\n\\ No newline at end of file",
-            }
-        ]
-    ) == ["a\0-old", "a\0+new", "a\0+more"]

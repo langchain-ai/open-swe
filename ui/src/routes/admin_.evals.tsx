@@ -7,11 +7,13 @@ import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
+  head: () => ({ meta: [{ title: pageTitle("Reviewer evals") }] }),
 })
 
 function ReviewerEvalPage() {
@@ -94,7 +96,6 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
       <StatusLine label="Effort" value={config?.reasoning_effort} />
       <StatusLine label="Score mode" value={config?.score_mode} />
       <StatusLine label="Threshold" value={config?.severity_threshold} />
-      <StatusLine label="Cap" value={config ? String(config.cap) : null} />
       <StatusLine label="LangSmith project" value={data.langsmith_project} />
       <StatusLine label="Triggered by" value={data.created_by} />
       {data.started_at && (

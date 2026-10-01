@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
 from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from tests.support.slack_api import SlackAPI
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -55,33 +56,27 @@ def _option_payload() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_selected_option_updates_original_message(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_selected_option_updates_original_message(
+    monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     payload = _option_payload()
-    update = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
-
     await slack_routes._update_selected_option_message(
         SlackInteraction.model_validate(payload),
         SlackBlockAction.model_validate(payload["actions"][0]),
         "Option B",
     )
 
-    update.assert_awaited_once_with(
-        "C1",
-        "2.0",
-        "Pick one",
-        blocks=[
-            {"type": "section", "text": {"type": "mrkdwn", "text": "Pick one"}},
-            {
-                "type": "context",
-                "elements": [{"type": "plain_text", "text": "Selected: Option B"}],
-            },
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": "Open in Web"}],
-            },
-        ],
-    )
+    method, sent = slack_api.calls[0]
+    assert method == "chat.update"
+    assert sent["channel"] == "C1"
+    assert sent["ts"] == "2.0"
+    assert sent["text"] == "Pick one"
+    assert sent["blocks"] == [
+        payload["message"]["blocks"][0],
+        {"type": "context", "elements": [{"type": "plain_text", "text": "Selected: Option B"}]},
+        payload["message"]["blocks"][-1],
+    ]
 
 
 @pytest.mark.asyncio

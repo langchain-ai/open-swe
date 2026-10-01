@@ -1,5 +1,27 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+
+import { reportError } from "@/lib/errorReporting"
+
+type DashboardMutationMeta = {
+  /** Toast title when the mutation fails, e.g. "Couldn't pin thread". */
+  errorTitle?: string
+  /** The caller shows this failure inline, so skip the toast; it is still logged. */
+  silent?: boolean
+}
+
+declare module "@tanstack/react-query" {
+  interface Register {
+    mutationMeta: DashboardMutationMeta
+  }
+}
+
+export const BROWSER_CACHE_MAX_AGE_MS = 10 * 60_000
+
+/** Data the browser keeps must still expire, even while it stays on screen. */
+export const expiresInBrowser = {
+  staleTime: BROWSER_CACHE_MAX_AGE_MS,
+  refetchInterval: BROWSER_CACHE_MAX_AGE_MS,
+} as const
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -15,13 +37,13 @@ export function makeQueryClient() {
     }),
     mutationCache: new MutationCache({
       onError: (error, _variables, _context, mutation) => {
-        console.error("Mutation failed", {
-          mutationKey: mutation.options.mutationKey,
+        const key = mutation.options.mutationKey
+        reportError({
+          title: mutation.meta?.errorTitle ?? "Something went wrong",
           error,
+          mutation: key ? JSON.stringify(key) : undefined,
+          showToast: !mutation.meta?.silent,
         })
-        // Mutations with their own onError already tell the user what failed.
-        if (!mutation.options.onError)
-          toast.error("Something went wrong", { description: error.message })
       },
     }),
     defaultOptions: {

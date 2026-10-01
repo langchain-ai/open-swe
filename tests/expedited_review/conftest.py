@@ -2,13 +2,13 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from agent.expedited_review.approvals import ExpeditedApproval
 from agent.github.pull_requests import PullRequest
+from agent.human_review.requests import HumanReviewRequest
 from agent.users import User
 
 PEOPLE = {"U_ADA": ("ada", "1"), "U_GRACE": ("grace", "2"), "U_LINUS": ("linus", "3")}
 
-OpenApproval = Callable[..., Awaitable[ExpeditedApproval]]
+OpenApproval = Callable[..., Awaitable[HumanReviewRequest]]
 
 
 @pytest.fixture(autouse=True)
@@ -20,15 +20,16 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
 def open_approval(registry_db: None) -> OpenApproval:
     """Register ada, grace and linus, and open a card on ada's pull request."""
 
-    async def make(*, fingerprint: str = "", awaiting_ready: bool = False) -> ExpeditedApproval:
+    async def make(*, fingerprint: str = "", awaiting_ready: bool = False) -> HumanReviewRequest:
         for slack_id, (login, github_id) in PEOPLE.items():
             user = await User.sign_in("github", github_id, login=login)
             await user.link("slack", slack_id, team_id="T1")
         pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
         assert pr.author_user_id is not None
-        return await ExpeditedApproval(
+        return await HumanReviewRequest(
             pull_request_id=pr.id,
             head_sha="abc123",
+            kind="expedited",
             diff_fingerprint=fingerprint,
             awaiting_ready=awaiting_ready,
             thread_id="thread-1",

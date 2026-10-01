@@ -13,6 +13,7 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.approvals import fetch_approvals_md
 from agent.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
@@ -54,6 +55,7 @@ from agent.review.reviews import (
     update_pending_review_comment,
     update_review_comment,
 )
+from agent.review.session import ReviewSession
 from agent.review.style_jobs import (
     cancel_review_style_analysis,
     start_bootstrap_analysis,
@@ -67,6 +69,7 @@ from agent.review.styles import (
     normalize_repo_full_name,
 )
 from agent.review.walkthrough import Walkthrough
+from agent.threads.handlers import mark_review_session_viewed
 
 router = APIRouter(tags=["review"])
 
@@ -262,7 +265,20 @@ async def api_run_review_scout(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewScoutTrigger:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await trigger_review_scout(owner, repo, pr_number)
+    return await trigger_review_scout(owner, repo, pr_number, session["sub"])
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/viewed", status_code=204)
+async def api_mark_review_viewed(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> Response:
+    await mark_review_session_viewed(
+        ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=session["sub"])
+    )
+    return Response(status_code=204)
 
 
 class WalkthroughDismissed(BaseModel):
@@ -540,6 +556,24 @@ async def api_create_review_style(
     return await REVIEW_STYLES.create(body.full_name, session["sub"])
 
 
+class ApprovalsFileStatus(BaseModel):
+    found: bool
+
+
+# Declared before the detail route, whose ``{full_name:path}`` would otherwise swallow the suffix.
+@router.get("/review-styles/{full_name:path}/approvals-file")
+async def api_get_review_style_approvals_file(
+    full_name: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ApprovalsFileStatus:
+    full_name = normalize_repo_full_name(full_name)
+    token = await require_repo_access_for_user(session["sub"], full_name)
+    owner, _, name = full_name.partition("/")
+    return ApprovalsFileStatus(
+        found=await fetch_approvals_md(owner, name, None, token=token) is not None
+    )
+
+
 @router.get("/review-styles/{full_name:path}")
 async def api_get_review_style(
     full_name: str,
@@ -565,7 +599,7 @@ async def api_update_review_style_prompt(
     await require_repo_access_for_user(session["sub"], full_name)
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
-    if "approval_policy" in body.model_fields_set:
+    if "approval_mode" in body.model_fields_set:
         from agent.dashboard.deps import require_admin
 
         require_admin(session)
@@ -615,7 +649,7 @@ async def api_delete_review_style(
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    if record.approval_policy:
+    if record.approval_mode is not None:
         from agent.dashboard.deps import require_admin
 
         require_admin(session)

@@ -1,19 +1,20 @@
 """Review scout graph.
 
 Cuts a pull request's full diff into an ordered series of commits a reviewer
-can read top to bottom and stores them as the PR's walkthrough, and records
-where the author's steering changed what shipped. Runs on its own thread per
-PR; the reviewer starts it and waits for both before reviewing.
+can read top to bottom and stores them as the PR's walkthrough, alongside a
+summary of the human input behind it. Runs on its own thread per PR; the
+reviewer starts it and waits for it before reviewing.
 """
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
@@ -31,15 +32,13 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import apply_tool_descriptions, render_prompt
-from agent.review.author_guidance import GUIDANCE_CAP, GuidanceReview, SteeringHistory
+from agent.prompts import apply_tool_descriptions, prompt
+from agent.review.author_guidance import SteeringHistory
 from agent.review.walkthrough import Walkthrough
 from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
 from agent.review_scout.paths import scout_repo_dir
@@ -54,7 +53,7 @@ from agent.runtime import (
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
-from agent.tools.record_guidance import record_guidance
+from agent.tools.record_human_input import record_human_input
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -62,23 +61,28 @@ logger = logging.getLogger(__name__)
 
 SCOUT_MODEL_CALL_LIMIT = 150
 _CLOSING_TITLE_TAG_RE = re.compile(r"</\s*pr_title\s*>", re.IGNORECASE)
-MAX_STEPS = 8
+_HUMAN_INPUT_TOOL = record_human_input.__name__
 
 
 class ReviewScoutState(PrepareRunState):
     scout_merge_base: NotRequired[str | None]
+    human_input_summary: NotRequired[str]
+    has_human_input: NotRequired[bool]
 
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
     repo_name = cfg.repo.name if cfg.repo else ""
+    repositories = [repo_name] if repo_name else None
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=[repo_name] if repo_name else None
+        repositories=repositories
     )
     if not token:
         raise RuntimeError(
             f"GitHub App installation token unavailable for scout thread {thread_id}"
         )
-    cache_github_token_for_thread(thread_id, token, expires_at=expires_at, is_bot_token=True)
+    cache_github_token_for_thread(
+        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
+    )
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
         thread_id,
@@ -129,27 +133,38 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         merge_base = await setup_working_tree(
             backend, repo_dir, base_sha=cfg.base_sha, head_sha=cfg.head_sha
         )
-        system_prompt = render_prompt(
-            "review-scout/main.md",
+        system_prompt = prompt(
+            "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=repo_dir,
             merge_base=merge_base,
             patch_dir=f"{work_dir}/.scout-patches",
-            max_steps=MAX_STEPS,
         )
         history = await SteeringHistory.load(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        if history is not None and history.follow_ups:
-            guidance = render_prompt(
-                "review-scout/author-guidance.md", messages=history.messages_block()
-            )
-            system_prompt = f"{system_prompt}\n\n{guidance}"
+        if history is not None:
+            human_input = prompt("review-scout/human-input", messages=history.messages_block())
+            system_prompt = f"{system_prompt}\n\n{human_input}"
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
             "scout_merge_base": merge_base,
+            "human_input_summary": "",
+            "has_human_input": history is not None,
         }
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        # Without messages from the people who asked for the PR, the model would summarize its description instead.
+        if not request.state.get("has_human_input"):
+            request = request.override(
+                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
+            )
+        return await super().awrap_model_call(request, handler)
 
 
 class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
@@ -197,11 +212,9 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             merge_base_sha=merge_base,
             scout_thread_id=self._thread_id,
             steps=steps,
+            human_input_summary=state.get("human_input_summary", ""),
         )
         logger.info("Stored review walkthrough", extra={**extra, "scout_steps": len(steps)})
-        # Only a scout that got as far as its walkthrough is trusted to have
-        # judged the steering too, including when it recorded nothing.
-        await GuidanceReview.complete(cfg.repo.owner, cfg.repo.name, cfg.pr_number, cfg.head_sha)
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -245,19 +258,14 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     return create_deep_agent(
         model=model,
         system_prompt="",
-        tools=apply_tool_descriptions(
-            [commit_walkthrough_step, record_guidance],
-            {"record_guidance": {"cap": GUIDANCE_CAP}},
-        ),
+        tools=apply_tool_descriptions([commit_walkthrough_step, record_human_input]),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

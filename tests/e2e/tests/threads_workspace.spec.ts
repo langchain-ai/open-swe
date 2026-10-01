@@ -6,7 +6,10 @@ import {
   type Page,
 } from "@playwright/test";
 
-import { dismissOnboardingIfShown } from "./helpers/dashboard";
+import {
+  dismissOnboardingIfShown,
+  waitForThreadIdle,
+} from "./helpers/dashboard";
 
 const USER = {
   login: "threads-workspace-e2e",
@@ -458,6 +461,17 @@ test.describe("threads workspace", () => {
       },
     ]);
     await loginAs(page);
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          ...session,
+          slack_oauth_enabled: true,
+          slack_user_id: null,
+        },
+      });
+    });
 
     const profileGate = deferred();
     const profileStarted = deferred();
@@ -491,7 +505,7 @@ test.describe("threads workspace", () => {
       (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
         seen;
       const detect = () => {
-        if (document.body.textContent?.includes("Choose your default model")) {
+        if (document.body.textContent?.includes("Connect your Slack account")) {
           seen.value = true;
         }
       };
@@ -675,8 +689,11 @@ test.describe("threads workspace", () => {
       name: "Pin No repository",
       includeHidden: true,
     });
-    await pinNoRepo.locator("..").hover();
-    await pinNoRepo.click();
+    // Rows seeded by earlier tests can still shift the folder after the hover lands.
+    await expect(async () => {
+      await pinNoRepo.locator("..").hover();
+      await pinNoRepo.click({ timeout: 2_000 });
+    }).toPass();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
       sidebar.getByRole("button", { name: "No repository", exact: true }),
@@ -689,8 +706,10 @@ test.describe("threads workspace", () => {
       name: "Unpin No repository",
       includeHidden: true,
     });
-    await unpinNoRepo.locator("..").hover();
-    await expect(unpinNoRepo).toBeVisible();
+    await expect(async () => {
+      await unpinNoRepo.locator("..").hover();
+      await expect(unpinNoRepo).toBeVisible({ timeout: 2_000 });
+    }).toPass();
 
     const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
     await sidebar.screenshot({ path: screenshotPath });
@@ -727,6 +746,7 @@ test.describe("automation run history", () => {
     };
     expect(triggered.status).toBe("started");
     createdThreadIds.add(triggered.thread_id);
+    await waitForThreadIdle(page, triggered.thread_id);
 
     const producedHistoryResponse = await page.request.get(
       `/dashboard/api/threads/page?scope=automation&automation_id=${SCHEDULE_IDS.daily}&limit=100&offset=0`,
@@ -746,7 +766,7 @@ test.describe("automation run history", () => {
     expect(producedHistory.items).toContainEqual(
       expect.objectContaining({
         id: triggered.thread_id,
-        title: "Test: E2E Daily Health",
+        title: "Add greet() helper",
         triggerKind: "schedule_test",
         automationId: SCHEDULE_IDS.daily,
       }),
@@ -797,7 +817,7 @@ test.describe("automation run history", () => {
     const producedRun = daily.locator(
       `a[href="/agents/${triggered.thread_id}"]`,
     );
-    await expect(producedRun).toContainText("Test: E2E Daily Health");
+    await expect(producedRun).toContainText("Add greet() helper");
     await expect(producedRun).toContainText("Test run");
 
     const scheduledRun = daily.getByRole("link").filter({
@@ -842,7 +862,7 @@ test.describe("automation run history", () => {
     const recentProducedRun = page.locator(
       `a[href="/agents/${triggered.thread_id}"]`,
     );
-    await expect(recentProducedRun).toContainText("Test: E2E Daily Health");
+    await expect(recentProducedRun).toContainText("Add greet() helper");
 
     await recentProducedRun.click();
     await expect(page).toHaveURL(new RegExp(`/agents/${triggered.thread_id}$`));
