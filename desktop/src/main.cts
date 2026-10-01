@@ -1424,8 +1424,8 @@ async function completeExternalLogin(verifier, code) {
     expirationDate: Date.now() / 1000 + Number(payload.expires_in),
   });
 
-  const existingWindow = mainWindow && !mainWindow.isDestroyed();
-  const window = existingWindow || createWindow();
+  const window =
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
@@ -1610,6 +1610,8 @@ function createSetupWindow() {
       }
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
+      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
+        pendingDeepLink = null;
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1646,7 +1648,8 @@ let pendingDeepLink = null;
 function openDesktopLink(url) {
   const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
   if (!target) return false;
-  const existingWindow = mainWindow && !mainWindow.isDestroyed();
+  const existingWindow =
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow();
   if (window.isMinimized()) window.restore();
   window.show();
@@ -1756,7 +1759,8 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
-    if (pendingDeepLink) openDesktopLink(pendingDeepLink);
+    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
+      pendingDeepLink = null;
     // Otherwise the first local thread opened after launch waits behind the
     // backend's boot, showing a blank page for seconds.
     if (localThreadStore.list().length) {

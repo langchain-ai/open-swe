@@ -89,7 +89,7 @@
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
       "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
-      "entitlementsInherit": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.inherit.plist",
       "target": [
         "dmg",
         "zip"
