@@ -204,6 +204,19 @@ async def _render_standard(
             states = (
                 await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
             )
+    from agent.human_review.standard import merge_wait
+
+    if (
+        "CHANGES_REQUESTED" not in states.values()
+        and merge_wait(
+            [reviewer.github_login for reviewer in request.reviewers],
+            request.created_at,
+            states,
+            datetime.now(UTC),
+        )
+        is None
+    ):
+        return standard_card.closed_card(request, title=pr.title, outcome="approved")
     requester = request.requested_by
     return standard_card.open_card(
         request,
