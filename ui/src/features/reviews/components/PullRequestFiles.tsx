@@ -1,9 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon, XIcon } from "@phosphor-icons/react"
 import { MultiFileDiff } from "@pierre/diffs/react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { IoLogoGithub } from "react-icons/io5"
-import { toast } from "sonner"
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs"
 
 import type {
@@ -20,10 +26,17 @@ import {
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
 import {
+  useAgentBatch,
+  useAgentBatchStore,
+  type BatchItem,
+  type BatchItemState,
+} from "@/features/reviews/lib/agentBatch"
+import {
   buildCommentPayload,
   commentRangeLabel,
-} from "@/features/reviews/components/ReviewMainBody"
+} from "@/features/reviews/lib/lineRange"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -54,9 +67,8 @@ interface Draft {
   body: string
 }
 
-interface SentComment {
+interface PostedComment {
   id: string
-  target: CommentTarget
   path: string
   range: SelectedLineRange
   body: string
@@ -65,7 +77,12 @@ interface SentComment {
 
 type FileAnnotation =
   | { kind: "draft"; draft: Draft }
-  | { kind: "sent"; comment: SentComment }
+  | { kind: "posted"; comment: PostedComment }
+  | {
+      kind: "batched"
+      item: Extract<BatchItem, { kind: "line" }>
+      state: BatchItemState
+    }
 
 interface PullRequestTarget {
   repo: string
@@ -81,9 +98,9 @@ function useLineComments(pr: PullRequestTarget, login: string) {
   const [owner = "", name = ""] = pr.repo.split("/")
   const previewKey = pullRequestPreviewQuery(pr).queryKey
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [sent, setSent] = useState<Array<SentComment>>([])
+  const [sent, setSent] = useState<Array<PostedComment>>([])
 
-  const restore = (comment: SentComment) => {
+  const restore = (comment: PostedComment) => {
     setSent((current) => current.filter((item) => item.id !== comment.id))
     setDraft(
       (current) =>
@@ -94,31 +111,23 @@ function useLineComments(pr: PullRequestTarget, login: string) {
         }
     )
   }
-  const optimistic = (comment: SentComment) => {
+  const optimistic = (comment: PostedComment) => {
     setDraft(null)
     setSent((current) => [...current, comment])
   }
-  const payload = (comment: SentComment): ReviewCommentCreate =>
+  const payload = (comment: PostedComment): ReviewCommentCreate =>
     buildCommentPayload(comment.path, comment.range, comment.body)
 
-  const toAgent = useMutation({
-    mutationFn: (comment: SentComment) =>
-      api.sendLineCommentToAgent(pr.repo, pr.number, payload(comment)),
-    meta: { errorTitle: "Couldn't send comment to agent" },
-    onMutate: optimistic,
-    onError: (_error, comment) => restore(comment),
-    onSuccess: (result) => {
-      toast.success(
-        result.already_running
-          ? `Queued behind the running agent on ${pr.repo}#${pr.number}`
-          : `Sent comment to agent for ${pr.repo}#${pr.number}`
-      )
-      void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
-    },
-  })
+  const addToBatch = useAgentBatchStore((state) => state.add)
+  const removeItem = useAgentBatchStore((state) => state.remove)
+  const batch = useAgentBatch(pullRequestKey(pr))
+  const removeFromBatch = useCallback(
+    (id: string) => removeItem(pullRequestKey(pr), id),
+    [removeItem, pr]
+  )
 
   const toGithub = useMutation({
-    mutationFn: (comment: SentComment) =>
+    mutationFn: (comment: PostedComment) =>
       api.postReviewComment(owner, name, pr.number, payload(comment)),
     meta: { errorTitle: "Couldn't comment on GitHub" },
     onMutate: async (comment) => {
@@ -164,19 +173,19 @@ function useLineComments(pr: PullRequestTarget, login: string) {
 
   const send = (target: CommentTarget, body: string) => {
     if (!draft || !body.trim()) return
-    const comment: SentComment = {
+    const comment = {
       id: crypto.randomUUID(),
-      target,
       path: draft.path,
       range: draft.range,
       body: body.trim(),
-      url: null,
     }
-    if (target === "agent") toAgent.mutate(comment)
-    else toGithub.mutate(comment)
+    if (target === "agent") {
+      setDraft(null)
+      addToBatch(pullRequestKey(pr), { kind: "line", ...comment })
+    } else toGithub.mutate({ ...comment, url: null })
   }
 
-  return { draft, setDraft, sent, send }
+  return { draft, setDraft, sent, batch, send, removeFromBatch }
 }
 
 /** The PR's changed files; each one expands into its full diff, open to line comments. */
@@ -310,7 +319,7 @@ function FileDiff({
   file: ReviewDiffFile | undefined
   comments: ReturnType<typeof useLineComments>
 }) {
-  const { draft, setDraft, sent, send } = comments
+  const { draft, setDraft, sent, batch, send, removeFromBatch } = comments
   const diffOptions = useDiffOptions("unified")
   const startDraft = useCallback(
     (range: SelectedLineRange) => setDraft({ path, range, body: "" }),
@@ -336,8 +345,19 @@ function FileDiff({
         .map((comment) => ({
           side: rangeSide(comment.range),
           lineNumber: comment.range.end,
-          metadata: { kind: "sent" as const, comment },
+          metadata: { kind: "posted" as const, comment },
         })),
+      ...batch.flatMap(({ item, state }) =>
+        item.kind === "line" && item.path === path
+          ? [
+              {
+                side: rangeSide(item.range),
+                lineNumber: item.range.end,
+                metadata: { kind: "batched" as const, item, state },
+              },
+            ]
+          : []
+      ),
       ...(fileDraft
         ? [
             {
@@ -348,12 +368,38 @@ function FileDiff({
           ]
         : []),
     ],
-    [sent, path, fileDraft]
+    [sent, batch, path, fileDraft]
   )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<FileAnnotation>) => {
       const meta = annotation.metadata
-      if (meta.kind === "sent") return <SentCard comment={meta.comment} />
+      if (meta.kind === "posted")
+        return (
+          <CommentCard
+            label={
+              <span className="inline-flex items-center gap-1">
+                <IoLogoGithub className="size-3" />
+                Commented on GitHub
+              </span>
+            }
+            href={meta.comment.url}
+            range={meta.comment.range}
+            body={meta.comment.body}
+          />
+        )
+      if (meta.kind === "batched")
+        return (
+          <CommentCard
+            label={meta.state === "sent" ? "Sent to agent" : "Queued for agent"}
+            range={meta.item.range}
+            body={meta.item.body}
+            onRemove={
+              meta.state === "queued"
+                ? () => removeFromBatch(meta.item.id)
+                : undefined
+            }
+          />
+        )
       return (
         <Composer
           key={`${meta.draft.range.start}:${meta.draft.range.end}`}
@@ -363,7 +409,7 @@ function FileDiff({
         />
       )
     },
-    [setDraft, send]
+    [setDraft, send, removeFromBatch]
   )
   const oldFile = useMemo(
     () => ({
@@ -471,7 +517,7 @@ function Composer({
               disabled={empty}
               onClick={() => onSend("agent", body)}
             >
-              Send to agent
+              Add to agent batch
             </Button>
           </div>
         </div>
@@ -480,33 +526,51 @@ function Composer({
   )
 }
 
-function SentCard({ comment }: { comment: SentComment }) {
+function CommentCard({
+  label,
+  href = null,
+  range,
+  body,
+  onRemove,
+}: {
+  label: ReactNode
+  href?: string | null
+  range: SelectedLineRange
+  body: string
+  onRemove?: () => void
+}) {
   return (
     <div className="px-2 py-1 font-sans">
       <div className="rounded-md border border-border bg-card px-2.5 py-2 text-xs">
         <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          {comment.target === "agent" ? (
-            <span>Sent to agent</span>
-          ) : comment.url ? (
+          {href ? (
             <a
-              href={comment.url}
+              href={href}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+              className="hover:text-foreground hover:underline"
             >
-              <IoLogoGithub className="size-3" />
-              Commented on GitHub
+              {label}
             </a>
           ) : (
-            <span className="inline-flex items-center gap-1">
-              <IoLogoGithub className="size-3" />
-              Commented on GitHub
-            </span>
+            label
           )}
           <span aria-hidden="true">·</span>
-          <span className="font-mono">{commentRangeLabel(comment.range)}</span>
+          <span className="font-mono">{commentRangeLabel(range)}</span>
+          {onRemove && (
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Remove from agent batch"
+              className="ml-auto"
+              onClick={onRemove}
+            >
+              <XIcon />
+            </IconButton>
+          )}
         </div>
-        <p className="whitespace-pre-wrap text-foreground">{comment.body}</p>
+        <p className="whitespace-pre-wrap text-foreground">{body}</p>
       </div>
     </div>
   )

@@ -948,7 +948,11 @@ export type PullRequestThreadIntent =
   | { intent: "fix"; context: OpenPullRequest | null }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
-  | ({ intent: "line-comment" } & Omit<ReviewCommentCreate, "start_side">)
+  | { intent: "comments"; comments: Array<AgentBatchComment> }
+
+export type AgentBatchComment =
+  | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
+  | { kind: "thread"; comment_url: string; instructions: string }
 
 export interface PostedReviewComment {
   id: number
@@ -1597,30 +1601,11 @@ export const api = {
     pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
-  addressPullRequestComment: (
+  sendCommentsToAgent: (
     repo: string,
     number: number,
-    commentUrl: string,
-    instructions: string
-  ) =>
-    pullRequestThread(repo, number, {
-      intent: "address-comment",
-      comment_url: commentUrl,
-      instructions,
-    }),
-  sendLineCommentToAgent: (
-    repo: string,
-    number: number,
-    comment: ReviewCommentCreate
-  ) =>
-    pullRequestThread(repo, number, {
-      intent: "line-comment",
-      path: comment.path,
-      line: comment.line,
-      side: comment.side,
-      start_line: comment.start_line ?? null,
-      body: comment.body,
-    }),
+    comments: Array<AgentBatchComment>
+  ) => pullRequestThread(repo, number, { intent: "comments", comments }),
   resolveReviewThreads: (
     repo: string,
     number: number,

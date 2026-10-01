@@ -135,35 +135,65 @@ class AddressCommentIntent(_PullRequestIntentBase):
         return f"Address comment on {full_name}#{number}"
 
 
-class LineCommentIntent(_PullRequestIntentBase):
-    intent: Literal["line-comment"]
+class LineComment(BaseModel):
+    """A comment on diff lines that lives only in the agent's prompt, not on GitHub."""
+
+    kind: Literal["line"]
     path: str = Field(min_length=1, max_length=1000)
     line: int = Field(ge=1)
     side: Literal["LEFT", "RIGHT"] = "RIGHT"
     start_line: int | None = Field(default=None, ge=1)
     body: str = Field(min_length=1, max_length=10_000)
 
+    def prompt_values(self) -> dict[str, str]:
+        low = min(self.start_line or self.line, self.line)
+        return {
+            "path": self.path,
+            "lines": f"line {self.line}" if low == self.line else f"lines {low}-{self.line}",
+            "side": "old" if self.side == "LEFT" else "new",
+            "body": self.body.strip(),
+        }
+
+
+class ThreadComment(BaseModel):
+    kind: Literal["thread"]
+    comment_url: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(default="", max_length=10_000)
+
+
+class CommentBatchIntent(_PullRequestIntentBase):
+    intent: Literal["comments"]
+    comments: list[Annotated[LineComment | ThreadComment, Field(discriminator="kind")]] = Field(
+        min_length=1, max_length=100
+    )
+
     dispatches_run: ClassVar[bool] = True
     queues_behind_running: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        low = min(self.start_line or self.line, self.line)
-        lines = f"line {self.line}" if low == self.line else f"lines {low}-{self.line}"
+        threads = [c for c in self.comments if isinstance(c, ThreadComment)]
+        if any(not thread.comment_url.startswith(f"{url}#") for thread in threads):
+            raise HTTPException(422, "comment does not belong to this pull request")
         return prompt(
-            "runs/pull-request-line-comment",
+            "runs/pull-request-comment-batch",
             url=url,
-            path=self.path,
-            lines=lines,
-            side="old" if self.side == "LEFT" else "new",
-            body=self.body.strip(),
+            threads=[
+                {"comment_url": t.comment_url, "instructions": t.instructions.strip()}
+                for t in threads
+            ],
+            lines=[c.prompt_values() for c in self.comments if isinstance(c, LineComment)],
         )
 
     def thread_title(self, full_name: str, number: int) -> str:
-        return f"Address comment on {full_name}#{number}"
+        return f"Address comments on {full_name}#{number}"
 
 
 PullRequestThreadIntent = Annotated[
-    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent | LineCommentIntent,
+    OpenThreadIntent
+    | FixIntent
+    | AddressCommentsIntent
+    | AddressCommentIntent
+    | CommentBatchIntent,
     Field(discriminator="intent"),
 ]
 

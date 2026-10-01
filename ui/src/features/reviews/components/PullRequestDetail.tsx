@@ -23,6 +23,12 @@ import { cn } from "@/lib/utils"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 import { useScrollAnchor } from "@/features/reviews/lib/scrollAnchor"
 import {
+  useAgentBatch,
+  useAgentBatchStore,
+  useSubmitAgentBatch,
+} from "@/features/reviews/lib/agentBatch"
+import { pullRequestKey } from "@/features/reviews/lib/status"
+import {
   PullRequestActions,
   type PullRequestOutcome,
 } from "./PullRequestActions"
@@ -206,49 +212,87 @@ function useResolveThreads(target: PullRequestRef) {
   })
 }
 
-function SendToAgent({
+function AddToAgentBatch({
   target,
   commentUrl,
 }: {
   target: PullRequestRef
   commentUrl: string
 }) {
-  const queryClient = useQueryClient()
-  const send = useMutation({
-    mutationFn: (instructions: string) =>
-      api.addressPullRequestComment(
-        target.repo,
-        target.number,
-        commentUrl,
-        instructions
-      ),
-    meta: { errorTitle: "Couldn't send comment to agent" },
-    onSuccess: (result) => {
-      toast.success(
-        result.already_running
-          ? `Agent already running on ${target.repo}#${target.number}`
-          : `Sent comment to agent for ${target.repo}#${target.number}`
-      )
-      void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
-    },
-  })
+  const key = pullRequestKey(target)
+  const entry = useAgentBatch(key).find(
+    ({ item }) => item.kind === "thread" && item.commentUrl === commentUrl
+  )
+  const add = useAgentBatchStore((state) => state.add)
+  const remove = useAgentBatchStore((state) => state.remove)
+  if (entry?.state === "sent")
+    return (
+      <Button size="sm" variant="outline" disabled>
+        Sent to agent
+      </Button>
+    )
+  if (entry)
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        title="Remove from the agent batch"
+        onClick={() => remove(key, entry.item.id)}
+      >
+        Queued for agent
+        <XIcon className="size-3" />
+      </Button>
+    )
   return (
     <TextPopover
       trigger={
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={send.isPending || send.isSuccess}
-        >
-          {send.isPending || send.isSuccess ? "Sent to agent" : "Send to agent"}
+        <Button size="sm" variant="outline">
+          Add to agent batch
         </Button>
       }
-      title="Send this comment to the agent"
-      description="The agent addresses it on the PR branch and replies on the thread."
+      title="Queue this comment for the agent"
+      description="Queued comments go to the agent together when you send the batch. It addresses each on the PR branch and replies on the thread."
       placeholder="Instructions (optional)"
-      submitLabel="Send"
-      onSubmit={(instructions) => send.mutateAsync(instructions)}
+      submitLabel="Add to batch"
+      onSubmit={async (instructions) =>
+        add(key, {
+          kind: "thread",
+          id: crypto.randomUUID(),
+          commentUrl,
+          instructions,
+        })
+      }
     />
+  )
+}
+
+function AgentBatchBar({ target }: { target: PullRequestRef }) {
+  const key = pullRequestKey(target)
+  const queued = useAgentBatch(key).filter(({ state }) => state === "queued")
+  const discard = useAgentBatchStore((state) => state.discard)
+  const submit = useSubmitAgentBatch(target)
+  if (!queued.length) return null
+  return (
+    <div className="flex items-center gap-2 border-t border-border bg-card px-5 py-3">
+      <span className="text-xs text-foreground">
+        {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
+        agent
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="ml-auto"
+        onClick={() => discard(key)}
+      >
+        Discard
+      </Button>
+      <Button
+        size="sm"
+        onClick={() => submit.mutate(queued.map(({ item }) => item))}
+      >
+        Send to agent
+      </Button>
+    </div>
   )
 }
 
@@ -280,7 +324,7 @@ function Conversation({
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-2 text-foreground">
           {thread.url && (
-            <SendToAgent target={target} commentUrl={thread.url} />
+            <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
           {thread.thread_id && (
             <Button
@@ -574,6 +618,7 @@ export function PullRequestDetail({
           </>
         )}
       </div>
+      <AgentBatchBar target={pr} />
     </aside>
   )
 }
