@@ -3,10 +3,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 from unittest.mock import AsyncMock
+from urllib.parse import urlencode
 
 import pytest
+from fastapi import BackgroundTasks, HTTPException, Request
 
-from agent.slack import run_feedback
+from agent.slack import routes, run_feedback
 from agent.slack.payloads import SlackChannelContext, SlackInteraction
 from agent.utils.json_types import JsonObject
 
@@ -257,4 +259,3 @@ async def test_webhook_acknowledges_feedback_without_starting_agent(
     process.assert_not_awaited()
     await tasks()
     process.assert_awaited_once_with(interaction(), interaction().actions[0])
-
