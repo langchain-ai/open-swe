@@ -16924,6 +16924,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/FeedbackResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/agent__utils__json_types__JsonObject"
                     }
                   ],
                   "title": "Response Slack Interactivity Webhooks Slack Interactivity Post"
