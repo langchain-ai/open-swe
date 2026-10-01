@@ -10,7 +10,7 @@ export const reviewStatuses = [
 ] as const
 export type ReviewStatus = (typeof reviewStatuses)[number]
 export interface ReviewsSearch {
-  tab?: "mine" | "all"
+  tab?: "mine" | "to-review" | "all"
   repo?: string[]
   q?: string
   status?: ReviewStatus[]
@@ -68,7 +68,10 @@ export function validateReviewsSearch(
     ),
   ]
   return {
-    tab: search.tab === "all" ? "all" : undefined,
+    tab:
+      search.tab === "all" || search.tab === "to-review"
+        ? search.tab
+        : undefined,
     repo: repo.length ? repo : undefined,
     q: typeof search.q === "string" ? search.q.slice(0, 200) : undefined,
     status: status.length ? status : undefined,

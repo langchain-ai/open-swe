@@ -1628,14 +1628,15 @@ export const api = {
     request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
-  myPullRequests: (
+  openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
     direction: "asc" | "desc" = "desc",
-    page = 1
+    page = 1,
+    scope: "mine" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),

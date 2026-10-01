@@ -10211,8 +10211,11 @@
             "name": "scope",
             "required": false,
             "schema": {
-              "const": "mine",
               "default": "mine",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
               "title": "Scope",
               "type": "string"
             }

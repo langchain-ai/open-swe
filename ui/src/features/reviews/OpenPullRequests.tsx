@@ -37,12 +37,14 @@ function chunked(refs: { repo: string; number: number }[]) {
   )
 }
 
-export function MyPullRequests({
+export function OpenPullRequests({
   login,
+  scope,
   filters,
   onFiltersChange,
 }: {
   login: string
+  scope: "mine" | "review-requested"
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
@@ -60,7 +62,7 @@ export function MyPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
-  const query = useOpenPullRequests(login, repo, sort, direction)
+  const query = useOpenPullRequests(login, repo, sort, direction, scope)
   const knownRepos = useRepos()
   // Rows whose details have been asked for. Tied to the filter set that grew
   // it, so changing a filter starts the list over without an extra render.
@@ -208,7 +210,11 @@ export function MyPullRequests({
       >
         <section
           className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
-          aria-label="My open pull requests"
+          aria-label={
+            scope === "mine"
+              ? "My open pull requests"
+              : "Pull requests to review"
+          }
         >
           <div className="flex flex-wrap items-center gap-2">
             <MultiSelect
@@ -341,7 +347,9 @@ export function MyPullRequests({
                       ? "Loading matching PRs…"
                       : all.length
                         ? "No PRs match these filters."
-                        : "No open PRs found."}
+                        : scope === "mine"
+                          ? "No open PRs found."
+                          : "No pending review requests. You’re all caught up."}
                   </p>
                 ) : (
                   <PullRequestList
