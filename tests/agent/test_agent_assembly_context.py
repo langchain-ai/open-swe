@@ -11,12 +11,14 @@ import asyncio
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
@@ -24,9 +26,9 @@ from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.server import _registered_tool_name, get_agent
 
 _MODEL_DEFAULTS = {
-    "default_agent_model": "openai:gpt-6-sol",
+    "default_agent_model": "openai:gpt-6.1-sol",
     "default_agent_reasoning_effort": "medium",
-    "default_agent_subagent_model": "openai:gpt-6-sol",
+    "default_agent_subagent_model": "openai:gpt-6.1-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
 
@@ -109,7 +111,6 @@ async def _capture_create_deep_agent_kwargs(
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
-    private_thread: bool = False,
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
@@ -152,17 +153,12 @@ async def _capture_create_deep_agent_kwargs(
                     **_MODEL_DEFAULTS,
                     "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
                     "default_agent_routing_fast_reasoning_effort": "low",
-                    "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+                    "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
                     "default_agent_routing_balanced_reasoning_effort": "medium",
                     "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
                     "default_agent_routing_performance_reasoning_effort": "high",
                 }
             ),
-        ),
-        patch(
-            "agent.server._private_thread",
-            new_callable=AsyncMock,
-            return_value=private_thread,
         ),
         patch("agent.server.load_profile", new_callable=AsyncMock, return_value=profile),
         patch(
@@ -197,7 +193,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
         profile={"draft_prs": False},
         thread_settings={
             "owner_login": "draft-preference-owner",
-            "model_id": "openai:gpt-6-sol",
+            "model_id": "openai:gpt-6.1-sol",
         },
     )
 
@@ -221,11 +217,11 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         return WorkspaceSettings(
             {
                 **_MODEL_DEFAULTS,
-                "default_agent_routing_fast_model": "openai:gpt-6-sol",
+                "default_agent_routing_fast_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_fast_reasoning_effort": "low",
-                "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+                "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_balanced_reasoning_effort": "medium",
-                "default_agent_routing_performance_model": "openai:gpt-6-sol",
+                "default_agent_routing_performance_model": "openai:gpt-6.1-sol",
                 "default_agent_routing_performance_reasoning_effort": "high",
                 "gateway_enabled": False,
                 "fable_enabled": True,
@@ -278,7 +274,7 @@ async def test_router_failure_uses_same_model_as_routing_off() -> None:
 @pytest.mark.parametrize("legacy_thread", [False, True])
 async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) -> None:
     initial_settings = (
-        {"model_id": "openai:gpt-6-sol", "effort": "medium", "model_routing_enabled": True}
+        {"model_id": "openai:gpt-6.1-sol", "effort": "medium", "model_routing_enabled": True}
         if legacy_thread
         else {}
     )
@@ -523,7 +519,10 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("private_thread", [True, False])
-async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None:
+async def test_channel_reads_need_a_private_thread(
+    private_thread: bool, saved_thread_scope: dict[str, str]
+) -> None:
+    saved_thread_scope["visibility"] = "private" if private_thread else "public"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -534,7 +533,7 @@ async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None
         }
     )
 
-    captured = await _capture_create_deep_agent_kwargs(config, private_thread=private_thread)
+    captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(tools, list)
@@ -548,3 +547,202 @@ async def test_channel_reads_need_a_private_thread(private_thread: bool) -> None
     gp = next(item for item in subagents if item["name"] == "general-purpose")
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
     assert ("slack_read_channel_messages" in subagent_names) is private_thread
+
+
+@pytest.fixture
+def pinned_settings() -> dict[str, object]:
+    return {
+        "model_id": "anthropic:claude-opus-5-5",
+        "effort": "high",
+        "requested_model": "anthropic:claude-opus-5-5",
+        "model_handoff_complete": True,
+        "model_routing_enabled": False,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_requested_model_survives_auto_followups_but_explicit_selection_wins(
+    source: str,
+    pinned_settings: dict[str, object],
+) -> None:
+    config = _base_config()
+    configurable = config["configurable"]
+    configurable.update(
+        source=source,
+        model_selection="auto",
+        agent_model_id="openai:gpt-6.1-sol",
+        agent_effort="low",
+    )
+    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    assert configurable["resolved_agent_model_id"] == "anthropic:claude-opus-5-5"
+    configurable.update(
+        model_selection="explicit", agent_model_id="openai:gpt-6.1-sol", agent_effort="low"
+    )
+    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    assert configurable["resolved_agent_model_id"] == "openai:gpt-6.1-sol"
+
+
+@pytest.mark.parametrize("image_source", ["initial", "retained", "tool"])
+@pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
+async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
+    image_source: Literal["initial", "retained", "tool"],
+    route: Literal["fast", "balanced", "performance"],
+) -> None:
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+
+    model_id = "fireworks:accounts/fireworks/models/kimi-k3"
+    config = _base_config()
+    config["configurable"].update(source="dashboard", model_selection="auto")
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        thread_settings={
+            "model_id": "openai:gpt-6.1-sol",
+            "effort": "medium",
+            "model_handoff_complete": True,
+            "model_routing_enabled": True,
+            "routing_models": {route: {"model_id": model_id, "effort": "high"}},
+        },
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    middleware = cast(list[object], captured["middleware"])
+    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+    fallback = next(
+        (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
+    )
+    image = [{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
+    state: ModelSelectionState = {
+        "messages": [
+            ToolMessage(content=image, tool_call_id="screenshot")
+            if image_source == "tool"
+            else HumanMessage(content=image)
+        ],
+        "model_route": route,
+    }
+    if image_source == "retained":
+        state["messages"].append(HumanMessage(content="Explain the screenshot"))
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+
+    async def handle_selected(request: ModelRequest) -> ModelResponse:
+        if fallback is not None:
+            return await fallback.awrap_model_call(request, handler)
+        return await handler(request)
+
+    for with_image in (True, False):
+        request = ModelRequest(
+            model=cast(BaseChatModel, captured["model"]),
+            messages=state["messages"] if with_image else [HumanMessage(content="Continue")],
+            state=state,
+        )
+        await selection.awrap_model_call(request, handle_selected)
+        actual = handler.call_args.args[0]
+        assert actual.model.model_id == ("openai:gpt-6.1-sol" if with_image else model_id)
+        assert actual.messages == request.messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "expected_model", "expected_effort"),
+    [
+        (None, "openai:gpt-6.1-sol", "medium"),
+        (
+            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "high"},
+            "google_genai:gemini-3.8-flash",
+            "high",
+        ),
+    ],
+)
+async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups(
+    profile: dict[str, object] | None,
+    expected_model: str,
+    expected_effort: str,
+    pinned_settings: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.server import PrepareAgentRunMiddleware
+
+    monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr(
+        "agent.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
+    )
+    config = _base_config()
+    config["configurable"].update(
+        source="dashboard", model_selection="auto", model_selection_changed=True
+    )
+    with patch("agent.server.store_thread_settings", new_callable=AsyncMock) as store:
+        captured = await _capture_create_deep_agent_kwargs(
+            config, thread_settings=pinned_settings, profile=profile
+        )
+    snapshot = cast(dict[str, object], store.call_args.args[2])
+    assert snapshot["requested_model"] is None
+    assert snapshot["model_routing_enabled"] is True
+    assert snapshot["model_handoff_complete"] is True
+    assert snapshot["model_id"] == expected_model
+    assert snapshot["effort"] == expected_effort
+    assert snapshot["subagent_model_id"] == expected_model
+    assert snapshot["subagent_effort"] == (expected_effort if profile else "low")
+
+    followup = _base_config()
+    followup["configurable"].update(source="dashboard", model_selection="auto")
+    followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
+    for agent in (captured, followup_agent):
+        middleware = cast(list[object], agent["middleware"])
+        selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+        assert await selection.select_route({"messages": []}) == "default"
+        assert selection._models["default"] is agent["model"]
+        assert agent["make_model_calls"][0][0] == expected_model
+        prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
+        assert prepare._requested_models is None
+
+
+async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
+    from langchain_core.messages import convert_to_messages
+    from langgraph.store.memory import InMemoryStore
+
+    from agent.middleware.check_message_queue import (
+        LinearNotifyState,
+        check_message_queue_before_model,
+    )
+    from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
+
+    config = _base_config()
+    captured = await _capture_create_deep_agent_kwargs(
+        config,
+        thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
+        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+    )
+    store = InMemoryStore()
+    namespace = ("queue", "thread-ctx")
+    url = "https://example.com/image.png"
+    image = {"type": "image_url", "image_url": {"url": url}}
+    await store.aput(
+        namespace,
+        "pending_messages",
+        {"messages": [{"content": {"text": "Explain this", "image_urls": [url]}}]},
+    )
+    with (
+        patch("agent.middleware.check_message_queue.get_config", return_value=config),
+        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+        patch("agent.middleware.check_message_queue.fetch_image_block", return_value=image),
+    ):
+        update = await check_message_queue_before_model.abefore_model(
+            cast(LinearNotifyState, {"messages": []}), MagicMock()
+        )
+    assert update is not None
+    messages = convert_to_messages(update["messages"])
+    content = messages[-1].content
+    assert isinstance(content, list) and image in content
+    fallback = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, ImageModelFallbackMiddleware)
+    )
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    await fallback.awrap_model_call(
+        ModelRequest(model=cast(BaseChatModel, captured["model"]), messages=messages), handler
+    )
+    assert handler.call_args.args[0].model is not captured["model"]
+    assert handler.call_args.args[0].messages == messages
+    assert await store.aget(namespace, "pending_messages") is None

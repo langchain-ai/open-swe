@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import { expiresInBrowser } from "@/lib/query"
 import {
   threadActions,
   type PullRequestThreadActionName,
@@ -31,7 +32,7 @@ export function PullRequestThreadAction({
   const thread = useQuery({
     queryKey: ["pr-thread-status", login, pr.repo, pr.number],
     queryFn: () => api.pullRequestThreadStatus(pr.repo, pr.number),
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,

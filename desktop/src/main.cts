@@ -401,11 +401,7 @@ async function createThreadWorktree(thread, baseBranch) {
   return localThreadStore.setWorktree(thread.id, worktree, true);
 }
 
-/**
- * Two agents in one working tree overwrite each other's edits and fight over
- * its branch, and the backend now runs local threads concurrently, so a tree an
- * agent is working in is off limits to everything else.
- */
+/** Prevent branch switches and worktree reuse from disrupting running agents. */
 async function assertWorkspaceFree(root, exceptThreadId = null) {
   const activity = await backendSupervisor.threadActivity();
   if (!activity) throw new Error("Could not reach the local Open SWE backend");
@@ -700,7 +696,6 @@ function configureDesktopIpc() {
         "Add a valid project to Open SWE before starting a local agent",
       );
     await backendSupervisor.start();
-    if (input?.workspaceMode !== "worktree") await assertWorkspaceFree(cwd);
     let thread = localThreadStore.create({ ...input, cwd });
     try {
       if (input?.workspaceMode === "worktree")
@@ -885,6 +880,19 @@ function configureDesktopIpc() {
       return { ...diff, repository };
     } catch {
       return { status: "error", files: [], truncated: false };
+    }
+  });
+  /** The checked-out branch's pull request, for the composer PR link. */
+  ipcMain.handle("desktop:get-local-pr", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await diffThread(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return null;
+    try {
+      const { pr } = await repositoryMetadata(thread.checkpoint.repo);
+      return pr;
+    } catch {
+      return null;
     }
   });
 }

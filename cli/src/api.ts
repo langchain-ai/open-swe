@@ -14,6 +14,14 @@ import {
   type Identity,
   type ThreadsPage,
 } from "./threads.ts"
+import {
+  humanReviewDismissSchema,
+  humanReviewRequestSchema,
+  pullRequestApiPath,
+  type HumanReviewDismissResult,
+  type HumanReviewRequestResult,
+} from "./review.ts"
+import { uploadedThreadSchema } from "./upload.ts"
 
 export class ApiError extends Error {
   constructor(
@@ -36,6 +44,12 @@ export interface BridgeSession {
   bridgeId: string
   heartbeatIntervalSeconds: number
   aliveThresholdSeconds: number
+}
+
+/** A pre-encoded request body and the headers that describe it. */
+interface RawBody {
+  data: Uint8Array
+  headers: Record<string, string>
 }
 
 export interface BridgeRequest {
@@ -115,13 +129,23 @@ export class ApiClient {
   private async send(
     method: string,
     path: string,
-    options: { body?: unknown; accept?: string; signal?: AbortSignal } = {}
+    options: {
+      body?: unknown
+      raw?: RawBody
+      accept?: string
+      signal?: AbortSignal
+    } = {}
   ): Promise<Response> {
+    const headers = {
+      ...(await this.headers(options.accept ?? "application/json")),
+      ...options.raw?.headers,
+    }
     const response = await fetch(this.url(path), {
       method,
-      headers: await this.headers(options.accept ?? "application/json"),
+      headers,
       body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
+        options.raw?.data ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
       signal: options.signal,
     })
     if (!response.ok) {
@@ -136,7 +160,7 @@ export class ApiClient {
   private async json(
     method: string,
     path: string,
-    options: { body?: unknown; signal?: AbortSignal } = {}
+    options: { body?: unknown; raw?: RawBody; signal?: AbortSignal } = {}
   ): Promise<unknown> {
     const response = await this.send(method, path, options)
     if (response.status === 204) return null
@@ -162,6 +186,56 @@ export class ApiClient {
     )
     if (!parsed.success)
       throw new ProtocolError("/threads/page response is malformed")
+    return parsed.data
+  }
+
+  /** Create a thread from a gzipped JSONL session upload; returns its id. */
+  async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
+    const parsed = uploadedThreadSchema.safeParse(
+      await this.json("POST", "/threads/uploads", {
+        raw: {
+          data: gzippedJsonl,
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            "Content-Encoding": "gzip",
+          },
+        },
+      })
+    )
+    if (!parsed.success)
+      throw new ProtocolError("/threads/uploads response is malformed")
+    return parsed.data.id
+  }
+
+  /** Post a Slack review card for a pull request, or return (and re-summarize) the open one. */
+  async requestHumanReview(
+    prUrl: string,
+    body: { inline_summary: string; channel?: string }
+  ): Promise<HumanReviewRequestResult> {
+    const parsed = humanReviewRequestSchema.safeParse(
+      await this.json("POST", `${pullRequestApiPath(prUrl)}/human-review`, {
+        body,
+      })
+    )
+    if (!parsed.success)
+      throw new ProtocolError("human review response is malformed")
+    return parsed.data
+  }
+
+  /** Dismiss a pull request's open review request, as its card's Dismiss button does. */
+  async dismissHumanReviewRequest(
+    prUrl: string,
+    body: { reason?: string }
+  ): Promise<HumanReviewDismissResult> {
+    const parsed = humanReviewDismissSchema.safeParse(
+      await this.json(
+        "POST",
+        `${pullRequestApiPath(prUrl)}/human-review/dismiss`,
+        { body }
+      )
+    )
+    if (!parsed.success)
+      throw new ProtocolError("human review dismissal response is malformed")
     return parsed.data
   }
 
@@ -310,6 +384,7 @@ export async function exchangeDesktopHandoff(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        Origin: backend,
       },
       body: JSON.stringify({ code, verifier }),
     }

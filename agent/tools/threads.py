@@ -25,7 +25,6 @@ from agent.threads import plan_api, workflow_approval_api
 from agent.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
-    delete_dashboard_thread,
     get_dashboard_thread,
     resolve_dashboard_thread,
     send_dashboard_message,
@@ -65,7 +64,6 @@ ThreadAction = Literal[
     "admin_cancel",
     "resolve",
     "unresolve",
-    "delete",
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
@@ -709,7 +707,7 @@ def _available_actions(
         actions.append("add_plan_comment")
     if can_delete_plan_comment:
         actions.append("delete_plan_comment")
-    actions.extend(["unresolve" if resolved else "resolve", "delete"])
+    actions.append("unresolve" if resolved else "resolve")
     if running:
         actions.append("cancel")
     if plan_status:
@@ -912,7 +910,6 @@ def _unexpected_action_arguments(
     content: str | None,
     content_format: PlanFormat,
     fingerprint: str | None,
-    confirm: bool,
     model_id: str | None,
     effort: str | None,
 ) -> list[str]:
@@ -922,7 +919,6 @@ def _unexpected_action_arguments(
         "admin_cancel": set(),
         "resolve": set(),
         "unresolve": set(),
-        "delete": {"confirm"},
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
@@ -942,8 +938,6 @@ def _unexpected_action_arguments(
         }.items()
         if isinstance(value, str) and value.strip()
     }
-    if confirm:
-        provided.add("confirm")
     if content_format != "html":
         provided.add("content_format")
     return sorted(provided - allowed)
@@ -958,7 +952,6 @@ async def manage_thread(
     content: str | None = None,
     content_format: PlanFormat = "html",
     fingerprint: str | None = None,
-    confirm: bool = False,
     model_id: str | None = None,
     effort: str | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
@@ -978,7 +971,6 @@ async def manage_thread(
         content=content,
         content_format=content_format,
         fingerprint=fingerprint,
-        confirm=confirm,
         model_id=model_id,
         effort=effort,
     )
@@ -986,8 +978,6 @@ async def manage_thread(
         return _failure(f"Unexpected arguments for {action}: {', '.join(unexpected)}")
     if action == "admin_cancel" and not actor.admin:
         return _failure("Only workspace admins can cancel another user's thread")
-    if action == "delete" and not confirm:
-        return _failure("delete requires confirm=true")
     if action == "send_message":
         validated = _message_args(message or "", model_id, effort)
         if isinstance(validated, dict):
@@ -1029,9 +1019,6 @@ async def manage_thread(
                 email=actor.email,
             )
             return {"success": True, "thread": _list_item(thread)}
-        if action == "delete":
-            await delete_dashboard_thread(thread_id, actor.login, email=actor.email)
-            return {"success": True, "deleted": True, "thread_id": thread_id}
         if action == "add_plan_comment":
             if error := _required(comment, "comment", action):
                 return error

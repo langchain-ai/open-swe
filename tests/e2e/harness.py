@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from e2e_env import (  # noqa: E402
     OWNER,
     REPO,
     REPO_ROOT,
+    REVIEW_CHANNEL,
     SECOND_OWNER,
     SECOND_REPO,
     TEST_USERS,
@@ -161,7 +163,7 @@ async def _reset_durable_pr_state() -> None:
 
     if postgres.configured():
         async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE expedited_approval, pull_request CASCADE"))
+            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -407,9 +409,13 @@ async def control_team_settings(request: Request) -> JSONResponse:
 @app.get("/control/expedited-approvals")
 async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
     """Every expedited approval row for a repository, newest last."""
-    from agent.expedited_review.approvals import ExpeditedApproval
+    from agent.human_review.requests import HumanReviewRequest
 
-    approvals = await ExpeditedApproval.all_for_repo(owner, repo)
+    approvals = [
+        request
+        for request in await HumanReviewRequest.all_for_repo(owner, repo)
+        if request.kind == "expedited"
+    ]
     return JSONResponse(
         [
             {
@@ -427,12 +433,94 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                         "github_review_id": vote.github_review_id,
                         "github_review_sha": vote.github_review_sha,
                     }
-                    for vote in approval.votes
+                    for vote in approval.participants
                 ],
             }
             for approval in approvals
         ]
     )
+
+
+@app.get("/control/human-review-requests")
+async def control_human_review_requests(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
+    """Every standard human review request for a repository, newest last."""
+    from agent.human_review.requests import HumanReviewRequest
+
+    return JSONResponse(
+        [
+            {
+                "id": str(request.id),
+                "state": request.state,
+                "detail": request.detail,
+                "pr_number": request.pull_request.number,
+                "thread_id": request.thread_id,
+                "tldr": request.tldr,
+                "slack_channel_id": request.slack_channel_id,
+                "slack_thread_ts": request.slack_thread_ts,
+                "slack_message_ts": request.slack_message_ts,
+                "slack_broadcast": request.slack_broadcast,
+                "reviewers": [
+                    {"github_login": r.github_login, "assigned_by_agent": r.assigned_by_agent}
+                    for r in request.reviewers
+                ],
+            }
+            for request in await HumanReviewRequest.all_for_repo(owner, repo)
+            if request.kind == "standard"
+        ]
+    )
+
+
+@app.post("/control/human-review-deadline")
+async def control_human_review_deadline(request: Request) -> JSONResponse:
+    """Fire a request's scheduled deadline now, as if ``hours`` had passed since it was posted.
+
+    The scheduler delays these by 30 minutes and 2 hours; the spec cannot wait that long.
+    """
+    from sqlalchemy import update
+
+    from agent.database import postgres
+    from agent.human_review.requests import HumanReviewRequest
+    from agent.human_review.standard import run_deadline
+
+    body = await request.json()
+    request_id = str(body.get("request_id") or "")
+    step = str(body.get("step") or "")
+    hours = float(body.get("hours") or 0)
+    if hours:
+        async with postgres.session() as session:
+            await session.execute(
+                update(HumanReviewRequest)
+                .where(HumanReviewRequest.id == uuid.UUID(request_id))
+                .values(created_at=HumanReviewRequest.created_at - timedelta(hours=hours))
+            )
+    return JSONResponse(await run_deadline(request_id, step))
+
+
+@app.post("/control/user-preferences")
+async def control_user_preferences(request: Request) -> JSONResponse:
+    """Change a person's preferences, as their settings pages do."""
+    from agent.users import User, UserPreferencesPatch
+
+    await _seed_test_user_mappings()
+    body = await request.json()
+    login = str(body.get("login") or "")
+    patch = UserPreferencesPatch.model_validate(body.get("preferences") or {})
+    preferences = await User.update_preferences(login, patch)
+    if preferences is None:
+        raise HTTPException(404, f"no user with login {login!r}")
+    return JSONResponse({"ok": True, "login": login, **preferences.model_dump()})
+
+
+@app.post("/control/repo-file")
+async def control_repo_file(request: Request) -> JSONResponse:
+    """Commit files onto the repository's base branch."""
+    body = await request.json()
+    owner, name = _split_repo(body.get("repo"))
+    files = body.get("files")
+    if not isinstance(files, dict) or not files:
+        raise HTTPException(400, "files must map paths to contents")
+    fakes.commit_to_base(owner, name, {str(path): str(text) for path, text in files.items()})
+    return JSONResponse({"ok": True})
 
 
 @app.get("/control/queued")
@@ -540,9 +628,13 @@ async def _slack_send_result(payload: dict[str, Any], resp: httpx2.Response) -> 
     event = payload["event"]
     channel = str(event["channel"])
     thread_ts = "0" if channel in fakes.CODE_CHANNELS else str(event["thread_ts"])
-    thread_id = await lookup_slack_thread_id(
-        get_client(url=os.environ["LANGGRAPH_URL"]), channel, thread_ts
-    )
+    client = get_client(url=os.environ["LANGGRAPH_URL"])
+    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
+    if thread_id is None and channel.startswith("D"):
+        # A concierge-mode DM is one conversation keyed on the fixed "0" timestamp.
+        concierge_thread_id = await lookup_slack_thread_id(client, channel, "0")
+        if concierge_thread_id is not None:
+            thread_ts, thread_id = "0", concierge_thread_id
     return JSONResponse(
         {
             "thread_ts": thread_ts,
@@ -631,7 +723,7 @@ async def slack_send(request: Request) -> JSONResponse:
 async def slack_action(request: Request) -> JSONResponse:
     body = await request.json()
     action = body.get("action")
-    channel_id = str(CURRENT_THREAD.get("channel") or "")
+    channel_id = str(body.get("channel") or CURRENT_THREAD.get("channel") or "")
     thread_ts = str(body.get("thread_ts") or CURRENT_THREAD.get("thread_ts") or "")
     message_ts = str(body.get("message_ts") or "")
     user_id = str(body.get("user") or TEST_USERS[0]["slack_id"])
@@ -814,6 +906,7 @@ async def slack_messages(channel: str = "", thread_ts: str = "") -> JSONResponse
                 "ts": m["ts"],
                 "thread_ts": m["thread_ts"],
                 "blocks": m["blocks"],
+                "reply_broadcast": m.get("reply_broadcast", False),
             }
             for m in msgs
         ]
@@ -882,6 +975,7 @@ async def mock_github_data() -> JSONResponse:
                 "body": p["body"],
                 "files": p["files"],
                 "reviews": p["reviews"],
+                "requested_reviewers": p["requested_reviewers"],
                 "review_comments": p["review_comments"],
                 "standalone_comment_posts": p["standalone_comment_posts"],
                 "issue_comments": p["issue_comments"],
@@ -951,7 +1045,11 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
             "avatar_url": f"{BASE_URL}/logo-mark.png",
         },
         "merged_at": pr.get("merged_at"),
-        "head": {"ref": pr["head"], "sha": pr["head_sha"]},
+        "head": {
+            "ref": pr["head"],
+            "sha": pr["head_sha"],
+            "repo": {"full_name": f"{pr['owner']}/{pr['repo']}"},
+        },
         "base": {
             "ref": pr["base"],
             "sha": fakes.base_sha(pr),
@@ -1253,6 +1351,25 @@ async def gh_create_issue_comment(
     return JSONResponse(comment, status_code=201)
 
 
+@app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
+async def gh_request_reviewers(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    for login in body.get("reviewers") or []:
+        if login == pr["author"]:
+            return JSONResponse(
+                {"message": "Review cannot be requested from pull request author."},
+                status_code=422,
+            )
+        if login not in pr["requested_reviewers"]:
+            pr["requested_reviewers"].append(login)
+    return JSONResponse(_gh_pr_json(pr), status_code=201)
+
+
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
 async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
     body = await request.json()
@@ -1433,6 +1550,7 @@ async def slack_post_message(request: Request) -> JSONResponse:
         text=body.get("text", ""),
         blocks=body.get("blocks"),
         is_bot=True,
+        reply_broadcast=bool(body.get("reply_broadcast")),
     )
     message: dict[str, Any] = {"ts": ts}
     thread_ts = body.get("thread_ts") or ""
@@ -1453,6 +1571,28 @@ async def slack_update_message(request: Request) -> JSONResponse:
     if message is None:
         return JSONResponse({"ok": False, "error": "message_not_found"})
     return _ok({"ts": message["ts"], "message": message})
+
+
+async def _slack_form(request: Request) -> dict[str, Any]:
+    """The SDK sends these methods' ``params=`` in the query string or a form, not as JSON."""
+    if request.headers.get("content-type", "").startswith("application/json"):
+        return {**request.query_params, **(await request.json())}
+    return {**request.query_params, **dict(await request.form())}
+
+
+@app.post("/fake-slack/chat.delete")
+async def slack_delete_message(request: Request) -> JSONResponse:
+    body = await _slack_form(request)
+    if not fakes.delete_slack_message(str(body.get("channel") or ""), str(body.get("ts") or "")):
+        return JSONResponse({"ok": False, "error": "message_not_found"})
+    return _ok()
+
+
+@app.post("/fake-slack/conversations.open")
+async def slack_conversations_open(request: Request) -> JSONResponse:
+    body = await _slack_form(request)
+    user = str(body.get("users") or "")
+    return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
 
 
 @app.post("/fake-slack/chat.postEphemeral")
@@ -1496,13 +1636,17 @@ async def slack_users_info(user: str = "") -> JSONResponse:
     )
 
 
+_CHANNEL_NAMES = {REVIEW_CHANNEL: "reviews"}
+
+
 @app.get("/fake-slack/conversations.info")
 async def slack_conversations_info(channel: str = "") -> JSONResponse:
     code_channel = fakes.CODE_CHANNELS.get(channel)
+    name = code_channel["name"] if code_channel else _CHANNEL_NAMES.get(channel, "demo")
     data: dict[str, Any] = {
         "id": channel,
-        "name": code_channel["name"] if code_channel else "demo",
-        "name_normalized": code_channel["name"] if code_channel else "demo",
+        "name": name,
+        "name_normalized": name,
         "is_channel": not channel.startswith("D"),
         "is_private": False,
         "is_im": channel.startswith("D"),

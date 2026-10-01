@@ -46,7 +46,14 @@ def next_slack_ts() -> str:
 
 
 def add_slack_message(
-    channel: str, thread_ts: str, *, user: str, text: str, blocks: Any = None, is_bot: bool = False
+    channel: str,
+    thread_ts: str,
+    *,
+    user: str,
+    text: str,
+    blocks: Any = None,
+    is_bot: bool = False,
+    reply_broadcast: bool = False,
 ) -> str:
     ts = next_slack_ts()
     actual_thread_ts = thread_ts or ts
@@ -58,9 +65,21 @@ def add_slack_message(
             "thread_ts": actual_thread_ts,
             "blocks": blocks,
             "is_bot": is_bot,
+            "reply_broadcast": reply_broadcast,
         }
     )
     return ts
+
+
+def delete_slack_message(channel: str, message_ts: str) -> bool:
+    for (message_channel, _thread_ts), thread_messages in SLACK_MESSAGES.items():
+        if message_channel != channel:
+            continue
+        for index, message in enumerate(thread_messages):
+            if message["ts"] == message_ts:
+                del thread_messages[index]
+                return True
+    return False
 
 
 def add_ephemeral(channel: str, user: str, text: str) -> str:
@@ -270,6 +289,24 @@ def push_branch(owner: str, repo: str, branch: str, files: dict[str, str]) -> No
     shutil.rmtree(work)
 
 
+def commit_to_base(owner: str, repo: str, files: dict[str, str]) -> None:
+    """Commit ``files`` straight onto the base branch, as a merged change would land."""
+    remote = _REMOTES[(owner, repo)]
+    work = remote.parent / f"base-{owner}-{repo}"
+    if work.exists():
+        shutil.rmtree(work)
+    ident = ["-c", "user.email=seed@example.com", "-c", "user.name=Seed"]
+    _git("clone", "--branch", BASE_BRANCH, str(remote), str(work))
+    for path, content in files.items():
+        target = work / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    _git("add", "-A", cwd=work)
+    _git(*ident, "commit", "-m", "Seed base files", cwd=work)
+    _git("push", "origin", BASE_BRANCH, cwd=work)
+    shutil.rmtree(work)
+
+
 def resolve_ref(owner: str, repo: str, ref: str) -> str:
     """A git revision for ``ref``; a pull's synthetic head SHA maps to its pushed branch."""
     pull = find_pull_by_sha(owner, repo, ref)
@@ -392,6 +429,7 @@ def create_pull(
         "standalone_comment_posts": [],
         "issue_comments": [],
         "review_decision": "REVIEW_REQUIRED",
+        "requested_reviewers": [],
         "author": author,
         "merge_method": None,
         "created_at": created_at or github_timestamp(-5 * 24 * 60 * 60),

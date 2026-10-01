@@ -55,6 +55,24 @@ def _patch_slack(monkeypatch) -> SimpleNamespace:
     return posted
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("<@U0BOT> /breakout fix it", Command("fix it")),
+        ("/breakout fix it", Command("fix it")),
+        (
+            "details <@U0BOT> /breakout <#C2|target> fix it",
+            Command("fix it", "<#C2|target>", "C2", "details"),
+        ),
+        ("details <@U0BOT> /breakout", Command("", prior_text="details")),
+        ("details <@U0BOT> please /breakout fix it", None),
+        ("details /breakout fix it <@U0BOT>", None),
+    ],
+)
+def test_breakout_command_requires_position_after_mention(text, expected):
+    assert Command.parse(text, "U0BOT") == expected
+
+
 @pytest.mark.asyncio
 async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypatch):
     posted = _patch_slack(monkeypatch)
@@ -97,6 +115,33 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
         "100.0",
     )
     posted.ephemeral.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(monkeypatch):
+    posted = _patch_slack(monkeypatch)
+    root = AsyncMock(return_value=("200.0", None))
+    monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
+    monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
+    )
+    mention = AsyncMock()
+    monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
+    text = "Context for this task.\nMore details <@U0BOT> /breakout fix it"
+    command = Command.parse(text, "U0BOT")
+
+    assert command == Command("fix it", prior_text="Context for this task.\nMore details")
+    await breakout.process_slack_breakout(
+        _request().model_copy(update={"text": text}), command, None
+    )
+
+    assert root.await_args.args[1].startswith("`/breakout`: fix it · ")
+    sent = mention.await_args.args[0]
+    assert sent.text == "fix it"
+    assert sent.prior_message_text == "Context for this task.\nMore details"
+    assert sent.context_thread_ts == "100.0"
+    posted.reactions.assert_awaited_once()
 
 
 @pytest.mark.asyncio

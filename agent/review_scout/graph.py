@@ -32,9 +32,7 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
@@ -74,14 +72,17 @@ class ReviewScoutState(PrepareRunState):
 
 async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
     repo_name = cfg.repo.name if cfg.repo else ""
+    repositories = [repo_name] if repo_name else None
     token, expires_at = await get_github_app_installation_token_with_expiry(
-        repositories=[repo_name] if repo_name else None
+        repositories=repositories
     )
     if not token:
         raise RuntimeError(
             f"GitHub App installation token unavailable for scout thread {thread_id}"
         )
-    cache_github_token_for_thread(thread_id, token, expires_at=expires_at, is_bot_token=True)
+    cache_github_token_for_thread(
+        thread_id, token, expires_at=expires_at, is_bot_token=True, repositories=repositories
+    )
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
         thread_id,
@@ -263,10 +264,8 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),

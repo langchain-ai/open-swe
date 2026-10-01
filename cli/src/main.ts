@@ -32,7 +32,8 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe mcp                          Serve an MCP server on stdio (list_threads)
+  oswe mcp                          Serve an MCP server on stdio (list_threads,
+                                    upload_session)
   oswe --help | --version
 
 Run options:

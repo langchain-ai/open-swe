@@ -60,9 +60,7 @@ def test_cached_token_expires_after_max_ttl() -> None:
     far_future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
     old_cached_at = datetime.now(UTC) - timedelta(hours=25)
     github_token._GITHUB_TOKEN_CACHE[("tid", github_token._BOT_PRINCIPAL)] = (
-        "ghp_secret",
-        far_future,
-        old_cached_at,
+        github_token._CachedToken("ghp_secret", far_future, old_cached_at)
     )
     assert github_token.get_github_token({"configurable": {"thread_id": "tid"}}) is None
 
@@ -251,7 +249,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     assert invalidated["calls"] == 1
     assert resolves == ["stale-token", "fresh-token"]
     assert react_calls == ["stale-token", "fresh-token"]
-    assert fetch_calls == ["fresh-token"]
+    assert fetch_calls == ["stale-token"]
 
 
 @pytest.mark.asyncio
@@ -282,7 +280,11 @@ async def test_publish_review_invalidates_cached_token_on_401(
             },
         },
     )
-    monkeypatch.setattr(publish_review_module, "get_github_token", lambda: "revoked-token")
+    monkeypatch.setattr(
+        publish_review_module,
+        "resolve_thread_github_token",
+        AsyncMock(return_value="revoked-token"),
+    )
     monkeypatch.setattr(publish_review_module, "invalidate_cached_github_token", fake_invalidate)
     monkeypatch.setattr(publish_review_module, "_publish_review_async", fake_publish)
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
@@ -293,3 +295,38 @@ async def test_publish_review_invalidates_cached_token_on_401(
     assert "401" in result["error"]
     assert invalidated["calls"] == 1
     assert invalidated.get("thread_id") == "thread-xyz"
+
+
+@pytest.mark.asyncio
+async def test_expired_bot_token_is_re_minted_at_its_original_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {"configurable": {"thread_id": "tid"}}
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    github_token.cache_github_token_for_thread(
+        "tid", "stale-token", expires_at=expired, is_bot_token=True, repositories=["r"]
+    )
+    fresh_expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    mint = AsyncMock(return_value=("fresh-token", fresh_expiry))
+    monkeypatch.setattr(github_token, "get_github_app_installation_token_with_expiry", mint)
+
+    assert await github_token.resolve_thread_github_token(config) == "fresh-token"
+    assert await github_token.resolve_thread_github_token(config) == "fresh-token"
+    mint.assert_awaited_once_with(repositories=("r",))
+
+
+@pytest.mark.asyncio
+async def test_expired_user_token_is_never_replaced_with_a_bot_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    principal = github_token.github_token_principal(login="alice")
+    config = {"configurable": {"thread_id": "tid", "github_login": "alice"}}
+    expired = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    github_token.cache_github_token_for_thread(
+        "tid", "alice-token", expires_at=expired, principal=principal
+    )
+    mint = AsyncMock()
+    monkeypatch.setattr(github_token, "get_github_app_installation_token_with_expiry", mint)
+
+    assert await github_token.resolve_thread_github_token(config) is None
+    mint.assert_not_awaited()

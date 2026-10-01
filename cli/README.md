@@ -168,12 +168,30 @@ server on stdio, signed in with the same credential as the rest of the CLI:
 { "mcpServers": { "oswe": { "command": "oswe", "args": ["mcp"] } } }
 ```
 
-Its one tool, `list_threads`, lists your threads newest first with the
-dashboard sidebar's filters: `repo` (owner/name) or `no_repo`,
-`include_archived`, `include_automations`, `sort` (`created` or `updated`),
-plus `status`, `unread`, `source`, `query`, `limit` and `offset`. Archived
-threads and automation runs are left out unless asked for. It needs a person's
-session; API keys and CI tokens cannot list threads.
+Every tool needs a person's session; API keys and CI tokens cannot use them.
+
+`list_threads` lists your threads newest first with the dashboard sidebar's
+filters: `repo` (owner/name) or `no_repo`, `include_archived`,
+`include_automations`, `sort` (`created` or `updated`), plus `status`, `unread`,
+`source`, `query`, `limit` and `offset`. Archived threads and automation runs
+are left out unless asked for.
+
+`upload_session` moves a local coding session into a new Open SWE thread. It
+takes `type` (`claude`), `transcript_path` (the session's JSONL, sent verbatim),
+where the working directory was pushed — `repo` and `branch`, or `pr_url` — and
+`visibility` (`workspace` by default, or `private`). Commit and push the whole
+working directory first: the cloud agent sees only the pushed branch. No run
+starts; continue the thread from the dashboard. A Claude Code transcript lives
+at `~/.claude/projects/<cwd with non-alphanumerics as ->/$CLAUDE_CODE_SESSION_ID.jsonl`.
+
+`request_human_review` posts a pull request's review card in its repository's
+Slack review channel (or `channel`), with `inline_summary` as the card's
+summary. It needs **Request human reviews in Slack** turned on for you on the
+dashboard's Feature Flags page. Asking again for a pull request you already
+asked about replaces the open card's summary.
+
+`dismiss_human_review_request` takes a pull request's open review request down,
+as the card's Dismiss button does, with an optional `reason` shown on the card.
 
 ## Environment the agent gets
 

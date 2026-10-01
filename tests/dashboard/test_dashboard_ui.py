@@ -31,6 +31,33 @@ def _shell_route(app) -> DashboardShellRoute:
     return next(route for route in app.router.routes if isinstance(route, DashboardShellRoute))
 
 
+def test_desktop_api_preflight_without_extra_cors_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+    client = TestClient(app_module.create_app())
+
+    response = client.options(
+        "/dashboard/api/me",
+        headers={
+            "Origin": "open-swe://app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "open-swe://app"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert (
+        client.options(
+            "/dashboard/api/me",
+            headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"},
+        ).status_code
+        == 400
+    )
+
+
 def test_api_routes_keep_precedence_over_the_shell(build_dir: Path) -> None:
     client = TestClient(app_module.create_app())
 

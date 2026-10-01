@@ -113,7 +113,9 @@ async def github_webhook(
             except Exception:  # noqa: BLE001
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action == "closed":
-            background_tasks.add_task(service.settle_expedited_review_on_close, payload)
+            background_tasks.add_task(service.settle_human_review_on_close, payload)
+        elif action in common.GH_PR_AGENT_STATE_ACTIONS:
+            background_tasks.add_task(service.settle_human_reviews, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -160,6 +162,10 @@ async def github_webhook(
             delivery_id,
         )
         return {"status": "accepted", "message": "Processing GitHub CI event"}
+
+    if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
+        # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
+        background_tasks.add_task(service.settle_human_reviews, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

@@ -14,6 +14,7 @@ from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
+from agent.openai_responses.routes import router as sandbox_openai_router
 from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
@@ -125,15 +126,14 @@ def create_app() -> FastAPI:
         raise RuntimeError(
             "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
         )
-    if allowed_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[*allowed_origins, "open-swe://app"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
     add_trace_resource_names(app)
     add_request_ids(app)
     app.include_router(dashboard_router)
@@ -144,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(github_webhook_router)
     app.include_router(sandbox_tool_router)
+    app.include_router(sandbox_openai_router)
     mount_dashboard_ui(app)
     return app
 

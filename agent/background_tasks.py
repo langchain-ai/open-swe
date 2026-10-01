@@ -5,6 +5,7 @@ import shlex
 from typing import Any
 
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError
 
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
@@ -174,7 +175,12 @@ async def _list_tasks(backend: Any) -> list[dict[str, Any]]:
 
 async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
     client = _client()
-    thread = await client.threads.get(thread_id)
+    try:
+        thread = await client.threads.get(thread_id)
+    except NotFoundError:
+        logger.info("Background-task thread is gone", extra={"agent_thread_id": thread_id})
+        await _delete_crons(thread_id)
+        return {"status": "missing_thread"}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
     tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)

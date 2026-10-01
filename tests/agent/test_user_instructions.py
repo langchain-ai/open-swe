@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -6,7 +7,10 @@ from agent.tools.save_user_instructions import save_user_instructions
 
 
 @pytest.mark.asyncio
-async def test_save_user_instructions_requires_login() -> None:
+async def test_save_user_instructions_requires_login(
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(private=True, owner=True)
     with patch(
         "agent.tools.save_user_instructions.get_config",
         return_value={"configurable": {}},
@@ -17,7 +21,8 @@ async def test_save_user_instructions_requires_login() -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_user_instructions_writes_record() -> None:
+async def test_save_user_instructions_writes_record(grant_tool_access: Callable[..., None]) -> None:
+    grant_tool_access(private=True, owner=True)
     mock_set = AsyncMock(return_value={"instructions": "Always run tests."})
     with (
         patch(

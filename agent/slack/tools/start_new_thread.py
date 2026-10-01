@@ -305,6 +305,7 @@ async def slack_start_new_thread(
             clean_channel_id,
             message_ts,
             _thread_details(clean_instructions, repo),
+            agent_thread_id=thread_id,
             unfurl_links=False,
             unfurl_media=False,
         )
