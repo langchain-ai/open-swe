@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, type ReactNode } from "react"
-import type { ModelOption, WorkspaceSettings } from "@/lib/api"
+import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import {
@@ -59,6 +59,7 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
+      badgeClassName={!inherits ? "text-destructive" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}
@@ -164,7 +165,7 @@ export function DefaultRepoSection({
 }: {
   scope: SettingsScope
   /** Every repository the installation can see: any workspace may default to any of them. */
-  repositories: Array<string>
+  repositories: Array<Repository>
 }) {
   const settings = useScopedSettings(scope)
   const scoped = scope.kind === "workspace"
@@ -186,7 +187,8 @@ export function DefaultRepoSection({
           control={
             <div className="w-56">
               <RepoSelector
-                repos={repositories.map((full_name) => ({ full_name }))}
+                repos={repositories}
+                allowArchived
                 selectedRepo={settings.data?.default_repo ?? null}
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"

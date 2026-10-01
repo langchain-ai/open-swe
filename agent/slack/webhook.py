@@ -60,6 +60,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
+_KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -397,6 +398,8 @@ def _slack_context_input(
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
+    prior_message_text: str = "",
+    is_breakout: bool = False,
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -473,6 +476,19 @@ def _slack_context_input(
             if kind == "human"
             else system_input(text, message_context)
         )
+    if prior_message_text:
+        run_messages.append(
+            human_input(
+                prior_message_text,
+                {
+                    "sender_id": trigger_person["id"],
+                    "channel_id": channel_entity_id,
+                    "surface": "slack",
+                    "kind": "human",
+                    "data": {"timestamp": event_ts},
+                },
+            )
+        )
     if constant_context or turn_context:
         slack_context: SystemIdentity = {
             "id": _SLACK_CONTEXT_SENDER_ID,
@@ -506,9 +522,11 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(current_message, bot_user_id)
-    _, separator, forwarded_context = rendered_request.partition("\n")
-    if separator and forwarded_context:
+    rendered_request = _slack_message_text(
+        {**current_message, "text": ""} if is_breakout else current_message, bot_user_id
+    )
+    _, _, forwarded_context = rendered_request.partition("\n")
+    if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
@@ -838,7 +856,9 @@ async def _process_slack_mention_impl(
         if not message_update:
             source_messages = context_messages
     clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+        slack_utils.replace_bot_mention_with_username(
+            text, bot_user_id, common.SLACK_BOT_USERNAME
+        ).strip()
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)
@@ -1026,6 +1046,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else "",
         )
         if section
     )
@@ -1147,6 +1168,8 @@ async def _process_slack_mention_impl(
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
+        prior_message_text=request.prior_message_text,
+        is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
         constant_context=constant_context,
         dispatched_timestamps=dispatched_timestamps,

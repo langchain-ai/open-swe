@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
@@ -510,6 +511,16 @@ async def slack_webhook(
         or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
         or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    leading_mention = re.match(r"\s*<@([^>]+)>", text)
+    if (
+        not in_code_channel
+        and not in_dm_channel
+        and allowed_bot is None
+        and leading_mention
+        and leading_mention.group(1) != bot_user_id
+    ):
+        return ignored("Message addressed to another user")
+
     solo_followup = False
     if (
         not is_message_update
@@ -775,6 +786,15 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if (
+        interaction.type == "view_submission"
+        and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
+    ):
+        return expedited_review.handle_picker_submission(interaction, background_tasks)
+    if interaction.type == "block_actions" and any(
+        action.action_id == expedited_review.CHANNEL_SELECT_ACTION for action in interaction.actions
+    ):
+        return await expedited_review.handle_channel_select(interaction)
     if interaction.type == "block_actions":
         feedback_action = next(
             (action for action in interaction.actions if action.action_id == FEEDBACK_ACTION), None

@@ -6,12 +6,14 @@
     "az_comment": "reviewed commit is not in the repo",
     "comments": [
       {
-        "comment": "ConditionalPasskeysEnabled() called without UserModel parameter",
-        "severity": "Medium"
+        "comment": "In UsernameForm.authenticate(), isConditionalPasskeysEnabled() is called without passing the required UserModel parameter.",
+        "severity": "Medium",
+        "category": "api"
       },
       {
         "comment": "With isConditionalPasskeysEnabled(UserModel user) requiring user != null, authenticate(...) will not call webauthnAuth.fillContextForm(context) on the initial login page where context.getUser() is still null, so conditional passkey UI will not be set up for first-time passkey login. Consider whether this should also be enabled when no user has been selected yet so ID-less passkey authentication on the initial login form continues to work.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "speculative"
       }
     ]
   },
@@ -20,12 +22,14 @@
     "url": "https://github.com/keycloak/keycloak/pull/32918",
     "comments": [
       {
-        "comment": "Recursive caching call using session instead of delegate",
-        "severity": "Critical"
+        "comment": "InfinispanIdentityProviderStorageProvider.getForLogin() recursively calls session.identityProviders().getById() instead of idpDelegate.getById(), causing the cache lookup to re-enter the same caching layer.",
+        "severity": "Critical",
+        "category": "bug"
       },
       {
         "comment": "Cleanup reference uses incorrect alias - should be 'idp-alias-' + i instead of 'alias'.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       }
     ]
   },
@@ -35,11 +39,23 @@
     "comments": [
       {
         "comment": "Returns wrong provider (default keystore instead of BouncyCastle)",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "Dead code exists where ASN1Encoder instances are created and written to, but their results are immediately discarded. The actual encoding is performed by new ASN1Encoder instances created in the subsequent return statement, rendering the earlier operations useless.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "perf"
+      },
+      {
+        "comment": "When length starts at -1 from indefinite-length encoding, the arithmetic 'length = length - bytes.length' will behave unexpectedly, potentially leading to incorrect processing of encoded data.",
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "Abstract order() method on CryptoProvider may break backward compatibility with existing implementations",
+        "severity": "Low",
+        "category": "speculative"
       }
     ]
   },
@@ -49,7 +65,13 @@
     "comments": [
       {
         "comment": "Incorrect method call for exit codes. The picocli.exit() method calls System.exit() directly, which is problematic:",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
+      },
+      {
+        "comment": "Need to add changelog/release notes documenting the exit code change and migration guidance",
+        "severity": "Low",
+        "category": "doc_defect"
       }
     ]
   },
@@ -59,15 +81,28 @@
     "comments": [
       {
         "comment": "Inconsistent feature flag bug causing orphaned permissions. The AdminPermissions event listener, responsible for cleaning up permissions upon role, client, or group removal, is incorrectly guarded by the ADMIN_FINE_GRAINED_AUTHZ (V1) feature flag. This is inconsistent with other methods in the class that use ADMIN_FINE_GRAINED_AUTHZ_V2. Consequently, if ADMIN_FINE_GRAINED_AUTHZ_V2 is enabled but V1 is not, the permission cleanup logic will not execute, leading to orphaned permission data. Cleanup should occur regardless of which fine-grained authorization version is enabled.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "In hasPermission(ClientModel client, String scope), the resource lookup uses findByName(server, client.getId(), server.getId()), but AdminPermissionsSchema.getOrCreateResource creates per-client resources with the owner set to resourceServer.getClientId(), so this lookup will never find those resources and will always fall back to the 'all-clients' resource, effectively ignoring client-specific permissions.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "In getClientsWithPermission(String scope), iterating resourceStore.findByType(server, AdminPermissionsSchema.CLIENTS_RESOURCE_TYPE) and returning resource.getName() will only ever consider the type-level 'Clients' resource (per-client resources have no type) and return its name, while AvailableRoleMappingResource#getRoleIdsWithPermissions expects actual client IDs to pass to realm.getClientById, which can lead to incorrect behavior or a null client and subsequent failures.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
+      },
+      {
+        "comment": "In ClientPermissionsV2.hasPermission, the method getResourceTypeResource could return null, leading to a NullPointerException in findByResource. Defensive null checks are needed to prevent this issue.",
+        "severity": "High",
+        "category": "bug"
+      },
+      {
+        "comment": "Remove unused getEvaluationContext private method in ClientPermissionsV2 - it is defined but never called",
+        "severity": "Low",
+        "category": "style"
       }
     ]
   },
@@ -76,12 +111,14 @@
     "url": "https://github.com/keycloak/keycloak/pull/37038",
     "comments": [
       {
-        "comment": "Incorrect permission check in canManage() method",
-        "severity": "High"
+        "comment": "In GroupPermissionsV2.canManage(), the permission fallback checks for both VIEW and MANAGE scopes (hasPermission(null, AdminPermissionsSchema.VIEW, AdminPermissionsSchema.MANAGE)), but canManage() should only grant access for MANAGE scope, not VIEW. This means users with only VIEW permission on groups can pass the canManage() check, granting them write access they should not have. The canView() method correctly checks both VIEW and MANAGE, but canManage() should only check MANAGE.",
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "In getGroupIdsWithViewPermission, hasPermission is called with groupResource.getId() and the same groupResource.getId() is added to granted, but hasPermission resolves resources by name (treating the argument as a group id) and the GroupPermissionEvaluator contract says this method returns group IDs that are later used as UserModel.GROUPS and in getUsersCount group filters. This mismatch means per-group VIEW_MEMBERS/MANAGE_MEMBERS permissions may not yield the expected group IDs for filtering and counts, and evaluation may effectively only look at the type-level 'all-groups' resource; consider revisiting whether this should operate on the underlying group ids (resource names) instead so it aligns with the JPA queries and the interface contract.",
-        "severity": "High"
+        "severity": "High",
+        "category": "api"
       }
     ]
   },
@@ -91,19 +128,28 @@
     "comments": [
       {
         "comment": "The translation is in Italian instead of Lithuanian. This should be translated to Lithuanian to match the file's locale (messages_lt.properties).",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "doc_defect"
       },
       {
         "comment": "The totpStep1 value uses Traditional Chinese terms in the Simplified Chinese file (zh_CN), which is likely incorrect for this locale. Please verify the locale‑appropriate translation.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "doc_defect"
       },
       {
         "comment": "The anchor sanitization logic has a potential issue where it consumes English matcher groups without proper validation. If the translated text has more anchor tags than the English text, this could lead to incorrect validation results.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "security"
       },
       {
         "comment": "The method name 'santizeAnchors' should be 'sanitizeAnchors' (missing 'i').",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "style"
+      },
+      {
+        "comment": "Field HTML_TAGS should be declared as 'private static final' following Java naming conventions for constants",
+        "severity": "Low",
+        "category": "style"
       }
     ]
   },
@@ -112,20 +158,24 @@
     "url": "https://github.com/keycloak/keycloak/pull/37634",
     "comments": [
       {
-        "comment": "Wrong parameter in null check (grantType vs. rawTokenId)",
-        "severity": "Critical"
+        "comment": "In AccessTokenContext constructor, the fourth Objects.requireNonNull validates grantType twice instead of validating rawTokenId, allowing null rawTokenId values to pass validation.",
+        "severity": "Critical",
+        "category": "bug"
       },
       {
         "comment": "In isAccessTokenId, the substring for the grant shortcut and the equality check look inverted: the grant shortcut occupies indices 4–5 (substring(4,6)), and a match should return true (combined with UUID check), not false.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "Javadoc mentions \"usually like 3-letters shortcut\" but some implementations use 2-letter shortcuts (\"ac\", \"cc\", \"rt\", \"te\", \"pc\", \"ci\", \"ro\"). Consider updating documentation to reflect actual usage pattern.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "doc_defect"
       },
       {
         "comment": " Catching generic RuntimeException is too broad. The implementation throws IllegalArgumentException specifically - catch that instead for more precise testing.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
       }
     ]
   },
@@ -135,11 +185,13 @@
     "comments": [
       {
         "comment": "Unsafe raw List deserialization without type safety. Calling Optional.get() directly on the Optional returned by RecoveryAuthnCodesUtils.getCredential(user) without checking isPresent() can lead to a NoSuchElementException if the Optional is empty.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "After creating the RecoveryAuthnCodesCredentialModel, consider setting its id from the stored credential (e.g., myUser.recoveryCodes.getId()); otherwise getId() will be null and downstream removal by id (e.g., removeStoredCredentialById in the authenticator flow) may not work.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
       }
     ]
   },
@@ -149,11 +201,13 @@
     "comments": [
       {
         "comment": "Returning null from getSubGroupsCount() violates the GroupModel contract (Javadoc says it never returns null) and may lead to NPEs in callers that expect a non-null count.",
-        "severity": "Critical"
+        "severity": "Critical",
+        "category": "api"
       },
       {
         "comment": "The reader thread isn’t waited for; flipping deletedAll to true and asserting immediately can race and miss exceptions added just after the flag change, making this test flaky.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "concurrency"
       }
     ]
   }

@@ -519,7 +519,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 _SESSION_COST_LABEL_RE = re.compile(
     r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
-    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\)"
+    r"| • \+(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -547,8 +548,8 @@ def with_slack_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Replace cumulative and optional per-run costs in a live Slack footer."""
     label = format_slack_session_cost(cost)
-    if run_cost is not None:
-        label += f" ({format_slack_session_cost(run_cost)})"
+    if run_cost is not None and run_cost < cost:
+        label += f" • +{format_slack_session_cost(run_cost)}"
     updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
@@ -1364,8 +1365,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch messages for a Slack thread, keeping the most recent window."""
+async def fetch_slack_thread_messages(
+    channel_id: str, thread_ts: str, *, complete: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch messages for a Slack thread, keeping the most recent window.
+
+    With ``complete``, a failed page raises instead of returning the pages fetched so far.
+    """
     if not SLACK_BOT_TOKEN:
         return []
 
@@ -1390,6 +1396,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 )
             except SLACK_REQUEST_ERRORS as exc:
                 logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                if complete:
+                    raise
                 break
 
             batch = payload.get("messages", [])

@@ -146,6 +146,7 @@ async def test_slack_start_new_thread_success(
             "unfurl_media": unfurl_media,
             "blocks": blocks,
             "usage": usage,
+            "agent_thread_id": kwargs.get("agent_thread_id"),
         }
         return "1700000000.222222", None
 
@@ -257,6 +258,7 @@ async def test_slack_start_new_thread_success(
         "unfurl_media": False,
         "blocks": None,
         "usage": None,
+        "agent_thread_id": expected_thread_id,
     }
     assert captured["thread_create"]["if_exists"] == "do_nothing"
     assert captured["thread_create"]["thread_id"] == expected_thread_id
