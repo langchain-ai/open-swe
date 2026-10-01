@@ -24,6 +24,20 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
     return posixpath.join(work_dir, repo_name)
 
 
+async def resolve_checkout_dir(
+    sandbox_backend: SandboxBackendProtocol, work_dir: str, repo_name: str
+) -> str:
+    """``<work_dir>/<repo>``, or a ``$HOME/<repo>`` checkout made before the /workspace move."""
+    repo_dir = posixpath.join(work_dir, repo_name)
+    name = shlex.quote(posixpath.basename(repo_name))
+    result = await sandbox_backend.aexecute(
+        f"test -e {shlex.quote(repo_dir)}/.git || "
+        f'{{ test -e "$HOME"/{name}/.git && printf %s "$HOME"/{name}; }}'
+    )
+    legacy = _normalize_path(result.output) if result.exit_code == 0 else None
+    return legacy or repo_dir
+
+
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:
     """Resolve a writable base directory for repository operations."""
     cached_work_dir = getattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, None)
