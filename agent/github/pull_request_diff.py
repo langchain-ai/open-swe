@@ -132,15 +132,6 @@ async def _pull_branch_shas(
     return base_sha, head_sha
 
 
-async def pull_request_diff_refs(
-    client: httpx2.AsyncClient, full_name: str, pr_number: int
-) -> tuple[str, str]:
-    """Return the PR's ``(merge_base_sha, head_sha)`` — the refs its diff spans."""
-    base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
-    return _merge_base_sha(comparison), head_sha
-
-
 async def build_pr_diff_files(
     client: httpx2.AsyncClient,
     full_name: str,

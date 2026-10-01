@@ -1088,48 +1088,6 @@
         "title": "CustomToolCallItem",
         "type": "object"
       },
-      "DashboardImageBody": {
-        "properties": {
-          "base64": {
-            "minLength": 1,
-            "title": "Base64",
-            "type": "string"
-          },
-          "fileName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filename"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kind"
-          },
-          "mimeType": {
-            "minLength": 1,
-            "title": "Mimetype",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base64",
-          "mimeType"
-        ],
-        "title": "DashboardImageBody",
-        "type": "object"
-      },
       "DesktopConnectExchange": {
         "description": "Body of a desktop connect handoff redemption.",
         "properties": {
@@ -4883,59 +4841,6 @@
         "title": "ThreadFeedbackResponse",
         "type": "object"
       },
-      "ThreadMessageBody": {
-        "properties": {
-          "client_message_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Message Id"
-          },
-          "content": {
-            "default": "",
-            "maxLength": 20000,
-            "title": "Content",
-            "type": "string"
-          },
-          "effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effort"
-          },
-          "images": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardImageBody"
-            },
-            "title": "Images",
-            "type": "array"
-          },
-          "model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Id"
-          }
-        },
-        "title": "ThreadMessageBody",
-        "type": "object"
-      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -5421,19 +5326,6 @@
           "type"
         ],
         "title": "ValidationError",
-        "type": "object"
-      },
-      "WalkthroughDismissed": {
-        "properties": {
-          "dismissed": {
-            "title": "Dismissed",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "dismissed"
-        ],
-        "title": "WalkthroughDismissed",
         "type": "object"
       },
       "WebSearchAction": {
@@ -13304,73 +13196,6 @@
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/walkthrough": {
-      "delete": {
-        "description": "Drop the stored walkthrough so the next scout run rebuilds it.",
-        "operationId": "api_dismiss_walkthrough_dashboard_api_reviews__owner___repo___pr_number__walkthrough_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "repo",
-            "required": true,
-            "schema": {
-              "title": "Repo",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "pr_number",
-            "required": true,
-            "schema": {
-              "title": "Pr Number",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WalkthroughDismissed"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Dismiss Walkthrough",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-openai/v1/models": {
       "get": {
         "operationId": "list_models_dashboard_api_sandbox_openai_v1_models_get",
@@ -16006,66 +15831,6 @@
           }
         ],
         "summary": "Api Thread History",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/messages": {
-      "post": {
-        "operationId": "api_send_thread_message_dashboard_api_threads__thread_id__messages_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadMessageBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Send Thread Message Dashboard Api Threads  Thread Id  Messages Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Send Thread Message",
         "tags": [
           "dashboard",
           "threads"

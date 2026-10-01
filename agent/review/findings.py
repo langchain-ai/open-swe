@@ -196,12 +196,6 @@ class ReviewerSlackThread(TypedDict, total=False):
     thread_ts: str
 
 
-class ReviewerEvalPublication(TypedDict):
-    finding_ids: list[str]
-    severity_threshold: Severity
-    cap: int
-
-
 def new_finding_id() -> str:
     """Return a stable, short, URL-friendly finding id (``f_<hex>``)."""
     return f"f_{uuid.uuid4().hex[:10]}"
@@ -1098,20 +1092,9 @@ async def set_reviewer_thread_metadata(
         raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
-def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:
-    return bool(metadata.get("watch"))
-
-
 def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:
     value = metadata.get("last_reviewed_sha")
     return value if isinstance(value, str) and value else None
-
-
-def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
-    pr = metadata.get("pr")
-    if not isinstance(pr, dict):
-        return None
-    return cast(ReviewerPRMeta, pr)
 
 
 def get_thread_slack_ref(metadata: dict[str, Any]) -> ReviewerSlackThread | None:

@@ -4,7 +4,6 @@ from agent.slack.blocks import (
     code_block,
     code_blocks,
 )
-from agent.slack.payloads import SlackViewSubmission
 
 
 def test_code_block_escapes_fences_and_fits_the_limit() -> None:
@@ -26,22 +25,3 @@ def test_code_blocks_keep_markup_literal_and_split_without_losing_text() -> None
     assert literal["elements"][0]["language"] == "diff"
     assert all(len(text) <= CODE_TEXT_MAX_CHARS for text in texts)
     assert "\n".join(texts) == long_body
-
-
-def test_view_submission_reads_metadata_and_typed_values() -> None:
-    submission = SlackViewSubmission.parse(
-        {
-            "type": "view_submission",
-            "user": {"id": "U1", "username": "ada"},
-            "view": {
-                "callback_id": "example_modal",
-                "private_metadata": '{"approval_id": "abc"}',
-                "state": {"values": {"feedback": {"comment": {"value": "needs a test"}}}},
-            },
-        }
-    )
-
-    assert submission is not None
-    assert submission.callback_id == "example_modal"
-    assert submission.metadata == {"approval_id": "abc"}
-    assert submission.submitted("feedback", "comment") == "needs a test"

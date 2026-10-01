@@ -76,7 +76,6 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     ModelOption,
     available_requested_models,
-    canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -241,7 +240,6 @@ from agent.tools import (
 from agent.tools.access import permitted, resolve_access
 from agent.tools.admin_gate import (
     actor_has_admin_context,
-    actor_is_admin,
     participant_is_admin,
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
@@ -686,10 +684,6 @@ ADMIN_TOOLS = (
 def workspace_slug(cfg: RunConfig) -> str | None:
     """The workspace this thread selected, if any."""
     return cfg.workspace_slug
-
-
-async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    return await actor_is_admin(RunConfig.from_config(config), login=profile_login)
 
 
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
@@ -1500,9 +1494,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
-    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
-    if canonical_per_thread is not None:
-        per_thread_model, per_thread_effort = canonical_per_thread
     if (
         (
             not thread_settings.get("requested_model")

@@ -463,39 +463,3 @@ export const agentsApi = {
       { method: "POST" }
     ),
 }
-
-export type ThreadGroup = "today" | "last7" | "last30" | "older"
-
-export function groupThreads(
-  threads: Array<AgentThread>,
-  timestampField: "createdAt" | "updatedAt" = "updatedAt"
-): Record<ThreadGroup, Array<AgentThread>> {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-
-  const groups: Record<ThreadGroup, Array<AgentThread>> = {
-    today: [],
-    last7: [],
-    last30: [],
-    older: [],
-  }
-
-  for (const thread of [...threads].sort(
-    (a, b) => b[timestampField] - a[timestampField]
-  )) {
-    const timestamp = thread[timestampField]
-    if (timestamp >= todayStart.getTime()) {
-      groups.today.push(thread)
-    } else if (timestamp >= sevenDaysAgo) {
-      groups.last7.push(thread)
-    } else if (timestamp >= thirtyDaysAgo) {
-      groups.last30.push(thread)
-    } else {
-      groups.older.push(thread)
-    }
-  }
-
-  return groups
-}
