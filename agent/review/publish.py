@@ -533,25 +533,9 @@ async def open_swe_review_exists(
     repo: str,
     pr_number: int,
     token: str,
+    head_sha: str | None = None,
 ) -> bool | None:
-    """Return whether Open SWE has already posted a review summary on this PR.
-
-    Detected via the ``review_summary_marker`` that ``render_review_body``
-    embeds in every Open SWE review body. The reviewer uses this to avoid
-    posting a duplicate "No issues found" summary when the ``re_review`` config
-    flag is stale — a push that lands mid-run is delivered as a queued message
-    into the still-running first-review run, whose configurable still says
-    ``re_review=False``, so the empty-review guard can't trust that flag alone.
-
-    Tri-state on purpose:
-    - ``True``  — an Open SWE review summary was found.
-    - ``False`` — the full review list was paginated successfully and carried
-      no Open SWE summary.
-    - ``None``  — the answer is unknown because an API call (or a page partway
-      through pagination) failed. Callers must not treat ``None`` as "no review
-      exists": the old fail-open-as-False behaviour double-posted "no issues"
-      summaries whenever pagination failed mid-walk.
-    """
+    """Find a published review, optionally at a specific commit; return None when unknown."""
     marker = review_summary_marker(pr_number)
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     params: dict[str, Any] = {"per_page": 100, "page": 1}
@@ -574,7 +558,11 @@ async def open_swe_review_exists(
             if not data:
                 return False
             for review in data:
-                if isinstance(review, dict) and marker in (review.get("body") or ""):
+                if (
+                    isinstance(review, dict)
+                    and marker in (review.get("body") or "")
+                    and (head_sha is None or review.get("commit_id") == head_sha)
+                ):
                     return True
             if len(data) < 100:  # noqa: PLR2004
                 return False
