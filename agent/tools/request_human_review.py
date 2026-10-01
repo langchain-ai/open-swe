@@ -22,6 +22,31 @@ def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+def _assignment_failure(
+    request: HumanReviewRequest | None, *, automatic: bool
+) -> dict[str, Any] | None:
+    """Return the assignment refusal for an absent or expedited request."""
+    if request is None:
+        return _failure("This pull request has no open review request to assign a reviewer to.")
+    if request.kind == "expedited":
+        if automatic:
+            return _failure(
+                "This pull request has an open expedited approval card, so Open SWE cannot "
+                "automatically assign a reviewer. Expedited cards are approved by whoever "
+                "clicks. To route this pull request to a specific person, call "
+                "dismiss_human_review_request followed by request_human_review; otherwise "
+                "leave the expedited card open and wait to be woken when someone approves."
+            )
+        return _failure(
+            "This pull request has an open expedited approval card, which cannot take an "
+            "assigned reviewer: expedited cards are approved by whoever clicks. To route "
+            "this pull request to a specific person, call dismiss_human_review_request "
+            "followed by request_human_review; otherwise leave the expedited card open and "
+            "wait to be woken when someone approves."
+        )
+    return None
+
+
 async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None:
     """Why this run may not act on the pull request's repository, judged by its own GitHub access."""
     config = get_config()
@@ -109,8 +134,8 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if request is None or request.kind == "expedited":
-        return _failure("This pull request has no open review request to assign a reviewer to.")
+    if failure := _assignment_failure(request, automatic=False):
+        return failure
     thread_id = RunConfig.from_config(get_config()).thread_id
     # Only the thread woken to pick a reviewer may pick one.
     if not thread_id or request.thread_id != thread_id:
@@ -132,8 +157,8 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     if pr_ref is None:
         return _failure("pr_url must be a canonical GitHub pull request URL")
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if request is None or request.kind == "expedited":
-        return _failure("This pull request has no open review request to assign a reviewer to.")
+    if failure := _assignment_failure(request, automatic=True):
+        return failure
     thread_id = RunConfig.from_config(get_config()).thread_id
     if not thread_id:
         return _failure("No executable agent thread is available")
