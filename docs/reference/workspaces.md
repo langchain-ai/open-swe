@@ -123,9 +123,10 @@ examined. Coding threads that members start from Slack, the dashboard, or Linear
 the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts
-receive them in `OPENSWE_WORKSPACE_REPOS`, and changing them rebuilds the image. Any other
-repository is cloned on demand by the run that needs it. A refresh writes only snapshot and refresh
-state and an edit writes only the definition, so neither reverts the other.
+receive them in `OPENSWE_WORKSPACE_REPOS`, clone each to `/workspace/<repo>`, and changing them
+rebuilds the image. Any other repository is cloned on demand to the same place by the run that
+needs it. A refresh writes only snapshot and refresh state and an edit writes only the
+definition, so neither reverts the other.
 
 ### Access
 

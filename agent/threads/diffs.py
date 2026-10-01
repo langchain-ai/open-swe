@@ -3,7 +3,6 @@
 import base64
 import json
 import logging
-import posixpath
 from functools import cache
 from importlib import resources
 from typing import Any
@@ -172,7 +171,7 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from agent.sandboxes.paths import resolve_sandbox_work_dir
+    from agent.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
     from agent.utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
@@ -186,7 +185,7 @@ async def get_dashboard_thread_working_tree_diff(
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
-    repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
+    repo_path = await resolve_checkout_dir(sandbox, work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
 
 
