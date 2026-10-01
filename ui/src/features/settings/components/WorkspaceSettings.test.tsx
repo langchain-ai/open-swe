@@ -129,6 +129,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
+  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
@@ -485,6 +486,7 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
+    expect(
     expect(
       (await within(editor.closest("section")!).findByRole("alert")).textContent
     ).toContain("JSON object")
