@@ -1,9 +1,9 @@
 """Durable watch for a merged OpenSWE pull request.
 
 A scheduler cron polls the configured locate tool on ``ROLLOUT_WATCH_SCHEDULE``
-(every 15 minutes by default). The implementing thread is resumed when dev,
-staging, or prod newly contains the
-merge SHA. Each stage waits one quiet poll, then runs the same check. A stage
+(every 15 minutes by default). The implementing thread is resumed when a
+configured stage newly contains the merge SHA. Stages default to dev, staging,
+and prod. Each stage waits one quiet poll, then runs the same check. A stage
 with no configured targets is skipped. ``rollout_page_check`` opens the page
 in the sandbox browser and does not log in.
 """
@@ -42,7 +42,7 @@ _CRON_FIELD = re.compile(r"^[A-Za-z0-9*,/\-]+$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
-_STAGES = ("dev", "staging", "prod")
+_DEFAULT_STAGES = ("dev", "staging", "prod")
 
 
 @asynccontextmanager
@@ -174,13 +174,27 @@ def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
     return isinstance(check_id, str) and bool(check_id) and finished_for != check_id
 
 
+def rollout_stages() -> tuple[str, ...]:
+    """Stage names from ``ROLLOUT_STAGES``, in that order.
+
+    Unset or entirely invalid values use dev, staging, and prod.
+    """
+    stages: list[str] = []
+    for item in ENV.ROLLOUT_STAGES.get_list():
+        name = _name(item)
+        if name and name not in stages:
+            stages.append(name)
+    return tuple(stages) or _DEFAULT_STAGES
+
+
 def rollout_envs() -> list[RolloutEnv]:
-    """Dev, staging, and prod from ``ROLLOUT_ENVS``, in that order.
+    """Stages from ``ROLLOUT_ENVS``, in ``ROLLOUT_STAGES`` order.
 
     A stage is omitted when it has no targets. Extra entries for one stage are
-    combined. Any other name is ignored.
+    combined. A name that is not a configured stage is ignored.
     """
-    grouped: dict[str, list[str]] = {stage: [] for stage in _STAGES}
+    stages = rollout_stages()
+    grouped: dict[str, list[str]] = {stage: [] for stage in stages}
     for item in ENV.ROLLOUT_ENVS.get_list():
         name, sep, raw_targets = item.partition(":")
         env_name = _name(name)
@@ -190,7 +204,7 @@ def rollout_envs() -> list[RolloutEnv]:
             target = _name(part)
             if target and target not in grouped[env_name]:
                 grouped[env_name].append(target)
-    return [RolloutEnv(stage, tuple(grouped[stage])) for stage in _STAGES if grouped[stage]]
+    return [RolloutEnv(stage, tuple(grouped[stage])) for stage in stages if grouped[stage]]
 
 
 def rollout_env_names() -> list[str]:

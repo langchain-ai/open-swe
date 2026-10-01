@@ -145,6 +145,19 @@ def test_envs_ready_waits_for_every_configured_target(
     assert rollouts.envs_ready(targets) == {"dev", "prod"}
 
 
+def test_stages_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROLLOUT_STAGES", raising=False)
+    monkeypatch.setenv("ROLLOUT_ENVS", "prod:target-prod,qa:target-qa,dev:target-dev")
+    assert rollouts.rollout_env_names() == ["dev", "prod"]
+
+    monkeypatch.setenv("ROLLOUT_STAGES", "qa,prod")
+    assert rollouts.rollout_stages() == ("qa", "prod")
+    assert rollouts.rollout_env_names() == ["qa", "prod"]
+
+    monkeypatch.setenv("ROLLOUT_STAGES", "@@@")
+    assert rollouts.rollout_stages() == ("dev", "staging", "prod")
+
+
 def test_a_missing_stage_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         "ROLLOUT_ENVS",

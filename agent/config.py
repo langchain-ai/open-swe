@@ -283,10 +283,15 @@ ENV.var(
     "Comma-separated owner/repo pairs whose merged pull requests are watched. Empty watches none.",
 )
 ENV.var(
+    "ROLLOUT_STAGES",
+    "Comma-separated rollout stage names, in check order.",
+    default="dev,staging,prod",
+)
+ENV.var(
     "ROLLOUT_ENVS",
-    "Dev, staging, and prod targets as name:target|target. Only those three names are used, "
-    "in that order. A name with no targets is skipped. A name is ready when every listed "
-    "target contains the commit. Example: dev:target-dev,prod:target-a|target-b. Empty watches none.",
+    "Targets for each stage as name:target|target. Names must be in ROLLOUT_STAGES. "
+    "A stage with no targets is skipped. A stage is ready when every listed target contains "
+    "the commit. Example: dev:target-dev,prod:target-a|target-b. Empty watches none.",
 )
 ENV.var(
     "ROLLOUT_DATADOG_TAGS",
