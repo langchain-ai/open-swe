@@ -21,7 +21,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection title="About">
+    <SettingsSection id="about" title="About">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
