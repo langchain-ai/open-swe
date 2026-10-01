@@ -1126,6 +1126,8 @@ export interface ReviewDiffFile {
   originalContent: string
   modifiedContent: string
   unrenderable?: boolean
+  /** GitHub's hunk patch, present even when the full blobs are too large to send. */
+  patch?: string | null
 }
 
 export type PreviewFileStatus =

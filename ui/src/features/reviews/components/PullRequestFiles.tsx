@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CaretRightIcon, XIcon } from "@phosphor-icons/react"
-import { MultiFileDiff } from "@pierre/diffs/react"
+import { getSingularPatch } from "@pierre/diffs"
+import { FileDiff as PatchDiff, MultiFileDiff } from "@pierre/diffs/react"
 import {
   useCallback,
   useEffect,
@@ -10,7 +11,11 @@ import {
   type ReactNode,
 } from "react"
 import { IoLogoGithub } from "react-icons/io5"
-import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs"
+import type {
+  DiffLineAnnotation,
+  FileDiffMetadata,
+  SelectedLineRange,
+} from "@pierre/diffs"
 
 import type {
   PreviewFile,
@@ -428,7 +433,17 @@ function FileDiff({
     [path, file?.modifiedContent]
   )
 
-  if (!file || file.unrenderable) {
+  const hasContents =
+    file != null &&
+    !file.unrenderable &&
+    file.originalContent != null &&
+    file.modifiedContent != null
+  const patch = useMemo(
+    () => (file && !hasContents ? patchFileDiff(file) : null),
+    [file, hasContents]
+  )
+
+  if (!file || (!hasContents && !patch)) {
     return (
       <p className="p-3 text-center text-xs text-muted-foreground">
         {file
@@ -439,16 +454,50 @@ function FileDiff({
   }
   return (
     <div className="overflow-x-auto bg-card font-mono text-[11px] leading-5">
-      <MultiFileDiff<FileAnnotation>
-        oldFile={oldFile}
-        newFile={newFile}
-        options={options}
-        lineAnnotations={annotations}
-        selectedLines={fileDraft?.range ?? null}
-        renderAnnotation={renderAnnotation}
-      />
+      {patch ? (
+        <PatchDiff<FileAnnotation>
+          fileDiff={patch}
+          disableWorkerPool
+          options={options}
+          lineAnnotations={annotations}
+          selectedLines={fileDraft?.range ?? null}
+          renderAnnotation={renderAnnotation}
+        />
+      ) : (
+        <MultiFileDiff<FileAnnotation>
+          oldFile={oldFile}
+          newFile={newFile}
+          options={options}
+          lineAnnotations={annotations}
+          selectedLines={fileDraft?.range ?? null}
+          renderAnnotation={renderAnnotation}
+        />
+      )}
     </div>
   )
+}
+
+/** The file's hunks from GitHub's patch, for when its full contents were not sent. */
+function patchFileDiff(file: ReviewDiffFile): FileDiffMetadata | null {
+  if (!file.patch) return null
+  const previous = file.previousPath ?? file.path
+  const text = file.patch.startsWith("diff --git")
+    ? file.patch
+    : [
+        `diff --git a/${previous} b/${file.path}`,
+        `--- ${file.status === "added" ? "/dev/null" : `a/${previous}`}`,
+        `+++ ${file.status === "removed" ? "/dev/null" : `b/${file.path}`}`,
+        file.patch.endsWith("\n") ? file.patch : `${file.patch}\n`,
+      ].join("\n")
+  try {
+    return getSingularPatch(text)
+  } catch (error) {
+    console.error("Could not parse a pull request file patch", {
+      path: file.path,
+      error,
+    })
+    return null
+  }
 }
 
 function Composer({
