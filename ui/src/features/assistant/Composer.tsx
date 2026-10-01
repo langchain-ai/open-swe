@@ -12,7 +12,11 @@ import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useProfile, useRepos } from "@/lib/profile"
+import { useRecentRepos } from "@/lib/recentRepos"
+import { useSession } from "@/lib/session"
 import { useThreadMetadata } from "./AssistantProvider"
+
+const EMPTY_REPOS: string[] = []
 
 function Attachment() {
   const attachment = useAuiState((state) => state.attachment)
@@ -57,6 +61,17 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
   const { models, defaultSelection } = useModelOptions()
   const profile = useProfile()
   const repos = useRepos()
+  const session = useSession()
+  const recentRepos = useRecentRepos(
+    (state) =>
+      state.byAccount[`${session.data?.login ?? "anonymous"}:github`] ??
+      EMPTY_REPOS
+  )
+  const recentRepo = recentRepos.find((id) =>
+    repos.data?.repositories.some(
+      (repo) => repo.full_name === id && !repo.archived
+    )
+  )
   const workspaceQuery = useWorkspaceOptions(!thread)
   const workspaces = workspaceQuery.data?.workspaces ?? []
   const update = (values: Record<string, unknown>) =>
@@ -64,6 +79,9 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   useEffect(() => {
     if (config || !profile.data || disabled) return
+    if (!thread && initialRepo === undefined && repos.isPending) return
+    const repo =
+      initialRepo ?? (!thread ? recentRepo : null) ?? profile.data.default_repo
     aui.composer().setRunConfig({
       custom: {
         ...modelConfigurable(
@@ -75,8 +93,8 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
         ),
         ...(initialRepo === null
           ? { repo_explicitly_none: true }
-          : (initialRepo ?? profile.data.default_repo)
-            ? { repo: initialRepo ?? profile.data.default_repo }
+          : repo
+            ? { repo }
             : {}),
       },
     })
@@ -87,6 +105,8 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
     disabled,
     initialRepo,
     profile.data,
+    recentRepo,
+    repos.isPending,
     thread,
   ])
 

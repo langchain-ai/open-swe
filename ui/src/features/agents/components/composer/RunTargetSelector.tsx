@@ -92,8 +92,9 @@ export function LocalRepoSelector({
       side={side}
       historyScope="local"
       refreshable={false}
+      allowEmpty={false}
       footer={
-        <div className="border-t border-border p-2">
+        <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border p-2">
           <button
             type="button"
             onClick={onAddRepo}

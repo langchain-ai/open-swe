@@ -24,6 +24,7 @@ interface CommonProps {
   selectedLabel?: string
   placeholder?: string
   emptySelectionLabel?: string
+  allowEmpty?: boolean
   searchPlaceholder?: string
   noMatchesLabel?: string
   className?: string
@@ -109,6 +110,7 @@ function RepoSelect(
     selectedLabel,
     placeholder = "Select repository",
     emptySelectionLabel = "No repository",
+    allowEmpty = true,
     searchPlaceholder = "Search repositories…",
     noMatchesLabel = "No matches",
     className,
@@ -256,27 +258,29 @@ function RepoSelect(
             </label>
           )}
           <div
-            className="overflow-y-auto"
+            className="min-h-0 flex-1 overflow-y-auto"
             role={props.multiple ? "menu" : undefined}
           >
-            <button
-              type="button"
-              onClick={() => choose(null)}
-              className={cn(
-                "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
-                selected.length ? "text-muted-foreground" : "text-foreground"
-              )}
-            >
-              {props.multiple ? "Clear selection" : emptySelectionLabel}
-              {selected.length === 0 && (
-                <span
-                  aria-hidden="true"
-                  className="ml-auto pl-3 text-muted-foreground"
-                >
-                  ✓
-                </span>
-              )}
-            </button>
+            {allowEmpty && (
+              <button
+                type="button"
+                onClick={() => choose(null)}
+                className={cn(
+                  "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
+                  selected.length ? "text-muted-foreground" : "text-foreground"
+                )}
+              >
+                {props.multiple ? "Clear selection" : emptySelectionLabel}
+                {selected.length === 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto pl-3 text-muted-foreground"
+                  >
+                    ✓
+                  </span>
+                )}
+              </button>
+            )}
             {filteredRepos.length === 0 ? (
               <div className="px-2 py-1.5 text-muted-foreground">
                 {noMatchesLabel}
