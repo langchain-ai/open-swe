@@ -415,6 +415,125 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("saves sandbox sizes in bytes and clears inherited sizes", async () => {
+    mockApis()
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(RECORD)
+    renderPage()
+    fireEvent.change(await screen.findByLabelText("vCPUs"), {
+      target: { value: "8" },
+    })
+    fireEvent.change(screen.getByLabelText("Memory (GiB)"), {
+      target: { value: "32" },
+    })
+    fireEvent.change(screen.getByLabelText("Disk (GiB)"), {
+      target: { value: "256" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: 8,
+        mem_bytes: 32 * 1024 ** 3,
+        fs_capacity_bytes: 256 * 1024 ** 3,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Save sandbox configuration" })
+          .hasAttribute("disabled")
+      ).toBe(false)
+    )
+    for (const label of ["vCPUs", "Memory (GiB)", "Disk (GiB)"])
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: null,
+        mem_bytes: null,
+        fs_capacity_bytes: null,
+      })
+    )
+  })
+
+  it("edits proxy configuration without losing other sandbox create parameters", async () => {
+    const record = {
+      ...RECORD,
+      create_params: { _internal_runtime: "v2", proxy_config: { rules: [] } },
+    }
+    mockApis(record)
+    const proxy = {
+      rules: [
+        {
+          name: "service",
+          match_hosts: ["api.example.com"],
+          env_vars: { SERVICE_MODE: "example" },
+        },
+      ],
+    }
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...record,
+      create_params: { ...record.create_params, proxy_config: proxy },
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole("tab", { name: "JSON" }))
+    const editor = await screen.findByLabelText("Proxy configuration (JSON)")
+    fireEvent.change(editor, { target: { value: "[]" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("alert")
+          .some((alert) => alert.textContent?.includes("JSON object"))
+      ).toBe(true)
+    )
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("Rule name"), {
+      target: { value: "updated-service" },
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }))
+    expect(
+      JSON.parse(
+        (
+          screen.getByLabelText(
+            "Proxy configuration (JSON)"
+          ) as HTMLTextAreaElement
+        ).value
+      ).rules[0].name
+    ).toBe("updated-service")
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        create_params: {
+          _internal_runtime: "v2",
+          proxy_config: {
+            ...proxy,
+            rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+        },
+      })
+    )
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Save proxy configuration",
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(true)
+    )
+  })
+
   it("saves the sandbox scripts and starts a rebuild", async () => {
     mockApis()
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({

@@ -123,6 +123,7 @@ export interface ChatComposerProps {
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
+  droppedFiles?: { key: number; files: Array<File> } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -264,6 +265,7 @@ export const ChatComposer = memo(function ChatComposer({
   onEmptySubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
+  droppedFiles = null,
   models = [],
   selection = null,
   onSelectionChange,
@@ -585,6 +587,11 @@ export const ChatComposer = memo(function ChatComposer({
     )
   }, [])
 
+  useEffect(() => {
+    if (droppedFiles)
+      void Promise.resolve().then(() => addFiles(droppedFiles.files))
+  }, [addFiles, droppedFiles])
+
   const handleFileChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       if (event.target.files) void addFiles(event.target.files)
@@ -764,6 +771,7 @@ export const ChatComposer = memo(function ChatComposer({
       )}
 
       <div
+        data-chat-composer
         className={cn(
           "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:border-[0.75px] dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
           compact ? "min-h-[88px]" : "min-h-[106px]",

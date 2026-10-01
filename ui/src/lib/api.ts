@@ -244,6 +244,8 @@ export interface Profile {
   preserve_sandbox_memory?: boolean
   human_review_requests?: boolean
   review_channel_watch?: boolean
+  experimental_act_as_approval?: boolean
+  act_as_always_allowed?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -266,6 +268,7 @@ export interface ProfileUpdate {
   preserve_sandbox_memory?: boolean
   human_review_requests?: boolean
   review_channel_watch?: boolean
+  experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -730,8 +733,17 @@ export interface WorkspaceCreate {
   update_script?: string
 }
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
   repos?: Array<string>
@@ -739,6 +751,9 @@ export interface WorkspaceUpdate {
   kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
+  vcpus?: number | null
+  mem_bytes?: number | null
+  fs_capacity_bytes?: number | null
 }
 
 export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
@@ -749,6 +764,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  create_params?: Record<string, JsonValue>
   slug: string
   name: string
   prompt: string

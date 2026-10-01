@@ -303,7 +303,9 @@ test("preserves no-project selection despite a default repository", async ({
   await expect(repository).toHaveText("Select repository");
   await repository.click();
   await expect(
-    page.getByRole("button", { name: "No repository", exact: true }),
+    page
+      .getByRole("dialog")
+      .getByRole("button", { name: "No repository", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   const submitted = page.waitForRequest(
