@@ -7,17 +7,17 @@ from xml.etree import ElementTree
 import pytest
 from deepagents import create_deep_agent
 from deepagents.backends import StateBackend
-from langchain.agents.middleware import AgentState, wrap_model_call
+from langchain.agents.middleware import AgentState, ModelRoutingMiddleware, wrap_model_call
 from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.input_messages import human_input, person_introduction
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from agent.middleware.require_user_reply import RequireUserReplyMiddleware
 from agent.run_config import RunConfig
@@ -214,7 +214,10 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
         backend=backend,
         middleware=[
             middleware,
-            ModelSelectionMiddleware({}, model, routing_mode=None),
+            ModelRoutingMiddleware(
+                models={"default": {"model": model, "criteria": ""}},
+                decision_model=RunnableLambda(lambda _: "default"),
+            ),
             ConversationOffloadingMiddleware(model, backend),
             RequireUserReplyMiddleware("reply", "no_reply", initial_surface="web"),
             scripted_model,
@@ -225,7 +228,7 @@ async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
                 "description": "worker",
                 "mode": "fork",
                 "model": model,
-                "middleware": [_DisableInheritedMiddleware(ModelSelectionMiddleware.__name__)],
+                "middleware": [_DisableInheritedMiddleware(ModelRoutingMiddleware.__name__)],
             }
         ],
         checkpointer=InMemorySaver(),

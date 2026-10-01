@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelRoutingMiddleware
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -12,7 +13,6 @@ from langgraph.pregel import Pregel
 
 import agent.server as server
 from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.middleware.model_selection import ModelSelectionMiddleware
 from agent.tools.access import Access
 from agent.utils.thread_settings import ThreadSettings
 
@@ -76,12 +76,12 @@ async def test_resume_after_model_handoff(
     def assemble(*, model: FakeListChatModel, middleware: Sequence[object], **_: object) -> Pregel:
         # Exercise the factory's routing middleware with real checkpoint execution,
         # without invoking unrelated sandbox, tool, and analytics middleware.
-        selection = [item for item in middleware if isinstance(item, ModelSelectionMiddleware)]
+        selection = [item for item in middleware if isinstance(item, ModelRoutingMiddleware)]
         return create_agent(
             model,
             middleware=selection,
             checkpointer=checkpointer,
-            interrupt_before=["ModelSelectionMiddleware.before_model"] if selection else [],
+            interrupt_before=["ModelRoutingMiddleware.before_model"] if selection else [],
         )
 
     monkeypatch.setattr(server, "create_deep_agent", assemble)
@@ -101,7 +101,7 @@ async def test_resume_after_model_handoff(
         },
         config,
     )
-    assert (await initial.aget_state(config)).next == ("ModelSelectionMiddleware.before_model",)
+    assert (await initial.aget_state(config)).next == ("ModelRoutingMiddleware.before_model",)
 
     settings["model_handoff_complete"] = True
     settings["requested_model"] = requested_model

@@ -4,10 +4,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
+from langchain.agents.middleware import ModelRoutingMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage
+from langgraph.runtime import Runtime
 
-from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+from agent.middleware.model_selection import (
+    ModelSelectionState,
+    create_model_router,
+    prepare_model_route,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -17,22 +23,34 @@ def _no_gateway_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
 
 
-def _middleware(
-    route_model_ids: dict[str, str] | None = None,
-    routing_mode: Literal["auto", "fast"] = "auto",
-) -> tuple[ModelSelectionMiddleware, dict[str, MagicMock]]:
+def _middleware() -> tuple[ModelRoutingMiddleware, dict[str, MagicMock]]:
     profiles = ("fast", "balanced", "performance")
     models = {profile: MagicMock(name=profile) for profile in (*profiles, "default")}
-    middleware = ModelSelectionMiddleware(
-        cast(Any, models),
-        models["default"],
-        route_model_ids=route_model_ids,
-        routing_mode=routing_mode,
-    )
+    middleware = create_model_router(cast(Any, models), models["default"])
     return middleware, models
 
 
-async def _invoke(middleware: ModelSelectionMiddleware, state: dict[str, Any]) -> ModelRequest:
+async def _prepare(
+    middleware: ModelRoutingMiddleware,
+    state: ModelSelectionState,
+    runtime: Runtime,
+    *,
+    routing_mode: Literal["auto", "fast"] | None = "auto",
+    route_model_ids: dict[str, str] | None = None,
+) -> dict[str, str]:
+    return {
+        "model_route": await prepare_model_route(
+            middleware,
+            state,
+            runtime,
+            routing_mode=routing_mode,
+            route_model_ids=route_model_ids,
+            requested_model=state.get("requested_model"),
+        )
+    }
+
+
+async def _invoke(middleware: ModelRoutingMiddleware, state: dict[str, Any]) -> ModelRequest:
     request = ModelRequest(
         model=MagicMock(),
         messages=state["messages"],
@@ -57,12 +75,12 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
     middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    state.update(await _prepare(middleware, cast(Any, state), MagicMock()))
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
     state["model_route"] = "fast_alt"
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    state.update(await _prepare(middleware, cast(Any, state), MagicMock()))
     assert (await _invoke(middleware, state)).model is models["fast"]
     jev.assert_awaited_once()
     assert jev.await_args.args[0] == "Update the README"
@@ -79,13 +97,13 @@ async def test_fast_mode_skips_classifier_and_routing_event(
         "agent.middleware.model_selection.get_stream_writer",
         lambda: events.append,
     )
-    middleware, models = _middleware(routing_mode="fast")
+    middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
     if existing_route is not None:
         state["model_route"] = existing_route
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    state.update(await _prepare(middleware, cast(Any, state), MagicMock(), routing_mode="fast"))
 
     expected_route = existing_route or "fast"
     assert state["model_route"] == expected_route
@@ -100,8 +118,8 @@ async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) 
     middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-    await middleware.abefore_model(cast(Any, state), MagicMock())
+    state.update(await _prepare(middleware, cast(Any, state), MagicMock()))
+    await _prepare(middleware, cast(Any, state), MagicMock())
 
     jev.assert_awaited_once()
 
@@ -130,7 +148,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
         "messages": [HumanMessage(content=_HUMAN_ENVELOPE), HumanMessage(content=_PERSON_BLOCK)]
     }
 
-    await middleware.abefore_model(cast(Any, state), MagicMock())
+    await _prepare(middleware, cast(Any, state), MagicMock())
 
     assert jev.await_args.args[0] == "how's the weather in sf today"
 
@@ -187,7 +205,7 @@ async def test_jev_routes_or_falls_back(
     )
     middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
-    route = (await middleware.abefore_model(state, MagicMock()))["model_route"]
+    route = (await _prepare(middleware, state, MagicMock()))["model_route"]
     assert route == ("default" if failure else "fast")
     assert len(requests) == 1
     assert requests[0].url == (
@@ -203,7 +221,7 @@ async def test_jev_routes_or_falls_back(
     assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")
     assert payload["questions"]["route"]["type"] == "choice"
     state["model_route"] = route
-    assert (await middleware.abefore_model(state, MagicMock()))["model_route"] == route
+    assert (await _prepare(middleware, state, MagicMock()))["model_route"] == route
     assert len(requests) == 1
 
 
@@ -217,21 +235,23 @@ async def test_requested_model_wins_and_emits_actual_model(
     jev = AsyncMock()
     monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     chosen = MagicMock()
-    factory = MagicMock(return_value=chosen)
-    middleware = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode=routing_mode,
-        requested_model_factory=factory,
-    )
+    middleware = create_model_router({"fast": MagicMock()}, MagicMock())
+    middleware.models["default"] = chosen
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="hello")],
         "model_route": "fast",
         "requested_model": "anthropic:claude-opus-5-5",
     }
-    state.update(await middleware.abefore_model(state, MagicMock()))
+    state.update(
+        await _prepare(
+            middleware,
+            state,
+            MagicMock(),
+            routing_mode=routing_mode,
+            route_model_ids={"default": "anthropic:claude-opus-5-5"},
+        )
+    )
     assert (await _invoke(middleware, dict(state))).model is chosen
-    factory.assert_called_with("anthropic:claude-opus-5-5")
     jev.assert_not_awaited()
     assert events[-1] == {
         "type": "model_routed",
@@ -245,12 +265,12 @@ async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.M
     jev = AsyncMock()
     monkeypatch.setattr("agent.middleware.model_selection.select_jev_choice", jev)
     default = MagicMock()
-    middleware = ModelSelectionMiddleware({}, default, routing_mode=None)
+    middleware = create_model_router({}, default)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix this")],
         "model_route": "fast",
     }
-    state.update(await middleware.abefore_model(state, MagicMock()))
+    state.update(await _prepare(middleware, state, MagicMock(), routing_mode=None))
     assert state["model_route"] == "default"
     assert (await _invoke(middleware, dict(state))).model is default
     jev.assert_not_awaited()

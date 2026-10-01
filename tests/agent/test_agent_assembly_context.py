@@ -261,7 +261,7 @@ async def test_router_failure_uses_same_model_as_routing_off() -> None:
     model_selection = next(
         item
         for item in cast(list[object], agent["middleware"])
-        if type(item).__name__ == "ModelSelectionMiddleware"
+        if type(item).__name__ == "ModelRoutingMiddleware"
     )
     route = (await model_selection.abefore_model({"messages": []}, MagicMock()))["model_route"]
 
@@ -589,8 +589,10 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
     image_source: Literal["initial", "retained", "tool"],
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
+    from langchain.agents.middleware import ModelRoutingMiddleware
+
     from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
-    from agent.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+    from agent.middleware.model_selection import ModelSelectionState
 
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
@@ -607,7 +609,7 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
     middleware = cast(list[object], captured["middleware"])
-    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+    selection = next(item for item in middleware if isinstance(item, ModelRoutingMiddleware))
     fallback = next(
         (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
     )
@@ -660,7 +662,8 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     pinned_settings: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from langchain.agents.middleware import ModelRoutingMiddleware
+
     from agent.server import PrepareAgentRunMiddleware
 
     monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "jev")
@@ -689,7 +692,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
     for agent in (captured, followup_agent):
         middleware = cast(list[object], agent["middleware"])
-        selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
+        selection = next(item for item in middleware if isinstance(item, ModelRoutingMiddleware))
         assert (await selection.abefore_model({"messages": []}, MagicMock()))[
             "model_route"
         ] == "default"
