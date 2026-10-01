@@ -108,7 +108,8 @@ const MAX_EXPANDED_TEXT_LENGTH = 4000
 
 function expandedTextForChunk(
   chunk: ToolExecutionChunk,
-  repoPath?: string
+  repoPath?: string,
+  loadedOutput?: string
 ): string | null {
   const blocks: Array<string> = []
 
@@ -120,7 +121,7 @@ function expandedTextForChunk(
     blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
   }
 
-  const rawOutput = chunk.output ?? ""
+  const rawOutput = loadedOutput ?? chunk.output ?? ""
   const output = rawOutput.trim()
   const jsonOutput = formatJsonToolResult(rawOutput)
   if (output) blocks.push(jsonOutput ?? output)
@@ -134,7 +135,12 @@ function expandedTextForChunk(
 
   if (blocks.length === 0) return null
   const joined = blocks.join("\n\n")
-  if (textArguments.length || (jsonOutput !== null && !command)) return joined
+  if (
+    loadedOutput !== undefined ||
+    textArguments.length ||
+    (jsonOutput !== null && !command)
+  )
+    return joined
   return joined.length > MAX_EXPANDED_TEXT_LENGTH
     ? `${joined.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
     : joined
@@ -185,6 +191,7 @@ export function describeWorkEntry(
     repoPath
   )
   const resolvedPreview = preview ?? firstLocationPath(chunk, repoPath)
+  const loadOutput = chunk.loadOutput
 
   return {
     icon: iconForChunk(chunk),
@@ -198,7 +205,13 @@ export function describeWorkEntry(
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
-    loadExpandedText: chunk.loadOutput ?? null,
+    loadExpandedText:
+      loadOutput && toolTextArguments(chunk.input).length
+        ? async () => {
+            const output = await loadOutput()
+            return expandedTextForChunk(chunk, repoPath, output) ?? ""
+          }
+        : (loadOutput ?? null),
   }
 }
 

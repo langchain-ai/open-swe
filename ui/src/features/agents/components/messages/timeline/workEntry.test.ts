@@ -176,6 +176,25 @@ describe("describeWorkEntry", () => {
     )
   })
 
+  it("preserves arguments when lazy output replaces the preview", async () => {
+    const output = "Full output\n".repeat(500)
+    const entry = describeWorkEntry(
+      chunk({
+        title: "report_platform_issue",
+        toolKind: "other",
+        input: { problem_description: "Sandbox disconnected" },
+        output: "Partial output",
+        loadOutput: async () => output,
+      })
+    )
+
+    const loaded = await entry.loadExpandedText?.()
+    expect(loaded).toBe(
+      `problem description:\nSandbox disconnected\n\n${output.trim()}`
+    )
+    expect(loaded).not.toContain("Partial output")
+  })
+
   it("keeps complete JSON tool output available for highlighted rendering", () => {
     const output = JSON.stringify({ value: "x".repeat(5000) })
     const entry = describeWorkEntry(chunk({ output }), repoPath)
