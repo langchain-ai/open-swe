@@ -317,18 +317,24 @@ const config = defineConfig({
       // would shadow nitro's assets.
       handlers: IS_PRODUCTION
         ? [
-            "/dashboard/api",
-            "/webhooks",
-            // A built server fronting the mock harness fronts its fake-SaaS and
-            // control routes too, so the E2E browser has the one origin a
-            // deployment gives it and reaches the backend the way it really
-            // does — through the handler below. Serving the app from the
-            // harness instead let the suite pass while this proxy was broken.
-            ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
-          ].map((prefix) => ({
-            route: `${prefix}/**`,
-            handler: "./server/backend-proxy.ts",
-          }))
+            {
+              route: "/.well-known/apple-app-site-association",
+              handler: "./server/apple-app-site-association.ts",
+            },
+            ...[
+              "/dashboard/api",
+              "/webhooks",
+              // A built server fronting the mock harness fronts its fake-SaaS and
+              // control routes too, so the E2E browser has the one origin a
+              // deployment gives it and reaches the backend the way it really
+              // does — through the handler below. Serving the app from the
+              // harness instead let the suite pass while this proxy was broken.
+              ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+            ].map((prefix) => ({
+              route: `${prefix}/**`,
+              handler: "./server/backend-proxy.ts",
+            })),
+          ]
         : [],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and

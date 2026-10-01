@@ -144,6 +144,35 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
     assert description[len(kept)] in {" ", ","}
 
 
+@pytest.mark.parametrize(
+    ("states", "collapsed"),
+    [
+        ({"grace": "APPROVED"}, True),
+        ({}, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+    ],
+)
+async def test_approved_card_collapses_without_closing_the_request(
+    states: dict[str, str], collapsed: bool
+) -> None:
+    from agent.github.pull_requests import PullRequest
+    from agent.human_review.lifecycle import _render_standard
+    from agent.human_review.requests import HumanReviewRequest
+
+    pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    with (
+        patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+    ):
+        text, blocks = await _render_standard(request, None, "token")
+    assert ("Review request: approved" in text) is collapsed
+    assert (len(blocks) == 1) is collapsed
+    assert request.state == "open"
+
+
 def _github(status: int, text: str = "") -> AsyncMock:
     return AsyncMock(return_value=httpx2.Response(status, text=text))
 

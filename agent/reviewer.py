@@ -35,7 +35,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -52,7 +52,6 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     StableToolResultOrderMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
@@ -124,6 +123,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 SanitizeOpenAIResponsesMiddleware(),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
@@ -1013,12 +1013,12 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 ToolErrorMiddleware(),
                 refresh_github_proxy_before_model,
                 check_message_queue_before_model,
-                TimeoutWrapupMiddleware(),
                 SanitizeFireworksMessagesMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
