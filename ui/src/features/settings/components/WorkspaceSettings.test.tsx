@@ -129,6 +129,9 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
+  // The API-keys query runs in a section above the proxy editor; its rejection
+  // surfaces a page-level alert that wins `findByRole("alert")` races.
+  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
@@ -485,9 +488,9 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "JSON object"
-    )
+    expect(
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
     expect(update).not.toHaveBeenCalled()
     fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))

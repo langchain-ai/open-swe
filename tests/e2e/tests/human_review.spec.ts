@@ -316,11 +316,13 @@ test.describe("Human review in Slack", () => {
       .toBe(1);
     await expect
       .poll(async () =>
-        (await channelMessages(request, "C_DEMO", asked.thread_ts)).map(
-          (m) => m.text,
-        ),
+        (await channelMessages(request, "C_DEMO", asked.thread_ts))
+          .map((m) => m.text)
+          .some((text) =>
+            text.includes(`Review requested in <#${REVIEW_CHANNEL}>.`),
+          ),
       )
-      .toContain(`Review requested in <#${REVIEW_CHANNEL}>.`);
+      .toBe(true);
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.slack_thread_ts).toBe("");
