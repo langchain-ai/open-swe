@@ -114,7 +114,7 @@ export function WorkspaceSandboxSection({
           </span>
         }
       />
-      <div className="space-y-3 px-4 py-3.5">
+      <div className="space-y-3 border-b border-border px-4 py-3.5">
         <p className="text-xs text-muted-foreground">
           Applies to new sandboxes and image builders, not existing threads.
           Leave sizes blank to inherit deployment defaults. If only CPU or
@@ -175,7 +175,6 @@ export function WorkspaceSandboxSection({
         </div>
       </div>
       <div className="space-y-3 px-4 py-3.5">
-        <h3 className="text-sm font-medium">Scripts</h3>
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
