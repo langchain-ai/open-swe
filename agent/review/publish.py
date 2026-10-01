@@ -290,19 +290,17 @@ def render_review_body(
     ui_url: str | None = None,
     out_of_diff_findings: list[Finding] | None = None,
     additional_findings_count: int = 0,
+    existing_findings_count: int = 0,
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
     dry_run: bool = False,
 ) -> str:
-    """Compose the top-level review body.
-
-    When ``surfaced_count`` is 0 but ``additional_findings_count`` is > 0,
-    the headline says "No issues found" and a second line directs the reader
-    to the web app for the remaining sub-threshold findings.
-    """
+    """Compose one summary of new findings, outstanding findings, and the assessment."""
     out_of_diff_findings = out_of_diff_findings or []
     has_additional = additional_findings_count > 0
-    if surfaced_count == 0 and not out_of_diff_findings:
+    if surfaced_count == 0 and existing_findings_count:
+        headline = "**Open SWE Review** found no new issues."
+    elif surfaced_count == 0 and not out_of_diff_findings:
         headline = (
             "## ✅ Open SWE Review: No issues found\n\n"
             "Open SWE reviewed this PR and found no potential bugs to report."
@@ -314,6 +312,9 @@ def render_review_body(
         headline = f"**Open SWE Review** found {surfaced_count} potential {issue_word}."
 
     parts = [headline]
+    if existing_findings_count:
+        noun = "finding remains" if existing_findings_count == 1 else "findings remain"
+        parts.append(f"{existing_findings_count} previously reported {noun} unresolved.")
     if has_additional:
         noun = "finding" if additional_findings_count == 1 else "findings"
         parts.append(f"{additional_findings_count} additional {noun} can be viewed in the web app.")

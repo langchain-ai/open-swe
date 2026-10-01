@@ -361,6 +361,26 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
 
+    existing_findings_count = sum(
+        1 for f in findings if f.get("status", "open") == "open" and comment_ids_for_finding(f)
+    )
+    assessment_already_published = False
+    if assessment is not None and not inline_comments:
+        metadata = await get_thread_metadata(thread_id)
+        current_run_id = metadata.get("current_reviewer_run_id")
+        if langgraph_run_id is None and isinstance(current_run_id, str):
+            langgraph_run_id = current_run_id
+        previous_id = metadata.get("review_assessment_id")
+        previous = await ASSESSMENTS.get(str(previous_id)) if isinstance(previous_id, int) else None
+        if (
+            previous is not None
+            and langgraph_run_id
+            and previous.run_id == langgraph_run_id
+            and previous.head_sha == head_sha
+        ):
+            assessment = None
+            assessment_already_published = True
+
     # With nothing new to surface, skip the "no issues found" summary if Open
     # SWE has already reviewed this PR — the user already saw the previous
     # result, and posting another summary on every push is noise. We can't rely
@@ -374,13 +394,16 @@ async def _publish_review_async(
     if (
         assessment is None
         and not inline_comments
-        and await _open_swe_already_reviewed(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            token=token,
-            is_re_review=is_re_review,
+        and (
+            assessment_already_published
+            or await _open_swe_already_reviewed(
+                thread_id=thread_id,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                token=token,
+                is_re_review=is_re_review,
+            )
         )
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
@@ -391,7 +414,7 @@ async def _publish_review_async(
             findings=findings,
         )
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=existing_findings_count
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
@@ -403,7 +426,7 @@ async def _publish_review_async(
             findings=await list_findings_async(thread_id),
         )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-        conclusion, check_title, check_summary = review_check_conclusion(0)
+        conclusion, check_title, check_summary = review_check_conclusion(existing_findings_count)
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,
@@ -438,6 +461,7 @@ async def _publish_review_async(
             trace_url=review_trace_url,
             ui_url=review_ui_url,
             additional_findings_count=additional_findings_count,
+            existing_findings_count=existing_findings_count,
             assessment=assessment,
             approved=approved,
             dry_run=dry_run,
@@ -486,6 +510,9 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
+                existing_findings_count=existing_findings_count,
+                assessment=assessment,
+                dry_run=dry_run,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -501,6 +528,7 @@ async def _publish_review_async(
                 inline_comments = retry_inline
                 eligible_with_payload = valid_with_payload
                 unresolvable_findings = dropped_ids
+                approved = False
             else:
                 retry_error = (
                     retry_response.get("_error", "unknown error")
@@ -544,7 +572,7 @@ async def _publish_review_async(
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
-    if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
+    if assessment is not None and isinstance(review_id, int):
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
         try:
             if langgraph_run_id is None:
@@ -630,7 +658,7 @@ async def _publish_review_async(
             reviewer_thread_id=thread_id,
             github_review_id=review_id if isinstance(review_id, int) else None,
             head_sha=head_sha,
-            finding_count=len(inline_comments),
+            finding_count=len(inline_comments) + existing_findings_count,
         )
     except Exception:
         if assessment is None:
@@ -654,7 +682,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             review_id=review_id,
-            surfaced_count=len(inline_comments),
+            surfaced_count=len(inline_comments) + existing_findings_count,
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
@@ -667,7 +695,9 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(
+        len(inline_comments) + existing_findings_count
+    )
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,

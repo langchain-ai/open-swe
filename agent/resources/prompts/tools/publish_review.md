@@ -1,9 +1,10 @@
 Post all current findings to the PR as a GitHub Review.
 
-Call this once at the end of a review run, after you have finished adding
-findings (and, on a re-review, after marking resolved findings via
-``update_finding``). The tool posts one GitHub PR Review for eligible
-inline findings, records the GitHub comment/thread IDs for future
+Call this once at the end of a review run, after all investigation, delegated
+work, verification, and any approval assessment are complete. Submit findings
+and the assessment together in this single call (on a re-review, first mark
+resolved findings via ``update_finding``). The tool posts one GitHub PR Review
+for eligible inline findings, records the GitHub comment/thread IDs for future
 re-reviews, resolves GitHub threads for findings now marked resolved, and
 advances the reviewer thread's ``last_reviewed_sha``.
 
@@ -24,13 +25,15 @@ Args:
         review only when the reviewer instructions include an approval policy,
         and assess against that policy. The commit must match the live
         reviewed head. Unresolved findings force ``needs_human_review``. A new
-        assessment is published even when a re-review has no new findings.
+        assessment is published even when a re-review has no new findings,
+        but another call on the same run and commit with no new findings is
+        skipped. Do not republish just to update the assessment explanation.
         GitHub keeps native thumbs-up/down feedback on the review. The host may
         submit an approval only when an admin has set the repository to
         approve and the reviewed commit is still current; otherwise it posts
         the assessment as a comment. No merge is performed. Assessments are
-        omitted in eval mode and when publication retries with only a subset
-        of findings.
+        omitted in eval mode. Anchor-recovery retries retain the assessment
+        alongside the findings as an advisory comment, never an approval.
     severity_threshold: Lowest severity to surface as inline GitHub comments
         (default ``medium``). Lower-severity findings stay in state and are
         mentioned in the review summary with a link to the web app, but are
