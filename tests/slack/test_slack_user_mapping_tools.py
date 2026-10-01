@@ -112,6 +112,27 @@ async def test_admin_can_move_mapping_without_inheriting_previous_email(
 
 
 @pytest.mark.usefixtures("registry_db")
+async def test_reassigning_to_the_same_owner_keeps_verified_slack_metadata(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "agent.tools.access.resolve_access",
+        AsyncMock(return_value=Access(admin_thread=True, admin=True)),
+    )
+    ada = await User.sign_in("github", "1", login="ada")
+    await ada.link("slack", "U123", email="ada@example.com", team_id="T1")
+    slack_api.respond({"ok": True, "user": {"id": "U123", "name": "Ada"}})
+
+    result = await manage_slack_github_mapping("U123", "ada")
+    assert result["success"] is True
+
+    moved = await User.for_identity("slack", "U123")
+    assert moved is not None and moved.id == ada.id
+    slack_identity = next(identity for identity in moved.identities if identity.provider == "slack")
+    assert (slack_identity.email, slack_identity.team_id) == ("ada@example.com", "T1")
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_admin_rejects_unknown_github_user_and_inactive_slack_member(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
