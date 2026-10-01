@@ -102,15 +102,16 @@ describe("OwnershipPicker", () => {
     }
     const { rerender } = render(<SlackChannelPicker {...props} />)
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const absent = await screen.findByRole<HTMLInputElement>("checkbox", {
+    const absent = await screen.findByRole("checkbox", {
       name: "#design",
     })
-    expect(absent.disabled).toBe(false)
+    expect(absent.getAttribute("aria-disabled") === "true").toBe(false)
     fireEvent.click(absent)
     expect(
-      screen.getByRole<HTMLInputElement>("checkbox", { name: "#design" })
-        .disabled
-    ).toBe(true)
+      screen
+        .getByRole("checkbox", { name: "#design" })
+        .getAttribute("aria-disabled")
+    ).toBe("true")
     expect(screen.queryByRole("switch")).toBeNull()
     expect(screen.queryByLabelText("Slack channel ID")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "#engineering" }))
@@ -126,10 +127,10 @@ describe("OwnershipPicker", () => {
     })
     rerender(<SlackChannelPicker {...props} selected={["CJOINED01"]} />)
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const joined = await screen.findByRole<HTMLInputElement>("checkbox", {
+    const joined = await screen.findByRole("checkbox", {
       name: "#design",
     })
-    expect(joined.disabled).toBe(false)
+    expect(joined.getAttribute("aria-disabled") === "true").toBe(false)
     fireEvent.click(joined)
     fireEvent.click(screen.getByRole("button", { name: "Save 2 channels" }))
     expect(onChange).toHaveBeenLastCalledWith(["CJOINED01", "CABSENT01"])
