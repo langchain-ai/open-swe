@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from deepagents.middleware.subagents import SubAgent
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -57,10 +57,9 @@ from agent.middleware import (
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
-from agent.middleware.common_prompt import CommonPromptMiddleware, common_general_purpose_subagent
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.prompts import apply_tool_descriptions, common_prompt, load_prompt, prompt
 from agent.review.approvals import approval_policy_for_review
 from agent.review.diff import (
     changed_files,
@@ -116,14 +115,13 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": "reviewer",
         "description": load_prompt("reviewer/subagent-description.md"),
-        "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
+        "system_prompt": common_prompt(REVIEWER_SUBAGENT_SYSTEM_PROMPT),
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
         "middleware": cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
-                CommonPromptMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
@@ -986,7 +984,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=reviewer_model,
-        system_prompt="",
+        system_prompt=common_prompt(),
         tools=apply_tool_descriptions(
             [
                 fetch_review_diff,
@@ -1002,7 +1000,10 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
             ]
         ),
         subagents=[
-            common_general_purpose_subagent(),
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            },
             _reviewer_subagent(reviewer_subagent_model),
         ],
         backend=backend,

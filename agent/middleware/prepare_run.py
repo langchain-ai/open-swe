@@ -12,7 +12,7 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
-from agent.middleware.common_prompt import CommonPromptMiddleware
+from agent.middleware.trace import OpenSWEMiddleware
 from agent.utils.startup_trace import aphase, flush_phases
 
 
@@ -46,7 +46,7 @@ def _latest_message_fingerprint(state: Mapping[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-class BasePrepareRunMiddleware(CommonPromptMiddleware):
+class BasePrepareRunMiddleware(OpenSWEMiddleware):
     """Checkpointed per-run setup.
 
     Subclasses must keep `_prepare` idempotent. LangGraph checkpoints the
@@ -108,4 +108,4 @@ class BasePrepareRunMiddleware(CommonPromptMiddleware):
             existing = request.system_message.text if request.system_message is not None else ""
             content = f"{rendered}\n\n{existing}" if existing else rendered
             request = request.override(system_message=SystemMessage(content=content))
-        return await super().awrap_model_call(request, handler)
+        return await handler(request)

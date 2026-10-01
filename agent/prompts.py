@@ -86,7 +86,8 @@ def _deployment_context() -> tuple[str, str]:
     return "unknown", "no explicit environment or local runtime marker"
 
 
-def common_prompt() -> str:
+def common_prompt(agent_prompt: str = "") -> str:
     """Render service-wide instructions from current deployment configuration."""
     environment, source = _deployment_context()
-    return prompt("system/common", deployment_environment=environment, deployment_source=source)
+    shared = prompt("system/common", deployment_environment=environment, deployment_source=source)
+    return f"{shared}\n\n{agent_prompt}" if agent_prompt else shared
