@@ -549,12 +549,11 @@ describe("WorkspaceSettingsPanel", () => {
       .closest("section")!
     expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
     expect(screen.queryByLabelText("Setup script")).toBeNull()
-    expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
-    expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
-    for (const trigger of screen.getAllByRole("button", {
-      name: "OPENSWE_WORKSPACE_REPOS",
-    })) {
-      fireEvent.click(trigger)
+    for (const name of ["Edit setup script", "Edit update script"]) {
+      fireEvent.click(screen.getByRole("button", { name }))
+      fireEvent.click(
+        await screen.findByRole("button", { name: "OPENSWE_WORKSPACE_REPOS" })
+      )
       const popup = await screen.findByRole("dialog", {
         name: "Expanded value",
       })
@@ -562,6 +561,12 @@ describe("WorkspaceSettingsPanel", () => {
         within(popup).getByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')
       ).toBeTruthy()
       fireEvent.keyDown(popup, { key: "Escape" })
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Expanded value" })
+        ).toBeNull()
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Done" }))
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     }
     fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
