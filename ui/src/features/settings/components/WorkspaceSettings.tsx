@@ -15,6 +15,7 @@ import {
 
 import { SettingsSection } from "@/components/AppShell"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
+import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -40,6 +41,7 @@ import {
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
   FableSection,
@@ -294,6 +296,12 @@ export function WorkspaceSettingsPanel({
         onSaved={onSaved}
         onRebuildStarted={onRebuildStarted}
       />
+      <WorkspaceProxySection
+        key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
+        record={record.data}
+        canEdit={canEdit}
+        onSaved={onSaved}
+      />
       <ModelDefaultsSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
@@ -305,6 +313,9 @@ export function WorkspaceSettingsPanel({
         repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
+      {canEdit && (
+        <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
+      )}
       <LLMGatewaySection scope={scope} />
       <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
