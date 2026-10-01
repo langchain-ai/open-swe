@@ -967,6 +967,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     outputs={
                         "requested_model": decision.requested_model,
                         "classifier": vars(decision.classifier),
+                        "requested_effort": decision.requested_effort,
+                        "effort_classifier": vars(decision.effort_classifier),
                         "outcome": decision.outcome,
                         "reason": decision.reason,
                         "pin_persisted": decision.pin_persisted,
@@ -987,6 +989,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             client=client,
         )
         requested_model: str | None = None
+        requested_effort: str | None = None
         if self._requested_models is not None and self._model_selection is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
@@ -995,6 +998,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
                     decision=decision.classifier,
+                    effort_decision=decision.effort_classifier,
                     slack_event_ts=(
                         handoff_config.slack_thread.triggering_event_ts
                         if handoff_config.slack_thread is not None
@@ -1009,6 +1013,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "low_confidence"
                 if handoff is not None:
                     requested_model = handoff.requested_model
+                    requested_effort = handoff.requested_effort
+                    decision.requested_effort = requested_effort
                     decision.requested_model = requested_model
                     if handoff.unavailable_model or (
                         requested_model and requested_model not in self._requested_models
@@ -1017,6 +1023,27 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         decision.reason = "model_unavailable"
                         raise ValueError(
                             "The requested runtime model is unavailable; select an available model."
+                        )
+                if handoff is not None and handoff.unavailable_effort:
+                    decision.outcome = "unavailable_request"
+                    decision.reason = "effort_unavailable"
+                    raise ValueError("The requested reasoning effort is unavailable.")
+                if requested_effort is not None:
+                    requested_model = requested_model or self._model_id
+                    decision.requested_model = requested_model
+                    option = self._requested_models.get(requested_model)
+                    if option is None:
+                        decision.outcome = "unavailable_request"
+                        decision.reason = "model_unavailable"
+                        raise ValueError(
+                            "Choose an available runtime model to set its reasoning effort."
+                        )
+                    if requested_effort not in option["efforts"]:
+                        decision.outcome = "incompatible_request"
+                        decision.reason = "effort_unsupported"
+                        raise ValueError(
+                            f"The requested reasoning effort {requested_effort!r} is not supported "
+                            f"by {option['label']}; choose from {', '.join(option['efforts'])}."
                         )
                 settings["model_handoff_complete"] = True
                 settings["requested_model"] = requested_model
@@ -1036,7 +1063,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         )
                     settings.update(
                         model_id=requested_model,
-                        effort=option["default_effort"],
+                        effort=requested_effort or option["default_effort"],
                         model_routing_enabled=False,
                     )
                 try:
@@ -1056,8 +1083,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 decision.pin_persisted = bool(requested_model)
             if requested_model:
                 option = self._requested_models[requested_model]
+                requested_effort = settings.get("effort") or option["default_effort"]
+                decision.requested_effort = requested_effort
                 try:
-                    self._model_selection.use_requested_model(requested_model)
+                    self._model_selection.use_requested_model(requested_model, requested_effort)
                 except Exception:
                     decision.outcome = "selection_failure"
                     decision.reason = "model_initialization_failed"
@@ -1066,7 +1095,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
                 self._model_id = requested_model
-                self._effort = option["default_effort"]
+                self._effort = requested_effort
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
@@ -1254,6 +1283,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
+            "requested_effort": requested_effort,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
@@ -1843,13 +1873,17 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     configurable["image_model_fallback_enabled"] = image_fallback is not None
 
-    def requested_model_factory(requested_model: str) -> BaseChatModel:
+    def requested_model_factory(
+        requested_model: str, requested_effort: str | None
+    ) -> BaseChatModel:
         option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
         model = _make_model_or_defer(
             requested_model,
             use_gateway=use_gateway,
             **provider_model_kwargs(
-                requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
+                requested_model,
+                requested_effort or option["default_effort"],
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
             ),
         )
         if image_fallback is not None and not option["supports_images"]:
