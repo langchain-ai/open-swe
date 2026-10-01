@@ -16,6 +16,7 @@ from agent.human_review.lifecycle import delete_legacy_crons
 from agent.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_TASK
 from agent.human_review.standard import run_deadline
 from agent.reconcile import reconcile_stale_runs
+from agent.rollouts import evaluate_rollout
 from agent.run_config import RunConfig
 from agent.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
@@ -67,6 +68,11 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
             if not key:
                 return {"result": {"status": "missing_watch_key"}}
             return {"result": {"status": await evaluate_watch(key)}}
+        if task == "rollout":
+            key = state.watch_key or cfg.watch_key
+            if not key:
+                return {"result": {"status": "missing_watch_key"}}
+            return {"result": {"status": await evaluate_rollout(key)}}
         if task == EXPEDITED_REVIEW_TASK:
             key = state.watch_key or cfg.watch_key
             if not key:

@@ -18,6 +18,7 @@ __all__ = [
     "review_chat_thread_id",
     "review_style_thread_id",
     "reviewer_thread_id",
+    "rollout_lock_thread_id",
     "slack_thread_id",
     "thread_id_from_branch",
 ]
@@ -65,6 +66,10 @@ def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> s
 
 def baby_sit_lock_thread_id(key: str) -> str:
     return _url_uuid(f"open-swe:baby-sit-lock:{key}")
+
+
+def rollout_lock_thread_id(key: str) -> str:
+    return _url_uuid(f"open-swe:rollout-lock:{key}")
 
 
 def linear_issue_thread_id(issue_id: str) -> str:

@@ -1,0 +1,21 @@
+{{ env }} contains {{ sha }}.
+
+PR: {{ pr_url }}
+Author: {{ author }}
+{% if page %}
+Page: {{ page }}
+Expected: {{ expected }}
+Call `rollout_page_check` with the https URL of that page on this environment. The tool uses the server-side bot login and does not return the password. If the tool says the browser runtime is not installed, say the page check did not run. Do not invent what the page showed.
+{% endif %}
+{% if metrics %}
+Metrics: {{ metrics }}
+Query Datadog and compare this revision to the previous one. Staging uses the tag env:staging. Prod uses env:prod, env:eu-prod, and the other prod regions, and only when this environment is prod. Skip Datadog on dev. A prod metric move is the whole revision, not proof this commit caused it.
+{% endif %}
+{% if not page and not metrics %}
+No page or metric check was stored.
+{% endif %}
+{% if last %}
+Post one verdict in this thread and as a GitHub comment on the PR (`gh pr comment {{ pr_url }}`): whether the issue is fixed, and whether there is a regression. On a failure, mention {{ author }}. Do not post in #langsmith-releases or any other Slack channel.
+{% else %}
+Report this environment in the thread. The final verdict waits until the last environment in the check.
+{% endif %}

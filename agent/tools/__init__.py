@@ -40,6 +40,8 @@ _TOOL_MODULES = {
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
+    "record_rollout_check": ".record_rollout_check",
+    "rollout_page_check": ".rollout_page_check",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
     "configure_repository": ".workspaces",
@@ -117,10 +119,12 @@ __all__ = [
     "read_repo_file",
     "read_user_settings",
     "record_human_input",
+    "record_rollout_check",
     "recreate_sandbox",
     "refresh_workspace_start",
     "configure_repository",
     "report_platform_issue",
+    "rollout_page_check",
     "request_human_review",
     "request_pr_review",
     "request_service_connection",
@@ -204,6 +208,7 @@ if TYPE_CHECKING:
     from agent.tools.read_only_sql import read_only_sql
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.record_human_input import record_human_input
+    from agent.tools.record_rollout_check import record_rollout_check
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
     from agent.tools.report_platform_issue import report_platform_issue
@@ -215,6 +220,7 @@ if TYPE_CHECKING:
     )
     from agent.tools.request_service_connection import request_service_connection
     from agent.tools.resolve_finding_thread import resolve_finding_thread
+    from agent.tools.rollout_page_check import rollout_page_check
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.save_user_settings import save_user_settings

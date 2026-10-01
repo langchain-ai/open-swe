@@ -1,0 +1,71 @@
+"""Store the rollout check on the thread that is opening a pull request."""
+
+from collections.abc import Mapping
+from typing import Any
+from urllib.parse import urlparse, urlunparse
+
+from langgraph.config import get_config
+from langgraph_sdk import get_client
+
+from agent.run_config import RunConfig
+from agent.source_context import SourceContext
+from agent.tools.manage_baby_sit import dispatch_run_config
+
+_PAGE_LIMIT = 300
+_TEXT_LIMIT = 1000
+
+
+def _clip(value: str, limit: int) -> str:
+    return value.strip()[:limit]
+
+
+def _without_userinfo(value: str) -> str:
+    parsed = urlparse(value)
+    if not parsed.username and not parsed.password:
+        return value
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return urlunparse(parsed._replace(netloc=host))
+
+
+async def record_rollout_check(
+    page: str = "",
+    expected: str = "",
+    metrics: str = "",
+    include_prod: bool = False,
+) -> dict[str, Any]:
+    """Implement the `record_rollout_check` tool."""
+    cfg = RunConfig.from_config(get_config())
+    thread_id = cfg.thread_id
+    if not thread_id:
+        return {"success": False, "error": "No executable agent thread is available"}
+    envs = ["dev", "staging", *(["prod"] if include_prod else [])]
+    dumped = cfg.dump()
+    source = SourceContext.parse(
+        {
+            key: dumped[key]
+            for key in ("slack_thread", "linear_issue", "github_issue")
+            if isinstance(dumped.get(key), Mapping)
+        }
+    )
+    check = {
+        "page": _without_userinfo(_clip(page, _PAGE_LIMIT)),
+        "expected": _clip(expected, _TEXT_LIMIT),
+        "metrics": _clip(metrics, _TEXT_LIMIT),
+        "envs": envs,
+        "author": (cfg.github_login or "").strip(),
+        "run_config": dispatch_run_config(cfg, thread_id, None),
+        "source_context": source.dump(),
+    }
+    try:
+        await get_client().threads.update(thread_id=thread_id, metadata={"rollout_check": check})
+    except Exception:
+        return {"success": False, "error": "Could not store the rollout check"}
+    return {
+        "success": True,
+        "envs": envs,
+        "page": bool(check["page"]),
+        "metrics": bool(check["metrics"]),
+        "include_prod": include_prod,
+    }

@@ -1,0 +1,1 @@
+Store this thread's rollout check before or when you open the pull request. Dev and staging are always watched. Pass `page` and `expected` when the change is visible. Pass `metrics` when the diff can move latency or system metrics. Pass `include_prod=true` only when prod has to be checked. The bot username, email, and password stay on the server.

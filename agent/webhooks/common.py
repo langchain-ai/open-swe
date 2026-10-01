@@ -1480,16 +1480,19 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 resolves_thread = any(
                     record.get("resolves_thread") is True for record in updated_pull_requests
                 )
+                from agent.rollouts import rollout_watch_pending
+
+                rollout_pending = rollout_watch_pending(metadata)
                 needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
                 if all_terminal:
                     if state_changed and metadata.get("resolved") is not True:
-                        if resolves_thread:
+                        if resolves_thread and not rollout_pending:
                             metadata_update["resolved"] = True
                             metadata_update["resolved_at_ms"] = int(
                                 datetime.now(UTC).timestamp() * 1000
                             )
                             metadata_update["auto_resolved_by_prs"] = True
-                        elif not needs_attention:
+                        elif not rollout_pending and not needs_attention:
                             metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
                 else:
                     if metadata.get("auto_resolved_by_prs") is True:
@@ -1513,6 +1516,13 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from agent.thread_feedback import schedule_pr_feedback
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
+            if rollout_watch_pending(metadata):
+                from agent.rollouts import start_from_merge
+
+                try:
+                    await start_from_merge(thread_id, metadata, payload)
+                except Exception:
+                    logger.warning("Failed to start rollout watch for %s", thread_id, exc_info=True)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from agent.analytics.emitter import task_rework
 
