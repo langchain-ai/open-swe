@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from agent.human_review.requests import HumanReviewRequest
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -1104,6 +1105,10 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
+            load_prompt("runs/slack-review-request.md")
+            if event_ts != thread_ts
+            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
+            else "",
             resolved_links_section,
         )
         if section
