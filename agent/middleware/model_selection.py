@@ -141,22 +141,23 @@ class ModelSelectionMiddleware(ModelRoutingMiddleware):
         self.models["default"] = self._requested_models[model_id]
         self._route_model_ids["default"] = model_id
 
-    async def aselect_route(self, state: ModelRoutingState) -> str:
+    def before_model(self, state: ModelRoutingState, runtime: Runtime) -> dict[str, str]:
+        raise NotImplementedError("Open SWE model routing requires async execution")
+
+    async def abefore_model(self, state: ModelRoutingState, runtime: Runtime) -> dict[str, str]:
+        routing_state = state.copy()
         requested_model = state.get("requested_model")
         if isinstance(requested_model, str) and self._requested_model_factory is not None:
             self.use_requested_model(requested_model)
-            return "default"
-        if self._routing_mode is None:
-            return "default"
-        if state.get("model_route") == "fast_alt":
-            return "fast"
-        if self._routing_mode == "fast" and not state.get("model_route"):
-            return "fast"
-        return await super().aselect_route(state)
-
-    async def abefore_model(self, state: ModelRoutingState, runtime: Runtime) -> dict[str, str]:
-        update = await super().abefore_model(state, runtime)
-        if self._routing_mode == "auto" or state.get("requested_model"):
+            routing_state["model_route"] = "default"
+        elif self._routing_mode is None:
+            routing_state["model_route"] = "default"
+        elif state.get("model_route") == "fast_alt":
+            routing_state["model_route"] = "fast"
+        elif self._routing_mode == "fast" and not state.get("model_route"):
+            routing_state["model_route"] = "fast"
+        update = await super().abefore_model(routing_state, runtime)
+        if self._routing_mode == "auto" or requested_model:
             await _emit_routed_model(
                 self.models, self._route_model_ids, cast(SelectedRoute, update["model_route"])
             )

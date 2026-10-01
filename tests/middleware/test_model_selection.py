@@ -62,6 +62,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
     state["model_route"] = "fast_alt"
+    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
     assert (await _invoke(middleware, state)).model is models["fast"]
     jev.assert_awaited_once()
     assert jev.await_args.args[0] == "Update the README"
@@ -186,7 +187,7 @@ async def test_jev_routes_or_falls_back(
     )
     middleware, _ = _middleware()
     state = ModelSelectionState(messages=[HumanMessage(content="x" * 8_001)])
-    route = await middleware.aselect_route(state)
+    route = (await middleware.abefore_model(state, MagicMock()))["model_route"]
     assert route == ("default" if failure else "fast")
     assert len(requests) == 1
     assert requests[0].url == (
@@ -202,7 +203,7 @@ async def test_jev_routes_or_falls_back(
     assert payload["model"] == ("typesafe/jev-1.13.0" if use_gateway else "jev-1.13.0")
     assert payload["questions"]["route"]["type"] == "choice"
     state["model_route"] = route
-    assert await middleware.aselect_route(state) == route
+    assert (await middleware.abefore_model(state, MagicMock()))["model_route"] == route
     assert len(requests) == 1
 
 

@@ -1477,7 +1477,7 @@ wheels = [
 [[package]]
 name = "langchain"
 version = "1.4.3"
-source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&branch=sydney-runkle%2Flangchain%2Fmodel-routing-middleware#b65d30569def7c7165382f909a0a79c36584b7bc" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Flangchain_v1&branch=sydney-runkle%2Flangchain%2Fmodel-routing-middleware#613951a5bd59474ea2167b5754e640946ba37a59" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
@@ -1501,7 +1501,7 @@ wheels = [
 [[package]]
 name = "langchain-core"
 version = "1.6.6"
-source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Fcore&branch=sydney-runkle%2Flangchain%2Fmodel-routing-middleware#b65d30569def7c7165382f909a0a79c36584b7bc" }
+source = { git = "https://github.com/langchain-ai/langchain?subdirectory=libs%2Fcore&branch=sydney-runkle%2Flangchain%2Fmodel-routing-middleware#613951a5bd59474ea2167b5754e640946ba37a59" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonpatch" },
