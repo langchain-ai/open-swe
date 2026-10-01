@@ -29,6 +29,7 @@ class PersonIdentity(TypedDict):
     id: str
     display_name: NotRequired[str]
     github_login: NotRequired[str]
+    slack_user_id: NotRequired[str]
     commit_name: NotRequired[str]
     commit_email: NotRequired[str]
     email: NotRequired[str]
@@ -93,6 +94,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "person": (
         "display_name",
         "github_login",
+        "slack_user_id",
         "commit_name",
         "commit_email",
         "email",
