@@ -274,6 +274,8 @@ class HumanReviewRequest(Base):
     @classmethod
     async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
         """Whether this Slack thread contains an Open SWE review-request card."""
+        if not postgres.configured():
+            return False
         async with postgres.session() as session:
             request_id = await session.scalar(
                 select(cls.id)
