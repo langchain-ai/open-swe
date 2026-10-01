@@ -41,6 +41,7 @@ import {
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
   FableSection,
@@ -294,6 +295,12 @@ export function WorkspaceSettingsPanel({
         record={record.data}
         onSaved={onSaved}
         onRebuildStarted={onRebuildStarted}
+      />
+      <WorkspaceProxySection
+        key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
+        record={record.data}
+        canEdit={canEdit}
+        onSaved={onSaved}
       />
       <ModelDefaultsSection
         scope={scope}

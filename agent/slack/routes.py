@@ -9,6 +9,7 @@ from typing import Literal, TypedDict, cast
 from fastapi import APIRouter, Response
 from langgraph_sdk.client import LangGraphClient
 
+from agent.act_as import slack as act_as
 from agent.expedited_review import slack as expedited_review
 from agent.human_review import slack as human_review
 from agent.human_review.posted import watch_post
@@ -890,6 +891,9 @@ async def slack_interactivity(
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:
             return await human_review.handle_button(interaction, button, background_tasks)
+
+        if button.type == act_as.BUTTON_TYPE:
+            return await act_as.handle_button(interaction, button, background_tasks)
 
         if button.type == "workflow_push_approval":
             if not channel_id or not thread_ts or not button.fingerprint:
