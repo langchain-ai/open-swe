@@ -21,7 +21,7 @@ from agent.store import get_value, now_ms, put_value
 
 logger = logging.getLogger(__name__)
 
-REPO_LIST_CACHE_NAMESPACE: list[str] = ["repo_list_cache"]
+REPO_LIST_CACHE_NAMESPACE: list[str] = ["repo_list_cache_v2"]
 REPO_LIST_FRESH_MS = 10 * 60 * 1000
 REPO_LIST_MAX_AGE_MS = 24 * 60 * 60 * 1000
 

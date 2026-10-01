@@ -196,6 +196,8 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
         "default",
         WorkspaceUpdate(prompt="secret-ish prompt", create_params={"_internal_runtime": "v2"}),
     )
+    await WORKSPACES.mark_capturing("default")
+    assert (await env_store.list_workspace_options())[0]["has_snapshot"] is False
     await WORKSPACES.mark_captured(
         "default",
         snapshot_id="snap-1",
@@ -227,6 +229,9 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
 
     admin_view = await env_store.list_workspace_options(include_logs=True)
     assert admin_view[0]["refresh_log_excerpt"] == "+ TOKEN=hunter2\ndone"
+
+    await WORKSPACES.mark_capturing("default")
+    assert (await env_store.list_workspace_options())[0]["has_snapshot"] is True
 
 
 @pytest.mark.asyncio

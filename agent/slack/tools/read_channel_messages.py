@@ -5,6 +5,7 @@ from agent.slack.client import (
     format_slack_messages_for_prompt,
     get_slack_user_names,
 )
+from agent.tools.access import Policy, access
 
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
 
@@ -15,6 +16,7 @@ _NOT_PUBLIC = (
 )
 
 
+@access(Policy(trusted="private"))
 async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, Any]:
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():

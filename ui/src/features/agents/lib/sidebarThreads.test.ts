@@ -55,6 +55,13 @@ const checkout: DesktopProject = {
 }
 
 describe("sidebar thread adapters", () => {
+  it("retains registered local folders without visible chats when requested", () => {
+    const repos = sidebarRepoOptions([], [checkout])
+    expect(groupSidebarThreadsByRepo([], repos, "updated", true).repos).toEqual(
+      [{ ...repos[0], threads: [] }]
+    )
+  })
+
   it("uses short repository names and namespaced identities", () => {
     const cloud = cloudSidebarThread(cloudThread())
     const local = localSidebarThread(localThread(), checkout, undefined)

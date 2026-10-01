@@ -19,7 +19,6 @@ from agent.review.eval_store import (
     HEARTBEAT_STALE_SECONDS,
     REVIEWER_EVAL_KEY,
 )
-from agent.review.findings import REVIEW_FINDING_CAP
 from agent.store import get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,6 @@ class ReviewerEvalConfig(TypedDict):
     reasoning_effort: str
     score_mode: ScoreMode
     severity_threshold: Severity
-    cap: int
 
 
 DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
@@ -54,7 +52,6 @@ DEFAULT_REVIEWER_EVAL_CONFIG: ReviewerEvalConfig = {
     "reasoning_effort": "medium",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",
-    "cap": REVIEW_FINDING_CAP,
 }
 
 

@@ -718,7 +718,7 @@ class Workspace(BaseModel):
             "slack_channel_ids": list(self.slack_channel_ids),
             "kitchen_channel_ids": list(self.kitchen_channel_ids),
             "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
-            "has_snapshot": self.snapshot_status == "ready",
+            "has_snapshot": self.ready_snapshot_id is not None,
             "refresh_status": self.refresh_status,
             "refresh_kind": self.refresh_kind,
             "refresh_finished_at": self.refresh_finished_at,

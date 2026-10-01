@@ -31,6 +31,7 @@ vi.mock("@/lib/session", () => ({
   }),
 }))
 vi.mock("@/lib/profile", () => ({
+  useProfile: () => ({ data: { repository_usage: [] } }),
   useRepos: () => ({
     data: {
       repositories: [

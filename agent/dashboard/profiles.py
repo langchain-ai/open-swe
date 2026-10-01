@@ -430,6 +430,20 @@ async def get_my_profile(
     }
 
 
+@router.post("/profile/slack-onboarding-dismissal")
+async def dismiss_slack_onboarding(
+    session: dict[str, str] = _SESSION_DEP,
+) -> dict[str, object]:
+    login = session["sub"]
+    profile = await get_profile(login) or {}
+    await put_value(
+        PROFILES_NAMESPACE,
+        login,
+        {**profile, "slack_onboarding_dismissed": True, "updated_at": now_iso()},
+    )
+    return await get_my_profile(session)
+
+
 @router.put("/profile")
 async def put_my_profile(
     update: ProfileUpdate,
