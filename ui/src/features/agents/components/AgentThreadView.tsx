@@ -40,11 +40,9 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import {
-  describeSendError,
-  useSubmitAgentMessage,
-} from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
   agentThreadKeys,
   useAgentSkills,
@@ -63,6 +61,7 @@ import type {
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -136,6 +135,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
+  const [autoIntent] = useState(createAutoSelectionIntent)
   const activeSelection = autoSelected
     ? null
     : (selection ??
@@ -145,6 +145,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
+    autoIntent.select(next === null)
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -152,7 +153,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     (model) => model.id === activeSelection?.modelId
   )
   const baseMessages = source.messages
-  const isStreaming = thread.status === "running" || source.isRunning
+  const isStreaming =
+    source.kind === "transcript"
+      ? source.isRunning
+      : thread.status === "running" || source.isRunning
   // Server truth: follow-ups queued behind the live run, from the transcript.
   const queued = source.queued
   const login = session.data?.login
@@ -162,11 +166,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     [login]
   )
 
-  // The SDK stream cannot queue, so a follow-up there always steers.
-  const followUpBehavior =
-    source.kind === "transcript"
-      ? (session.data?.follow_up_behavior ?? "queue")
-      : "steer"
+  const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
       content: string,
@@ -179,23 +179,34 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
-      await sendMessage.mutateAsync({
-        content,
-        images,
-        model_id: activeSelection?.modelId ?? null,
-        effort: activeSelection?.effort ?? null,
-        enqueue: isStreaming && queue && source.kind === "transcript",
-      })
+      const messageId = crypto.randomUUID()
+      const carriesAutoSelection = autoIntent.claim(
+        messageId,
+        content.trim() !== "/offload" && (!isStreaming || queue)
+      )
+      const restoreAutoSelection = () => autoIntent.restore(messageId)
+      try {
+        await sendMessage.mutateAsync({
+          content,
+          images,
+          client_message_id: messageId,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+          model_selection_changed: carriesAutoSelection,
+          enqueue: isStreaming && queue,
+          ...(carriesAutoSelection
+            ? { onStartError: restoreAutoSelection }
+            : {}),
+        })
+      } catch (error) {
+        restoreAutoSelection()
+        throw error
+      }
     },
-    [
-      activeSelection?.effort,
-      activeSelection?.modelId,
-      followUpBehavior,
-      isStreaming,
-      sendMessage,
-      source.kind,
-    ]
+    [activeSelection, autoIntent, followUpBehavior, isStreaming, sendMessage]
   )
+
+  const restoreQueuedAutoSelection = autoIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
     entry.message.chunks
@@ -207,6 +218,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
 
   const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [droppedFiles, setDroppedFiles] = useState<{
+    key: number
+    files: Array<File>
+  } | null>(null)
   const restoreQueuedToComposer = useCallback(
     (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
       if (texts.length === 0 && images.length === 0) return
@@ -233,14 +248,22 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     []
   )
-  // Withdraws a queued follow-up: its run is cancelled before it starts, and
-  // the transcript hides the turn.
+  // A "stream"-kind source's queue only reflects a cancel via `cancelQueued`
+  // — never a lifecycle event, since the run never reached "running" —
+  // otherwise the row lingers until the next hydrate.
   const withdrawQueued = useCallback(
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
-      await agentsApi.cancelRun(thread.id, entry.runId)
+      if (source.kind === "stream") {
+        if (!(await source.cancelQueued(entry.turnId))) {
+          throw new Error("The queued message could not be cancelled.")
+        }
+      } else {
+        await agentsApi.cancelRun(thread.id, entry.runId)
+      }
+      restoreQueuedAutoSelection(entry.message.id)
     },
-    [thread.id]
+    [restoreQueuedAutoSelection, source, thread.id]
   )
   const steerInFlightRef = useRef(false)
   // Send now: the follow-up leaves the queue and goes into the live run.
@@ -252,11 +275,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        await sendMessage.mutateAsync({ content: queuedText(entry), images })
+        sendMessage.mutate({ content: queuedText(entry), images })
       } catch (error) {
-        toast.error(
-          `Couldn't send the queued message now: ${describeSendError(error)}`
-        )
+        reportError({ title: "Couldn't send the queued message now", error })
       } finally {
         steerInFlightRef.current = false
       }
@@ -287,9 +308,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         await withdrawQueued(entry)
         restoreQueuedToComposer([queuedText(entry)], images)
       })().catch((error: unknown) =>
-        toast.error(
-          `Couldn't cancel the queued message: ${describeSendError(error)}`
-        )
+        reportError({ title: "Couldn't cancel the queued message", error })
       )
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
@@ -311,9 +330,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ...pending.flatMap(queuedImages),
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
-    if (!(await source.stop())) {
-      toast.error("Couldn't stop the run.")
-      return
+    if (!(await source.stop())) return
+    for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
+    for (const message of unacknowledged) restoreQueuedAutoSelection(message.id)
+    if (source.kind === "stream" && pending.length > 0) {
+      // Same reasoning as withdrawQueued: syncs the adapter's queue store.
+      await Promise.allSettled(
+        pending.map((entry) => source.cancelQueued(entry.turnId))
+      )
     }
     if (unacknowledged.length > 0) {
       const dropped = new Set(unacknowledged.map((message) => message.id))
@@ -347,6 +371,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     isOwnQueued,
     queryClient,
     queued,
+    restoreQueuedAutoSelection,
     restoreQueuedToComposer,
     source,
     thread.id,
@@ -522,7 +547,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           onRename={(title) =>
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
-          target="Cloud"
+          target={
+            thread.sandboxId?.startsWith("bridge:") ? "Local CLI" : "Cloud"
+          }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
@@ -565,7 +592,33 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             </Alert>
           </div>
         )}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+          onDragOver={(event) => {
+            if (canPost && event.dataTransfer.types.includes("Files"))
+              event.preventDefault()
+          }}
+          onDrop={(event) => {
+            if (
+              !canPost ||
+              !event.dataTransfer.types.includes("Files") ||
+              (event.target instanceof Element &&
+                event.target.closest("[data-chat-composer]"))
+            )
+              return
+            event.preventDefault()
+            const files = Array.from(event.dataTransfer.files).filter((file) =>
+              ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+                file.type
+              )
+            )
+            if (files.length)
+              setDroppedFiles((previous) => ({
+                key: (previous?.key ?? 0) + 1,
+                files,
+              }))
+          }}
+        >
           {hydrationFailed || hydrationTimedOut ? (
             <LoadError
               title="Unable to load messages"
@@ -599,7 +652,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <Messages
                   messages={visibleMessages}
                   threadId={thread.id}
-                  showUserNames={thread.visibility !== "private"}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
@@ -682,6 +734,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
+                droppedFiles={droppedFiles}
                 models={models}
                 routed={routed}
                 selection={activeSelection}

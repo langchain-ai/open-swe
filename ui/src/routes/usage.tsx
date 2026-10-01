@@ -19,6 +19,7 @@ import { Fragment, useState } from "react"
 import type {
   AnalyticsMetadata,
   PRMergeRateCohort,
+  PRMergeRateEffort,
   PRMergeRatePayload,
   PRMergeRateResponse,
   ReviewerStatsPayload,
@@ -42,6 +43,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { safeModelLabel } from "@/lib/modelLabel"
 import {
@@ -55,6 +57,7 @@ export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
     period: typeof search.period === "string" ? search.period : undefined,
   }),
+  head: () => ({ meta: [{ title: pageTitle("Usage") }] }),
   component: UsagePage,
 })
 
@@ -76,10 +79,10 @@ type PROutcomesSort =
   | "closed_without_merge"
   | "open"
   | "median_distance"
+  | "mean_distance"
   | "merge_rate"
   | "avg_delivery_seconds"
   | "avg_merge_seconds"
-
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "24h": "Last 24h",
   "7d": "Last 7 days",
@@ -205,7 +208,7 @@ function UsageAnalyticsPeriod({
   const [leaderboardPage, setLeaderboardPage] = useState(1)
   const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
   const [direction, setDirection] = useState<SortDirection>("asc")
-  const [usageScope, setUsageScope] = useState<UsageScope>("invocations")
+  const [usageScope, setUsageScope] = useState<UsageScope>("threads")
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -459,22 +462,21 @@ function AnalyticsCoverage({
     tone: string
   } = hasFailedEvents
     ? {
-        label: "Event processing needs attention",
+        label: "Analytics need attention",
         description:
-          "Some captured events could not be processed. Reports may be incomplete.",
+          "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
         tone: "text-destructive",
       }
     : hasPendingEvents
       ? {
-          label: "Event processing is behind",
-          description:
-            "New activity is still waiting to be processed into reports.",
+          label: "Analytics are updating",
+          description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
           tone: "text-amber-600 dark:text-amber-400",
         }
       : {
-          label: "Event processing is up to date",
+          label: "Analytics are up to date",
           icon: CheckCircleIcon,
           tone: "text-emerald-600 dark:text-emerald-400",
         }
@@ -719,7 +721,11 @@ function PRMergeRateSection({
               <strong>Median distance</strong> is the median normalized line
               edit distance between each merged PR’s opening diff and final
               diff. It is calculated only for merged PRs with complete text
-              patches; higher means more post-open editing.
+              patches; higher means more post-open editing.{" "}
+              <strong>Mean distance</strong> is the arithmetic mean of those
+              same per-PR percentages; unusually rewritten PRs affect it more.
+              Neither metric weights PRs by size. The measured/merged count
+              shows how many merged PRs had complete patches.
             </p>
             <p>
               <strong>Merge rate</strong> includes only PRs old enough to have a
@@ -729,14 +735,14 @@ function PRMergeRateSection({
               they have had enough time to merge.
             </p>
             <p>
-              <strong>Avg time to merge</strong> is the arithmetic mean of time
-              from PR opened to merged across merged PRs opened in the selected
+              <strong>Time to merge</strong> is the arithmetic mean of time from
+              PR opened to merged across merged PRs opened in the selected
               period. Unmerged PRs are excluded, and it shows — when a group has
               no merges.
             </p>
             <p>
-              <strong>Avg time to PR</strong> is the arithmetic mean of time
-              from opening-run start to PR creation across all PRs opened in the
+              <strong>Time to PR</strong> is the arithmetic mean of time from
+              opening-run start to PR creation across all PRs opened in the
               selected period. PRs without a valid opening-run start time are
               excluded, and it shows — when a group has none.
             </p>
@@ -765,41 +771,11 @@ function PRMergeRateSection({
   )
 }
 
-function OpenPRCount({
+function AvgTimeToMerge({
   cohort,
-  maturityDays,
 }: {
-  cohort: Pick<PRMergeRateCohort, "mature_pending" | "waiting">
-  maturityDays: number
+  cohort: PRMergeRateCohort | PRMergeRateEffort
 }) {
-  const [open, setOpen] = useState(false)
-
-  if (cohort.waiting === 0 && cohort.mature_pending === 0) {
-    return <span>0</span>
-  }
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger
-        closeOnClick={false}
-        onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-      >
-        {cohort.waiting + cohort.mature_pending}
-      </TooltipTrigger>
-      <TooltipPopup>
-        <div>
-          {cohort.waiting} open for less than {maturityDays} days
-        </div>
-        <div>
-          {cohort.mature_pending} open for {maturityDays} days or longer
-        </div>
-      </TooltipPopup>
-    </Tooltip>
-  )
-}
-
-function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   return (
     <span>
       {cohort.avg_merge_seconds == null
@@ -809,14 +785,18 @@ function AvgTimeToMerge({ cohort }: { cohort: PRMergeRateCohort }) {
   )
 }
 
-function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
+function AvgTimeToPR({
+  cohort,
+}: {
+  cohort: PRMergeRateCohort | PRMergeRateEffort
+}) {
   if (!("avg_delivery_seconds" in cohort)) {
     // A backend that predates the metric has no key for it at all.
     return (
       <span
         className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         title="Metric unavailable from this backend"
-        aria-label="Avg time to PR: metric unavailable from this backend"
+        aria-label="Time to PR: metric unavailable from this backend"
         tabIndex={0}
       >
         —
@@ -826,54 +806,77 @@ function AvgTimeToPR({ cohort }: { cohort: PRMergeRateCohort }) {
   if (cohort.avg_delivery_seconds == null) {
     return <span title="No PRs with valid timing in this group">—</span>
   }
+  return <span>{formatAvgDuration(cohort.avg_delivery_seconds)}</span>
+}
+
+type OutcomeGroup = Pick<
+  PRMergeRateCohort,
+  | "cohort_size"
+  | "merged"
+  | "closed_without_merge"
+  | "mature_pending"
+  | "waiting"
+>
+type Outcome = "merged" | "closed_without_merge" | "open"
+
+function outcomePercent(group: OutcomeGroup, outcome: Outcome): number {
+  if (!group.cohort_size) return 0
+  const counts = [
+    group.merged,
+    group.closed_without_merge,
+    group.mature_pending + group.waiting,
+  ]
+  const raw = counts.map((count) => (count * 100) / group.cohort_size)
+  const rounded = raw.map(Math.floor)
+  const remainder = 100 - rounded.reduce((sum, value) => sum + value, 0)
+  const order = [0, 1, 2].sort(
+    (a, b) => raw[b]! - rounded[b]! - (raw[a]! - rounded[a]!) || a - b
+  )
+  for (let index = 0; index < remainder; index++) rounded[order[index]!]!++
+  return rounded[{ merged: 0, closed_without_merge: 1, open: 2 }[outcome]]!
+}
+
+function OutcomeCell({
+  group,
+  outcome,
+  maturityDays,
+}: {
+  group: OutcomeGroup
+  outcome: Outcome
+  maturityDays: number
+}) {
+  const [open, setOpen] = useState(false)
+  const count =
+    outcome === "open" ? group.mature_pending + group.waiting : group[outcome]
+  const value = (
+    <>
+      {count}{" "}
+      <span className="text-muted-foreground">
+        ({outcomePercent(group, outcome)}%)
+      </span>
+    </>
+  )
+  if (outcome !== "open" || !count) return value
   return (
-    <Tooltip>
-      <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {formatAvgDuration(cohort.avg_delivery_seconds)}
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        {value}
       </TooltipTrigger>
-      <TooltipPopup className="max-w-xs">
-        Based on PRs whose opening run has a valid start time, regardless of
-        outcome; PRs with missing or invalid timing are excluded.
+      <TooltipPopup>
+        <div>
+          {group.waiting} open for less than {maturityDays} days
+        </div>
+        <div>
+          {group.mature_pending} open for {maturityDays} days or longer
+        </div>
       </TooltipPopup>
     </Tooltip>
   )
 }
-
-const PR_OUTCOME_COLUMNS: Array<SortableColumn<PROutcomesSort>> = [
-  {
-    key: "model",
-    label: "Opening model",
-    align: "left",
-    defaultDirection: "asc",
-  },
-  { key: "prs_opened", label: "PRs opened", align: "right" },
-  { key: "merged", label: "Merged", align: "right" },
-  {
-    key: "closed_without_merge",
-    label: "Closed without merge",
-    align: "right",
-  },
-  { key: "open", label: "Open", align: "right" },
-  {
-    key: "median_distance",
-    label: "Median distance",
-    align: "right",
-    tooltip:
-      "Median post-open line edit distance across merged PRs. Higher means the final diff changed more after the PR opened.",
-  },
-  {
-    key: "merge_rate",
-    label: "Merge rate",
-    align: "right",
-  },
-  { key: "avg_delivery_seconds", label: "Avg time to PR", align: "right" },
-  {
-    key: "avg_merge_seconds",
-    label: "Avg time to merge",
-    align: "right",
-    tooltip: "Unmerged PRs are excluded.",
-  },
-]
 
 function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
   switch (sort) {
@@ -889,13 +892,161 @@ function prOutcomeSortValue(cohort: PRMergeRateCohort, sort: PROutcomesSort) {
       return cohort.waiting + cohort.mature_pending
     case "median_distance":
       return cohort.median_distance_basis_points ?? null
+    case "mean_distance":
+      return cohort.mean_distance_basis_points ?? null
     case "merge_rate":
       return cohort.mature_cohort_merge_share
     case "avg_delivery_seconds":
-      return cohort.avg_delivery_seconds
+      return cohort.avg_delivery_seconds ?? null
     case "avg_merge_seconds":
-      return cohort.avg_merge_seconds
+      return cohort.avg_merge_seconds ?? null
   }
+}
+
+function prOutcomeColumns(
+  maturityDays: number
+): Array<SortableColumn<PROutcomesSort>> {
+  return [
+    {
+      key: "model",
+      label: "Opening model",
+      align: "left",
+      defaultDirection: "asc",
+    },
+    { key: "prs_opened", label: "PRs opened (base)", align: "right" },
+    { key: "merged", label: "Merged", align: "right" },
+    {
+      key: "merge_rate",
+      label: "Mature merge rate",
+      align: "right",
+      tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
+    },
+    {
+      key: "closed_without_merge",
+      label: "Closed without merge",
+      align: "right",
+    },
+    { key: "open", label: "Open", align: "right" },
+    {
+      key: "median_distance",
+      label: "Median distance",
+      align: "right",
+      tooltip:
+        "Median post-open line edit distance across measurable merged PRs.",
+    },
+    {
+      key: "mean_distance",
+      label: "Mean distance",
+      align: "right",
+      tooltip:
+        "Mean post-open line edit distance across measurable merged PRs. Unusually rewritten PRs affect it more than the median; PRs are not weighted by size.",
+    },
+    {
+      key: "avg_delivery_seconds",
+      label: "Time to PR",
+      align: "right",
+      tooltip:
+        "Average time from opening-run start to PR creation, regardless of outcome. PRs with missing or invalid timing are excluded.",
+    },
+    {
+      key: "avg_merge_seconds",
+      label: "Time to merge",
+      align: "right",
+      tooltip:
+        "Average time from PR opened to merged. Unmerged PRs are excluded.",
+    },
+  ]
+}
+
+function PROutcomeCells({
+  group,
+  maturityDays,
+}: {
+  group: PRMergeRateCohort | PRMergeRateEffort
+  maturityDays: number
+}) {
+  const rate = group.mature_cohort_merge_share
+  return (
+    <>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        {group.cohort_size}{" "}
+        <span className="text-muted-foreground">(100%)</span>
+      </td>
+      {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
+        <Fragment key={outcome}>
+          <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+            <OutcomeCell
+              group={group}
+              outcome={outcome}
+              maturityDays={maturityDays}
+            />
+          </td>
+          {outcome === "merged" && (
+            <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+              <span className="font-semibold">
+                {rate == null ? "—" : formatPercent(rate)}
+              </span>
+              {rate != null && (
+                <div className="text-xs text-muted-foreground">
+                  {group.merged}/{group.mature_denominator} eligible
+                </div>
+              )}
+              {rate != null && group.mature_denominator < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+            </td>
+          )}
+        </Fragment>
+      ))}
+      {(["median_distance", "mean_distance"] as const).map((metric) => {
+        const value =
+          metric === "median_distance"
+            ? group.median_distance_basis_points
+            : "mean_distance_basis_points" in group
+              ? group.mean_distance_basis_points
+              : undefined
+        const supported =
+          metric === "median_distance" || "mean_distance_basis_points" in group
+        return (
+          <td
+            key={metric}
+            className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
+          >
+            <Tooltip>
+              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
+              </TooltipTrigger>
+              <TooltipPopup>
+                {supported
+                  ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
+                  : "Mean distance unavailable for this group"}
+              </TooltipPopup>
+            </Tooltip>
+            {supported && group.distance_sample_size !== undefined && (
+              <div className="text-xs text-muted-foreground">
+                {group.distance_sample_size}/{group.merged} measured
+              </div>
+            )}
+            {supported &&
+              (group.distance_sample_size ?? 0) > 0 &&
+              (group.distance_sample_size ?? 0) < 5 && (
+                <div className="text-xs text-amber-600 dark:text-amber-400">
+                  Small sample
+                </div>
+              )}
+          </td>
+        )
+      })}
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToPR cohort={group} />
+      </td>
+      <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
+        <AvgTimeToMerge cohort={group} />
+      </td>
+    </>
+  )
 }
 
 function PRMergeRateTable({
@@ -907,9 +1058,9 @@ function PRMergeRateTable({
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
   const [direction, setDirection] = useState<SortDirection>("desc")
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const sortedCohorts = [...cohorts].sort((a, b) => {
     const aValue = prOutcomeSortValue(a, sort)
     const bValue = prOutcomeSortValue(b, sort)
@@ -919,7 +1070,12 @@ function PRMergeRateTable({
       typeof aValue === "string" && typeof bValue === "string"
         ? aValue.localeCompare(bValue, undefined, { sensitivity: "base" })
         : Number(aValue) - Number(bValue)
-    return direction === "asc" ? comparison : -comparison
+    return (
+      (direction === "asc" ? comparison : -comparison) ||
+      (safeModelLabel(a.model_id ?? "") || "Unavailable").localeCompare(
+        safeModelLabel(b.model_id ?? "") || "Unavailable"
+      )
+    )
   })
   const pageCount = Math.max(1, Math.ceil(sortedCohorts.length / pageSize))
   const currentPage = Math.min(page, pageCount)
@@ -931,25 +1087,22 @@ function PRMergeRateTable({
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-xs">
+        <table className="w-full min-w-[1100px] text-xs">
+          <caption className="px-4 py-3 text-left text-muted-foreground">
+            Outcome shares use PRs opened in each row as their base. Expand a
+            model to see its reasoning efforts.
+          </caption>
           <thead className="border-b border-border text-muted-foreground">
             <tr>
-              {PR_OUTCOME_COLUMNS.map((column, index, columns) => (
+              {prOutcomeColumns(maturityDays).map((column) => (
                 <SortableHeader
                   key={column.key}
-                  column={
-                    column.key === "merge_rate"
-                      ? {
-                          ...column,
-                          tooltip: `Includes merged and closed PRs, plus PRs open for at least ${maturityDays} days. Newer open PRs are excluded.`,
-                        }
-                      : column
-                  }
+                  column={column}
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={(nextSort, defaultDirection) => {
                     setDirection(
-                      sort === nextSort
+                      nextSort === sort
                         ? direction === "asc"
                           ? "desc"
                           : "asc"
@@ -958,23 +1111,29 @@ function PRMergeRateTable({
                     setSort(nextSort)
                     setPage(1)
                   }}
-                  className={`${index === 0 ? "sticky left-0 z-10 bg-card pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={
+                    column.key === "model"
+                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      : "text-right"
+                  }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
+              const modelLabel =
+                safeModelLabel(cohort.model_id ?? "") || "Unavailable"
               const hasMultipleEfforts = cohort.efforts.length > 1
               const isExpanded = hasMultipleEfforts && expanded.has(key)
-              const modelLabel = cohort.model_id
-                ? safeModelLabel(cohort.model_id) || "Unavailable"
-                : "Unavailable"
               return (
                 <Fragment key={key}>
                   <tr>
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3">
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 bg-inherit px-4 py-3 text-left font-normal"
+                    >
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
                           <button
@@ -1007,49 +1166,33 @@ function PRMergeRateTable({
                           <div className="font-medium">{modelLabel}</div>
                           <div className="text-muted-foreground">
                             {hasMultipleEfforts
-                              ? `All efforts · ${cohort.model_attribution_quality} attribution`
-                              : `${formatEffort(cohort.efforts[0]?.effort)} · ${cohort.model_attribution_quality} attribution`}
+                              ? "All efforts"
+                              : formatEffort(cohort.efforts[0]?.effort)}{" "}
+                            · {cohort.model_attribution_quality} attribution
                           </div>
                         </div>
                       </div>
-                    </td>
-                    <PRMergeRateCells
-                      cohort={cohort}
+                    </th>
+                    <PROutcomeCells
+                      group={cohort}
                       maturityDays={maturityDays}
                     />
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <AvgTimeToPR cohort={cohort} />
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <AvgTimeToMerge cohort={cohort} />
-                    </td>
                   </tr>
-                  {isExpanded
-                    ? cohort.efforts.map((effort) => (
-                        <tr
-                          key={`${key}-${effort.effort ?? "unknown"}`}
-                          className="bg-muted/35"
+                  {isExpanded &&
+                    cohort.efforts.map((effort) => (
+                      <tr key={`${key}-${effort.effort ?? "unknown"}`}>
+                        <th
+                          scope="row"
+                          className="sticky left-0 z-10 bg-inherit py-3 pr-2 pl-11 text-left font-medium"
                         >
-                          <td className="sticky left-0 z-10 bg-[color-mix(in_oklab,var(--muted)_35%,var(--card))] py-3 pr-2 pl-11 font-medium">
-                            {formatEffort(effort.effort)}
-                          </td>
-                          <PRMergeRateCells
-                            cohort={effort}
-                            maturityDays={maturityDays}
-                          />
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            <span title="Average shown at the model level">
-                              —
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    : null}
+                          {formatEffort(effort.effort)}
+                        </th>
+                        <PROutcomeCells
+                          group={effort}
+                          maturityDays={maturityDays}
+                        />
+                      </tr>
+                    ))}
                 </Fragment>
               )
             })}
@@ -1188,63 +1331,6 @@ function formatEffort(effort: string | null | undefined) {
     : "Unknown / legacy"
 }
 
-function PRMergeRateCells({
-  cohort,
-  maturityDays,
-}: {
-  cohort: Pick<
-    PRMergeRateCohort,
-    | "cohort_size"
-    | "merged"
-    | "closed_without_merge"
-    | "mature_pending"
-    | "waiting"
-    | "mature_cohort_merge_share"
-    | "median_distance_basis_points"
-    | "distance_sample_size"
-  >
-  maturityDays: number
-}) {
-  return (
-    <>
-      <td className="px-2 py-3 text-right tabular-nums">
-        {cohort.cohort_size}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">{cohort.merged}</td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        {cohort.closed_without_merge}
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        <OpenPRCount cohort={cohort} maturityDays={maturityDays} />
-      </td>
-      <td className="px-2 py-3 text-right tabular-nums">
-        <Tooltip>
-          <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            {cohort.median_distance_basis_points == null
-              ? "—"
-              : `${(cohort.median_distance_basis_points / 100).toFixed(1)}%`}
-          </TooltipTrigger>
-          <TooltipPopup>
-            {cohort.distance_sample_size ?? 0} merged PR
-            {cohort.distance_sample_size === 1 ? "" : "s"} measured
-          </TooltipPopup>
-        </Tooltip>
-        {(cohort.distance_sample_size ?? 0) > 0 &&
-          (cohort.distance_sample_size ?? 0) < 5 && (
-            <div className="text-xs text-amber-600 dark:text-amber-400">
-              Small sample
-            </div>
-          )}
-      </td>
-      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">
-        {cohort.mature_cohort_merge_share == null
-          ? "—"
-          : formatPercent(cohort.mature_cohort_merge_share)}
-      </td>
-    </>
-  )
-}
-
 function UsageTable({
   scope,
   period,
@@ -1301,9 +1387,10 @@ function UsageTable({
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
+                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
               >
                 <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
-                <td className="sticky left-0 z-10 bg-card px-2 py-3">
+                <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}

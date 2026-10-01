@@ -6,6 +6,7 @@ import type {
 import type {
   QueuedTurn,
   SubagentToolCall,
+  TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
 
@@ -70,6 +71,12 @@ interface ThreadSourceShared {
 export interface StreamThreadSource extends ThreadSourceShared {
   kind: "stream"
   stream: AgentStream
+  /**
+   * Cancel one entry from the SDK's own submission queue, by
+   * `queued[].turnId` — keeps the local store in sync, unlike a plain
+   * run-cancel REST call (which leaves it stale until the next hydrate).
+   */
+  cancelQueued: (id: string) => Promise<boolean>
 }
 
 /** The thread is served by the append-only transcript event log. */
@@ -79,6 +86,10 @@ export interface TranscriptThreadSource extends ThreadSourceShared {
   subagentToolCalls: (
     namespace: ReadonlyArray<string>
   ) => Array<SubagentToolCall>
+  /** A subagent's own transcript: what it said and did under its namespace. */
+  subagentMessages: (namespace: ReadonlyArray<string>) => Array<Message>
+  /** The `task` call that spawned a subagent, or null when there is none. */
+  subagentTask: (toolCallId: string) => TranscriptToolCallState | null
 }
 
 export type ThreadSource = StreamThreadSource | TranscriptThreadSource

@@ -1,25 +1,39 @@
 import { useCallback, useMemo } from "react"
+import { useSubmissionQueue } from "@langchain/react"
 
 import { latestContextTokens } from "@/features/agents/lib/contextUsage"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import { queueEntryToTurn } from "@/features/agents/lib/queuedMessages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
 import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
+import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import { runTranscriptBuilt } from "@/lib/perf/streaming"
 import { threadTranscriptBuilt } from "@/lib/perf/threadLoad"
 import { perfNow } from "@/lib/perf/trace"
+import { useSession } from "@/lib/session"
 import { useCancelRun } from "./useCancelRun"
 import type { StreamThreadSource, ThreadRunInput } from "./types"
 
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
-  const { stream, connection } = useAgentThreadStream({
+  const { stream, connection, trackRunAcceptance } = useAgentThreadStream({
     transport: "cloud",
     threadId,
   })
   // `stream.stop()` only cancels server-side when this client dispatched the
   // run, so the cancel endpoint runs first and this only detaches.
   const stop = useCancelRun(threadId, stream.disconnect)
+  const login = useSession().data?.login
+  const { entries: queueEntries, cancel: cancelQueued } =
+    useSubmissionQueue(stream)
+  const queued = useMemo<Array<QueuedTurn>>(
+    () =>
+      queueEntries
+        .map((entry) => queueEntryToTurn(entry, login))
+        .filter((entry): entry is QueuedTurn => entry !== null),
+    [login, queueEntries]
+  )
 
   const messages = useMemo(() => {
     const started = perfNow()
@@ -35,25 +49,39 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
   }, [stream.messages, stream.toolCalls, threadId])
 
   const startRun = useCallback(
-    async ({ message, configurable }: ThreadRunInput) => {
+    async ({ message, configurable, enqueue }: ThreadRunInput) => {
       const config = Object.keys(configurable).length
         ? { configurable }
         : undefined
-      await stream.submit(
-        message
-          ? {
-              messages: [
-                {
-                  ...promptMessage(message.text, message.images),
-                  id: message.id,
-                },
-              ],
-            }
-          : {},
-        { config }
-      )
+      const accepted = message ? trackRunAcceptance(message.id) : undefined
+      let submitError: unknown
+      try {
+        await stream.submit(
+          message
+            ? {
+                messages: [
+                  {
+                    ...promptMessage(message.text, message.images),
+                    id: message.id,
+                  },
+                ],
+              }
+            : {},
+          {
+            config,
+            ...(enqueue ? { multitaskStrategy: "enqueue" as const } : {}),
+            onError: (error: unknown) => {
+              submitError = error
+            },
+          }
+        )
+      } catch (error) {
+        submitError = error
+      }
+      const wasAccepted = await accepted?.()
+      if (submitError && !wasAccepted) throw submitError
     },
-    [stream]
+    [trackRunAcceptance, stream]
   )
 
   const contextTokens = useMemo(
@@ -69,9 +97,8 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     stream,
     threadId,
     messages,
-    // The SDK stream has no view of runs it did not start; a follow-up sent
-    // while it runs steers instead (the transcript source queues).
-    queued: [],
+    queued,
+    cancelQueued,
     isRunning: stream.isLoading,
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,

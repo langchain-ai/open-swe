@@ -8,11 +8,14 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.credential_scope import private_credential_login
+from agent.dashboard.feature_flags import feature_flag_names
 from agent.dashboard.personal_settings import PROFILE_SETTING_KEYS
 from agent.dashboard.profiles import get_profile, normalize_profile_for_response
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.dashboard.user_preferences import get_user_preferences
+from agent.tools.access import Policy, access
+from agent.users import User, UserPreferencesPatch
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
 logger = logging.getLogger(__name__)
@@ -23,7 +26,6 @@ _PROFILE_SETTING_KEYS = (
     "default_subagent_model",
     "subagent_reasoning_effort",
     "auto_fix_ci",
-    "dm_session_enabled",
     "draft_prs",
     "review_draft_prs",
     "recent_thread_context_enabled",
@@ -47,9 +49,16 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
         get_notion_status(login),
     )
     instructions = instruction_record.get("instructions") if instruction_record else ""
+    profile_settings = _safe_profile_settings(profile, own_settings=own_settings)
+    if own_settings:
+        preferences = await User.preferences_for_login(login)
+        profile_settings["concierge_mode"] = preferences.concierge_mode
+        profile_settings.update(
+            {key: getattr(preferences, key) for key in feature_flag_names(UserPreferencesPatch)}
+        )
     return {
         "login": login,
-        "profile": _safe_profile_settings(profile, own_settings=own_settings),
+        "profile": profile_settings,
         "instructions": instructions if isinstance(instructions, str) else "",
         "connections": {
             "notion": notion.get("notion", {"connected": False}),
@@ -57,6 +66,7 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     }
 
 
+@access(Policy(trusted="private", actor="owner"))
 async def read_user_settings() -> dict[str, Any]:
     """Implement the `read_user_settings` tool."""
     config = get_config()

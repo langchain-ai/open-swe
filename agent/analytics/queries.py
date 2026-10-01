@@ -122,6 +122,11 @@ async def pr_merge_rate_by_model(
                         AS avg_delivery_seconds,
                     count(*) FILTER (WHERE r.started_at IS NOT NULL
                         AND p.opened_at >= r.started_at) AS delivery_samples,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY p.distance_basis_points)
+                        FILTER (WHERE p.current_state = 'merged')
+                        AS effort_median_distance_basis_points,
+                    count(p.distance_basis_points) FILTER (WHERE p.current_state = 'merged')
+                        AS effort_distance_sample_size,
                     (SELECT percentile_cont(0.5) WITHIN GROUP
                         (ORDER BY distance_basis_points)
                      FROM pr_projection d
@@ -130,6 +135,13 @@ async def pr_merge_rate_by_model(
                        AND d.model_attribution_quality = p.model_attribution_quality
                        AND d.opened_at >= :start AND d.opened_at <= :as_of
                        AND d.current_state = 'merged') AS median_distance_basis_points,
+                    (SELECT avg(distance_basis_points)
+                     FROM pr_projection d
+                     WHERE d.workspace_id = :workspace_id
+                       AND d.originating_model_id IS NOT DISTINCT FROM p.originating_model_id
+                       AND d.model_attribution_quality = p.model_attribution_quality
+                       AND d.opened_at >= :start AND d.opened_at <= :as_of
+                       AND d.current_state = 'merged') AS mean_distance_basis_points,
                     (SELECT count(distance_basis_points)
                      FROM pr_projection d
                      WHERE d.workspace_id = :workspace_id
@@ -182,6 +194,11 @@ async def pr_merge_rate_by_model(
                         if row["median_distance_basis_points"] is not None
                         else None
                     ),
+                    "mean_distance_basis_points": (
+                        float(row["mean_distance_basis_points"])
+                        if row["mean_distance_basis_points"] is not None
+                        else None
+                    ),
                     "distance_sample_size": int(row["distance_sample_size"] or 0),
                 },
             )
@@ -189,6 +206,17 @@ async def pr_merge_rate_by_model(
             effort["avg_merge_seconds"] = (
                 float(row["avg_merge_seconds"]) if row["avg_merge_seconds"] is not None else None
             )
+            effort["avg_delivery_seconds"] = (
+                float(row["avg_delivery_seconds"])
+                if row["avg_delivery_seconds"] is not None
+                else None
+            )
+            effort["median_distance_basis_points"] = (
+                int(row["effort_median_distance_basis_points"])
+                if row["effort_median_distance_basis_points"] is not None
+                else None
+            )
+            effort["distance_sample_size"] = int(row["effort_distance_sample_size"] or 0)
             cohort["efforts"].append({"effort": row["configured_effort"], **effort})
             avg_merge_seconds = effort["avg_merge_seconds"]
             merged_count = effort["merged"]

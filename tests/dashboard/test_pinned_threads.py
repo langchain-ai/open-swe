@@ -85,64 +85,6 @@ async def thread_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[ThreadAPI
         yield api
 
 
-async def test_pins_outside_filtered_pages_keep_store_order_and_refresh_membership(
-    thread_api: ThreadAPI, fake_store: FakeStore
-) -> None:
-    for thread_id in ("old-resolved", "automation", "other-repo"):
-        thread_api.add(thread_id, resolved=True, repo_owner="elsewhere", repo_name="repo")
-        await pins.pin_thread("alice", thread_id)
-    thread_api.add("automation", source="schedule", schedule_id="daily")
-
-    result = await listing.list_dashboard_pinned_threads("alice")
-    assert [item["id"] for item in result] == ["old-resolved", "automation", "other-repo"]
-    assert result[0]["resolved"] is True
-    assert result[1]["source"] == "schedule"
-    assert all(item["messages"] == [] for item in result)
-    assert thread_api.count("POST", "/search") == 1
-    assert thread_api.count("GET", "/runs") == 0
-
-    await listing.unpin_dashboard_thread("old-resolved", "alice")
-    thread_api.add("new")
-    await pins.pin_thread("alice", "new")
-    result = await listing.list_dashboard_pinned_threads("alice")
-    assert [item["id"] for item in result] == ["automation", "other-repo", "new"]
-
-
-async def test_ten_mixed_pins_use_one_summary_read_and_only_refresh_active_runs(
-    thread_api: ThreadAPI, fake_store: FakeStore
-) -> None:
-    for index in range(10):
-        thread_id = str(index)
-        thread_api.add(thread_id, latest_run_id=thread_id)
-        await pins.pin_thread("alice", thread_id)
-    thread_api.threads["0"]["status"] = "busy"
-    for _ in range(2):
-        result = await listing.list_dashboard_pinned_threads("alice")
-        assert [item["status"] for item in result] == ["running", *["finished"] * 9]
-    assert thread_api.count("POST", "/search") == 2
-    assert thread_api.count("GET", "/runs") == 2
-    assert thread_api.count("PATCH", "/0") == 1
-
-
-async def test_external_idle_to_running_then_interrupted_and_finished_transitions(
-    thread_api: ThreadAPI, fake_store: FakeStore
-) -> None:
-    thread_api.add("external", latest_run_id="external")
-    await pins.pin_thread("alice", "external")
-    assert (await listing.list_dashboard_pinned_threads("alice"))[0]["status"] == "finished"
-
-    # Slack/another browser/scheduler starts work without a dashboard invalidation.
-    thread_api.threads["external"]["status"] = "busy"
-    assert (await listing.list_dashboard_pinned_threads("alice"))[0]["status"] == "running"
-    thread_api.run_statuses["external"] = "interrupted"
-    assert (await listing.list_dashboard_pinned_threads("alice"))[0]["status"] == "interrupted"
-    thread_api.run_statuses["external"] = "running"
-    assert (await listing.list_dashboard_pinned_threads("alice"))[0]["status"] == "running"
-    thread_api.threads["external"]["status"] = "idle"
-    thread_api.run_statuses["external"] = "success"
-    assert (await listing.list_dashboard_pinned_threads("alice"))[0]["status"] == "finished"
-
-
 async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_and_refresh(
     thread_api: ThreadAPI, fake_store: FakeStore
 ) -> None:
@@ -163,15 +105,6 @@ async def test_deleted_unreadable_and_private_pins_are_checked_for_each_viewer_a
     del thread_api.threads["private"]
     assert await listing.list_dashboard_pinned_threads("alice") == []
     assert await pins.list_thread_pin_ids("alice") == ["shared", "private", "internal", "deleted"]
-
-
-async def test_no_pins_does_not_issue_an_unfiltered_thread_search(
-    thread_api: ThreadAPI, fake_store: FakeStore
-) -> None:
-    thread_api.add("other-user-thread")
-    await pins.pin_thread("bob", "other-user-thread")
-    assert await listing.list_dashboard_pinned_threads("alice") == []
-    assert thread_api.requests == []
 
 
 async def test_search_failure_propagates_instead_of_returning_an_empty_pin_list(

@@ -2,10 +2,20 @@
 
 import html
 import re
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
 from agent.incidents.models import IncidentReport
+
+# The investigation format responders read top to bottom, with a per-section character
+# budget that keeps the whole message inside Slack's block limits.
+_SECTIONS = (
+    ("problem", "Problem", 500),
+    ("previous_occurrence", "Previous occurrence", 500),
+    ("impact", "Impact", 400),
+    ("cause", "Cause", 500),
+)
 
 
 def _safe_url(value: str) -> bool:
@@ -21,6 +31,21 @@ def _safe_url(value: str) -> bool:
         )
     except ValueError:
         return False
+
+
+def _investigation(report: IncidentReport, compact: Callable[[str, int], str]) -> list[str]:
+    """The named investigation sections, skipping any the turn had nothing to say about."""
+    sections = [
+        f"*{label}*\n{value}"
+        for field, label, limit in _SECTIONS
+        if (value := compact(getattr(report, field), limit))
+    ]
+    steps = [step for step in (compact(item, 300) for item in report.next_steps[:3]) if step]
+    if steps:
+        sections.append(
+            "*Steps to solve*\n" + "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
+        )
+    return sections
 
 
 def report_message(
@@ -55,13 +80,20 @@ def report_message(
             value = "".join(prefix).rsplit(" ", 1)[0].rstrip(".,;:") + "…"
         return html.escape(value, quote=False)
 
-    heading = {"answer": "Investigation answer", "completion": "Incident complete"}.get(
-        reason, "Investigation update"
-    )
-    summary = compact(text, 2400 if reason == "answer" else 800)
-    sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
-    if report.next_steps and reason == "findings":
-        sections.append("*Suggested next step*\n" + compact(report.next_steps[0], 350))
+    heading = {
+        "answer": "Investigation answer",
+        "completion": "Incident complete",
+        "findings": "Investigation",
+    }.get(reason, "Investigation update")
+    if reason == "findings":
+        # Without a problem section the headline is the only statement of the finding; the
+        # fallback previous-occurrence and impact sections must not stand in for it.
+        summary = "" if report.problem else compact(text, 800)
+        sections = [f"*{heading}*\n{summary}" if summary else f"*{heading}*"]
+        sections.extend(_investigation(report, compact))
+    else:
+        summary = compact(text, 2400 if reason == "answer" else 800)
+        sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
     blocks: list[dict[str, Any]] = [
         {"type": "section", "text": {"type": "mrkdwn", "text": section, "verbatim": True}}
         for section in sections

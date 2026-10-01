@@ -1,8 +1,13 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
     _latest_reviews_by_user,
     _resolve_mergeability,
+    assess_readiness,
     readiness_blockers,
 )
 from agent.github.pull_request_status import Mergeability
@@ -28,6 +33,12 @@ def _snapshot(**overrides: object) -> PullRequestSnapshot:
 
 def test_branch_protection_waiting_on_approvals_is_not_a_blocker() -> None:
     assert readiness_blockers(_snapshot(mergeable_state="blocked")) == []
+
+
+def test_a_required_check_that_has_not_reported_blocks_even_when_the_rest_is_green() -> None:
+    blockers = readiness_blockers(_snapshot(unreported_required_checks=["e2e"]))
+
+    assert blockers == ["required checks have not reported yet: e2e"]
 
 
 def test_a_failing_check_github_does_not_require_is_named_but_does_not_block() -> None:
@@ -65,34 +76,74 @@ def test_every_gate_reports_independently() -> None:
             check_state="pending",
             unresolved_threads=2,
             changes_requested_by=["grace"],
-            open_swe_review_required=True,
         )
     )
 
-    assert len(blockers) == 5
+    assert len(blockers) == 4
     assert any("draft" in b for b in blockers)
     assert any("still running" in b for b in blockers)
     assert any("2 unresolved review threads" in b for b in blockers)
     assert any("grace" in b for b in blockers)
-    assert any("Open SWE" in b for b in blockers)
 
 
-def test_open_swe_review_only_required_where_enabled() -> None:
-    assert readiness_blockers(_snapshot(open_swe_review_required=False)) == []
-    assert (
-        readiness_blockers(_snapshot(open_swe_review_required=True, open_swe_reviewed_head=True))
-        == []
+@pytest.mark.parametrize("live_approval_id", [None, 123])
+async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
+    live_approval_id: int | None,
+) -> None:
+    live_reviews = (
+        [{"id": live_approval_id, "state": "APPROVED", "user": {"login": "grace"}}]
+        if live_approval_id is not None
+        else []
+    )
+    with (
+        patch(
+            "agent.expedited_review.readiness.fetch_pr",
+            AsyncMock(
+                return_value={
+                    "state": "open",
+                    "head": {"sha": "newsha"},
+                    "base": {"ref": "main"},
+                    "user": {"login": "ada"},
+                    "mergeable": True,
+                    "mergeable_state": "clean",
+                }
+            ),
+        ),
+        patch(
+            "agent.expedited_review.readiness.list_check_runs",
+            AsyncMock(
+                return_value=[
+                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"}
+                ]
+            ),
+        ),
+        patch("agent.expedited_review.readiness.list_commit_statuses", AsyncMock(return_value=[])),
+        patch(
+            "agent.expedited_review.readiness.fetch_required_checks", AsyncMock(return_value=set())
+        ),
+        patch("agent.expedited_review.readiness.github_client"),
+        patch(
+            "agent.expedited_review.readiness.fetch_unresolved_review_threads",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "agent.expedited_review.readiness._fetch_reviews", AsyncMock(return_value=live_reviews)
+        ),
+        patch("agent.expedited_review.readiness.fetch_mergeability", AsyncMock(return_value=None)),
+    ):
+        result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
+
+    assert result is not None
+    assert result.snapshot.check_state == "success"
+    assert result.ready
+    assert result.snapshot.approved_review_ids == (
+        frozenset({live_approval_id}) if live_approval_id is not None else frozenset()
     )
 
 
-def test_closed_or_conflicting_pull_requests_are_terminal() -> None:
-    closed = _snapshot(state="closed")
-    conflicting = _snapshot(mergeable=False, mergeable_state="dirty")
+def test_mergeability_still_computing_is_not_ready() -> None:
     computing = _snapshot(mergeable=None, mergeable_state="unknown")
 
-    assert Readiness(closed, readiness_blockers(closed)).terminal
-    assert Readiness(conflicting, readiness_blockers(conflicting)).terminal
-    assert not Readiness(computing, readiness_blockers(computing)).terminal
     assert not Readiness(computing, readiness_blockers(computing)).ready
 
 

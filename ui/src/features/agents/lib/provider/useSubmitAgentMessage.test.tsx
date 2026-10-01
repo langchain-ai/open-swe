@@ -9,6 +9,7 @@ import type { InfiniteData } from "@tanstack/react-query"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { ThreadsPage } from "@/features/agents/lib/api"
 import { AgentsApiError } from "@/features/agents/lib/api"
+import { reportError } from "@/lib/errorReporting"
 import {
   SIDEBAR_PAGE_SIZE,
   agentThreadKeys,
@@ -22,6 +23,7 @@ const source = {
 vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
   useThreadSource: () => source,
 }))
+vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
 const THREAD_ID = "thread-1"
 const SIDEBAR_PARAMS = {
@@ -77,9 +79,31 @@ beforeEach(() => {
   source.isRunning = false
   source.startRun.mockReset()
   source.startRun.mockResolvedValue(undefined)
+  vi.mocked(reportError).mockClear()
 })
 
 describe("useSubmitAgentMessage", () => {
+  it.each([false, true])(
+    "sends Auto picker intent separately from inherited Auto (changed=%s)",
+    async (changed) => {
+      const { result } = setup()
+      await result.current.mutateAsync({
+        content: "Fix the typo",
+        model_id: null,
+        effort: null,
+        model_selection_changed: changed,
+      })
+      expect(source.startRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configurable: {
+            model_selection: "auto",
+            ...(changed ? { model_selection_changed: true } : {}),
+          },
+        })
+      )
+    }
+  )
+
   it("offloads without adding a user message", async () => {
     const { client, result } = setup()
     await result.current.mutateAsync({ content: "/offload", images: [] })
@@ -127,7 +151,12 @@ describe("useSubmitAgentMessage", () => {
     )
     const { client, result } = setup()
 
-    await result.current.mutateAsync({ content: "try me", images: [] })
+    const onStartError = vi.fn()
+    await result.current.mutateAsync({
+      content: "try me",
+      images: [],
+      onStartError,
+    })
 
     await waitFor(() =>
       expect(pendingMessages(client)).toEqual([
@@ -139,5 +168,33 @@ describe("useSubmitAgentMessage", () => {
       ])
     )
     expect(sidebarStatus(client)).toBe("error")
+    expect(onStartError).toHaveBeenCalledOnce()
+    expect(reportError).toHaveBeenCalledWith({
+      title: "Couldn't send message",
+      error: expect.any(AgentsApiError),
+    })
+  })
+
+  it("clears queued on a failed enqueue so the failed row leaves the queue", async () => {
+    source.startRun.mockRejectedValueOnce(
+      new AgentsApiError(503, "Service Unavailable")
+    )
+    const { client, result } = setup()
+
+    await result.current.mutateAsync({
+      content: "try me",
+      images: [],
+      enqueue: true,
+    })
+
+    await waitFor(() =>
+      expect(pendingMessages(client)).toEqual([
+        expect.objectContaining({
+          content: "try me",
+          status: "failed",
+          queued: false,
+        }),
+      ])
+    )
   })
 })

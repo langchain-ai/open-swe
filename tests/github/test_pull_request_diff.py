@@ -124,3 +124,32 @@ async def test_before_is_the_merge_base_so_the_diff_matches_git(
         1,
         3,
     )
+
+
+async def test_every_page_of_a_large_pr_is_loaded() -> None:
+    names = [f"src/file_{index:03}.py" for index in range(150)]
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path.endswith("/pulls/7"):
+            return httpx2.Response(200, json={"base": {"sha": "b"}, "head": {"sha": "h"}})
+        if path.endswith("/pulls/7/files"):
+            page = int(request.url.params.get("page", "1"))
+            size = int(request.url.params["per_page"])
+            batch = names[(page - 1) * size : page * size]
+            return httpx2.Response(
+                200,
+                json=[
+                    {"filename": name, "status": "added", "additions": 1, "deletions": 0}
+                    for name in batch
+                ],
+            )
+        if "/compare/" in path:
+            return httpx2.Response(200, json={"merge_base_commit": {"sha": "b"}})
+        return httpx2.Response(200, content=b"x = 1\n")
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
+        diff = await build_pr_diff_files(client, "acme/app", 7)
+
+    assert [file["path"] for file in diff["files"]] == names
+    assert diff["truncated"] is False

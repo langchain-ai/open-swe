@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 PLAN_CONTENT_NAMESPACE = ["plan", "content"]
 PLAN_COMMENTS_NAMESPACE = ["plan", "comments"]
+PLAN_DISMISSED_NAMESPACE = ["plan", "dismissed"]
 
 # Plans are mirrored into the sandbox outside cloned repositories.
 PLAN_FILE_DIRECTORY = "/workspace/plans"
@@ -84,6 +85,22 @@ async def save_plan_content(
             )
     metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
     await _merge_thread_metadata(thread_id, metadata)
+
+
+async def dismiss_plan(thread_id: str, revision: str | None) -> None:
+    """Hide this revision's inline preview until a new revision is published."""
+    await put_value(PLAN_DISMISSED_NAMESPACE, thread_id, {"revision": revision})
+
+
+async def plan_is_dismissed(thread_id: str, revision: str | None) -> bool:
+    try:
+        record = await get_value(PLAN_DISMISSED_NAMESPACE, thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read artifact dismissal", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
+        return False
+    return record is not None and record.get("revision") == revision
 
 
 async def write_plan_to_sandbox(

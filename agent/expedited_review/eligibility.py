@@ -69,22 +69,6 @@ class ChangedFile(BaseModel):
     def total_lines(cls, files: list[ChangedFile]) -> int:
         return sum(file.changed_lines for file in files)
 
-    @classmethod
-    def rendered(cls, files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
-        """``(files the card draws, test files it only names)``.
-
-        Tests are left off the card only when they are the minority of a change
-        that is mostly source, because there the source is what is being voted
-        on. A test-only or test-heavy change would otherwise show nothing.
-        """
-        reviewed, tests = cls.split(files)
-        if not tests or cls.total_lines(tests) <= cls.total_lines(reviewed):
-            return reviewed, tests
-        return (
-            [*reviewed, *(file for file in tests if file.patch is not None)],
-            [file for file in tests if file.patch is None],
-        )
-
 
 _CHANGED_FILES = TypeAdapter(list[ChangedFile])
 
@@ -103,13 +87,18 @@ class Ineligible:
 
 
 def diff_fingerprint(files: list[ChangedFile]) -> str:
+    """A hash of the non-test diff the card draws, so a commit touching only tests keeps the votes."""
     digest = hashlib.sha256()
-    for file in sorted(files, key=lambda f: f.filename):
+    for file in sorted(ChangedFile.split(files)[0], key=lambda f: f.filename):
         digest.update(file.filename.encode())
         digest.update(b"\0")
         digest.update((file.patch or "").encode())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def fingerprint_matches(files: list[ChangedFile], fingerprint: str) -> bool:
+    return diff_fingerprint(files) == fingerprint
 
 
 def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:

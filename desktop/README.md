@@ -51,7 +51,8 @@ and **Sign in for cloud mode** remains available from the local sidebar.
 
 ## Install on macOS
 
-Install Git, Node.js 22, and `uv`, clone this repository, then run this from its root:
+Install Git, Node.js 22, `uv`, and [Bun](https://bun.com/docs/installation), clone this
+repository, then run this from its root:
 
 ```bash
 make install-desktop

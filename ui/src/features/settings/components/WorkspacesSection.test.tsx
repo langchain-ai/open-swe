@@ -52,6 +52,7 @@ function renderSection(isAdmin: boolean) {
 
 describe("WorkspacesSection", () => {
   it("shows refresh outcomes and a configure control for admins", async () => {
+    const finishedAt = new Date(Date.now() - 3_600_000).toISOString()
     vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
       default_slug: "default",
       workspaces: [
@@ -60,12 +61,13 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
           refresh_status: "success",
           refresh_kind: "update",
-          refresh_finished_at: new Date(Date.now() - 3_600_000).toISOString(),
+          refresh_finished_at: finishedAt,
           refresh_log_excerpt: "cloning acme/repo\ndone",
         },
         {
@@ -73,6 +75,7 @@ describe("WorkspacesSection", () => {
           name: "Preview",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: false,
           default_repo: null,
           has_snapshot: false,
@@ -88,7 +91,10 @@ describe("WorkspacesSection", () => {
     expect(await screen.findByText("Preview")).toBeTruthy()
     expect(screen.queryByRole("button", { name: /^Delete/ })).toBeNull()
     expect(screen.getByText("Snapshot ready")).toBeTruthy()
-    expect(screen.getByText(/Updated 1 hour ago/)).toBeTruthy()
+    const updated = screen.getByText(/Updated 1 hour ago/)
+    expect(updated.getAttribute("title")).toBe(
+      new Date(finishedAt).toLocaleString(undefined, { timeZoneName: "short" })
+    )
     expect(screen.getByText(/Refresh failed/)).toBeTruthy()
     expect(screen.getByText("setup script exited 1")).toBeTruthy()
     expect(screen.getByText("Refresh log")).toBeTruthy()
@@ -109,6 +115,7 @@ describe("WorkspacesSection", () => {
           name: "Primary",
           repos: ["acme/oss"],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -118,6 +125,7 @@ describe("WorkspacesSection", () => {
           name: "Preview",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: false,
           default_repo: null,
           has_snapshot: false,
@@ -154,6 +162,7 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -182,6 +191,7 @@ describe("WorkspacesSection", () => {
           name: "Default",
           repos: [],
           slack_channel_ids: [],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: false,
@@ -218,6 +228,7 @@ describe("WorkspacesSection", () => {
           name: "Core",
           repos: ["acme/api"],
           slack_channel_ids: ["C0000000001"],
+          kitchen_channel_ids: [],
           is_default: true,
           default_repo: null,
           has_snapshot: true,
@@ -251,6 +262,7 @@ describe("WorkspacesSection", () => {
       prompt: "",
       repos: ["acme/api"],
       slack_channel_ids: ["C0000000002"],
+      kitchen_channel_ids: [],
     })
 
     renderSection(true)
@@ -258,9 +270,13 @@ describe("WorkspacesSection", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Add workspace" })
     )
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add workspace" }))
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
     const repositoryHelp = screen.getByRole("button", {
       name: "About workspace repositories",
     })
@@ -268,7 +284,7 @@ describe("WorkspacesSection", () => {
     fireEvent.mouseMove(repositoryHelp)
     expect(
       await screen.findByText(
-        /dashboard, Slack, GitHub issues, or pull requests/
+        /routes its GitHub issues, pull requests, Linear tickets/
       )
     ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose repositories" }))
@@ -297,6 +313,7 @@ describe("WorkspacesSection", () => {
       name: "Preview",
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
+      kitchen_channel_ids: [],
     })
   })
 })

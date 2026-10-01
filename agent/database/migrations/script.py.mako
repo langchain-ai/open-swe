@@ -1,9 +1,9 @@
-"""${message}"""
+<%! import json %>"""${message}"""
 
 from alembic import op
 
 revision = "${up_revision}"
-down_revision = "${down_revision}"
+down_revision = ${json.dumps(down_revision)}
 branch_labels = ${repr(branch_labels)}
 depends_on = ${repr(depends_on)}
 

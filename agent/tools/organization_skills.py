@@ -5,17 +5,16 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.skill_store import store
-from agent.tools.admin_gate import require_admin
+from agent.tools.access import Policy, access, ack
 
-_ACTION = "manage organization skills"
+_WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("name", "skill.name"))
 
 
+@access(_WRITE)
 async def save_organization_skill(
     name: str, description: str, instructions: str = ""
 ) -> dict[str, Any]:
     """Implement the `save_organization_skill` tool."""
-    if error := await require_admin(_ACTION):
-        return {"ok": False, "error": error}
     try:
         body = store.SkillCreate(name=name, description=description, instructions=instructions)
         update = store.SkillUpdate(description=body.description, instructions=body.instructions)
@@ -34,10 +33,9 @@ async def save_organization_skill(
     return {"ok": True, "skill": skill, "created": created}
 
 
+@access(_WRITE)
 async def delete_organization_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_organization_skill` tool."""
-    if error := await require_admin(_ACTION):
-        return {"ok": False, "error": error}
     try:
         await store.delete_organization_skill(name)
     except HTTPException as exc:

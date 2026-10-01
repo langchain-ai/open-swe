@@ -7,6 +7,7 @@ import {
   expectTranscriptVisible,
   loginAs,
   openRunningThreadViaSlackLink,
+  optIntoQueue,
   openThreadViaSlackLink,
   threadIdFromUrl,
   threadState,
@@ -18,6 +19,67 @@ import {
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {
+  test("opens the composer without saving a personal model for a fresh user", async ({
+    page,
+  }) => {
+    await loginAs(page, {
+      login: "workspace-default-onboarding-e2e",
+      email: "workspace-default-onboarding-e2e@example.com",
+    });
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: { ...session, slack_oauth_enabled: false },
+      });
+    });
+    const profileBefore = await page.request.get("/dashboard/api/profile");
+    expect(profileBefore.ok()).toBeTruthy();
+    expect(await profileBefore.json()).not.toHaveProperty("default_model");
+
+    await page.goto("/agents");
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.reload();
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    const profileAfter = await page.request.get("/dashboard/api/profile");
+    expect(profileAfter.ok()).toBeTruthy();
+    expect(await profileAfter.json()).not.toHaveProperty("default_model");
+
+    await page.unroute("**/dashboard/api/me");
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: { ...session, slack_oauth_enabled: true, slack_user_id: null },
+      });
+    });
+    await page.reload();
+    await page.clock.setFixedTime(Date.now() + 61_000);
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("visibilitychange")),
+    );
+    await expect(
+      page.getByRole("button", { name: "Don't ask again" }),
+    ).toBeVisible();
+    const saved = page.waitForResponse(
+      "**/dashboard/api/profile/slack-onboarding-dismissal",
+    );
+    await page.getByRole("button", { name: "Don't ask again" }).click();
+    expect((await saved).ok()).toBeTruthy();
+    const dismissed = await (
+      await page.request.get("/dashboard/api/profile")
+    ).json();
+    expect(dismissed.slack_onboarding_dismissed).toBe(true);
+    expect(dismissed).not.toHaveProperty("default_model");
+    expect(dismissed).not.toHaveProperty("reasoning_effort");
+    await page.reload();
+    await page.getByTestId("composer-editor").click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
   test("the SAME user continues the conversation in the web app", async ({
     page,
   }) => {
@@ -40,7 +102,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
 
     // The transcript that started in Slack is here too (incl. the PR link).
     const pullRequestLink = page
-      .getByRole("link", { name: "Add greet() helper" })
+      .getByRole("main")
+      .getByRole("link", { name: "Add greet() helper", exact: true })
       .first();
     await expect(pullRequestLink).toBeVisible();
     // The hover card exists only once the thread's PR list has loaded; the PR
@@ -199,6 +262,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
     await openRunningThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
 
@@ -274,11 +338,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/agents");
-    const dismissOnboarding = page.getByRole("button", {
-      name: "Maybe later",
-    });
-    if (await dismissOnboarding.isVisible()) await dismissOnboarding.click();
-    await page.keyboard.press("Escape");
+    await dismissOnboardingIfShown(page);
 
     const clearInstructions = await page.request.delete(
       "/dashboard/api/me/instructions",
@@ -480,6 +540,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await optIntoQueue(page);
     await openRunningThreadViaSlackLink(page);
 
     const queuedText = "Please pick this up once the current run stops.";
@@ -510,11 +571,12 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toHaveCount(0);
   });
 
-  test("answers a queued follow-up after stopping a run this browser started", async ({
+  test("restores a queued follow-up after stopping a browser-started run and answers when resent", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
     await page.request.post("/control/reset");
+    await optIntoQueue(page);
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
 
@@ -533,7 +595,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
     await typeIntoComposer(page, queuedText);
     await expect(
-      page.getByTestId("queued-message").filter({ hasText: queuedText }),
+      page
+        .getByTestId("queued-message")
+        .filter({ hasText: queuedText })
+        .and(page.locator("[data-queued-pending='false']")),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Stop run" }).click();
@@ -541,6 +606,18 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await expect(page.getByTestId("queued-message")).toHaveCount(0, {
       timeout: 30_000,
     });
+    await expect(page.getByTestId("composer-editor")).toContainText(
+      queuedText,
+      { timeout: 30_000 },
+    );
+    await expect(
+      page.getByTestId("user-message").filter({ hasText: queuedText }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+
     await expect(
       page.getByTestId("user-message").filter({ hasText: queuedText }),
     ).toBeVisible({ timeout: 30_000 });

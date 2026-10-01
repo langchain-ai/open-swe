@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 from agent import scheduler
 
@@ -73,3 +74,23 @@ async def test_launch_runs_refresh_crons_registered_under_the_old_task_name(
 
     assert result == {"result": {"status": "refreshed"}}
     tick.assert_awaited_once_with("base", "full")
+
+
+async def test_launch_returns_sandbox_unavailable_for_exhausted_transient_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = SandboxRetryableConnectionError("gateway unavailable")
+
+    async def fail(*args: object, **kwargs: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(scheduler, "launch_scheduled_agent_run", fail)
+
+    async def exhausted(*args: object, **kwargs: object) -> dict[str, object]:
+        raise error
+
+    monkeypatch.setattr(scheduler, "retry_transient_sandbox_errors", exhausted)
+
+    result = await scheduler._launch(scheduler.SchedulerState(schedule_id="schedule-1"), {})
+
+    assert result == {"result": {"status": "sandbox_unavailable"}}
