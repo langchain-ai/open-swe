@@ -36,6 +36,9 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
+        <p>
+          OPENSWE_ENV: <IdentityValue value={buildInfo?.backend.environment} />
+        </p>
         <BuildIdentityDetails buildInfo={buildInfo} />
         <CopyDiagnosticsButton
           getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
