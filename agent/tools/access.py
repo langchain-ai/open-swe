@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Literal, ParamSpec, TypeVar, cast
 
 import langgraph_sdk
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent.config import ENV
 from agent.credential_scope import private_owner_login
@@ -210,14 +211,14 @@ async def sole_writer(cfg: RunConfig, metadata: Mapping[str, object], login: str
     return await _slack_writers_are(context, login)
 
 
-def _recognized(metadata: Mapping[str, object]) -> bool:
-    visibility = metadata.get("visibility", "public")
-    owner_type = metadata.get("owner_type")
-    return (
-        visibility in ("public", "private")
-        and owner_type in (None, "user", "system")
-        and not (owner_type == "system" and visibility == "private")
-    )
+class _ThreadScope(BaseModel):
+    """Validated metadata fields that determine tool access."""
+
+    model_config = ConfigDict(strict=True)
+
+    visibility: Literal["public", "private"] = "public"
+    owner_type: Literal["user", "system"] | None = None
+    admin_thread: bool | None = None
 
 
 async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = None) -> Access:
@@ -225,15 +226,23 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
     cfg = cfg or configurable()
     login = login or cfg.github_login
     metadata = await _metadata(cfg.thread_id)
-    if not _recognized(metadata):
-        metadata = {}
+    try:
+        scope = _ThreadScope.model_validate(metadata)
+    except ValidationError:
+        logger.warning(
+            "Unrecognized thread scope for tool access", extra={"thread_id": cfg.thread_id}
+        )
+        return Access()
+    if scope.owner_type == "system" and scope.visibility == "private":
+        return Access()
+    private = scope.visibility == "private"
     admin = await actor_is_admin(cfg, login=login)
     return Access(
-        private=metadata.get("visibility") == "private",
+        private=private,
         owner=private_owner_login(cfg, metadata) is not None,
         admin=admin,
-        admin_thread=admin and cfg.admin_thread is True,
-        admin_surface=admin and is_private_admin_surface(cfg),
+        admin_thread=admin and cfg.admin_thread is True and (private or scope.admin_thread is True),
+        admin_surface=admin and private and is_private_admin_surface(cfg),
         sole=await sole_writer(cfg, metadata, login),
         direct=direct_user_run(cfg),
     )
