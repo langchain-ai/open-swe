@@ -689,8 +689,11 @@ test.describe("threads workspace", () => {
       name: "Pin No repository",
       includeHidden: true,
     });
-    await pinNoRepo.locator("..").hover();
-    await pinNoRepo.click();
+    // Rows seeded by earlier tests can still shift the folder after the hover lands.
+    await expect(async () => {
+      await pinNoRepo.locator("..").hover();
+      await pinNoRepo.click({ timeout: 2_000 });
+    }).toPass();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
       sidebar.getByRole("button", { name: "No repository", exact: true }),
@@ -703,8 +706,10 @@ test.describe("threads workspace", () => {
       name: "Unpin No repository",
       includeHidden: true,
     });
-    await unpinNoRepo.locator("..").hover();
-    await expect(unpinNoRepo).toBeVisible();
+    await expect(async () => {
+      await unpinNoRepo.locator("..").hover();
+      await expect(unpinNoRepo).toBeVisible({ timeout: 2_000 });
+    }).toPass();
 
     const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
     await sidebar.screenshot({ path: screenshotPath });

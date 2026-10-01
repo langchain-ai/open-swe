@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import { expiresInBrowser } from "@/lib/query"
 import {
   PullRequestCard,
   type PullRequestOutcome,
@@ -16,7 +17,7 @@ import {
 import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
-import { refreshPullRequest } from "./lib/cache"
+import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
@@ -128,7 +129,7 @@ export function MyPullRequests({
     queries: reviewChunks.map((refs) => ({
       queryKey: ["my-pr-review-summaries", login, refs],
       queryFn: () => api.reviewSummaries(refs),
-      staleTime: Infinity,
+      ...expiresInBrowser,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       retry: false,
@@ -159,6 +160,14 @@ export function MyPullRequests({
     ? all.find((row) => pullRequestKey(row) === selected)
     : undefined
   const railed = Boolean(selectedRow)
+  const selectedIndex = visible.findIndex(
+    (row) => pullRequestKey(row) === selected
+  )
+  const nextRow = selectedIndex >= 0 ? visible[selectedIndex + 1] : undefined
+  useEffect(() => {
+    if (nextRow)
+      void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
+  }, [queryClient, nextRow])
 
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
@@ -169,7 +178,10 @@ export function MyPullRequests({
         outcome={settled[key]}
         compact={railed}
         selected={selected === key}
-        onSelect={() => onFiltersChange({ pr: key })}
+        onSelect={() => {
+          refreshPullRequest(queryClient, login, pr)
+          onFiltersChange({ pr: key })
+        }}
         review={
           summariesUnavailable ? null : (
             <PullRequestReview

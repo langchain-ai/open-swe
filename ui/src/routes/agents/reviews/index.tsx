@@ -10,6 +10,7 @@ import type { ReviewSummary } from "@/lib/api"
 import { PageHeader } from "@/components/AppShell"
 import { Badge } from "@/components/ui/badge"
 import { pageTitle } from "@/lib/pageTitle"
+import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -77,7 +78,7 @@ function ReviewsPage() {
     queryFn: () => api.listReviews(page, mine),
     enabled: !!session.data && !mine,
     placeholderData: keepPreviousData,
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
@@ -87,7 +88,7 @@ function ReviewsPage() {
     void queryClient.prefetchQuery({
       queryKey: ["reviews", nextMine, nextPage],
       queryFn: () => api.listReviews(nextPage, nextMine),
-      staleTime: Infinity,
+      staleTime: BROWSER_CACHE_MAX_AGE_MS,
     })
   }
 

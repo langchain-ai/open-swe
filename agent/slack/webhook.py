@@ -856,7 +856,9 @@ async def _process_slack_mention_impl(
         if not message_update:
             source_messages = context_messages
     clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+        slack_utils.replace_bot_mention_with_username(
+            text, bot_user_id, common.SLACK_BOT_USERNAME
+        ).strip()
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)

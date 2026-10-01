@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
+import { expiresInBrowser } from "@/lib/query"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
   mergeMethodLabels,
@@ -31,7 +32,7 @@ export function MergePullRequest({
   const allowed = useQuery({
     queryKey: ["repo-merge-methods", pr.repo],
     queryFn: () => api.repoMergeMethods(pr.repo),
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,

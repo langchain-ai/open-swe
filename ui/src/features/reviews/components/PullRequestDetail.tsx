@@ -27,6 +27,7 @@ import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 import {
   checkOutcome,
   checkTones,
@@ -223,8 +224,7 @@ interface PullRequestRef {
 
 function useResolveThreads(target: PullRequestRef) {
   const queryClient = useQueryClient()
-  const [owner, name] = target.repo.split("/")
-  const previewKey = ["pr-preview", owner, name, target.number]
+  const previewKey = pullRequestPreviewQuery(target).queryKey
   return useMutation({
     mutationFn: (threadIds: Array<string>) =>
       api.resolveReviewThreads(target.repo, target.number, threadIds),
@@ -437,12 +437,7 @@ export function PullRequestDetail({
   onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
 }) {
-  const [owner, name] = pr.repo.split("/")
-  const preview = useQuery({
-    queryKey: ["pr-preview", owner, name, pr.number],
-    queryFn: () => api.getPullRequestPreview(owner!, name!, pr.number),
-    staleTime: 60_000,
-  })
+  const preview = useQuery(pullRequestPreviewQuery(pr))
   const data = preview.data
   const resolve = useResolveThreads(pr)
   const resolvableIds = (data?.unresolved ?? []).flatMap((thread) =>
