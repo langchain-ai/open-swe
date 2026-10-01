@@ -7,6 +7,7 @@ import type {
 import {
   formatPathDisplayParts,
   formatToolDisplayParts,
+  toolTextArguments,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
 
@@ -114,6 +115,10 @@ function expandedTextForChunk(
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
   if (command) blocks.push(command)
+  const textArguments = toolTextArguments(chunk.input)
+  for (const [key, value] of textArguments) {
+    blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
+  }
 
   const rawOutput = chunk.output ?? ""
   const output = rawOutput.trim()
@@ -129,7 +134,7 @@ function expandedTextForChunk(
 
   if (blocks.length === 0) return null
   const joined = blocks.join("\n\n")
-  if (jsonOutput !== null && !command) return joined
+  if (textArguments.length || (jsonOutput !== null && !command)) return joined
   return joined.length > MAX_EXPANDED_TEXT_LENGTH
     ? `${joined.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
     : joined
