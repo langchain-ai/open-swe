@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, date, datetime
 from uuid import uuid4
@@ -78,6 +79,16 @@ async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) ->
 async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from agent.analytics import segment
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_export(event: event_log.LoggedEvent) -> None:
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(segment, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     request = Request(
         {
@@ -89,13 +100,21 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         }
     )
 
-    await EventLog.record(
-        request,
-        b"command=%2Foswe&text=hello+there",
-        "slack",
-        event_type="/oswe",
-        delivery_id="trigger-1",
-    )
+    try:
+        await asyncio.wait_for(
+            EventLog.record(
+                request,
+                b"command=%2Foswe&text=hello+there",
+                "slack",
+                event_type="/oswe",
+                delivery_id="trigger-1",
+            ),
+            timeout=2,
+        )
+        await asyncio.wait_for(started.wait(), timeout=2)
+    finally:
+        release.set()
+        await asyncio.gather(*event_log._SEGMENT_TASKS)
 
     async with transaction() as conn:
         row = (

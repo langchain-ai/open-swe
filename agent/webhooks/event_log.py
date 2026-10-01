@@ -25,6 +25,7 @@ _ROTATE_INTERVAL_SECONDS = 3600
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
+_SEGMENT_TASKS: set[asyncio.Task[None]] = set()
 
 _INSERT = text(
     f"""
@@ -244,7 +245,9 @@ class EventLog:
         from agent.analytics.segment import record_webhook
 
         event = LoggedEvent.model_validate({**row, "payload": payload})
-        await record_webhook(event)
+        task = asyncio.create_task(record_webhook(event))
+        _SEGMENT_TASKS.add(task)
+        task.add_done_callback(_SEGMENT_TASKS.discard)
         await EventSubscription.deliver(event)
 
     @classmethod
