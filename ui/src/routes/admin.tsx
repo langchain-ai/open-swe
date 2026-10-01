@@ -84,9 +84,7 @@ function AdminPage() {
       />
       <DefaultRepoSection
         scope={INSTANCE_SCOPE}
-        repositories={(repos.data?.repositories ?? []).map(
-          (repo) => repo.full_name
-        )}
+        repositories={repos.data?.repositories ?? []}
       />
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <FableSection scope={INSTANCE_SCOPE} />

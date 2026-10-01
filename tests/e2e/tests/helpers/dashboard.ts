@@ -61,25 +61,22 @@ export async function typeIntoComposer(page: Page, text: string) {
   await editor.press("Enter");
 }
 
-// A fresh user lands on the default-model dialog, whose backdrop swallows
-// clicks on the composer behind it.
 export async function dismissOnboardingIfShown(page: Page) {
   const profile = (await (
     await page.request.get("/dashboard/api/profile")
-  ).json()) as { default_model?: string };
-  const mapping = (await (
-    await page.request.get("/dashboard/api/my-mapping")
-  ).json()) as { slack_user_id?: string };
+  ).json()) as { slack_onboarding_dismissed?: boolean };
   const session = (await (
     await page.request.get("/dashboard/api/me")
   ).json()) as {
     slack_oauth_enabled?: boolean;
+    slack_user_id?: string | null;
   };
   const needsOnboarding =
-    !profile.default_model ||
-    (session.slack_oauth_enabled && !mapping.slack_user_id);
+    session.slack_oauth_enabled &&
+    !session.slack_user_id &&
+    !profile.slack_onboarding_dismissed;
   if (!needsOnboarding) return;
-  const dismiss = page.getByRole("button", { name: "Maybe later" });
+  const dismiss = page.getByRole("button", { name: "Don't ask again" });
   await expect(dismiss).toBeVisible();
   await dismiss.click();
   await expect(dismiss).toBeHidden();
@@ -316,7 +313,10 @@ export async function expectTranscriptVisible(page: Page) {
   await expect(async () => {
     await page.reload();
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible({ timeout: 8000 });
   }).toPass({ timeout: 60000 });
 }

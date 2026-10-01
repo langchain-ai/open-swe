@@ -120,6 +120,7 @@ def construct_system_prompt(
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
+    sole_writer: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
     slack_ask: bool = False,
@@ -144,6 +145,7 @@ def construct_system_prompt(
         local_checkout=local_checkout,
         desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
+        sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
         default_repo=(

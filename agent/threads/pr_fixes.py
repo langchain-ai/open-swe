@@ -18,7 +18,7 @@ from agent.prompts import prompt
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
-    _create_dashboard_thread_record,
+    create_dashboard_thread_record,
 )
 from agent.threads.summary import _assert_thread_postable
 from agent.utils.json_types import thread_metadata
@@ -210,7 +210,7 @@ async def _find_or_create_pr_thread(
     candidates = await _find_pr_threads(owner, repo, number, login, email)
     if candidates:
         return candidates[0]["thread_id"]
-    thread = await _create_dashboard_thread_record(
+    thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,

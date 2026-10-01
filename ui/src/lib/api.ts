@@ -15,6 +15,21 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface WorkspaceApiKey {
+  id: string
+  workspace: string
+  name: string
+  key_suffix: string
+  created_by: string
+  created_by_name?: string | null
+  description?: string | null
+  created_at: string | null
+  expires_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+  status: "active" | "expired" | "revoked"
+}
+
 const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
@@ -548,6 +563,7 @@ export interface PRMergeRateResponse {
 export interface Repository {
   full_name: string
   private: boolean
+  archived: boolean
 }
 
 export interface Installation {
@@ -710,10 +726,21 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  setup_script?: string
+  update_script?: string
 }
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
   repos?: Array<string>
@@ -721,6 +748,9 @@ export interface WorkspaceUpdate {
   kitchen_channel_ids?: Array<string>
   setup_script?: string
   update_script?: string
+  vcpus?: number | null
+  mem_bytes?: number | null
+  fs_capacity_bytes?: number | null
 }
 
 export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
@@ -731,6 +761,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  create_params?: Record<string, JsonValue>
   slug: string
   name: string
   prompt: string
@@ -1183,7 +1214,6 @@ export interface ReviewerEvalConfig {
   reasoning_effort: string
   score_mode: ReviewerEvalScoreMode
   severity_threshold: ReviewerEvalSeverity
-  cap: number
 }
 
 export interface ReviewerEvalProgress {
@@ -1255,6 +1285,8 @@ export const api = {
       `/options?workspace=${encodeURIComponent(workspace)}`
     ),
   profile: () => request<Profile>("/profile"),
+  dismissSlackOnboarding: () =>
+    request<Profile>("/profile/slack-onboarding-dismissal", { method: "POST" }),
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: (options?: { refresh?: boolean }) =>
@@ -1379,6 +1411,24 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listWorkspaceApiKeys: (slug: string) =>
+    request<WorkspaceApiKey[]>(
+      `/admin/api-keys?workspace=${encodeURIComponent(slug)}`
+    ),
+  createWorkspaceApiKey: (body: {
+    workspace: string
+    name: string
+    description?: string | null
+    expires_at: string
+  }) =>
+    request<WorkspaceApiKey & { secret: string }>("/admin/api-keys", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  revokeWorkspaceApiKey: (id: string) =>
+    request<void>(`/admin/api-keys/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   listWorkspaceOptions: () =>
     request<WorkspaceOptionList>("/workspaces/options"),
   getWorkspace: (slug: string) =>
@@ -1433,8 +1483,15 @@ export const api = {
       `/workspaces/${encodeURIComponent(slug)}/settings`,
       { method: "PUT", body: JSON.stringify(overrides) }
     ),
+  slackUserName: (userId: string) =>
+    request<{ name: string }>(
+      `/slack/users/${encodeURIComponent(userId)}/name`
+    ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  listSlackChannels: (refresh = false) =>
+    request<SlackChannelDirectory>(
+      `/slack/channels${refresh ? "?refresh=true" : ""}`
+    ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
