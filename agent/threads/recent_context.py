@@ -23,11 +23,11 @@ from agent.threads.summary import (
     _metadata_repo,
     _thread_id,
     _thread_metadata,
-    _thread_updated_ms,
     thread_is_owner,
     thread_is_private,
     thread_is_unlisted,
     thread_source,
+    thread_updated_ms,
 )
 from agent.utils.json_types import ThreadLike
 from agent.utils.thread_participants import participant_search_filters
@@ -202,7 +202,7 @@ class RecentContextSelector:
         ):
             return None
         _, _, full_name = _metadata_repo(metadata)
-        updated_at = _thread_updated_ms(thread)
+        updated_at = thread_updated_ms(thread)
         return RecentThreadContext(
             thread_id=thread_id,
             title=_clean_title(metadata.get("title"), full_name or None, thread_source(metadata)),

@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,7 +18,19 @@ _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_i
 
 
 def _config(**configurable: object) -> RunnableConfig:
-    return cast(RunnableConfig, {"configurable": configurable})
+    return cast(RunnableConfig, {"configurable": {"thread_id": "t-1", **configurable}})
+
+
+@pytest.fixture(autouse=True)
+def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
+            )
+        )
+    )
+    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
 
 
 # --- snapshot precedence ---
@@ -68,11 +81,9 @@ async def test_admin_thread_accepts_configured_admin_slack_dm(
 @pytest.mark.asyncio
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    with patch("agent.run_config.get_config", return_value=_config(github_login="someone-else")):
-        assert await env_tools.list_workspaces() == {
-            "ok": False,
-            "error": "Only workspace admins can manage workspaces.",
-        }
+    config = _config(admin_thread=True, github_login="someone-else")
+    with patch("agent.run_config.get_config", return_value=config):
+        assert (await env_tools.list_workspaces())["ok"] is False
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
 
@@ -114,7 +125,7 @@ class _Publish:
         for target in (
             patch(
                 "agent.run_config.get_config",
-                return_value=_config(github_login="ramonn", thread_id="t-1"),
+                return_value=_config(admin_thread=True, github_login="ramonn", thread_id="t-1"),
             ),
             patch.object(
                 env_tools.store.WORKSPACES,
@@ -242,7 +253,10 @@ async def test_refresh_start_refuses_while_one_is_running(
     )
     start = AsyncMock()
     with (
-        patch("agent.run_config.get_config", return_value=_config(github_login="ramonn")),
+        patch(
+            "agent.run_config.get_config",
+            return_value=_config(admin_thread=True, github_login="ramonn"),
+        ),
         patch.object(
             env_tools.store.WORKSPACES, "get", new_callable=AsyncMock, return_value=running
         ),
@@ -270,7 +284,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     bob = CollaboratorIdentity(
         display_name="bob", commit_name="bob", commit_email="bob@example.com", github_login="bob"
     )
-    admin_requester_config = {"configurable": {"user_email": "admin@example.com"}}
+    admin_requester_config = _config(user_email="admin@example.com")
 
     as_seen_by_admin = await server._thread_participant(bob, admin_requester_config)
     assert as_seen_by_admin.workspace_admin is False

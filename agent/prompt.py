@@ -39,12 +39,16 @@ def _load_default_prompt() -> str:
 
 
 def _render_source_guidance(
-    source: str, slack_context: bool, slack_ask: bool = False, slack_breakout: bool = False
+    source: str,
+    slack_context: bool,
+    slack_ask: bool = False,
+    slack_breakout: bool = False,
+    slack_by_the_way: bool = False,
 ) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "slack-ask" if slack_ask else "slack"
+        name = "slack-by-the-way" if slack_by_the_way else "slack-ask" if slack_ask else "slack"
     elif source in {"linear", "github", "schedule", "dashboard"}:
         name = source
     else:
@@ -116,10 +120,12 @@ def construct_system_prompt(
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
+    sole_writer: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
     slack_ask: bool = False,
     slack_breakout: bool = False,
+    slack_by_the_way: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
@@ -139,6 +145,7 @@ def construct_system_prompt(
         local_checkout=local_checkout,
         desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
+        sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
         default_repo=(
@@ -158,7 +165,7 @@ def construct_system_prompt(
         source_guidance_section=prompt(
             "system/source-context",
             source_guidance=_render_source_guidance(
-                source, slack_context, slack_ask, slack_breakout
+                source, slack_context, slack_ask, slack_breakout, slack_by_the_way
             ),
         ),
         default_prompt_section=_load_default_prompt(),

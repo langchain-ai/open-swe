@@ -53,6 +53,7 @@ const RECORD: WorkspaceRecord = {
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
+  snapshot_id: "snapshot-1",
   snapshot_status: "ready",
   refresh_status: "success",
   vcpus: 4,
@@ -128,6 +129,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
+  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
@@ -379,7 +381,7 @@ describe("WorkspaceSettingsPanel", () => {
             ? "image rebuild could not be confirmed"
             : outcome === "failed"
               ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
+              : "Sandbox image built with the saved repositories."
         )
         expect(
           screen
@@ -411,6 +413,121 @@ describe("WorkspaceSettingsPanel", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain(
       "already belongs to workspace core"
+    )
+  })
+
+  it("saves sandbox sizes in bytes and clears inherited sizes", async () => {
+    mockApis()
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(RECORD)
+    renderPage()
+    fireEvent.change(await screen.findByLabelText("vCPUs"), {
+      target: { value: "8" },
+    })
+    fireEvent.change(screen.getByLabelText("Memory (GiB)"), {
+      target: { value: "32" },
+    })
+    fireEvent.change(screen.getByLabelText("Disk (GiB)"), {
+      target: { value: "256" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: 8,
+        mem_bytes: 32 * 1024 ** 3,
+        fs_capacity_bytes: 256 * 1024 ** 3,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Save sandbox configuration" })
+          .hasAttribute("disabled")
+      ).toBe(false)
+    )
+    for (const label of ["vCPUs", "Memory (GiB)", "Disk (GiB)"])
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: null,
+        mem_bytes: null,
+        fs_capacity_bytes: null,
+      })
+    )
+  })
+
+  it("edits proxy configuration without losing other sandbox create parameters", async () => {
+    const record = {
+      ...RECORD,
+      create_params: { _internal_runtime: "v2", proxy_config: { rules: [] } },
+    }
+    mockApis(record)
+    const proxy = {
+      rules: [
+        {
+          name: "service",
+          match_hosts: ["api.example.com"],
+          env_vars: { SERVICE_MODE: "example" },
+        },
+      ],
+    }
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...record,
+      create_params: { ...record.create_params, proxy_config: proxy },
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole("tab", { name: "JSON" }))
+    const editor = await screen.findByLabelText("Proxy configuration (JSON)")
+    fireEvent.change(editor, { target: { value: "[]" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    expect(
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("Rule name"), {
+      target: { value: "updated-service" },
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }))
+    expect(
+      JSON.parse(
+        (
+          screen.getByLabelText(
+            "Proxy configuration (JSON)"
+          ) as HTMLTextAreaElement
+        ).value
+      ).rules[0].name
+    ).toBe("updated-service")
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        create_params: {
+          _internal_runtime: "v2",
+          proxy_config: {
+            ...proxy,
+            rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+        },
+      })
+    )
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Save proxy configuration",
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(true)
     )
   })
 
@@ -486,6 +603,9 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Unsaved workspace name" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
@@ -503,6 +623,17 @@ describe("WorkspaceSettingsPanel", () => {
         ).queryByRole("button", { name: "Cancel" })
       ).toBeNull()
     )
+
+    expect(
+      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+    ).toBe("Unsaved workspace name")
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
 
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.
@@ -537,8 +668,9 @@ describe("WorkspaceSettingsPanel", () => {
     vi.spyOn(api, "repos").mockResolvedValue({
       installations: [],
       repositories: [
-        { full_name: "acme/oss", private: false },
-        { full_name: "acme/api", private: true },
+        { full_name: "acme/oss", private: false, archived: false },
+        { full_name: "acme/api", private: true, archived: false },
+        { full_name: "acme/legacy", private: false, archived: true },
       ],
     })
     renderPage()
@@ -551,9 +683,16 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(trigger)
 
     // Core prefers acme/api, and OSS can still default to it.
-    const option = await screen.findByRole("button", { name: "acme/api" })
+    const option = await screen.findByRole("button", {
+      name: /acme\/api\s*Private/,
+    })
     expect(option.closest("section")).toBeNull()
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
+    expect(screen.queryByText("acme/legacy")).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
+    expect(
+      screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })
+    ).toBeTruthy()
   })
 
   it("turns an inherited setting into an override and resets it back", async () => {

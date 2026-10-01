@@ -14,6 +14,7 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card as expedited_card
+from agent.expedited_review.channels import channel_choices, own_choices
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
 from agent.expedited_review.readiness import latest_review_states
@@ -23,19 +24,21 @@ from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
-from agent.human_review.requests import HumanReviewRequest, RequestState
+from agent.human_review.requests import ChannelChoice, HumanReviewRequest, RequestState
 from agent.slack.blocks import Block, block_payload, escape
 from agent.slack.cards import repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
 )
-from agent.slack.code_channels import is_code_channel_session
+from agent.slack.dm import send_dm
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -129,13 +132,14 @@ async def post_card(
     if location is None:
         return None, "no Slack thread"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
+    approval.slack_channel_choices = await channel_choices(approval)
     text, blocks = expedited_card.open_card(
         approval,
         title=title,
         author=await approval.author_mention(),
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
-        channel=await _broadcast_channel(approval),
+        choices=approval.slack_channel_choices,
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -144,6 +148,24 @@ async def post_card(
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
     )
+
+
+async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
+    """Ask only the author to undraft; return a delivery problem, if any."""
+    if not approval.awaiting_ready:
+        return None
+    pr = approval.pull_request
+    author = (
+        await User.get(pr.author_user_id)
+        if pr.author_user_id
+        else await User.for_login("github", pr.author)
+    )
+    if author is None or not author.slack_user_id:
+        return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
+    text, blocks = expedited_card.readiness_prompt(approval)
+    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
+        return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+    return None
 
 
 async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, str | None]:
@@ -165,12 +187,9 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
     return await channel.post(text, blocks=block_payload(blocks))
 
 
-async def _broadcast_channel(approval: HumanReviewRequest) -> str | None:
-    """``#name`` of the channel the card could be broadcast to; ``None`` outside a thread."""
-    if not approval.slack_thread_ts or is_code_channel_session(approval.slack_thread_ts):
-        return None
-    channel = await SlackChannel.load(approval.slack_channel_id)
-    return f"#{channel.name}" if channel is not None and channel.name else None
+async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
+    # Cards posted before choices were stored still offer their own channel.
+    return approval.slack_channel_choices or await own_choices(approval)
 
 
 async def _render_standard(
@@ -195,7 +214,10 @@ async def _render_standard(
     )
 
 
-async def render(request: HumanReviewRequest, outcome: str | None) -> tuple[str, list[Block]]:
+async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
+) -> tuple[str, list[Block]]:
+    """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if request.kind == "standard":
@@ -210,7 +232,12 @@ async def render(request: HumanReviewRequest, outcome: str | None) -> tuple[str,
             author=author,
             files=files,
             diff_image_id=diff_image_id,
-            channel=await _broadcast_channel(request),
+            choices=[] if copy else await _channel_choices(request),
+            thread_url=(
+                await get_slack_permalink(request.slack_channel_id, request.slack_thread_ts) or ""
+            )
+            if copy
+            else None,
         )
     return expedited_card.closed_card(
         request,
@@ -235,6 +262,14 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
             "Failed to update human review card",
             extra={"request_id": str(request.id), "kind": request.kind, "slack_error": error},
         )
+    if outcome is None and (copy := request.slack_copy) is not None:
+        text, blocks = await render(request, None, copy=True)
+        ok, error = await update_slack_message(*copy, text, blocks=block_payload(blocks))
+        if not ok:
+            logger.warning(
+                "Failed to update the copy of a human review card",
+                extra={"request_id": str(request.id), "slack_error": error},
+            )
 
 
 async def _repost(
@@ -255,6 +290,7 @@ async def _repost(
                 row is not None
                 and row.slack_message_ts == old_ts
                 and (outcome is not None or row.state == "open")
+                and not (broadcast and row.slack_copy is not None)
             )
             if kept:
                 row.slack_message_ts = message_ts
@@ -274,9 +310,55 @@ async def _repost(
 
 async def broadcast_card(approval: HumanReviewRequest) -> bool:
     """Send the open card to the channel as well as its thread."""
-    if approval.slack_broadcast or await _broadcast_channel(approval) is None:
+    if approval.sent_elsewhere or not await own_choices(approval):
         return False
     return await _repost(approval, broadcast=True)
+
+
+async def copy_card(approval: HumanReviewRequest, channel: SlackChannel) -> str | None:
+    """Post the open card at the top of another channel; why it was not, or ``None``."""
+    text, blocks = await render(approval, None, copy=True)
+    message_ts, error = await channel.post(text, blocks=block_payload(blocks))
+    if not message_ts:
+        logger.warning(
+            "Could not copy an expedited review card to another channel",
+            extra={"approval_id": str(approval.id), "slack_error": error},
+        )
+        return f"Slack refused the post: {error or 'unknown error'}."
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        kept = (
+            row is not None and row.state == "open" and not row.approved and not row.sent_elsewhere
+        )
+        if kept:
+            row.slack_copy_channel_id = channel.id
+            row.slack_copy_ts = message_ts
+    if not kept:
+        await _delete_copy(approval.id, (channel.id, message_ts))
+        return "The card changed while it was being sent. Try again."
+    if (current := await HumanReviewRequest.get(approval.id)) is not None:
+        await refresh_card(current)
+    return None
+
+
+async def _delete_copy(request_id: UUID, copy: tuple[str, str]) -> bool:
+    if await delete_slack_message(*copy):
+        return True
+    logger.warning(
+        "Could not delete the copy of a human review card",
+        extra={"request_id": str(request_id), "slack_channel": copy[0], "slack_ts": copy[1]},
+    )
+    return False
+
+
+async def _withdraw_copy(request: HumanReviewRequest) -> None:
+    """Delete the card's copy in another channel; the channel id stays for later choices."""
+    copy = request.slack_copy
+    if copy is None or not await _delete_copy(request.id, copy):
+        return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None and row.slack_copy_ts == copy[1]:
+            row.slack_copy_ts = ""
+    request.slack_copy_ts = ""
 
 
 async def notify_agent(request: HumanReviewRequest, prompt: str) -> bool:
@@ -353,7 +435,9 @@ async def refresh_card_in_thread(
     """Re-render a card, reposting it into the thread only if it was also in the channel.
 
     The channel keeps no finished cards: its copy is deleted and the thread keeps the card.
+    So does another channel the card was copied to.
     """
+    await _withdraw_copy(request)
     if not request.slack_broadcast or not await _repost(request, broadcast=False, outcome=outcome):
         await refresh_card(request, outcome=outcome)
 

@@ -59,7 +59,16 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         input={"messages": [{"role": "user", "content": "hi"}]},
         source="test",
         thread_title=None,
-        config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
+        config={
+            "configurable": {
+                "thread_id": "thread-1",
+                "slack_thread": {
+                    "channel_id": "C123",
+                    "channel_context": {"name": "team-openswe"},
+                },
+            },
+            "metadata": {"kind": "test"},
+        },
         client=client,
     )
 
@@ -86,6 +95,8 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     invocation_id = created["config"]["configurable"]["invocation_id"]
     assert created["config"]["metadata"] == {
         "kind": "test",
+        "slack_channel_id": "C123",
+        "slack_channel_name": "team-openswe",
         "invocation_id": invocation_id,
         "prepare_run_id": invocation_id,
         "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],

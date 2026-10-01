@@ -120,6 +120,15 @@ async def test_merges_the_bots_channels_with_the_public_directory_and_caches(
     assert len(client.calls["conversations_list"]) == 2
     assert len(client.calls["users_conversations"]) == 1
 
+    client.pages["users_conversations"].append(_MEMBER_PAGE)
+    client.pages["conversations_list"].append(
+        {"channels": [{"id": "C4", "name": "new-channel", "is_member": False}]}
+    )
+    refreshed = await channel_options.list_slack_channels(refresh=True)
+    assert [option.id for option in refreshed.channels] == ["C4", "G1"]
+    assert await channel_options.list_slack_channels() == refreshed
+    assert len(client.calls["conversations_list"]) == 3
+
 
 async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_read(
     monkeypatch: pytest.MonkeyPatch,
