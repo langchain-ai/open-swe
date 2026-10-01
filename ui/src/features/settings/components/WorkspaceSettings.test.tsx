@@ -485,9 +485,9 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "JSON object"
-    )
+    expect(
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
     expect(update).not.toHaveBeenCalled()
     fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
