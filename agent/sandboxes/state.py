@@ -22,7 +22,6 @@ from deepagents.backends.protocol import (
     execute_accepts_timeout,
 )
 from deepagents.backends.sandbox import BaseSandbox
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.github.token_scope import token_repositories_from_metadata
@@ -382,18 +381,11 @@ def get_or_create_sandbox_backend_proxy(
 
 
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch sandbox metadata from the run config or live thread."""
-    try:
-        config = get_config()
-        metadata = config.get("metadata", {})
-        if isinstance(metadata, dict) and isinstance(metadata.get("sandbox_id"), str):
-            return metadata
-    except Exception:
-        logger.debug(
-            "Failed to read inline thread metadata for sandbox; falling back to live lookup",
-            exc_info=True,
-        )
+    """Fetch sandbox metadata from the live thread.
 
+    Never from the run config: a run queued before ``recreate_sandbox`` carries
+    the sandbox the thread has since left.
+    """
     # A failed lookup must not read as "unbound": the caller would create a
     # replacement and bind it over the thread's real sandbox.
     thread = await get_client().threads.get(thread_id)

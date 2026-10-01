@@ -602,6 +602,9 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Unsaved workspace name" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
@@ -619,6 +622,17 @@ describe("WorkspaceSettingsPanel", () => {
         ).queryByRole("button", { name: "Cancel" })
       ).toBeNull()
     )
+
+    expect(
+      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+    ).toBe("Unsaved workspace name")
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
 
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.
