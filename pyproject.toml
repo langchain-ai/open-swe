@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents @ git+https://github.com/langchain-ai/deepagents.git@cc/filesystem-blobs#subdirectory=libs/deepagents",
+    "deepagents==0.7.20",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -74,7 +74,7 @@ sandbox-providers = [
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents @ git+https://github.com/langchain-ai/deepagents.git@cc/filesystem-blobs#subdirectory=libs/deepagents", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.20", "wcmatch>=11.0"]
 constraint-dependencies = [
     "langgraph-api>=0.15.0rc1,<0.16",
     "langgraph-runtime-inmem>=0.35.0rc1,<0.36",
