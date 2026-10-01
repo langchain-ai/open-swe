@@ -35,11 +35,12 @@ from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
 from agent.human_review.lifecycle import (
     mark_approved,
+    mark_closed,
     mark_merged,
     notify_agent,
     post_standard_card,
     refresh_card,
-    retire,
+    release_picks,
 )
 from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
@@ -567,12 +568,16 @@ async def settle(request: HumanReviewRequest) -> bool:
         await mark_merged(request)
         return True
     if snapshot.state != "open":
-        await retire(request, "cancelled", "the pull request was closed")
+        await mark_closed(request)
         return True
     async with github_client(token=token) as client:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
         return False
+    if approvers := [login for login, state in states.items() if state == "APPROVED"]:
+        request = await release_picks(
+            request, ", ".join(f"@{login}" for login in approvers) + " approved it", states
+        )
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
         return True
@@ -662,6 +667,23 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
     return True
 
 
+async def _approved_on_github(request: HumanReviewRequest) -> bool:
+    """Whether anyone has approved the pull request; ``False`` when GitHub cannot be read."""
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return False
+    async with github_client(token=token) as client:
+        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
+    if states is None:
+        logger.warning(
+            "Could not read reviews before picking a reviewer",
+            extra={"request_id": str(request.id)},
+        )
+        return False
+    return "APPROVED" in states.values()
+
+
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     """Scheduler entry point for the unclaimed and auto-merge deadlines."""
     try:
@@ -675,6 +697,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
+        if request.kind == "standard" and await _approved_on_github(request):
+            return {"status": "approved"}
         return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":
         await settle(request)
