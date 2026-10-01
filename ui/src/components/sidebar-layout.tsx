@@ -126,6 +126,7 @@ export function SidebarFrame({
     return createPortal(
       <div
         data-no-drag=""
+        data-sidebar-expand=""
         className={cn(
           "fixed top-2 left-2 z-30 flex items-center gap-1",
           isDesktop && "left-[90px]"
@@ -135,7 +136,6 @@ export function SidebarFrame({
         <button
           type="button"
           aria-label="Expand sidebar"
-          data-sidebar-expand=""
           onClick={toggle}
           className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -238,6 +238,7 @@ export function SidebarCollapseButton({
   return (
     <div
       data-no-drag=""
+      data-sidebar-collapse=""
       className={cn(
         "flex shrink-0 items-center gap-1",
         isDesktop && "fixed top-2 left-[90px] z-30",
@@ -248,7 +249,6 @@ export function SidebarCollapseButton({
       <button
         type="button"
         aria-label="Collapse sidebar"
-        data-sidebar-collapse=""
         onClick={onToggle}
         className={cn(
           "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
