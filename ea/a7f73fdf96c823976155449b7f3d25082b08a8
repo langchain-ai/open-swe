@@ -1,0 +1,21 @@
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_8ba74d43034700 308,328-332,334-337,339-340
+agent/rollouts.py
+  s_8c15db54e0c42b::t_ed0958274c1d54 369-374
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eaa7f73fdf96c823976155449b7f3d25082b08a8",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
