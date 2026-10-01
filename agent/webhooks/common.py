@@ -1482,7 +1482,12 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 )
                 from agent.rollouts import rollout_watch_pending
 
-                rollout_pending = rollout_watch_pending(metadata)
+                # A stored check only holds the thread open once the PR merges,
+                # or while that watch is already running. Closing the PR
+                # without a merge still resolves it or flags it for attention.
+                rollout_pending = rollout_watch_pending(metadata) and (
+                    new_state == "merged" or metadata.get("rollout_status") == "watching"
+                )
                 needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
                 if all_terminal:
                     if state_changed and metadata.get("resolved") is not True:

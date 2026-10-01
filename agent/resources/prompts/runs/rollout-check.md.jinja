@@ -29,7 +29,8 @@ A prod metric move is the whole revision, not proof this commit caused it.
 No page or metric check was stored.
 {% endif %}
 {% if last %}
-Post one verdict in this thread and as a GitHub comment on the PR (`gh pr comment {{ pr_url }}`): whether the issue is fixed, and whether there is a regression. On a failure, mention {{ author }}. Do not post in #langsmith-releases or any other Slack channel.
+Post one verdict in this thread and as a GitHub comment on the PR (`gh pr comment {{ pr_url }}`): whether the issue is fixed, and whether there is a regression. On a failure, mention {{ author }}.
 {% else %}
 Report this environment in the thread. The final verdict waits until the last environment in the check.
 {% endif %}
+Say nothing in Slack unless this work already has a Slack thread. If it does, update that thread with `slack_reply` and mention the author. Do not post anywhere else.

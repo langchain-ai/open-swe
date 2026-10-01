@@ -154,8 +154,11 @@ async def test_dev_wakes_once_and_staging_waits_a_poll(
 
     assert await rollouts.evaluate_rollout("acme/repo#7") == "waiting"
     assert dispatch.await_count == 1
-    assert "Do not query Datadog" in dispatch.await_args.args[1]
-    assert "gh pr comment" not in dispatch.await_args.args[1]
+    dev_reply = dispatch.await_args.args[1]
+    assert "Do not query Datadog" in dev_reply
+    assert "gh pr comment" not in dev_reply
+    assert "slack_reply" in dev_reply
+    assert "langsmith-releases" not in dev_reply
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
     assert dispatch.await_args.kwargs["source_context"].slack_thread.channel_id == "C1"
 
@@ -165,7 +168,16 @@ async def test_dev_wakes_once_and_staging_waits_a_poll(
     assert "staging" in verdict
     assert "gh pr comment" in verdict
     assert "Query env:staging." in verdict
-    for tag in ("env:dev", "env:staging", "env:prod", "env:eu-prod", "env:apac-prod", "env:aws-prod"):
+    assert "slack_reply" in verdict
+    assert "langsmith-releases" not in verdict
+    for tag in (
+        "env:dev",
+        "env:staging",
+        "env:prod",
+        "env:eu-prod",
+        "env:apac-prod",
+        "env:aws-prod",
+    ):
         assert tag in verdict
     watch = await rollouts.WATCHES.get("acme/repo#7")
     assert watch is not None and watch.active is False
@@ -317,6 +329,7 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
     assert check["run_config"]["workspace"] == "oss"
     assert check["run_config"]["slack_thread"]["channel_id"] == "C1"
     assert check["source_context"]["slack_thread"]["channel_id"] == "C1"
+    assert updates[0]["rollout_status"] is None
 
 
 async def test_page_check_reports_config_without_the_password(

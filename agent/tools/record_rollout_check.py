@@ -59,7 +59,10 @@ async def record_rollout_check(
         "source_context": source.dump(),
     }
     try:
-        await get_client().threads.update(thread_id=thread_id, metadata={"rollout_check": check})
+        await get_client().threads.update(
+            thread_id=thread_id,
+            metadata={"rollout_check": check, "rollout_status": None},
+        )
     except Exception:
         return {"success": False, "error": "Could not store the rollout check"}
     return {
