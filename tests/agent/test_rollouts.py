@@ -305,7 +305,7 @@ def test_done_status_does_not_cover_a_newer_check() -> None:
     )
 
 
-async def test_older_watch_stops_without_closing_a_newer_check(
+async def test_older_watch_finishes_without_closing_a_newer_check(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await rollouts.start_watch(
@@ -325,12 +325,19 @@ async def test_older_watch_stops_without_closing_a_newer_check(
         check_id="older",
     )
     client.threads.records["thread-1"] = {"metadata": {"rollout_check": {"check_id": "newer"}}}
+    monkeypatch.setattr(
+        rollouts, "locate_commit", AsyncMock(return_value=_targets(dev=True, staging=True))
+    )
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
 
-    async def fail_locate(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("a superseded watch should not poll")
+    assert await rollouts.evaluate_rollout("acme/repo#7") == "waiting"
+    assert dispatch.await_count == 0
+    watch = await rollouts.WATCHES.get("acme/repo#7")
+    assert watch is not None and watch.active is True
 
-    monkeypatch.setattr(rollouts, "locate_commit", fail_locate)
-    assert await rollouts.evaluate_rollout("acme/repo#7") == "superseded"
+    assert await rollouts.evaluate_rollout("acme/repo#7") == "done"
+    assert dispatch.await_count == 2
     assert all(item["metadata"].get("rollout_status") != "done" for item in client.threads.updated)
     assert all("resolved" not in item["metadata"] for item in client.threads.updated)
     watch = await rollouts.WATCHES.get("acme/repo#7")

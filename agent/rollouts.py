@@ -366,7 +366,12 @@ def _stored_check_id(thread: Any) -> str:
 
 
 async def _superseded(watch: RolloutWatch) -> bool:
-    """True when the thread has recorded a newer check than this watch."""
+    """True when the thread has recorded a newer check than this watch.
+
+    Used when a watch finishes, so an older watch can complete its own rollout
+    without marking the newer check done. Recording the next check does not
+    stop the watch that is already running.
+    """
     if not watch.check_id:
         return False
     try:
@@ -611,9 +616,6 @@ async def evaluate_rollout(key: str) -> str:
         watch = await WATCHES.get(key)
         if watch is None or not watch.active:
             return "inactive"
-        if await _superseded(watch):
-            await _retire(watch)
-            return "superseded"
         if _expired(watch):
             waiting = ", ".join(env for env in watch.envs if env not in watch.dispatched) or "none"
             sent = await _dispatch(
