@@ -1,65 +1,118 @@
-"""Feature-gated review links at the Slack delivery boundary."""
+"""Passive associations between observed Slack threads and GitHub pull request links."""
 
 import logging
 import re
-from typing import cast
+from datetime import datetime
 
-from agent.run_config import RunConfig
-from agent.users import User
-from agent.utils.dashboard_links import dashboard_base_url, dashboard_review_url
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Mapped, mapped_column
+
+from agent.database import postgres
+from agent.database.orm import NOW, Base
+from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.slack.payloads import SlackEventEnvelope
 
 logger = logging.getLogger(__name__)
 
-_PR_LINK = re.compile(
-    r"https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/([1-9]\d*)/?"
-    r"(?=$|[\s<>|)\].,!;:'\"])",
-    re.IGNORECASE,
+_PR_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/pull/[0-9]+(?!\w)",
+    re.I,
 )
-_CODE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
 
 
-def _text(text: str) -> str:
-    parts: list[str] = []
-    start = 0
-    for code in _CODE.finditer(text):
-        parts.append(_links(text[start : code.start()]))
-        parts.append(code.group())
-        start = code.end()
-    return "".join([*parts, _links(text[start:])])
-
-
-def _links(text: str) -> str:
-    return _PR_LINK.sub(
-        lambda match: dashboard_review_url(match[1], match[2], int(match[3])) or match.group(),
-        text,
-    )
-
-
-def _block(value: object) -> object:
+def _linked_urls(value: object) -> set[str]:
+    if isinstance(value, str):
+        return {
+            ref.url.lower()
+            for match in _PR_URL.finditer(value)
+            if (ref := parse_github_pr_url(match.group(0))) is not None and ref.number > 0
+        }
+    if isinstance(value, dict):
+        return set().union(*(_linked_urls(item) for item in value.values()))
     if isinstance(value, list):
-        return [_block(item) for item in value]
-    if not isinstance(value, dict) or value.get("type") in {"plain_text", "rich_text_preformatted"}:
-        return value
-    return {
-        key: _text(item) if key in {"text", "url"} and isinstance(item, str) else _block(item)
-        for key, item in value.items()
-    }
+        return set().union(*(_linked_urls(item) for item in value))
+    return set()
 
 
-async def pr_review_links(
-    text: str,
-    blocks: list[dict[str, object]] | None,
-    *,
-    login: str | None = None,
-) -> tuple[str, list[dict[str, object]] | None]:
-    """Rewrite displayed PR links without changing stored URLs or button values."""
-    if not dashboard_base_url() or "github.com/" not in (text + str(blocks)).lower():
-        return text, blocks
-    if login is None:
+def event_pull_requests(envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
+    event = envelope.event
+    if (
+        envelope.type != "event_callback"
+        or event is None
+        or event.type not in {"message", "app_mention"}
+        or event.subtype
+        not in {
+            "",
+            "file_share",
+            "thread_broadcast",
+            "bot_message",
+            "message_changed",
+            "me_message",
+        }
+    ):
+        return []
+    message = event.message if event.subtype == "message_changed" else event
+    if message is None:
+        return []
+    return [
+        ref
+        for url in sorted(_linked_urls(message.model_dump(exclude={"message", "previous_message"})))
+        if (ref := parse_github_pr_url(url)) is not None
+    ]
+
+
+class SlackPullRequestLink(Base):
+    __tablename__ = "slack_pull_request_link"
+
+    team_id: Mapped[str] = mapped_column(primary_key=True)
+    channel_id: Mapped[str] = mapped_column(primary_key=True)
+    thread_ts: Mapped[str] = mapped_column(primary_key=True)
+    pr_url: Mapped[str] = mapped_column(primary_key=True)
+    message_ts: Mapped[str]
+    first_seen_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
+
+    @classmethod
+    async def record(cls, envelope: SlackEventEnvelope) -> None:
+        """Record links without changing Slack routing or requiring a managed PR."""
+        event = envelope.event
+        if not postgres.configured() or event is None:
+            return
+        refs = event_pull_requests(envelope)
+        if not refs:
+            return
+        message = event.message if event.subtype == "message_changed" else event
+        if message is None:
+            return
+        team_id = envelope.team_id or event.team
+        channel_id = event.resolve_channel_id()
+        thread_ts = message.thread_ts or message.ts
+        if not (team_id and channel_id and thread_ts and message.ts):
+            return
         try:
-            login = RunConfig.from_runtime().github_login
-        except RuntimeError:
-            logger.debug("No active run for Slack PR links", exc_info=True)
-    if not login or not (await User.preferences_for_login(login)).pr_review_links:
-        return text, blocks
-    return _text(text), cast(list[dict[str, object]] | None, _block(blocks))
+            async with postgres.session() as session:
+                await session.execute(
+                    insert(cls)
+                    .values(
+                        [
+                            {
+                                "team_id": team_id,
+                                "channel_id": channel_id,
+                                "thread_ts": thread_ts,
+                                "pr_url": ref.url,
+                                "message_ts": message.ts,
+                            }
+                            for ref in refs
+                        ]
+                    )
+                    .on_conflict_do_nothing()
+                )
+        except Exception:
+            logger.warning(
+                "Recording Slack pull request links failed",
+                extra={
+                    "slack_team_id": team_id,
+                    "slack_channel_id": channel_id,
+                    "slack_thread_ts": thread_ts,
+                },
+                exc_info=True,
+            )

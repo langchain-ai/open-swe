@@ -40,6 +40,7 @@ from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
+from agent.webhooks.event_subscriptions import EventSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -478,6 +479,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
     ):
         await _start_run_for_pending_follow_ups(thread_id)
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+        await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     if (

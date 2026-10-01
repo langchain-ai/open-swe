@@ -201,8 +201,35 @@ export function buildProfileUpdate(
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
+    experimental_background_callbacks:
+      current?.experimental_background_callbacks ?? null,
     ...patch,
   }
+}
+
+export function useDismissSlackOnboarding() {
+  const qc = useQueryClient()
+  const session = useSession()
+  const queryKey = profileQueryKey(session.data?.login)
+  return useMutation({
+    meta: { errorTitle: "Couldn't dismiss Slack onboarding" },
+    mutationFn: api.dismissSlackOnboarding,
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey })
+      const previous = qc.getQueryData<Profile>(queryKey)
+      qc.setQueryData<Profile>(queryKey, (profile) =>
+        profile ? { ...profile, slack_onboarding_dismissed: true } : profile
+      )
+      return previous
+    },
+    onError: (_error, _variables, previous) => {
+      if (previous) qc.setQueryData(queryKey, previous)
+    },
+    onSuccess: (profile) => {
+      qc.setQueryData(queryKey, profile)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
+  })
 }
 
 export function useExperimentalAssistantUi(): boolean {

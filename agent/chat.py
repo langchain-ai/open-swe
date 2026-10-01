@@ -47,7 +47,6 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
@@ -199,7 +198,6 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareChatRunMiddleware(config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),

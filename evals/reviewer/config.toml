@@ -21,4 +21,3 @@ reasoning_effort = "high"
 # - "surfaced_findings" — score the exact final eval publication snapshot.
 score_mode = "surfaced_findings"
 severity_threshold = "low"
-cap = 6

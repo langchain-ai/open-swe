@@ -29,7 +29,7 @@ from agent.slack.http import (
     slack_error_details,
     slack_retry_after,
 )
-from agent.slack.pr_links import pr_review_links
+from agent.slack.review_links import pr_review_links
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.threads.creation import create_lock_thread
@@ -138,6 +138,44 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     if bot_user_id and bot_username:
         return text.replace(f"<@{bot_user_id}>", f"@{bot_username}")
     return text
+
+
+_SLACK_USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"<#([CG][A-Z0-9]+)\|?>")
+
+
+def slack_mentioned_user_ids(text: str) -> list[str]:
+    """The user ids in bare `<@USER_ID>` mentions."""
+    return _SLACK_USER_MENTION_RE.findall(text)
+
+
+def slack_mentioned_channel_ids(text: str) -> list[str]:
+    """The channel ids in `<#CHANNEL_ID>` mentions that carry no name."""
+    return _SLACK_CHANNEL_MENTION_RE.findall(text)
+
+
+def _label_slack_mentions(
+    text: str, pattern: re.Pattern[str], sigil: str, names_by_id: Mapping[str, str]
+) -> str:
+    def label(match: re.Match[str]) -> str:
+        entity_id = match[1]
+        name = names_by_id.get(entity_id, "")
+        if not name or name == entity_id:
+            return match[0]
+        escaped = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<{sigil}{entity_id}|{escaped}>"
+
+    return pattern.sub(label, text)
+
+
+def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_USER_MENTION_RE, "@", user_names_by_id)
+
+
+def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite unnamed `<#CHANNEL_ID>` mentions to Slack's labelled `<#CHANNEL_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_CHANNEL_MENTION_RE, "#", channel_names_by_id)
 
 
 def convert_mentions_to_slack_format(text: str) -> str:
@@ -350,10 +388,13 @@ def format_slack_messages_for_prompt(
     lines: list[str] = []
     for message in messages:
         forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
-        text = replace_bot_mention_with_username(
-            str(message.get("text", "")),
-            bot_user_id=bot_user_id,
-            bot_username=bot_username,
+        text = label_slack_user_mentions(
+            replace_bot_mention_with_username(
+                str(message.get("text", "")),
+                bot_user_id=bot_user_id,
+                bot_username=bot_username,
+            ),
+            user_names_by_id or {},
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
@@ -522,7 +563,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 _SESSION_COST_LABEL_RE = re.compile(
     r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
-    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\)"
+    r"| • \+(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -550,8 +592,8 @@ def with_slack_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Replace cumulative and optional per-run costs in a live Slack footer."""
     label = format_slack_session_cost(cost)
-    if run_cost is not None:
-        label += f" ({format_slack_session_cost(run_cost)})"
+    if run_cost is not None and run_cost < cost:
+        label += f" • +{format_slack_session_cost(run_cost)}"
     updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None

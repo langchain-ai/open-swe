@@ -4,6 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
+import asyncio
 import posixpath
 import re
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from agent.prompts import load_prompt
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from agent.slack.channels import SlackChannel
 from agent.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
 from agent.slack.failures import report_slack_failure
 from agent.slack.payloads import SlackChannelContext
@@ -60,6 +62,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
+_KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -377,12 +380,38 @@ def _slack_sender(
     return person["id"], person, "human"
 
 
-def _slack_message_text(message: dict[str, Any], bot_user_id: str) -> str:
+def _label_slack_mentions(
+    text: str, user_names_by_id: dict[str, str], channel_names_by_id: dict[str, str]
+) -> str:
+    return slack_utils.label_slack_channel_mentions(
+        slack_utils.label_slack_user_mentions(text, user_names_by_id), channel_names_by_id
+    )
+
+
+async def _public_slack_channel_names(channel_ids: list[str]) -> dict[str, str]:
+    """Names of the public channels among `channel_ids`; a private name never leaves Slack."""
+    unique_ids = sorted(set(channel_ids))
+    channels = await asyncio.gather(*(SlackChannel.load(channel_id) for channel_id in unique_ids))
+    return {
+        channel.id: channel.details.name
+        for channel in channels
+        if channel is not None and channel.public and channel.details.name
+    }
+
+
+def _slack_message_text(
+    message: dict[str, Any],
+    bot_user_id: str,
+    user_names_by_id: dict[str, str],
+    channel_names_by_id: dict[str, str],
+) -> str:
     forwarded = common.format_slack_messages_for_prompt(
         [message], {}, bot_user_id=bot_user_id, bot_username=common.SLACK_BOT_USERNAME
     )
     _, separator, content = forwarded.partition(": ")
-    return content if separator else forwarded
+    return _label_slack_mentions(
+        content if separator else forwarded, user_names_by_id, channel_names_by_id
+    )
 
 
 def _slack_context_input(
@@ -391,12 +420,15 @@ def _slack_context_input(
     logins_by_user_id: dict[str, str],
     *,
     person_ids_by_user_id: dict[str, str] | None = None,
+    channel_names_by_id: dict[str, str] | None = None,
     channel: ChannelIdentity,
     bot_user_id: str,
     event_ts: str,
     trigger_user_id: str = "",
     request_text: str,
     request_blocks: list[dict[str, Any]],
+    prior_message_text: str = "",
+    is_breakout: bool = False,
     turn_context: str = "",
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
@@ -405,6 +437,7 @@ def _slack_context_input(
     trigger_bot: AllowedSlackBot | None = None,
 ) -> RunInput:
     channel_entity_id = channel["id"]
+    channel_names = channel_names_by_id or {}
     already_dispatched = dispatched_timestamps or set()
     visible = set(visible_context_hashes or ())
     run_messages: list[RunMessage] = []
@@ -467,11 +500,24 @@ def _slack_context_input(
             "kind": kind,
             "data": {"timestamp": timestamp},
         }
-        text = _slack_message_text(message, bot_user_id)
+        text = _slack_message_text(message, bot_user_id, user_names_by_id, channel_names)
         run_messages.append(
             human_input(text, message_context)
             if kind == "human"
             else system_input(text, message_context)
+        )
+    if prior_message_text:
+        run_messages.append(
+            human_input(
+                _label_slack_mentions(prior_message_text, user_names_by_id, channel_names),
+                {
+                    "sender_id": trigger_person["id"],
+                    "channel_id": channel_entity_id,
+                    "surface": "slack",
+                    "kind": "human",
+                    "data": {"timestamp": event_ts},
+                },
+            )
         )
     if constant_context or turn_context:
         slack_context: SystemIdentity = {
@@ -506,9 +552,14 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(current_message, bot_user_id)
-    _, separator, forwarded_context = rendered_request.partition("\n")
-    if separator and forwarded_context:
+    rendered_request = _slack_message_text(
+        {**current_message, "text": ""} if is_breakout else current_message,
+        bot_user_id,
+        user_names_by_id,
+        channel_names,
+    )
+    _, _, forwarded_context = rendered_request.partition("\n")
+    if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
     run_messages.append(
@@ -822,7 +873,25 @@ async def _process_slack_mention_impl(
         for value in (message.get("user") for message in context_messages)
         if isinstance(value, str) and value
     ]
-    user_names_by_id = await common.get_slack_user_names(context_user_ids)
+    message_texts = [
+        text,
+        common.format_slack_messages_for_prompt([*context_messages, *source_messages], {}),
+    ]
+    mentioned_user_ids = [
+        mentioned
+        for message_text in message_texts
+        for mentioned in slack_utils.slack_mentioned_user_ids(message_text)
+    ]
+    user_names_by_id, channel_names_by_id = await asyncio.gather(
+        common.get_slack_user_names([*context_user_ids, *mentioned_user_ids]),
+        _public_slack_channel_names(
+            [
+                mentioned
+                for message_text in message_texts
+                for mentioned in slack_utils.slack_mentioned_channel_ids(message_text)
+            ]
+        ),
+    )
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
@@ -838,7 +907,9 @@ async def _process_slack_mention_impl(
         if not message_update:
             source_messages = context_messages
     clean_text = (
-        common.strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
+        slack_utils.replace_bot_mention_with_username(
+            text, bot_user_id, common.SLACK_BOT_USERNAME
+        ).strip()
         or "(no text in mention)"
     )
     is_first_mention = not await common.thread_exists(thread_id)
@@ -865,6 +936,7 @@ async def _process_slack_mention_impl(
         source_messages, user_names_by_id
     )
 
+    clean_text = _label_slack_mentions(clean_text, user_names_by_id, channel_names_by_id)
     content_blocks: list[dict[str, Any]] = [cast(dict[str, Any], create_text_block(clean_text))]
 
     image_urls = common.dedupe_urls(
@@ -1024,6 +1096,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else "",
         )
         if section
     )
@@ -1139,12 +1212,15 @@ async def _process_slack_mention_impl(
         user_names_by_id,
         logins_by_user_id,
         person_ids_by_user_id=person_ids_by_user_id,
+        channel_names_by_id=channel_names_by_id,
         channel=channel_identity,
         bot_user_id=bot_user_id,
         event_ts=event_ts,
         trigger_user_id=user_id,
         request_text=clean_text,
         request_blocks=content_blocks,
+        prior_message_text=request.prior_message_text,
+        is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
         constant_context=constant_context,
         dispatched_timestamps=dispatched_timestamps,

@@ -29,6 +29,7 @@ import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
@@ -49,6 +50,7 @@ import {
   useLocalRepoRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
+  useLocalThreadPr,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
@@ -222,6 +224,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const repository =
     branchDiff.data?.repository ?? checkpointDiff.data?.repository
   const pr = repository?.pr ?? null
+  // The composer's PR link reads this independent, always-enabled lookup, not
+  // the panel's diff: the row must show while the panel is collapsed, and the
+  // panel's cached metadata would go stale after a branch switch.
+  const composerPr = useLocalThreadPr(sessionId).data ?? null
   const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
@@ -491,6 +497,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
+            <ThreadPullRequests
+              pullRequests={composerPr ? [composerPr] : []}
+              compact
+              healthUnavailable
+            />
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {terminalContexts.map((text, index) => (

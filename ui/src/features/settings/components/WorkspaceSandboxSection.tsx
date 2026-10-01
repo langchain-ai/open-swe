@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Popover,
   PopoverPopup,
@@ -39,16 +40,21 @@ function WorkspaceReposPopover({ repos }: { repos: string[] }) {
   )
 }
 
-function gib(bytes: number | null | undefined): string | null {
-  if (bytes === null || bytes === undefined) return null
-  return `${Math.round((bytes / 1024 ** 3) * 10) / 10} GiB`
+function resourceValue(value: number | null | undefined, divisor = 1) {
+  return value == null ? "" : String(value / divisor)
 }
 
-/**
- * The scripts that build and refresh a workspace's sandbox image, with the
- * image's current state. Sizing and the base snapshot are set when the image
- * is published from an admin thread, so they are shown rather than edited.
- */
+function resourceBytes(value: string, multiplier = 1): number | null {
+  if (!value.trim()) return null
+  const number = Number(value) * multiplier
+  if (!Number.isSafeInteger(number) || number <= 0)
+    throw new Error(
+      "Sandbox sizes must be positive and resolve to whole bytes or vCPUs."
+    )
+  return number
+}
+
+/** Configure the workspace's new sandboxes and image scripts. */
 export function WorkspaceSandboxSection({
   record,
   onSaved,
@@ -61,10 +67,32 @@ export function WorkspaceSandboxSection({
   const buildAction = record.snapshot_id ? "Rebuild" : "Build"
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
+  const [vcpus, setVcpus] = useState(resourceValue(record.vcpus))
+  const [memory, setMemory] = useState(
+    resourceValue(record.mem_bytes, 1024 ** 3)
+  )
+  const [disk, setDisk] = useState(
+    resourceValue(record.fs_capacity_bytes, 1024 ** 3)
+  )
+  const configurationDirty =
+    vcpus !== resourceValue(record.vcpus) ||
+    memory !== resourceValue(record.mem_bytes, 1024 ** 3) ||
+    disk !== resourceValue(record.fs_capacity_bytes, 1024 ** 3)
   const dirty =
     setupScript !== (record.setup_script ?? "") ||
     updateScript !== (record.update_script ?? "")
 
+  const configuration = useMutation({
+    meta: { silent: true },
+    mutationFn: async () => {
+      return api.updateWorkspace(record.slug, {
+        vcpus: resourceBytes(vcpus),
+        mem_bytes: resourceBytes(memory, 1024 ** 3),
+        fs_capacity_bytes: resourceBytes(disk, 1024 ** 3),
+      })
+    },
+    onSuccess: onSaved,
+  })
   const save = useMutation({
     meta: { silent: true },
     mutationFn: () =>
@@ -84,13 +112,6 @@ export function WorkspaceSandboxSection({
 
   const status = record.snapshot_status ?? "none"
   const refreshing = record.refresh_status === "refreshing"
-  const sizing = [
-    record.vcpus === null || record.vcpus === undefined
-      ? null
-      : `${record.vcpus} vCPU`,
-    gib(record.mem_bytes),
-    gib(record.fs_capacity_bytes) && `${gib(record.fs_capacity_bytes)} disk`,
-  ].filter((part): part is string => !!part)
 
   return (
     <SettingsSection
@@ -115,16 +136,66 @@ export function WorkspaceSandboxSection({
           </span>
         }
       />
-      {sizing.length > 0 && (
-        <SettingsRow
-          label="Sandbox size"
-          control={
-            <span className="text-xs text-muted-foreground">
-              {sizing.join(" · ")}
-            </span>
-          }
-        />
-      )}
+      <div className="space-y-3 border-b border-border px-4 py-3.5">
+        <p className="text-xs text-muted-foreground">
+          Applies to new sandboxes and image builders, not existing threads.
+          Leave sizes blank to inherit deployment defaults. If only CPU or
+          memory is set, the sandbox service chooses the other.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {[
+            { label: "vCPUs", value: vcpus, set: setVcpus, step: "1" },
+            {
+              label: "Memory (GiB)",
+              value: memory,
+              set: setMemory,
+              step: "any",
+            },
+            { label: "Disk (GiB)", value: disk, set: setDisk, step: "any" },
+          ].map(({ label, value, set, step }) => (
+            <label key={label} className="text-sm">
+              {label}
+              <Input
+                aria-label={label}
+                type="number"
+                min="0"
+                step={step}
+                placeholder="Deployment default"
+                value={value}
+                onChange={(event) => set(event.target.value)}
+              />
+            </label>
+          ))}
+        </div>
+        {configuration.error && (
+          <p role="alert" className="text-xs text-destructive">
+            {configuration.error.message}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">
+          {configurationDirty && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={configuration.isPending}
+              onClick={() => {
+                setVcpus(resourceValue(record.vcpus))
+                setMemory(resourceValue(record.mem_bytes, 1024 ** 3))
+                setDisk(resourceValue(record.fs_capacity_bytes, 1024 ** 3))
+              }}
+            >
+              Cancel
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={!configurationDirty || configuration.isPending}
+            onClick={() => configuration.mutate()}
+          >
+            {configuration.isPending ? "Saving…" : "Save sandbox configuration"}
+          </Button>
+        </div>
+      </div>
       <div className="space-y-3 px-4 py-3.5">
         <div className="text-sm">
           <div>Setup script</div>
