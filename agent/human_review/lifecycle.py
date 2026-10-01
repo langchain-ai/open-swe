@@ -17,7 +17,7 @@ from agent.expedited_review import card as expedited_card
 from agent.expedited_review.channels import channel_choices, own_choices
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from agent.expedited_review.readiness import latest_review_states
+from agent.expedited_review.readiness import review_standings
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import github_client
@@ -201,9 +201,7 @@ async def _render_standard(
     states: dict[str, str] = {}
     if token is not None:
         async with github_client(token=token) as client:
-            states = (
-                await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
-            )
+            states = await review_standings(client, pr.owner, pr.repo, pr.number, pr.author) or {}
     requester = request.requested_by
     return standard_card.open_card(
         request,
