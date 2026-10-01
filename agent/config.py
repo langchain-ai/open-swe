@@ -277,6 +277,27 @@ ENV.var("DEFAULT_REPO_NAME", "Default GitHub repository when a run names none.")
 ENV.var("SLACK_REPO_OWNER", "Slack-specific default repository owner.")
 ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
+# --- Rollouts ------------------------------------------------------------------------------
+ENV.var(
+    "ROLLOUT_REPOS",
+    "Comma-separated owner/repo pairs whose merged pull requests are watched. Empty watches none.",
+)
+ENV.var(
+    "ROLLOUT_ENVS",
+    "Ordered environments as name:target|target. An environment is ready when every listed "
+    "target contains the commit. Example: dev:target-dev,prod:target-a|target-b. Empty watches none.",
+)
+ENV.var(
+    "ROLLOUT_DATADOG_TAGS",
+    "Datadog tags per environment as name=tag|tag. Example: dev=tag-dev,prod=tag-a|tag-b. "
+    "Empty leaves a metric check without a tag.",
+)
+ENV.var(
+    "ROLLOUT_LOCATE_TOOL",
+    "MCP tool that reports which targets contain a commit. Example: releases.locate_commit. "
+    "Empty skips the poll.",
+)
+
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)

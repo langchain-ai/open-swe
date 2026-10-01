@@ -1,9 +1,10 @@
 """Durable watch for a merged OpenSWE pull request.
 
-A scheduler cron polls Homebase ``releases.locate_commit`` every 15 minutes.
-The implementing thread is resumed only when an environment in the check newly
-contains the merge SHA (dev immediately, staging and prod after one quiet
-poll). ``rollout_page_check`` opens the page in the sandbox browser and does not log in.
+A scheduler cron polls the configured locate tool every 15 minutes. The
+implementing thread is resumed only when an environment in the check newly
+contains the merge SHA. The first environment is reported immediately. Each
+later environment waits one quiet poll. ``rollout_page_check`` opens the page
+in the sandbox browser and does not log in.
 """
 
 import json
@@ -12,12 +13,13 @@ import re
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
 from agent.mcp.instance import instance_mcp_source
 from agent.mcp.runtime import load_mcp_tools
@@ -35,11 +37,9 @@ WATCH_CRON_KIND = "rollout_watch"
 WATCH_SCHEDULE = "*/15 * * * *"
 WATCH_LOCK_TTL_MINUTES = 5
 MAX_WATCH_AGE = timedelta(days=7)
-_LOCATE_TOOL_NAMES = frozenset({"releases_locate_commit", "releases.locate_commit"})
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
-_ENVS = ("dev", "staging", "prod")
-ROLLOUT_OWNER = "langchain-ai"
-ROLLOUT_REPO = "langchainplus"
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
+_TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 
 
 @asynccontextmanager
@@ -120,9 +120,30 @@ def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
 
 
+class RolloutEnv(NamedTuple):
+    name: str
+    targets: tuple[str, ...]
+
+
+def _name(value: str) -> str:
+    name = value.strip().lower()
+    return name if _NAME_RE.fullmatch(name) else ""
+
+
+def rollout_repos() -> set[tuple[str, str]]:
+    """owner/repo pairs from ``ROLLOUT_REPOS``. Invalid entries are dropped."""
+    repos: set[tuple[str, str]] = set()
+    for item in ENV.ROLLOUT_REPOS.get_list():
+        owner, sep, repo = item.partition("/")
+        owner_name, repo_name = _name(owner), _name(repo)
+        if sep and owner_name and repo_name and "/" not in repo:
+            repos.add((owner_name, repo_name))
+    return repos
+
+
 def rollout_repo_allowed(owner: str, repo: str) -> bool:
-    """Rollouts follow langchainplus only until the check is ready for other repos."""
-    return owner.strip().lower() == ROLLOUT_OWNER and repo.strip().lower() == ROLLOUT_REPO
+    """True when this deployment watches the repository."""
+    return (_name(owner), _name(repo)) in rollout_repos()
 
 
 def rollout_payload_allowed(payload: Mapping[str, Any]) -> bool:
@@ -150,38 +171,55 @@ def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
     return isinstance(check_id, str) and bool(check_id) and finished_for != check_id
 
 
-def rollout_env(target_id: str, label: str = "") -> str | None:
-    """Map a Homebase locate target onto dev, staging, or prod.
+def rollout_envs() -> list[RolloutEnv]:
+    """Ordered environments from ``ROLLOUT_ENVS``. Invalid entries are dropped."""
+    specs: list[RolloutEnv] = []
+    seen: set[str] = set()
+    for item in ENV.ROLLOUT_ENVS.get_list():
+        name, sep, raw_targets = item.partition(":")
+        env_name = _name(name)
+        targets = tuple(target for part in raw_targets.split("|") if (target := _name(part)))
+        if not sep or not env_name or not targets or env_name in seen:
+            continue
+        seen.add(env_name)
+        specs.append(RolloutEnv(env_name, targets))
+    return specs
 
-    Self-hosted tracks are ignored. Staging is matched before prod so a
-    staging id is not treated as production.
-    """
-    ident = target_id.strip().lower()
-    text = f"{ident} {label.strip().lower()}"
-    if "self-hosted" in text:
-        return None
-    if "staging" in text:
-        return "staging"
-    if "prod" in text:
-        return "prod"
-    if "dev" in text:
-        return "dev"
-    return None
+
+def rollout_env_names() -> list[str]:
+    return [spec.name for spec in rollout_envs()]
+
+
+def datadog_tags(env: str) -> list[str]:
+    """Tags from ``ROLLOUT_DATADOG_TAGS`` for one environment."""
+    wanted = _name(env)
+    if not wanted:
+        return []
+    for item in ENV.ROLLOUT_DATADOG_TAGS.get_list():
+        name, sep, raw = item.partition("=")
+        if not sep or _name(name) != wanted:
+            continue
+        return [tag for part in raw.split("|") if (tag := part.strip()) and _TAG_RE.fullmatch(tag)]
+    return []
 
 
 def envs_ready(targets: list[Any]) -> set[str]:
-    """Environments whose every SaaS target contains the commit and has no error."""
-    grouped: dict[str, list[Mapping[str, Any]]] = {env: [] for env in _ENVS}
+    """Configured environments whose every target contains the commit and has no error."""
+    rows: dict[str, Mapping[str, Any]] = {}
     for target in targets:
         if not isinstance(target, Mapping):
             continue
-        env = rollout_env(str(target.get("id") or ""), str(target.get("label") or ""))
-        if env is not None:
-            grouped[env].append(target)
+        target_id = _name(str(target.get("id") or ""))
+        if target_id:
+            rows[target_id] = target
     ready: set[str] = set()
-    for env, rows in grouped.items():
-        if rows and all(not row.get("error") and row.get("contains") is True for row in rows):
-            ready.add(env)
+    for spec in rollout_envs():
+        matched = [rows.get(target_id) for target_id in spec.targets]
+        if all(
+            row is not None and not row.get("error") and row.get("contains") is True
+            for row in matched
+        ):
+            ready.add(spec.name)
     return ready
 
 
@@ -193,9 +231,13 @@ def _clip(value: object, limit: int) -> str:
 
 def _normalize_envs(raw: object) -> list[str]:
     if not isinstance(raw, list):
-        return ["dev", "staging"]
-    envs = [env for env in _ENVS if env in raw]
-    return envs or ["dev", "staging"]
+        return []
+    envs: list[str] = []
+    for env in raw:
+        name = _name(env) if isinstance(env, str) else ""
+        if name and name not in envs:
+            envs.append(name)
+    return envs
 
 
 def _payload(raw: Any) -> dict[str, Any] | None:
@@ -430,6 +472,9 @@ async def start_from_merge(
     owner, repo, number = identity
     if not rollout_repo_allowed(owner, repo):
         return
+    envs = _normalize_envs(check.get("envs"))
+    if not envs:
+        return
     pull_requests = metadata.get("pull_requests")
     resolves_thread = isinstance(pull_requests, list) and any(
         isinstance(record, dict) and record.get("resolves_thread") is True
@@ -449,7 +494,7 @@ async def start_from_merge(
         pr_number=number,
         sha=sha,
         author=author.strip(),
-        envs=_normalize_envs(check.get("envs")),
+        envs=envs,
         page=_clip(check.get("page"), 300),
         expected=_clip(check.get("expected"), 1000),
         metrics=_clip(check.get("metrics"), 1000),
@@ -511,13 +556,19 @@ def _check_prompt(watch: RolloutWatch, env: str, *, last: bool) -> str:
         page=watch.page,
         expected=watch.expected,
         metrics=watch.metrics,
+        datadog_tags=", ".join(datadog_tags(env)),
         last=last,
     )
 
 
+def _locate_tool_name() -> str:
+    return ENV.ROLLOUT_LOCATE_TOOL.get().replace(".", "_").strip().lower()
+
+
 async def locate_commit(workspace: str, sha: str) -> dict[str, Any] | None:
-    """Call the workspace Homebase locate tool. Returns None when it is unavailable."""
-    if not workspace:
+    """Call the configured locate tool. Returns None when it is unavailable."""
+    configured = _locate_tool_name()
+    if not workspace or not configured:
         return None
     try:
         tools = await load_mcp_tools(instance_mcp_source(), workspace_mcp_source(workspace))
@@ -528,22 +579,21 @@ async def locate_commit(workspace: str, sha: str) -> dict[str, Any] | None:
         (
             item
             for item in tools
-            if str((getattr(item, "metadata", None) or {}).get("mcp_tool_name") or "").replace(
-                ".", "_"
-            )
-            in _LOCATE_TOOL_NAMES
-            or str((getattr(item, "metadata", None) or {}).get("mcp_tool_name") or "")
-            in _LOCATE_TOOL_NAMES
+            if str((getattr(item, "metadata", None) or {}).get("mcp_tool_name") or "")
+            .replace(".", "_")
+            .strip()
+            .lower()
+            == configured
         ),
         None,
     )
     if tool is None:
-        logger.info("releases.locate_commit is not on the workspace MCP")
+        logger.info("Configured rollout locate tool is not on the workspace MCP")
         return None
     try:
         raw = await tool.ainvoke({"commit": sha})
     except Exception:
-        logger.warning("releases.locate_commit failed", exc_info=True)
+        logger.warning("Rollout locate tool failed", exc_info=True)
         return None
     return _payload(raw)
 
@@ -583,17 +633,18 @@ async def evaluate_rollout(key: str) -> str:
         targets: list[Any] = raw_targets if isinstance(raw_targets, list) else []
         ready = envs_ready(targets)
         changed = False
+        immediate = watch.envs[0] if watch.envs else ""
         for env in watch.envs:
             if env in watch.dispatched or env not in ready:
                 continue
-            if env != "dev" and env not in watch.seen:
+            if env != immediate and env not in watch.seen:
                 watch.seen.append(env)
                 changed = True
                 continue
             last = set(watch.dispatched) | {env} >= set(watch.envs)
             content = (
-                prompt("runs/rollout-dev", sha=watch.sha, pr_url=watch.pr_url)
-                if env == "dev"
+                prompt("runs/rollout-dev", env=env, sha=watch.sha, pr_url=watch.pr_url)
+                if env == immediate and not last
                 else _check_prompt(watch, env, last=last)
             )
             if not await _dispatch(watch, content):

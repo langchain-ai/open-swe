@@ -103,15 +103,29 @@ def _targets(*, dev: bool, staging: bool) -> dict[str, Any]:
     }
 
 
+def _configure_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ROLLOUT_REPOS", "langchain-ai/langchainplus")
+    monkeypatch.setenv(
+        "ROLLOUT_ENVS",
+        "dev:gcp-dev,staging:gcp-staging,prod:gcp-us-prod|gcp-eu-prod|gcp-apac-prod|aws-us-prod",
+    )
+    monkeypatch.setenv("ROLLOUT_DATADOG_TAGS", "dev=env:dev,staging=env:staging,prod=env:prod")
+    monkeypatch.setenv("ROLLOUT_LOCATE_TOOL", "releases.locate_commit")
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     fake = _Client()
+    _configure_rollout(monkeypatch)
     monkeypatch.setattr(rollouts, "get_client", lambda: fake)
     monkeypatch.setattr(agent_store, "store_client", lambda: fake)
     return fake
 
 
-def test_envs_ready_waits_for_every_prod_region_and_skips_self_hosted() -> None:
+def test_envs_ready_waits_for_every_configured_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_rollout(monkeypatch)
     targets: list[dict[str, Any]] = [
         {"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""},
         {"id": "gcp-staging", "label": "GCP Staging", "contains": False, "error": ""},
@@ -129,6 +143,31 @@ def test_envs_ready_waits_for_every_prod_region_and_skips_self_hosted() -> None:
         ]
     )
     assert rollouts.envs_ready(targets) == {"dev", "prod"}
+
+
+def test_envs_ready_can_treat_one_region_as_its_own_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "ROLLOUT_ENVS",
+        "dev:gcp-dev,apac-prod:gcp-apac-prod,aws-prod:aws-us-prod",
+    )
+    targets: list[dict[str, Any]] = [
+        {"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""},
+        {"id": "gcp-apac-prod", "label": "GCP APAC Prod", "contains": True, "error": ""},
+        {"id": "aws-us-prod", "label": "AWS US Prod", "contains": False, "error": ""},
+        {"id": "self-hosted-main", "label": "Self-hosted main", "contains": True, "error": ""},
+    ]
+    assert rollouts.envs_ready(targets) == {"dev", "apac-prod"}
+
+
+def test_rollout_repos_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ROLLOUT_REPOS", raising=False)
+    assert not rollouts.rollout_repo_allowed("langchain-ai", "langchainplus")
+    monkeypatch.setenv("ROLLOUT_REPOS", "Langchain-AI/LangChainPlus, acme/repo")
+    assert rollouts.rollout_repo_allowed("langchain-ai", "langchainplus")
+    assert rollouts.rollout_repo_allowed("acme", "repo")
+    assert not rollouts.rollout_repo_allowed("langchain-ai", "open-swe")
 
 
 async def test_dev_wakes_once_and_staging_waits_a_poll(
@@ -172,18 +211,10 @@ async def test_dev_wakes_once_and_staging_waits_a_poll(
     verdict = dispatch.await_args_list[1].args[1]
     assert "staging" in verdict
     assert "gh pr comment" in verdict
-    assert "Query env:staging." in verdict
+    assert "env:staging" in verdict
+    assert "env:prod" not in verdict
     assert "slack_reply" in verdict
     assert "langsmith-releases" not in verdict
-    for tag in (
-        "env:dev",
-        "env:staging",
-        "env:prod",
-        "env:eu-prod",
-        "env:apac-prod",
-        "env:aws-prod",
-    ):
-        assert tag in verdict
     watch = await rollouts.WATCHES.get("acme/repo#7")
     assert watch is not None and watch.active is False
     assert client.threads.updated[-1]["metadata"]["resolved"] is True
@@ -235,6 +266,7 @@ async def test_locate_commit_accepts_a_json_string(monkeypatch: pytest.MonkeyPat
                 {"targets": [{"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""}]}
             )
 
+    monkeypatch.setenv("ROLLOUT_LOCATE_TOOL", "releases.locate_commit")
     monkeypatch.setattr(rollouts, "instance_mcp_source", lambda: object())
     monkeypatch.setattr(rollouts, "workspace_mcp_source", lambda _workspace: object())
     monkeypatch.setattr(rollouts, "load_mcp_tools", AsyncMock(return_value=[_Tool()]))
@@ -243,6 +275,18 @@ async def test_locate_commit_accepts_a_json_string(monkeypatch: pytest.MonkeyPat
 
     assert report is not None
     assert report["targets"][0]["contains"] is True
+
+
+async def test_locate_commit_skips_when_the_tool_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ROLLOUT_LOCATE_TOOL", raising=False)
+
+    async def fail_load(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise AssertionError("locate should not load tools when no tool is configured")
+
+    monkeypatch.setattr(rollouts, "load_mcp_tools", fail_load)
+    assert await rollouts.locate_commit("oss", SHA) is None
 
 
 def test_done_status_does_not_cover_a_newer_check() -> None:
@@ -381,6 +425,7 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
         },
     )
     monkeypatch.setattr(record_tool, "get_client", lambda: _LangGraph())
+    _configure_rollout(monkeypatch)
     secret = "rollout-bot-test-secret"
 
     result = await record_tool.record_rollout_check(
@@ -389,9 +434,9 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
         metrics="p95 latency",
     )
 
-    assert result["envs"] == ["dev", "staging"]
+    assert result["envs"] == ["dev", "staging", "prod"]
     check = updates[0]["rollout_check"]
-    assert check["envs"] == ["dev", "staging"]
+    assert check["envs"] == ["dev", "staging", "prod"]
     assert isinstance(check["check_id"], str) and check["check_id"]
     assert secret not in json.dumps(check)
     assert check["run_config"]["workspace"] == "oss"

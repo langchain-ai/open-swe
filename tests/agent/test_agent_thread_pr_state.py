@@ -132,7 +132,10 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
 
 
 @pytest.mark.asyncio
-async def test_merged_rollout_check_stays_open_until_the_watch_finishes() -> None:
+async def test_merged_rollout_check_stays_open_until_the_watch_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ROLLOUT_REPOS", "langchain-ai/langchainplus")
     merging_pr = {
         "repo_full_name": "langchain-ai/langchainplus",
         "number": 7,

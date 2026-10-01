@@ -8,7 +8,7 @@ from uuid import uuid4
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
-from agent.rollouts import rollout_repo_allowed
+from agent.rollouts import rollout_env_names, rollout_repo_allowed
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
 from agent.tools.manage_baby_sit import dispatch_run_config
@@ -35,7 +35,6 @@ async def record_rollout_check(
     page: str = "",
     expected: str = "",
     metrics: str = "",
-    include_prod: bool = False,
     owner: str = "",
     repo: str = "",
 ) -> dict[str, Any]:
@@ -47,12 +46,14 @@ async def record_rollout_check(
     repo_owner = owner.strip() or (cfg.repo.owner if cfg.repo else "")
     repo_name = repo.strip() or (cfg.repo.name if cfg.repo else "")
     if not rollout_repo_allowed(repo_owner, repo_name):
+        return {"success": True, "watched": False, "reason": "This repository is not watched"}
+    envs = rollout_env_names()
+    if not envs:
         return {
             "success": True,
             "watched": False,
-            "reason": "Rollouts watch langchain-ai/langchainplus only",
+            "reason": "Rollout environments are not configured",
         }
-    envs = ["dev", "staging", *(["prod"] if include_prod else [])]
     dumped = cfg.dump()
     source = SourceContext.parse(
         {
@@ -84,5 +85,4 @@ async def record_rollout_check(
         "envs": envs,
         "page": bool(check["page"]),
         "metrics": bool(check["metrics"]),
-        "include_prod": include_prod,
     }

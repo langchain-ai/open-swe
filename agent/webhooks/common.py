@@ -1481,8 +1481,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 resolves_thread = any(
                     record.get("resolves_thread") is True for record in updated_pull_requests
                 )
-                # A stored check only holds the thread open once a langchainplus
-                # PR merges, or while that watch is already running.
+                # A stored check only holds the thread open once a configured
+                # rollout repo merges, or while that watch is already running.
                 watching = metadata.get("rollout_status") == "watching"
                 rollout_pending = rollout_watch_pending(metadata) and (
                     watching or (new_state == "merged" and rollout_payload_allowed(payload))
