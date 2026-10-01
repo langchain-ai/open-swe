@@ -1297,6 +1297,10 @@ export const api = {
     request<OptionsPayload>(
       `/options?workspace=${encodeURIComponent(workspace)}`
     ),
+  concierge: () =>
+    request<{ thread_id: string | null; channel_id: string | null }>(
+      "/slack/concierge"
+    ),
   profile: () => request<Profile>("/profile"),
   dismissSlackOnboarding: () =>
     request<Profile>("/profile/slack-onboarding-dismissal", { method: "POST" }),
