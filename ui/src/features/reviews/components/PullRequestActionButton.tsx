@@ -7,13 +7,13 @@ export function PullRequestActionButton({
   label,
   disabled,
   onClick,
-  errors,
+  errors = [],
   children,
 }: {
   label: string
   disabled: boolean
   onClick: () => void
-  errors: Array<Error | null>
+  errors?: Array<Error | null>
   children?: ReactNode
 }) {
   return (

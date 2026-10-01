@@ -16,6 +16,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   })
   const dismiss = useMutation({
     mutationFn: () => dismissPlan(threadId),
+    meta: { errorTitle: "Couldn't dismiss the plan" },
     onSuccess: () =>
       queryClient.setQueryData<PlanData>(queryKey, (plan) =>
         plan ? { ...plan, dismissed: true } : plan

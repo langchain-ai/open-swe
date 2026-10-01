@@ -7,12 +7,16 @@ import {
 import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
+import { pageTitle } from "@/lib/pageTitle"
+import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { MyPullRequests } from "@/features/reviews/MyPullRequests"
+import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
+import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
 import { PullRequestLinks } from "@/features/reviews/PullRequestLinks"
 import { ReviewCounts } from "@/features/reviews/components/ReviewCounts"
 import {
@@ -23,6 +27,7 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
+  head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
   component: ReviewsPage,
 })
 
@@ -67,7 +72,7 @@ function ReviewsPage() {
     queryFn: () => api.listReviews(page, mine),
     enabled: !!session.data && !mine,
     placeholderData: keepPreviousData,
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
@@ -77,7 +82,7 @@ function ReviewsPage() {
     void queryClient.prefetchQuery({
       queryKey: ["reviews", nextMine, nextPage],
       queryFn: () => api.listReviews(nextPage, nextMine),
-      staleTime: Infinity,
+      staleTime: BROWSER_CACHE_MAX_AGE_MS,
     })
   }
 
@@ -129,6 +134,11 @@ function ReviewsPage() {
                 </button>
               ))}
             </div>
+            <OpenPullRequestInput />
+            <ReviewBookmarklet />
+            <span className="hidden text-xs text-muted-foreground lg:inline">
+              Drag to your bookmarks bar
+            </span>
             {!mine && (
               <Button
                 className="ml-auto"

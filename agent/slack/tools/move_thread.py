@@ -3,13 +3,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk.client import LangGraphClient
 
-from agent.slack.client import (
-    bind_slack_thread_id,
-    delete_slack_thread_associations,
-    get_active_slack_thread,
-)
-from agent.slack.move import move_slack_thread
+from agent.slack.client import get_active_slack_thread
+from agent.slack.move import move_slack_thread, rebind_slack_thread
+from agent.source_context import SlackThreadRef
 from agent.threads.summary import thread_is_private
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
@@ -20,25 +18,20 @@ _CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
 
 async def _finish_existing_move(
-    client: Any,
+    client: LangGraphClient,
     thread_id: str,
     active: Mapping[str, Any],
     source: Mapping[str, Any],
 ) -> dict[str, Any]:
-    channel_id = str(active.get("channel_id") or "")
-    thread_ts = str(active.get("thread_ts") or "")
-    await bind_slack_thread_id(client, channel_id, thread_ts, thread_id)
-    await delete_slack_thread_associations(
-        client,
-        str(source.get("channel_id") or ""),
-        str(source.get("thread_ts") or ""),
-        expected_thread_id=thread_id,
+    destination = SlackThreadRef.model_validate(dict(active))
+    await rebind_slack_thread(
+        client, thread_id, SlackThreadRef.model_validate(dict(source)), destination
     )
     return {
         "success": True,
         "thread_id": thread_id,
-        "channel_id": channel_id,
-        "thread_ts": thread_ts,
+        "channel_id": destination.channel_id,
+        "thread_ts": destination.thread_ts,
         "dashboard_url": dashboard_thread_url(thread_id),
     }
 

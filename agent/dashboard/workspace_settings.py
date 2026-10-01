@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
@@ -48,7 +48,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-luna", "high")
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
@@ -60,21 +60,32 @@ class WorkspaceSettingsUpdate(BaseModel):
     default; on a workspace's record, None inherits the instance value.
     """
 
-    review_draft_prs: bool | None = None
-    pr_summaries: bool | None = None
-    review_trace_links: bool | None = None
+    review_draft_prs: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    pr_summaries: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    review_trace_links: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     # Tri-state LLM Gateway toggle: True/False is authoritative. None on the
     # instance inherits the LANGSMITH_GATEWAY_ENABLED deployment default; None on
     # a workspace inherits the instance.
     # Tri-state adaptive model routing toggle: True/False is authoritative. None
     # on the instance is off (routing is opt-in); None on a workspace inherits.
-    model_routing_enabled: bool | None = None
-    gateway_enabled: bool | None = None
-    fable_enabled: bool | None = None
-    expedited_review_enabled: bool | None = None
+    model_routing_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    gateway_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
+    expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    sandbox_openai_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     org_guidelines: str | None = None
-    approval_policy: str | None = None
-    review_auto_approve: bool | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
     default_agent_subagent_model: str | None = None
@@ -95,7 +106,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
-    @field_validator("org_guidelines", "approval_policy", mode="before")
+    @field_validator("org_guidelines", mode="before")
     @classmethod
     def _normalize_review_instructions(cls, v: object) -> str | None:
         if v is None:
@@ -313,16 +324,15 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "sandbox_openai_enabled": False,
         "org_guidelines": None,
-        "approval_policy": None,
-        "review_auto_approve": False,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
         "default_agent_subagent_model": fallback_model,
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "openai:gpt-6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+        "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
         "default_agent_routing_performance_reasoning_effort": "low",
@@ -371,6 +381,9 @@ _STALE_FIELDS = (
     "review_author_context_enabled",
     "review_tracing_project",
     "transcription_model",
+    # Approval criteria moved to each repository's .open-swe/APPROVALS.md and its review style's mode.
+    "approval_policy",
+    "review_auto_approve",
 )
 
 
@@ -614,9 +627,9 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     @property
     def review_scout_model(self) -> tuple[str, str]:
-        """The review scout's ``(model_id, reasoning_effort)``: model routing's fast tier."""
-        model = self.get("default_agent_routing_fast_model")
-        effort = self.get("default_agent_routing_fast_reasoning_effort")
+        """The review scout's ``(model_id, reasoning_effort)``: model routing's balanced tier."""
+        model = self.get("default_agent_routing_balanced_model")
+        effort = self.get("default_agent_routing_balanced_reasoning_effort")
         if (
             isinstance(model, str)
             and isinstance(effort, str)
@@ -674,6 +687,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def sandbox_openai_enabled(self) -> bool:
+        """Whether sandbox clients may use the experimental Responses API."""
+        return self.get("sandbox_openai_enabled") is True
 
     @property
     def org_review_guidelines(self) -> str | None:

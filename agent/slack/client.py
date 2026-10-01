@@ -31,6 +31,7 @@ from agent.slack.http import (
 )
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
+from agent.threads.creation import create_lock_thread
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -136,6 +137,44 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     if bot_user_id and bot_username:
         return text.replace(f"<@{bot_user_id}>", f"@{bot_username}")
     return text
+
+
+_SLACK_USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"<#([CG][A-Z0-9]+)\|?>")
+
+
+def slack_mentioned_user_ids(text: str) -> list[str]:
+    """The user ids in bare `<@USER_ID>` mentions."""
+    return _SLACK_USER_MENTION_RE.findall(text)
+
+
+def slack_mentioned_channel_ids(text: str) -> list[str]:
+    """The channel ids in `<#CHANNEL_ID>` mentions that carry no name."""
+    return _SLACK_CHANNEL_MENTION_RE.findall(text)
+
+
+def _label_slack_mentions(
+    text: str, pattern: re.Pattern[str], sigil: str, names_by_id: Mapping[str, str]
+) -> str:
+    def label(match: re.Match[str]) -> str:
+        entity_id = match[1]
+        name = names_by_id.get(entity_id, "")
+        if not name or name == entity_id:
+            return match[0]
+        escaped = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<{sigil}{entity_id}|{escaped}>"
+
+    return pattern.sub(label, text)
+
+
+def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_USER_MENTION_RE, "@", user_names_by_id)
+
+
+def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite unnamed `<#CHANNEL_ID>` mentions to Slack's labelled `<#CHANNEL_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_CHANNEL_MENTION_RE, "#", channel_names_by_id)
 
 
 def convert_mentions_to_slack_format(text: str) -> str:
@@ -348,10 +387,13 @@ def format_slack_messages_for_prompt(
     lines: list[str] = []
     for message in messages:
         forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
-        text = replace_bot_mention_with_username(
-            str(message.get("text", "")),
-            bot_user_id=bot_user_id,
-            bot_username=bot_username,
+        text = label_slack_user_mentions(
+            replace_bot_mention_with_username(
+                str(message.get("text", "")),
+                bot_user_id=bot_user_id,
+                bot_username=bot_username,
+            ),
+            user_names_by_id or {},
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
@@ -508,6 +550,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
     model_text = " + ".join(labels[:3])
     if len(labels) > 3:
         model_text = f"{model_text} +{len(labels) - 3}"
+    if model_text and usage.reasoning_effort:
+        model_text = f"{model_text} ({_safe_model_label(usage.reasoning_effort)})"
     parts = [model_text] if model_text else []
     if usage.session_cost_usd is not None:
         parts.append(format_slack_session_cost(usage.session_cost_usd))
@@ -515,7 +559,9 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 
 _SESSION_COST_LABEL_RE = re.compile(
-    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)(?: session cost)?$"
+    r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\)"
+    r"| • \+(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -526,25 +572,26 @@ def format_slack_session_cost(cost: float) -> str:
     return f"${cost:.2f}"
 
 
-def _replace_slack_session_cost(text: str, cost: float, *, require_web_link: bool) -> str:
+def _replace_slack_session_cost(text: str, label: str, *, require_web_link: bool) -> str:
     if require_web_link and SLACK_WEB_LINK_FOOTER_LABEL not in text:
         return text
     cleaned = _SESSION_COST_LABEL_RE.sub("", text).rstrip()
     cleaned = _MAIN_AGENT_TOKEN_LABEL_RE.sub("", cleaned).rstrip()
-    return (
-        f"{cleaned} • {format_slack_session_cost(cost)}"
-        if cleaned
-        else format_slack_session_cost(cost)
-    )
+    return f"{cleaned} • {label}" if cleaned else label
 
 
 def with_slack_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
     cost: float,
+    *,
+    run_cost: float | None = None,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Replace the cumulative cost in a live Slack footer without changing its blocks."""
-    updated_text = _replace_slack_session_cost(text, cost, require_web_link=True)
+    """Replace cumulative and optional per-run costs in a live Slack footer."""
+    label = format_slack_session_cost(cost)
+    if run_cost is not None and run_cost < cost:
+        label += f" • +{format_slack_session_cost(run_cost)}"
+    updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
 
@@ -577,7 +624,7 @@ def with_slack_session_cost(
     target = next(iter(candidates or fallback_candidates), None)
     if target is not None:
         target["text"] = _replace_slack_session_cost(
-            str(target.get("text") or ""), cost, require_web_link=False
+            str(target.get("text") or ""), label, require_web_link=False
         )
     elif (
         updated_text != text
@@ -590,7 +637,7 @@ def with_slack_session_cost(
             {
                 "type": "context",
                 "block_id": "open_swe_usage_footer",
-                "elements": [{"type": "mrkdwn", "text": format_slack_session_cost(cost)}],
+                "elements": [{"type": "mrkdwn", "text": label}],
             }
         )
     return updated_text, updated_blocks
@@ -1359,8 +1406,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch messages for a Slack thread, keeping the most recent window."""
+async def fetch_slack_thread_messages(
+    channel_id: str, thread_ts: str, *, complete: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch messages for a Slack thread, keeping the most recent window.
+
+    With ``complete``, a failed page raises instead of returning the pages fetched so far.
+    """
     if not SLACK_BOT_TOKEN:
         return []
 
@@ -1385,6 +1437,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 )
             except SLACK_REQUEST_ERRORS as exc:
                 logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                if complete:
+                    raise
                 break
 
             batch = payload.get("messages", [])
@@ -1432,10 +1486,8 @@ async def slack_thread_mutation_lock(
     deadline = asyncio.get_running_loop().time() + _SLACK_THREAD_MUTATION_LOCK_TIMEOUT_SECONDS
     while True:
         try:
-            await langgraph_client.threads.create(
-                thread_id=lock_id,
-                if_exists="raise",
-                ttl=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES,
+            await create_lock_thread(
+                langgraph_client, lock_id, ttl_minutes=_SLACK_THREAD_MUTATION_LOCK_TTL_MINUTES
             )
             break
         except ConflictError:

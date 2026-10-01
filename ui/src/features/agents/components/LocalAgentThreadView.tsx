@@ -29,6 +29,7 @@ import { ChangesPanel } from "@/features/agents/components/ChangesPanel"
 import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesScrollControl } from "@/features/agents/components/messages"
+import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import {
@@ -49,6 +50,7 @@ import {
   useLocalRepoRefs,
   useLocalThreadActivity,
   useLocalThreadDiff,
+  useLocalThreadPr,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import {
@@ -89,6 +91,7 @@ function errorMessage(error: unknown): string {
 
 export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const session = useSession()
+  const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const { stream } = useAgentThreadStream({
     transport: "local",
     threadId: sessionId,
@@ -221,6 +224,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const repository =
     branchDiff.data?.repository ?? checkpointDiff.data?.repository
   const pr = repository?.pr ?? null
+  // The composer's PR link reads this independent, always-enabled lookup, not
+  // the panel's diff: the row must show while the panel is collapsed, and the
+  // panel's cached metadata would go stale after a branch switch.
+  const composerPr = useLocalThreadPr(sessionId).data ?? null
   const diff = scope === "branch" ? branchDiff : checkpointDiff
   const files = useMemo(
     () => toPanelFiles(diff.data?.files ?? []),
@@ -490,6 +497,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             scrollControlRef={scrollControlRef}
           />
           <AgentComposerDock>
+            <ThreadPullRequests
+              pullRequests={composerPr ? [composerPr] : []}
+              compact
+              healthUnavailable
+            />
             {terminalContexts.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
                 {terminalContexts.map((text, index) => (
@@ -520,6 +532,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               activeRun={{ threadId: thread.id, running: isRunning }}
               busy={isRunning}
               compact
+              followUpBehavior={followUpBehavior}
               models={models}
               selection={activeSelection}
               onSelectionChange={setSelection}
@@ -530,14 +543,21 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                   setError(errorMessage(cause))
                 }
               }}
-              onSubmit={async (prompt, images) => {
+              onSubmit={async (prompt, images, options) => {
                 scrollControlRef.current?.scrollToBottom()
                 const terminalContext = terminalContexts.join("\n\n")
                 setTerminalContexts([])
                 const text = terminalContext
                   ? `${prompt}\n\nTerminal selection:\n\`\`\`\n${terminalContext}\n\`\`\``
                   : prompt
-                await submit(text, images, [], isRunning)
+                await submit(
+                  text,
+                  images,
+                  [],
+                  isRunning &&
+                    (followUpBehavior === "queue") !==
+                      (options?.alternate === true)
+                )
               }}
               placeholder="Add a follow up"
               skills={skills.data}

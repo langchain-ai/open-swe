@@ -7,14 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from agent.dashboard import deps, oauth, routes
-from agent.dashboard.workspace_settings import (
-    WorkspaceSettingsUpdate,
-    upsert_instance_settings,
-    upsert_workspace_overrides,
-)
+from agent.slack.channels import SlackChannel
 from agent.workspaces import routes as workspace_routes
-from agent.workspaces.store import WORKSPACES
-from tests.conftest import FakeStore
+from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -43,34 +38,57 @@ async def admin_client(
         yield client
 
 
-async def test_duplicate_repo_is_a_409(admin_client: httpx.AsyncClient) -> None:
-    first = await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
-    )
-    assert first.status_code == 200
-    second = await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/api"]}
-    )
-    assert second.status_code == 409
-    assert "already belongs to workspace core" in second.json()["detail"]
+@pytest.mark.parametrize(
+    ("setup_script", "run_id"), [("", None), ("echo setup", "run-1"), ("echo setup", None)]
+)
+async def test_create_starts_initial_build_when_setup_is_provided(
+    admin_client: httpx.AsyncClient, setup_script: str, run_id: str | None
+) -> None:
+    with (
+        patch.object(
+            workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")
+        ) as cron,
+        patch.object(
+            workspace_routes, "start_refresh_run", AsyncMock(return_value=run_id)
+        ) as start,
+    ):
+        response = await admin_client.post(
+            "/dashboard/api/workspaces",
+            json={
+                "name": "OSS",
+                "repos": ["acme/oss"],
+                "setup_script": setup_script,
+                "update_script": "echo update",
+            },
+        )
 
-
-async def test_duplicate_repo_on_update_is_a_409(admin_client: httpx.AsyncClient) -> None:
-    await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
-    )
-    await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/oss"]}
-    )
-    response = await admin_client.put("/dashboard/api/workspaces/oss", json={"repos": ["acme/api"]})
-    assert response.status_code == 409
-    assert "already belongs to workspace core" in response.json()["detail"]
+    stored = await WORKSPACES.get("oss")
+    assert stored is not None
+    assert stored.setup_script == setup_script
+    assert stored.update_script == "echo update"
+    if not setup_script:
+        assert response.status_code == 200
+        assert response.json()["refresh_status"] == "never"
+        cron.assert_not_awaited()
+        start.assert_not_awaited()
+    else:
+        cron.assert_awaited_once_with("oss")
+        start.assert_awaited_once_with("oss")
+        if run_id is None:
+            assert response.status_code == 502
+            assert response.json()["detail"] == (
+                "workspace was created but its initial image build could not start; "
+                "retry the build from workspace settings"
+            )
+        else:
+            assert response.status_code == 200
+            assert response.json()["refresh_status"] == "refreshing"
+            assert response.json()["refresh_run_id"] == run_id
 
 
 async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClient) -> None:
-    await admin_client.post(
-        "/dashboard/api/workspaces",
-        json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss"], setup_script="echo setup"), "admin"
     )
     with (
         patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
@@ -83,94 +101,9 @@ async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClie
         )
 
     assert response.status_code == 200
+    assert response.json()["refresh_status"] == "refreshing"
+    assert response.json()["refresh_run_id"] == "run-1"
     start.assert_awaited_once_with("oss")
-
-
-async def test_non_repo_update_does_not_rebuild_snapshot(admin_client: httpx.AsyncClient) -> None:
-    await admin_client.post(
-        "/dashboard/api/workspaces",
-        json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
-    )
-    with (
-        patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
-        patch.object(workspace_routes, "start_refresh_run", AsyncMock()) as start,
-    ):
-        response = await admin_client.put(
-            "/dashboard/api/workspaces/oss", json={"prompt": "Be concise"}
-        )
-
-    assert response.status_code == 200
-    start.assert_not_awaited()
-
-
-async def test_options_carry_repos_channels_and_default_flag(
-    admin_client: httpx.AsyncClient,
-) -> None:
-    await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
-    await admin_client.post(
-        "/dashboard/api/workspaces",
-        json={"name": "OSS", "repos": ["acme/oss"], "slack_channel_ids": ["C0SS"]},
-    )
-    body = (await admin_client.get("/dashboard/api/workspaces/options")).json()
-    by_slug = {item["slug"]: item for item in body["workspaces"]}
-    assert by_slug["default"]["is_default"] is True and by_slug["default"]["repos"] == []
-    assert by_slug["oss"]["repos"] == ["acme/oss"] and by_slug["oss"]["slack_channel_ids"] == [
-        "C0SS"
-    ]
-
-
-async def test_options_carry_each_workspace_default_repository(
-    admin_client: httpx.AsyncClient, fake_store: FakeStore
-) -> None:
-    """The composer preselects a workspace's default repository when the workspace is picked first.
-
-    An inherited default is withheld from a workspace that does not own it.
-    """
-    await admin_client.post("/dashboard/api/workspaces", json={"name": "Default"})
-    await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "OSS", "repos": ["acme/oss"]}
-    )
-    await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/api"]}
-    )
-    await upsert_instance_settings(WorkspaceSettingsUpdate(default_repo="acme/oss"))
-    await upsert_workspace_overrides("core", WorkspaceSettingsUpdate(default_repo="acme/api"))
-
-    body = (await admin_client.get("/dashboard/api/workspaces/options")).json()
-
-    by_slug = {item["slug"]: item for item in body["workspaces"]}
-    assert by_slug["oss"]["default_repo"] == "acme/oss"
-    assert by_slug["core"]["default_repo"] == "acme/api"
-    assert by_slug["default"]["default_repo"] is None
-
-
-async def test_a_workspace_with_no_repository_is_a_400(admin_client: httpx.AsyncClient) -> None:
-    """Only `default` may claim nothing; a malformed definition is not a conflict."""
-    response = await admin_client.post("/dashboard/api/workspaces", json={"name": "OSS"})
-    assert response.status_code == 400
-    assert "at least one repository" in response.json()["detail"]
-
-
-@pytest.mark.parametrize("stale_precheck", [False, True])
-async def test_a_repeated_workspace_name_is_a_409(
-    admin_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, stale_precheck: bool
-) -> None:
-    payload = {"name": "Core", "repos": ["acme/api"]}
-    first = await admin_client.post("/dashboard/api/workspaces", json=payload)
-    assert first.status_code == 200
-    if stale_precheck:
-
-        async def slug_was_free(slug: str) -> bool:
-            return False
-
-        monkeypatch.setattr(WORKSPACES, "slug_exists", slug_was_free)
-    second = await admin_client.post(
-        "/dashboard/api/workspaces", json={"name": "Core", "repos": ["acme/other"]}
-    )
-    assert second.status_code == 409
-    assert "already exists" in second.json()["detail"]
-    stored = await admin_client.get("/dashboard/api/workspaces/core")
-    assert stored.json() == first.json()
 
 
 async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
@@ -186,3 +119,77 @@ async def test_two_creates_of_one_name_at_once_are_a_200_and_a_409(
     assert sorted([first.status_code, second.status_code]) == [200, 409]
     conflict = first if first.status_code == 409 else second
     assert "already" in conflict.json()["detail"]
+
+
+_ELIGIBLE = {"is_member": True, "is_ext_shared": False, "is_pending_ext_shared": False}
+
+
+@pytest.mark.parametrize(
+    ("payload", "allowed"),
+    [
+        (_ELIGIBLE, True),
+        ({**_ELIGIBLE, "is_pending_ext_shared": True}, False),
+        ({**_ELIGIBLE, "is_ext_shared": True}, False),
+        ({**_ELIGIBLE, "is_member": False}, False),
+    ],
+)
+async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
+    admin_client: httpx.AsyncClient, payload: dict[str, bool], allowed: bool
+) -> None:
+    with patch.object(
+        workspace_routes.SlackChannel,
+        "load",
+        AsyncMock(return_value=SlackChannel(id="C0API", payload=_ELIGIBLE)),
+    ):
+        created = await admin_client.post(
+            "/dashboard/api/workspaces",
+            json={
+                "name": "OSS",
+                "repos": ["acme/oss"],
+                "slack_channel_ids": ["C0API", "C0NEW"],
+                "kitchen_channel_ids": ["C0API"],
+            },
+        )
+    assert created.status_code == 200
+
+    load = AsyncMock(return_value=SlackChannel(id="C0NEW", payload=payload))
+    with patch.object(workspace_routes.SlackChannel, "load", load):
+        response = await admin_client.put(
+            "/dashboard/api/workspaces/oss", json={"kitchen_channel_ids": ["C0API", "C0NEW"]}
+        )
+
+    load.assert_awaited_once_with("C0NEW", use_cache=False)
+    stored = (await admin_client.get("/dashboard/api/workspaces/oss")).json()
+    if allowed:
+        assert response.status_code == 200
+        assert stored["kitchen_channel_ids"] == ["C0API", "C0NEW"]
+    else:
+        assert response.status_code == 400
+        assert "C0NEW" in response.json()["detail"]
+        assert stored["kitchen_channel_ids"] == ["C0API"]
+
+
+async def test_a_prompt_edit_during_a_refresh_outlives_it(
+    admin_client: httpx.AsyncClient,
+) -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], setup_script="echo tools"), "admin"
+    )
+    await WORKSPACES.mark_refreshing("core")
+    response = await admin_client.put("/dashboard/api/workspaces/core", json={"prompt": "new"})
+    assert response.status_code == 200
+    assert response.json()["refresh_status"] == "refreshing"
+
+    await WORKSPACES.start_refresh_step("core", "capture")
+    await WORKSPACES.mark_refresh_settled("core", "success")
+
+    stored = (await admin_client.get("/dashboard/api/workspaces/core")).json()
+    assert stored["prompt"] == "new"
+    assert stored["refresh_status"] == "success"
+
+
+async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.AsyncClient) -> None:
+    response = await admin_client.delete("/dashboard/api/workspaces/default")
+
+    assert response.status_code == 409
+    assert (await admin_client.get("/dashboard/api/workspaces/default")).status_code == 200

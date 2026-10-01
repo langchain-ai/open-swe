@@ -5,11 +5,10 @@ This document records the design and operating constraints of expedited Slack re
 ## Summary
 
 The agent posts a tiny PR's full diff in the Slack thread. For a draft, the PR's
-author first marks it ready from the card. Then one person other than the author
-approves. The approval is only recorded in PostgreSQL; nothing reaches GitHub. Once
-checks and reviews are clean, the agent calls a merge tool that submits the approval
-as that person's GitHub review and merges. The approval survives a later commit only
-if it leaves the diff shown on the card unchanged.
+author first marks it ready from an author-only Slack DM. Then one person other than the author
+approves, and the click submits that person's GitHub review at once. Once checks and
+reviews are clean, the agent calls a merge tool that merges. The approval survives a
+later commit only if it leaves the diff shown on the card unchanged.
 
 ## Motivation
 
@@ -42,9 +41,12 @@ are already in the Slack thread.
   test-only or test lines are the majority, because otherwise there would be nothing
   to look at; when tests are the minority of a mostly-source change it names them
   instead, so the thing being voted on stays readable.
-- A draft stays a draft. Its card offers only **Mark ready for review**, which only
-  the PR's author can click; it undrafts the PR with the author's own GitHub token and
-  then opens the card for approval.
+- A draft stays a draft. **Mark ready for review** is sent by DM
+  to the PR's linked Slack author, rather than an ephemeral thread message. It undrafts
+  the PR with the author's own GitHub token and then opens the shared card for approval.
+  Calling the tool again retries this private prompt. If Slack delivery fails or the
+  author is not linked, the tool reports that they must mark it ready on GitHub;
+  calling the tool again after that opens the existing card for approval.
 - No path is refused for being sensitive. A denylist is incomplete by construction,
   so it stops nobody deliberate, while matching path segments blocks unrelated files
   that merely contain a word like `token`. The controls that hold are a diff small
@@ -57,13 +59,33 @@ are already in the Slack thread.
 
 ### Slack card
 
-PR link, author, the diff as the card draws it, and its status. A draft's card offers
-**Mark ready for review** and **Dismiss**; otherwise it has **Approve** and
-**Dismiss**. Once approved, the diff and buttons go and
+PR link, author, the diff as the card draws it, and its status. A draft's shared card
+shows a waiting status and **Dismiss**, never the author-only readiness button;
+otherwise it has **Approve** and **Dismiss**. Once approved, the diff and buttons go and
 the card says who approved. Once merged or cancelled, the whole card becomes one line,
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
-the PR link. It is posted in the thread only, never broadcast to the channel.
-Reactions are never votes.
+the PR link. Reactions are never votes.
+
+The card is posted in the thread only. Once it is open for approval it can be sent to
+one channel, once:
+
+- When the card is posted, it lists its thread's channel, then the public, not
+  externally shared channels where the PR author's non-private Open SWE threads ran
+  in the last 14 days, then channels the author's cards were sent to in the last
+  90 days. There are at most 10.
+- With only the thread's channel on the list, the card shows **Broadcast in #channel**
+  and **Other channel…**. With more, it shows a dropdown (thread's channel preselected,
+  **Other…** last) and **Send**. **Other** opens a picker of public channels, and a
+  channel picked there is on the list for the author's later cards.
+- Anyone in the thread may send the card to the thread's own channel. This reposts
+  the card as a thread reply also sent to the channel.
+- Only a voter (see below) may send it to another channel, since that shows the diff
+  to new people. The card is posted at the top of that channel with a link back to
+  the thread, and votes work from either copy.
+
+When the card is approved or closes for any reason, both the broadcast and the copy in
+the other channel are deleted, and the card stays in the thread only. So no channel
+keeps a finished card.
 
 ### Voting
 
@@ -71,18 +93,24 @@ Reactions are never votes.
   GitHub identity has write or higher on the repo. Votes are keyed by user id, so one
   person cannot vote twice through two handles.
 - The author cannot approve their own PR. One approval from anyone else is enough.
-- A click is recorded and the card re-rendered; nothing is sent to GitHub. A voter
-  without a stored GitHub token is refused at click time, since their review could not
-  be submitted later.
+- A click is recorded, the card re-rendered, and a GitHub `APPROVE` review submitted
+  with the voter's own token on the current head, provided the diff the card drew is
+  unchanged there. The review body links the Slack thread. A voter without a stored
+  GitHub token is refused. If GitHub is unavailable or refuses, the vote stays
+  recorded and the merge submits it.
 - When the approval lands, the agent is woken once so it can try the merge. The
   clicker gets an ephemeral confirmation; nothing else is posted.
 
 ### Dismissal
 
 Anyone in Slack may dismiss an open card, with no GitHub link or write access needed.
-The card is cancelled and its votes no longer count. Nothing is sent to the agent or to
-GitHub: anyone who wants changes tags the agent in the thread like any other request,
-and it can post a fresh card afterwards.
+The card is cancelled and its votes no longer count. Nothing is sent to the agent, and
+the GitHub reviews the votes submitted are dismissed: anyone who wants changes tags the
+agent in the thread like any other request, and it can post a fresh card afterwards.
+Every card that closes without a merge, superseded ones and a closed PR's included,
+dismisses its reviews the same way, so a reopened PR does not inherit them. A review
+counts as dismissed only once GitHub confirms; one GitHub refused is retried whenever
+another card of the PR closes.
 
 ### Merge
 
@@ -101,9 +129,9 @@ card. The tool:
    standing request for changes, and, where Open SWE auto-review is enabled, an Open
    SWE review for this exact head SHA. Anything missing is returned to the agent and
    nothing is written.
-4. Submits a GitHub `APPROVE` review at the current head for the approver with that
-   person's own token, recording the review id and SHA so a retry does not resubmit
-   it, and comments the card's Slack link on the PR.
+4. Submits a GitHub `APPROVE` review at the current head for any approver whose
+   review from the click is not a standing approval: it never landed, or GitHub
+   dismissed it as stale after a later commit.
 5. Merges with a GitHub App token scoped to contents and pull requests on that
    repository, conditional on the current head SHA, using a merge method the
    repository allows. GitHub refusing leaves the card open and the reason goes back
@@ -112,10 +140,17 @@ card. The tool:
 On a confirmed merge: card → merged, merged reaction on the Slack root. The thread
 resolves through the existing merged-PR handling.
 
+When someone merges or closes the PR on GitHub themselves, the `pull_request` closed
+webhook settles an open card the same way, from the PR's current state rather than the
+event, so a late delivery cannot close the card of a reopened PR: merged → card merged
+and the merged reaction; closed → card closed and its reviews dismissed. Nothing new is
+posted in Slack and the agent is not woken.
+
 ### Storage
 
-PostgreSQL, alongside the pull request and users tables: one row per card, one per
-vote. A vote records its decision and, once submitted, the GitHub review id
+PostgreSQL, alongside the pull request and users tables: an expedited card is a
+[human review request](human-review.md) of kind `expedited`, and each vote is one of its
+participants. A vote records its decision and, once submitted, the GitHub review id
 and the SHA it was submitted on. Votes reference `users.id`, never a GitHub or Slack
 handle; handles are looked up for display only.
 

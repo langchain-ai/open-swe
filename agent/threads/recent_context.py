@@ -15,19 +15,19 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.github.comments import format_github_comment_body_for_prompt
-from agent.prompts import render_prompt
+from agent.github.comments import sanitize_github_comment_body
+from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.threads.summary import (
     _is_automation_thread,
     _metadata_repo,
     _thread_id,
     _thread_metadata,
-    _thread_updated_ms,
     thread_is_owner,
     thread_is_private,
     thread_is_unlisted,
     thread_source,
+    thread_updated_ms,
 )
 from agent.utils.json_types import ThreadLike
 from agent.utils.thread_participants import participant_search_filters
@@ -202,7 +202,7 @@ class RecentContextSelector:
         ):
             return None
         _, _, full_name = _metadata_repo(metadata)
-        updated_at = _thread_updated_ms(thread)
+        updated_at = thread_updated_ms(thread)
         return RecentThreadContext(
             thread_id=thread_id,
             title=_clean_title(metadata.get("title"), full_name or None, thread_source(metadata)),
@@ -251,8 +251,8 @@ def _render_entries(entries: list[RecentThreadContext]) -> str:
                 f"   Thread: {entry.thread_id}",
             ]
         )
-        lines.append(format_github_comment_body_for_prompt("", body, trusted=()))
-    return render_prompt("system/recent-thread-context.md", entries="\n".join(lines))
+        lines.append(sanitize_github_comment_body(body))
+    return prompt("system/recent-thread-context", entries="\n".join(lines))
 
 
 def render_recent_thread_context(entries: list[RecentThreadContext]) -> str:

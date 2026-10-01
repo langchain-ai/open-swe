@@ -292,6 +292,7 @@ def render_review_body(
     additional_findings_count: int = 0,
     assessment: ReviewAssessment | None = None,
     approved: bool = False,
+    dry_run: bool = False,
 ) -> str:
     """Compose the top-level review body.
 
@@ -324,15 +325,17 @@ def render_review_body(
         )
         if approved:
             decision = "Approved"
-        suffix = "automatic approval" if approved else "advisory"
+        suffix = "automatic approval" if approved else "dry run" if dry_run else "advisory"
         parts.append(f"**Risk: {assessment.risk_score}/5 · {decision}** ({suffix})")
         parts.append(
             "<details>\n<summary>Why?</summary>\n\n"
             f"{escape(assessment.explanation)}\n\n"
             f"Reviewed commit: `{assessment.head_sha}`. Risk ranges from 1 (low) to 5 (high). "
             + (
-                "Approved automatically under the configured policy. No merge is performed."
+                "Approved automatically under the repository's `.open-swe/APPROVALS.md`. No merge is performed."
                 if approved
+                else "Dry run: this assessment does not approve or merge the PR."
+                if dry_run
                 else "This assessment does not approve or merge the PR."
             )
             + "\n\n</details>"

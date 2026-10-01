@@ -10,6 +10,7 @@ import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
 import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { RequestHumanReview } from "./RequestHumanReview"
 import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
 export type PullRequestOutcome = "merged" | "closed"
@@ -26,12 +27,14 @@ export function PullRequestActions({
   outcome,
   onSettled,
   onReady,
+  onReviewPage = false,
 }: {
   pr: OpenPullRequest
   login: string
   outcome?: PullRequestOutcome
   onSettled: (outcome: PullRequestOutcome) => void
   onReady: () => void
+  onReviewPage?: boolean
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -55,17 +58,28 @@ export function PullRequestActions({
             {pr.draft === true && (
               <MarkPullRequestReady pr={pr} onReady={onReady} />
             )}
+            {pr.draft === false && <RequestHumanReview pr={pr} />}
             {canUpdateBranch(pr) && (
               <UpdatePullRequestBranch pr={pr} onUpdated={onReady} />
             )}
             {canAttemptMerge(pr) && (
               <MergePullRequest pr={pr} onMerged={() => onSettled("merged")} />
             )}
+            {pr.missingChecks.length > 0 && (
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                Merge blocked: {pr.missingChecks.join(", ")} never reported
+              </span>
+            )}
             <ClosePullRequest pr={pr} onClosed={() => onSettled("closed")} />
           </>
         )}
       </div>
-      <PullRequestLinks repo={pr.repo} number={pr.number} title={pr.title} />
+      <PullRequestLinks
+        repo={pr.repo}
+        number={pr.number}
+        title={pr.title}
+        onReviewPage={onReviewPage}
+      />
     </div>
   )
 }

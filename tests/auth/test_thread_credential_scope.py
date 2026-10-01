@@ -176,6 +176,30 @@ async def test_background_completion_cannot_publish_with_saved_user_identity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["dashboard", "slack"])
+async def test_user_followup_can_publish_after_background_completion(
+    monkeypatch, thread_metadata, credentials, source
+):
+    from agent.dispatch import prepare_run_config
+
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    background_config = config(source=source)
+    background_config["configurable"]["background_task_completion"] = True
+    background_config = prepare_run_config(background_config, None)
+    monkeypatch.setattr("agent.run_config.get_config", lambda: background_config)
+
+    with pytest.raises(RuntimeError, match="Background"):
+        await opr._resolve_pr_author_token()
+    credentials.assert_not_awaited()
+
+    followup = prepare_run_config(config(source=source, login="bob"), None)
+    background_config["configurable"].update(followup["configurable"])
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+
+    assert await opr._resolve_pr_author_token() == ("bob-token", "user")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("removed_bot", [False, True])
 async def test_system_pr_uses_bot_even_with_a_triggering_user(
     monkeypatch, thread_metadata, credentials, fake_store, removed_bot

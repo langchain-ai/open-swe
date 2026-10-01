@@ -317,7 +317,7 @@ export function useAttachedTerminal(
       const connect = () => {
         if (disposed || exited) return
         void agentsApi
-          .connectCloudTerminal(target.threadId)
+          .connectCloudTerminal(sessionId)
           .then((connection) => {
             if (disposed || exited) return
             const createdSocket = new WebSocket(
@@ -428,7 +428,7 @@ export function useAttachedTerminal(
     setState(EMPTY_TERMINAL_SESSION)
     const remove = bridge.onEvent((event) => {
       if (
-        event.localSessionId === target.sessionId &&
+        event.localSessionId === sessionId &&
         event.terminalId === terminalId &&
         !disposed
       ) {
@@ -436,7 +436,7 @@ export function useAttachedTerminal(
       }
     })
     void bridge
-      .attach({ localSessionId: target.sessionId, terminalId, cwd })
+      .attach({ localSessionId: sessionId, terminalId, cwd })
       .then((snapshot) => {
         if (!disposed)
           setState((current) => applyTerminalSnapshot(current, snapshot))
@@ -457,7 +457,7 @@ export function useAttachedTerminal(
     return () => {
       disposed = true
       remove()
-      void bridge.detach({ localSessionId: target.sessionId, terminalId })
+      void bridge.detach({ localSessionId: sessionId, terminalId })
     }
   }, [cwd, restartRequest, sessionId, target.kind, terminalId])
 

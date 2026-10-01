@@ -13,12 +13,12 @@ const REFRESH_WINDOW_MS = 5 * 60 * 1000;
 const FALLBACK_REFRESH_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const SIGNED_IN_PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Open SWE</title>
+<html lang="en"><head><meta charset="utf-8"><title>ChatGPT sign-in complete - Open SWE</title>
 <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem}h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;opacity:.7}</style>
 </head><body><main><h1>You're signed in</h1><p>You can close this tab and return to Open SWE.</p></main></body></html>`;
 
 const FAILED_PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Open SWE</title>
+<html lang="en"><head><meta charset="utf-8"><title>ChatGPT sign-in failed - Open SWE</title>
 <style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem}h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;opacity:.7}</style>
 </head><body><main><h1>Sign-in failed</h1><p>Return to Open SWE and try again.</p></main></body></html>`;
 
