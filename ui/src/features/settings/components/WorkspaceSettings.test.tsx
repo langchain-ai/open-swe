@@ -77,10 +77,6 @@ afterEach(() => {
 })
 
 function mockApis(record: WorkspaceRecord = RECORD) {
-  // A failed proxy mutation reports itself through the client-error endpoint;
-  // the real `request` would otherwise reject with "Couldn't reach the server."
-  // and its alert would win `findByRole("alert")` below.
-  vi.spyOn(api, "reportClientError").mockResolvedValue(undefined)
   vi.spyOn(api, "getWorkspace").mockResolvedValue(record)
   vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
     default_slug: "oss",
@@ -133,6 +129,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
+  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
@@ -489,16 +486,10 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
-    await waitFor(() => expect(update).not.toHaveBeenCalled())
-    // The API-keys and repositories sections also fail while the real fetch is
-    // blocked, so match the alert that names the rejected configuration.
-    await waitFor(() =>
-      expect(
-        screen
-          .getAllByRole("alert")
-          .some((alert) => alert.textContent?.includes("JSON object"))
-      ).toBe(true)
-    )
+    expect(
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
+    expect(update).not.toHaveBeenCalled()
     fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
     fireEvent.change(screen.getByLabelText("Rule name"), {

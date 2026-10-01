@@ -310,6 +310,13 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_move_thread",
     }
 )
+SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_start_new_thread"})
+
+
+def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
+    if cfg.slack_by_the_way_thread_ts:
+        return SLACK_BY_THE_WAY_EXCLUDED_TOOLS
+    return SLACK_ASK_EXCLUDED_TOOLS
 
 
 # Reading a Slack channel takes an explicit channel id and nothing from the run's
@@ -1264,6 +1271,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
+                slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -1723,7 +1731,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
         if stop_summary_mode
-        else SLACK_ASK_EXCLUDED_TOOLS
+        else _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic
@@ -2004,7 +2012,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode
-            else SLACK_ASK_EXCLUDED_TOOLS
+            else _slack_ask_excluded_tools(cfg)
             if slack_ask_mode
             else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
             if incident_automatic
