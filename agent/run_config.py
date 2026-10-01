@@ -169,6 +169,8 @@ class RunConfig(BaseModel):
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
+    # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
+    slack_by_the_way_thread_ts: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 

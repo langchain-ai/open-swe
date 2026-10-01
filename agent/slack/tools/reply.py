@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
@@ -7,6 +8,7 @@ from typing import Annotated, Any, Literal
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import ConflictError
 
 from agent.run_config import RunConfig
 from agent.slack.blocks import (
@@ -33,7 +35,8 @@ from agent.slack.orphan import (
     slack_thread_detached,
 )
 from agent.slack.run_feedback import feedback_block
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.threads.creation import create_lock_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -41,6 +44,7 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+_BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
 # The posting helpers append a dashboard-link context block.
 _WEB_LINK_BLOCKS = 1
 
@@ -73,6 +77,10 @@ async def slack_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True and cfg.slack_by_the_way_thread_ts:
+        return await _by_the_way_reply(
+            cfg, cfg.slack_by_the_way_thread_ts, message, response_type, blocks, options
+        )
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
@@ -213,6 +221,75 @@ async def _handle_kickoff(
         )
         return
     await client.store.put_item(namespace, thread_ts, {"removed": True})
+
+
+async def _by_the_way_reply(
+    cfg: RunConfig,
+    thread_ts: str,
+    message: str,
+    response_type: Literal["progress", "final"],
+    blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
+) -> dict[str, Any]:
+    """Post the one public `/btw` answer, with no link back to the asker's private thread."""
+    if options or response_type != "final":
+        return {
+            "success": False,
+            "error": "only one final answer is posted for /btw",
+            "retry": True,
+            "hint": (
+                "Nothing was posted. Everyone in the Slack thread reads this reply and this run "
+                "ends with it, so send a single `final` reply without `options`."
+            ),
+        }
+    channel_id = cfg.slack_thread.channel_id if cfg.slack_thread else ""
+    if not channel_id:
+        return {"success": False, "error": "Missing the Slack channel to answer in"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    if blocks is None:
+        blocks = _reply_blocks(message, None, reserve=0)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            message = markdown_to_mrkdwn(message)
+    client = get_langgraph_client()
+    reservation = _by_the_way_answer_id(cfg.thread_id or "")
+    try:
+        await create_lock_thread(client, reservation, ttl_minutes=_BY_THE_WAY_ANSWER_TTL_MINUTES)
+    except ConflictError:
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
+    except Exception:
+        logger.exception(
+            "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
+        )
+        return {"success": False, "error": "could not reserve the answer", "retry": True}
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, message, blocks=blocks
+    )
+    if message_ts is None:
+        try:
+            await client.threads.delete(reservation)
+        except Exception:
+            logger.exception(
+                "Could not release the /btw answer reservation",
+                extra={"agent_thread_id": cfg.thread_id},
+            )
+        return {
+            "success": False,
+            "error": slack_error or "post failed",
+            "slack_error": slack_error,
+            "hint": _slack_reply_failure_hint(slack_error),
+        }
+    # Slack drops a thread's status on any bot post, including a conversation's already there.
+    await settle_slack_thread_status(channel_id, thread_ts)
+    return {"success": True}
+
+
+def _by_the_way_answer_id(thread_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-by-the-way-answer:{thread_id}"))
 
 
 async def _ephemeral_reply(
