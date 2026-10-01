@@ -174,6 +174,18 @@
       },
       "ApiKeyCreate": {
         "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -217,6 +229,28 @@
           "created_by": {
             "title": "Created By",
             "type": "string"
+          },
+          "created_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "expires_at": {
             "format": "date-time",
@@ -2039,6 +2073,28 @@
             "title": "Created By",
             "type": "string"
           },
+          "created_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -2910,6 +2966,17 @@
               }
             ],
             "title": "Draft Prs"
+          },
+          "experimental_act_as_approval": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Act As Approval"
           },
           "experimental_assistant_ui": {
             "agent_feature_flag": true,

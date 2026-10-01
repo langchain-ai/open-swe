@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ActAsApprovalPreference } from "@/features/settings/components/ActAsApprovalPreference"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { BackgroundCallbacksPreference } from "@/features/settings/components/BackgroundCallbacksPreference"
 import { HumanReviewPreference } from "@/features/settings/components/HumanReviewPreference"
@@ -38,6 +39,7 @@ function FeatureFlagsPage() {
         <BackgroundCallbacksPreference />
         <SandboxMemoryPreference />
         <HumanReviewPreference />
+        <ActAsApprovalPreference />
       </SettingsSection>
     </AppShell>
   )

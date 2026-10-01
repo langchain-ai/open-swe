@@ -111,10 +111,8 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
@@ -1940,7 +1938,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         else []
                     ),
                     *([workspace_skills] if workspace_skills else []),
-                    SanitizeToolInputsMiddleware(),
                     ValidateImageReadsMiddleware(),
                     ModelCallLimitMiddleware(
                         run_limit=incident_session.policy.max_model_calls
@@ -1967,7 +1964,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if stop_summary_mode
                         else [check_message_queue_before_model, deliver_event_matches_before_model]
                     ),
-                    TimeoutWrapupMiddleware(),
                     RequireUserReplyMiddleware(
                         _registered_tool_name(slack_reply),
                         _registered_tool_name(slack_no_reply_needed),

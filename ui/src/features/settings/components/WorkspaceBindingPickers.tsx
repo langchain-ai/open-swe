@@ -9,10 +9,7 @@ import {
 import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
-import {
-  normalizeSlackChannelId,
-  useSlackChannelDirectory,
-} from "@/lib/slack-channels"
+import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import {
   OwnershipPicker,
   type PickerItem,
@@ -163,9 +160,10 @@ export function SlackChannelPicker({
           <HashIcon size={14} />
         ),
         owner: owners.get(channel.id.toLowerCase()) ?? null,
+        disabled: !channel.is_member,
         warning: channel.is_member
           ? undefined
-          : "Open SWE is not in this channel, so mentions there will not reach it.",
+          : "Invite Open SWE to this channel, then refresh to select it.",
       })),
     [directory.data, owners]
   )
@@ -181,17 +179,6 @@ export function SlackChannelPicker({
       workspaceSlug={workspaceSlug}
       onChange={onChange}
       searchPlaceholder="Search channels"
-      filter={{
-        label: "Only channels the bot is in",
-        matches: (item) => !item.warning,
-      }}
-      manual={{
-        label: "Slack channel ID",
-        placeholder: "Paste a channel ID (for example, C0123456789)",
-        hint: "In Slack, open the channel details and copy the channel ID from the About tab.",
-        normalize: normalizeSlackChannelId,
-        invalidHint: "Channel IDs start with C or G.",
-      }}
       actions={
         <RefreshSlackChannels
           refresh={directory.refresh}
@@ -205,13 +192,13 @@ export function SlackChannelPicker({
               directory.error instanceof Error
                 ? ` (${directory.error.message})`
                 : ""
-            }; add them by ID.`
+            }; refresh to try again.`
           : null
       }
       notice={
         directory.data?.partial
-          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed. Add others by ID."
-          : null
+          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed."
+          : "Missing a channel? Invite Open SWE in Slack, then refresh this list."
       }
       disabled={disabled}
     />
