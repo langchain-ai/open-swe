@@ -1,0 +1,54 @@
+agent/resources/prompts/system/commit-pr.md
+  s_8c15db54e0c42b::t_72e80e64a32c9a 14
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_772ae970bf1332 106-115,119,125-128
+  s_8c15db54e0c42b::t_167fdc5c230281 280-291
+  s_8c15db54e0c42b::t_d8e3e434cfbe8a 214-215
+  s_8c15db54e0c42b::t_6745026fb8e2a7 269
+  s_8c15db54e0c42b::t_c0e651a5f2d916 428
+  s_8c15db54e0c42b::t_b59457498417b4 148-172
+  s_8c15db54e0c42b::t_978c6be1566ff8 437,439
+agent/resources/prompts/tools/record_rollout_check.md
+  s_8c15db54e0c42b::t_d7f4039f456096 1
+agent/tools/record_rollout_check.py
+  s_8c15db54e0c42b::t_6fa068f44e7168 11
+  s_8c15db54e0c42b::t_2e69f2fee0f54c 49-51
+  s_8c15db54e0c42b::t_0cfebe76a21719 55
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_426f2bdff393ef 135-138
+agent/config.py
+  s_8c15db54e0c42b::t_b37569003749f0 283-303
+agent/resources/prompts/runs/rollout-dev.md.jinja
+  s_8c15db54e0c42b::t_fbe376c29d44cf 1-2
+agent/webhooks/common.py
+  s_8c15db54e0c42b::t_a4274bbc76208b 1489-1490
+agent/resources/prompts/runs/rollout-check.md.jinja
+  s_8c15db54e0c42b::t_d32b625e4fc403 12-16
+agent/rollouts.py
+  s_8c15db54e0c42b::t_2bccd94075c93e 476
+  s_8c15db54e0c42b::t_c89c8cb2127029 236-240
+  s_8c15db54e0c42b::t_b3035e6dbb9da4 22
+  s_8c15db54e0c42b::t_d3f6f2c94cabd3 566-567,569-571,582-586
+  s_8c15db54e0c42b::t_5a8cce3d32dc5a 3-7
+  s_8c15db54e0c42b::t_0c3df7934815db 41-42
+  s_8c15db54e0c42b::t_8a441f51937762 174-186,188-203,207-208,212-214,216-222
+  s_8c15db54e0c42b::t_ea5f10750b0434 123-143,145-146
+  s_8c15db54e0c42b::t_9b736a4b5cae6b 16
+  s_8c15db54e0c42b::t_57cc6169a2c3b5 234-235,475,477,497,559,564-565,591,596,636,640,646-647
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8edcca570fd2eb0dbaf40cb70bb20a7515d264f9",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
