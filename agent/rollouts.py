@@ -35,6 +35,8 @@ MAX_WATCH_AGE = timedelta(days=7)
 _LOCATE_TOOL_NAMES = frozenset({"releases_locate_commit", "releases.locate_commit"})
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _ENVS = ("dev", "staging", "prod")
+ROLLOUT_OWNER = "langchain-ai"
+ROLLOUT_REPO = "langchainplus"
 
 
 @asynccontextmanager
@@ -112,6 +114,19 @@ WATCHES = RolloutWatchStore()
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
+
+
+def rollout_repo_allowed(owner: str, repo: str) -> bool:
+    """Rollouts follow langchainplus only until the check is ready for other repos."""
+    return owner.strip().lower() == ROLLOUT_OWNER and repo.strip().lower() == ROLLOUT_REPO
+
+
+def rollout_payload_allowed(payload: Mapping[str, Any]) -> bool:
+    identity = _repo_identity(payload)
+    if identity is None:
+        return False
+    owner, repo, _number = identity
+    return rollout_repo_allowed(owner, repo)
 
 
 def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
@@ -363,6 +378,8 @@ async def start_from_merge(
     if not isinstance(check, dict):
         return
     owner, repo, number = identity
+    if not rollout_repo_allowed(owner, repo):
+        return
     pull_requests = metadata.get("pull_requests")
     resolves_thread = isinstance(pull_requests, list) and any(
         isinstance(record, dict) and record.get("resolves_thread") is True

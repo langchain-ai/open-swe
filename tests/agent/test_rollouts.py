@@ -257,7 +257,7 @@ async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
             "pull_requests": [{"resolves_thread": True}],
         },
         {
-            "repository": {"full_name": "Acme/Repo"},
+            "repository": {"full_name": "langchain-ai/langchainplus"},
             "pull_request": {
                 "number": 7,
                 "merge_commit_sha": SHA,
@@ -265,12 +265,24 @@ async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
             },
         },
     )
-    watch = await rollouts.WATCHES.get("acme/repo#7")
+    watch = await rollouts.WATCHES.get("langchain-ai/langchainplus#7")
     assert watch is not None
     assert watch.sha == SHA
     assert watch.workspace == "oss"
     assert watch.resolves_thread is True
     assert client.threads.updated[-1]["metadata"] == {"rollout_status": "watching"}
+
+
+async def test_start_from_merge_ignores_other_repositories(client: _Client) -> None:
+    await rollouts.start_from_merge(
+        "thread-1",
+        {"kind": "agent", "rollout_check": {"envs": ["dev", "staging"]}},
+        {
+            "repository": {"full_name": "langchain-ai/open-swe"},
+            "pull_request": {"number": 7, "merge_commit_sha": SHA, "user": {"login": "octocat"}},
+        },
+    )
+    assert client.store.values == {}
 
 
 async def test_start_from_merge_ignores_a_thread_without_a_check(client: _Client) -> None:
@@ -308,6 +320,7 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
                 "thread_id": "thread-1",
                 "github_login": "octocat",
                 "workspace": "oss",
+                "repo": {"owner": "langchain-ai", "name": "langchainplus"},
                 "source": "slack",
                 "slack_thread": {"channel_id": "C1", "thread_ts": "1.2"},
             }
@@ -330,6 +343,36 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
     assert check["run_config"]["slack_thread"]["channel_id"] == "C1"
     assert check["source_context"]["slack_thread"]["channel_id"] == "C1"
     assert updates[0]["rollout_status"] is None
+    assert result["watched"] is True
+
+
+async def test_record_rollout_check_skips_other_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updated = False
+
+    class _Threads:
+        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+            del thread_id, metadata
+            nonlocal updated
+            updated = True
+
+    class _LangGraph:
+        threads = _Threads()
+
+    monkeypatch.setattr(
+        record_tool,
+        "get_config",
+        lambda: {
+            "configurable": {"thread_id": "thread-1", "repo": {"owner": "acme", "name": "repo"}}
+        },
+    )
+    monkeypatch.setattr(record_tool, "get_client", lambda: _LangGraph())
+
+    result = await record_tool.record_rollout_check(page="projects")
+
+    assert result["watched"] is False
+    assert updated is False
 
 
 async def test_page_check_reports_config_without_the_password(

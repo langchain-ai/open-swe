@@ -134,9 +134,9 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
 @pytest.mark.asyncio
 async def test_merged_rollout_check_stays_open_until_the_watch_finishes() -> None:
     merging_pr = {
-        "repo_full_name": "lc/repo",
+        "repo_full_name": "langchain-ai/langchainplus",
         "number": 7,
-        "url": "https://github.com/lc/repo/pull/7",
+        "url": "https://github.com/langchain-ai/langchainplus/pull/7",
         "state": "open",
         "resolves_thread": True,
     }
@@ -154,6 +154,48 @@ async def test_merged_rollout_check_stays_open_until_the_watch_finishes() -> Non
     fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
     fake_client.threads.get = AsyncMock(return_value=thread)
     fake_client.threads.update = AsyncMock()
+    payload = _pr_payload(state="closed", merged=True)
+    payload["repository"]["full_name"] = "langchain-ai/langchainplus"
+
+    with (
+        patch("agent.webhooks.common.get_client", return_value=fake_client),
+        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
+        patch("agent.rollouts.start_from_merge", new_callable=AsyncMock) as start,
+    ):
+        await webhook_common.update_agent_thread_pr_state(payload)
+
+    metadata = fake_client.threads.update.await_args.kwargs["metadata"]
+    assert "resolved" not in metadata
+    assert "attention_reason" not in metadata
+    assert metadata["pr_state"] == "merged"
+    start.assert_awaited_once()
+    assert start.await_args.args[0] == "t1"
+
+
+@pytest.mark.asyncio
+async def test_rollout_check_on_another_repo_still_resolves() -> None:
+    merging_pr = {
+        "repo_full_name": "lc/repo",
+        "number": 7,
+        "url": "https://github.com/lc/repo/pull/7",
+        "state": "open",
+        "resolves_thread": True,
+    }
+    thread = {
+        "thread_id": "t1",
+        "metadata": {
+            "kind": "agent",
+            "pr_url": merging_pr["url"],
+            "pr_state": "open",
+            "pull_requests": [merging_pr],
+            "rollout_check": {"envs": ["dev", "staging"]},
+        },
+    }
+    fake_client = MagicMock()
+    fake_client.threads.search = AsyncMock(side_effect=[[thread], []])
+    fake_client.threads.get = AsyncMock(return_value=thread)
+    fake_client.threads.update = AsyncMock()
 
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
@@ -164,11 +206,8 @@ async def test_merged_rollout_check_stays_open_until_the_watch_finishes() -> Non
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
     metadata = fake_client.threads.update.await_args.kwargs["metadata"]
-    assert "resolved" not in metadata
-    assert "attention_reason" not in metadata
-    assert metadata["pr_state"] == "merged"
-    start.assert_awaited_once()
-    assert start.await_args.args[0] == "t1"
+    assert metadata["resolved"] is True
+    start.assert_not_awaited()
 
 
 @pytest.mark.asyncio

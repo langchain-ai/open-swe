@@ -7,6 +7,7 @@ from urllib.parse import urlparse, urlunparse
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from agent.rollouts import rollout_repo_allowed
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
 from agent.tools.manage_baby_sit import dispatch_run_config
@@ -34,12 +35,22 @@ async def record_rollout_check(
     expected: str = "",
     metrics: str = "",
     include_prod: bool = False,
+    owner: str = "",
+    repo: str = "",
 ) -> dict[str, Any]:
     """Implement the `record_rollout_check` tool."""
     cfg = RunConfig.from_config(get_config())
     thread_id = cfg.thread_id
     if not thread_id:
         return {"success": False, "error": "No executable agent thread is available"}
+    repo_owner = owner.strip() or (cfg.repo.owner if cfg.repo else "")
+    repo_name = repo.strip() or (cfg.repo.name if cfg.repo else "")
+    if not rollout_repo_allowed(repo_owner, repo_name):
+        return {
+            "success": True,
+            "watched": False,
+            "reason": "Rollouts watch langchain-ai/langchainplus only",
+        }
     envs = ["dev", "staging", *(["prod"] if include_prod else [])]
     dumped = cfg.dump()
     source = SourceContext.parse(
@@ -67,6 +78,7 @@ async def record_rollout_check(
         return {"success": False, "error": "Could not store the rollout check"}
     return {
         "success": True,
+        "watched": True,
         "envs": envs,
         "page": bool(check["page"]),
         "metrics": bool(check["metrics"]),
