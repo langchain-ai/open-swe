@@ -19,6 +19,9 @@ from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.dispatch import dispatch_agent_run
+from agent.mcp.instance import instance_mcp_source
+from agent.mcp.runtime import load_mcp_tools
+from agent.mcp.workspace import workspace_mcp_source
 from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
@@ -516,10 +519,6 @@ async def locate_commit(workspace: str, sha: str) -> dict[str, Any] | None:
     """Call the workspace Homebase locate tool. Returns None when it is unavailable."""
     if not workspace:
         return None
-    from agent.mcp.instance import instance_mcp_source
-    from agent.mcp.runtime import load_mcp_tools
-    from agent.mcp.workspace import workspace_mcp_source
-
     try:
         tools = await load_mcp_tools(instance_mcp_source(), workspace_mcp_source(workspace))
     except Exception:

@@ -234,9 +234,9 @@ async def test_locate_commit_accepts_a_json_string(monkeypatch: pytest.MonkeyPat
                 {"targets": [{"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""}]}
             )
 
-    monkeypatch.setattr("agent.mcp.instance.instance_mcp_source", lambda: object())
-    monkeypatch.setattr("agent.mcp.workspace.workspace_mcp_source", lambda _workspace: object())
-    monkeypatch.setattr("agent.mcp.runtime.load_mcp_tools", AsyncMock(return_value=[_Tool()]))
+    monkeypatch.setattr(rollouts, "instance_mcp_source", lambda: object())
+    monkeypatch.setattr(rollouts, "workspace_mcp_source", lambda _workspace: object())
+    monkeypatch.setattr(rollouts, "load_mcp_tools", AsyncMock(return_value=[_Tool()]))
 
     report = await rollouts.locate_commit("oss", SHA)
 

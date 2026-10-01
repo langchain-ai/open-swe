@@ -161,7 +161,7 @@ async def test_merged_rollout_check_stays_open_until_the_watch_finishes() -> Non
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("agent.rollouts.start_from_merge", new_callable=AsyncMock) as start,
+        patch("agent.webhooks.common.start_from_merge", new_callable=AsyncMock) as start,
     ):
         await webhook_common.update_agent_thread_pr_state(payload)
 
@@ -201,7 +201,7 @@ async def test_rollout_check_on_another_repo_still_resolves() -> None:
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("agent.rollouts.start_from_merge", new_callable=AsyncMock) as start,
+        patch("agent.webhooks.common.start_from_merge", new_callable=AsyncMock) as start,
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
@@ -237,7 +237,7 @@ async def test_closed_unmerged_rollout_check_still_resolves() -> None:
     with (
         patch("agent.webhooks.common.get_client", return_value=fake_client),
         patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.rollouts.start_from_merge", new_callable=AsyncMock) as start,
+        patch("agent.webhooks.common.start_from_merge", new_callable=AsyncMock) as start,
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 

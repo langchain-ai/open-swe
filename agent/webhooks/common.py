@@ -84,6 +84,7 @@ from agent.review.findings import (
 )
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from agent.rollouts import rollout_payload_allowed, rollout_watch_pending, start_from_merge
 from agent.run_config import Repo
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -1480,8 +1481,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 resolves_thread = any(
                     record.get("resolves_thread") is True for record in updated_pull_requests
                 )
-                from agent.rollouts import rollout_payload_allowed, rollout_watch_pending
-
                 # A stored check only holds the thread open once a langchainplus
                 # PR merges, or while that watch is already running.
                 watching = metadata.get("rollout_status") == "watching"
@@ -1522,8 +1521,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
             if rollout_pending:
-                from agent.rollouts import start_from_merge
-
                 try:
                     await start_from_merge(thread_id, metadata, payload)
                 except Exception:
