@@ -68,6 +68,10 @@ class ProfileUpdate(BaseModel):
     experimental_assistant_ui: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    experimental_background_callbacks: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -201,6 +205,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "experimental_background_callbacks": (
+            update.experimental_background_callbacks
+            if update.experimental_background_callbacks is not None
+            else existing.get("experimental_background_callbacks")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -425,6 +434,20 @@ async def get_my_profile(
     return {**normalize_profile_for_response(profile), **preferences.model_dump()}
 
 
+@router.post("/profile/slack-onboarding-dismissal")
+async def dismiss_slack_onboarding(
+    session: dict[str, str] = _SESSION_DEP,
+) -> dict[str, object]:
+    login = session["sub"]
+    profile = await get_profile(login) or {}
+    await put_value(
+        PROFILES_NAMESPACE,
+        login,
+        {**profile, "slack_onboarding_dismissed": True, "updated_at": now_iso()},
+    )
+    return await get_my_profile(session)
+
+
 @router.put("/profile")
 async def put_my_profile(
     update: ProfileUpdate,
@@ -439,6 +462,11 @@ async def put_my_profile(
             preserve_sandbox_memory=update.preserve_sandbox_memory,
             human_review_requests=update.human_review_requests,
             review_channel_watch=update.review_channel_watch,
+            experimental_act_as_approval=update.experimental_act_as_approval,
+            # Switching approval either way starts over from asking every time.
+            act_as_always_allowed=(
+                False if update.experimental_act_as_approval is not None else None
+            ),
         ),
     )
     if preferences is None and (
@@ -446,6 +474,7 @@ async def put_my_profile(
         or update.preserve_sandbox_memory
         or update.human_review_requests
         or update.review_channel_watch
+        or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

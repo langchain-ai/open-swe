@@ -30,6 +30,7 @@ export interface PickerItem {
   owner?: PickerOwner | null
   /** Shown under the row; a selected item with a warning still saves. */
   warning?: string
+  disabled?: boolean
 }
 
 export interface PickerFilter {
@@ -62,6 +63,7 @@ export interface OwnershipPickerProps {
   filters?: Array<PickerFilter>
   manual?: ManualEntry
   loading?: boolean
+  actions?: ReactNode
   loadError?: string | null
   /** A caveat about the directory itself, shown above the rows. */
   notice?: string | null
@@ -100,6 +102,7 @@ export function OwnershipPicker({
   filters,
   manual,
   loading = false,
+  actions,
   loadError = null,
   notice = null,
   disabled = false,
@@ -177,7 +180,7 @@ export function OwnershipPicker({
     const elsewhere = ownedElsewhere(item)
     const checked = draftSet.has(item.id)
     // A conflicting row that is somehow already selected stays removable.
-    const locked = elsewhere && !checked
+    const locked = (elsewhere || item.disabled) && !checked
     return (
       <label
         key={item.id}
@@ -256,7 +259,10 @@ export function OwnershipPicker({
         {triggerLabel}
       </DialogTrigger>
       <DialogPopup className="w-full max-w-[520px]">
-        <DialogTitle className="px-3 pt-3">{title}</DialogTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-3">
+          <DialogTitle>{title}</DialogTitle>
+          {actions}
+        </div>
         {description && (
           <DialogDescription className="px-3 pt-1">
             {description}

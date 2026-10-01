@@ -10,13 +10,7 @@ import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
-export function UserMessage({
-  message,
-  showUserName = true,
-}: {
-  message: Message
-  showUserName?: boolean
-}) {
+export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks
@@ -71,7 +65,7 @@ export function UserMessage({
             )}
           </button>
         ) : (
-          ((showUserName && message.structuredSenderName) ||
+          (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
             <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
@@ -86,7 +80,7 @@ export function UserMessage({
                   data-testid="user-message-bot-icon"
                 />
               )}
-              {showUserName && message.structuredSenderName && (
+              {message.structuredSenderName && (
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (

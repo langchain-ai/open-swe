@@ -16,6 +16,10 @@ class UserPreferences(BaseModel):
     # merged reactions, and a bump with a picked reviewer once they sit green unapproved.
     review_channel_watch: bool = False
     approved_pr_dm_reminders: bool = False
+    # Ask this person before Open SWE opens a PR as them in a shared thread.
+    experimental_act_as_approval: bool = False
+    # Open SWE acts as this person in shared threads without asking first.
+    act_as_always_allowed: bool = False
 
 
 class UserPreferencesPatch(BaseModel):
@@ -32,3 +36,6 @@ class UserPreferencesPatch(BaseModel):
     review_channel_watch: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    # A consent control, so never agent-manageable.
+    experimental_act_as_approval: bool | None = None
+    act_as_always_allowed: bool | None = None

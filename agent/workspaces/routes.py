@@ -88,6 +88,14 @@ async def api_create_workspace(
         raise _save_conflict(e) from e
     if record.setup_script:
         await ensure_refresh_cron(record.slug)
+        run_id = await start_refresh_run(record.slug)
+        if run_id is None:
+            raise HTTPException(
+                502,
+                "workspace was created but its initial image build could not start; "
+                "retry the build from workspace settings",
+            )
+        return record.model_copy(update={"refresh_status": "refreshing", "refresh_run_id": run_id})
     return record
 
 

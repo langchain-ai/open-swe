@@ -1,5 +1,4 @@
 from agent.review.findings import (
-    REVIEW_FINDING_CAP,
     REVIEWER_THREAD_KIND,
     Finding,
 )
@@ -7,5 +6,4 @@ from agent.review.findings import (
 __all__ = [
     "Finding",
     "REVIEWER_THREAD_KIND",
-    "REVIEW_FINDING_CAP",
 ]

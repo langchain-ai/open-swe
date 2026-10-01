@@ -210,11 +210,16 @@ export function WorkspacesSection({
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
+      if (createDraft.setupScript.trim())
+        body.setup_script = createDraft.setupScript
+      if (createDraft.updateScript.trim())
+        body.update_script = createDraft.updateScript
       await api.createWorkspace(body)
       await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setAdding(false)
       setCreateDraft(EMPTY_DRAFT)
     } catch (e) {
+      void qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setCreateError(
         e instanceof Error ? e.message : "Could not create the workspace"
       )
