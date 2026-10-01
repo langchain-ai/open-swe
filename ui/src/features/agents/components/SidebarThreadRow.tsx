@@ -302,10 +302,10 @@ export function SidebarThreadRow({
     }) ?? null
 
   const thread = item.location === "cloud" ? item.thread : null
-  const subagents = item.subagents ?? []
+  const subagents = (item.subagents ?? []).filter(
+    (subagent) => subagent.status !== "completed"
+  )
   const hasSubagents = subagents.length > 0
-  // A sub-thread is on screen: it takes the highlight, and stays visible even
-  // when the fold is closed so the row that is open is never hidden.
   const activeSubagent =
     isActive &&
     activeSubagentId &&
@@ -313,10 +313,9 @@ export function SidebarThreadRow({
       ? activeSubagentId
       : null
   const subagentsCollapsed =
-    !activeSubagent &&
     prefs.collapseSubagentsByDefault !==
-      prefs.collapsedSubagentKeys.includes(item.key)
-  const rowIsActive = isActive && !activeSubagent
+    prefs.collapsedSubagentKeys.includes(item.key)
+  const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
   const source =
     item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
   const SourceIcon = source?.icon

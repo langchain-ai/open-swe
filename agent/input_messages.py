@@ -1,7 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from html import escape
 from typing import Any, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
@@ -199,6 +199,16 @@ def input_message_timestamps(content: object) -> set[str]:
         timestamp
         for message in _input_message_elements(content)
         if (timestamp := message.get("timestamp"))
+    }
+
+
+def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
+    """Ids of the event matches whose envelopes are already among ``messages``."""
+    return {
+        match_id
+        for message in messages
+        for element in _input_message_elements(_message_content(message))
+        if (match_id := element.get("event_match"))
     }
 
 

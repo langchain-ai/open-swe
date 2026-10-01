@@ -49,8 +49,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "supports_images": True,
     },
     {
-        "id": "openai:gpt-6-sol",
-        "label": "GPT-6 Sol",
+        "id": "openai:gpt-6.1-sol",
+        "label": "GPT-6.1 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
         "default_effort": "xhigh",
         "supports_images": True,
@@ -95,6 +95,15 @@ NON_DEFAULT_MODEL_IDS: frozenset[str] = frozenset(
     m["id"] for m in SUPPORTED_MODELS if not m.get("can_be_default", True)
 )
 
+
+def available_requested_models(*, fable_enabled: bool) -> dict[str, ModelOption]:
+    return {
+        model["id"]: model
+        for model in SUPPORTED_MODELS
+        if fable_enabled or model["id"] not in FABLE_MODEL_IDS
+    }
+
+
 DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
     {
         "anthropic:claude-opus-4-8",
@@ -105,6 +114,7 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
         "openai:gpt-5.6-sol",
         "openai:gpt-5.6-terra",
         "openai:gpt-5.6-luna",
+        "openai:gpt-6-sol",
         "google_genai:gemini-3.5-flash",
         "google_genai:gemini-3.6-flash",
         "google_genai:gemini-3.7-flash",
@@ -130,9 +140,10 @@ _PROFILE_LOADER_MODULES: dict[str, str] = {
 }
 CODEX_CONTEXT_WINDOW_OVERRIDES: dict[str, int] = {
     "openai:gpt-6-astra": 272_000,
-    "openai:gpt-6-sol": 272_000,
+    "openai:gpt-6.1-sol": 272_000,
     "openai:gpt-6-luna": 272_000,
 }
+_PROFILE_ALIASES = {"gpt-6.1-sol": "gpt-6-sol", "gpt-6-luna": "gpt-5.6-luna"}
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "anthropic:claude-sonnet-5-5": 1_000_000,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
@@ -162,8 +173,8 @@ def model_profile_with_context_override(model_id: str) -> dict[str, object] | No
     provider, _, model_name = model_id.partition(":")
     loader = _profile_loader(provider)
     profile = dict(loader(model_name)) if loader is not None else {}
-    if not profile and model_name in {"gpt-6-sol", "gpt-6-luna"} and loader is not None:
-        profile = dict(loader(model_name.replace("gpt-6-", "gpt-5.6-")))
+    if not profile and model_name in _PROFILE_ALIASES and loader is not None:
+        profile = dict(loader(_PROFILE_ALIASES[model_name]))
     profile["max_input_tokens"] = context_window
     return profile
 
@@ -229,7 +240,7 @@ def gate_fable_model(
 DEFAULT_MODEL_ID: str = (
     "anthropic:claude-opus-5-5"
     if ENV.ANTHROPIC_API_KEY.optional() and not ENV.OPENAI_API_KEY.optional()
-    else "openai:gpt-6-sol"
+    else "openai:gpt-6.1-sol"
 )
 DEFAULT_MODEL_EFFORT: str = "medium"
 

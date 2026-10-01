@@ -48,7 +48,7 @@ WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 ORG_GUIDELINES_MAX_CHARS = 10_000
 DEFAULT_THREAD_TITLE_MODEL = "openai:gpt-6-luna"
 DEFAULT_THREAD_TITLE_REASONING_EFFORT = "low"
-REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6-sol", "medium")
+REVIEW_SCOUT_FALLBACK_MODEL = ("openai:gpt-6.1-sol", "medium")
 ANTHROPIC_THREAD_TITLE_MODEL = "anthropic:claude-opus-5-5"
 ANTHROPIC_THREAD_TITLE_REASONING_EFFORT = "low"
 
@@ -80,6 +80,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     )
     fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     org_guidelines: str | None = None
@@ -321,6 +324,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "sandbox_openai_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -328,7 +332,7 @@ def _default_settings() -> dict[str, Any]:
         "default_agent_subagent_reasoning_effort": fallback_effort,
         "default_agent_routing_fast_model": "openai:gpt-6-luna",
         "default_agent_routing_fast_reasoning_effort": "high",
-        "default_agent_routing_balanced_model": "openai:gpt-6-sol",
+        "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
         "default_agent_routing_balanced_reasoning_effort": "medium",
         "default_agent_routing_performance_model": "openai:gpt-6-astra",
         "default_agent_routing_performance_reasoning_effort": "low",
@@ -683,6 +687,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def sandbox_openai_enabled(self) -> bool:
+        """Whether sandbox clients may use the experimental Responses API."""
+        return self.get("sandbox_openai_enabled") is True
 
     @property
     def org_review_guidelines(self) -> str | None:
