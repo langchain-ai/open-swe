@@ -2990,6 +2990,18 @@
             ],
             "title": "Experimental Assistant Ui"
           },
+          "experimental_background_callbacks": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Background Callbacks"
+          },
           "human_review_requests": {
             "anyOf": [
               {
@@ -13457,6 +13469,78 @@
           }
         },
         "summary": "List Tools",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
+      "post": {
+        "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9-]{1,128}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Background Task Complete",
+        "tags": [
+          "sandbox-tools"
+        ]
+      }
+    },
+    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/heartbeat": {
+      "post": {
+        "operationId": "background_task_heartbeat_dashboard_api_sandbox_tools_background_tasks__task_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9-]{1,128}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Background Task Heartbeat",
         "tags": [
           "sandbox-tools"
         ]
