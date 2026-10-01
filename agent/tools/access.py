@@ -102,6 +102,7 @@ class Policy:
     actor: Actor = "anyone"
     sole: Projection | None = None
     direct: bool = False
+    shared_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,8 @@ class Access:
     def mode(self, policy: Policy) -> Mode | None:
         if policy.direct and not self.direct:
             return None
+        if policy.shared_read and not self.private:
+            return "approval" if policy.actor == "admin" and self.admin and self.approval else None
         trusted = {
             "anywhere": True,
             "private": self.private,
@@ -283,11 +286,13 @@ def access(
             if mode == "approval":
                 bound = signature.bind(*args, **kwargs)
                 bound.apply_defaults()
-                blocked = await authorize_admin_write(configurable(), tool_name, bound.arguments)
+                blocked = await authorize_admin_write(
+                    configurable(), tool_name, bound.arguments, disclosure=applied.shared_read
+                )
                 if blocked is not None:
                     return cast(R, blocked)
             result = await fn(*args, **kwargs)
-            if mode == "full" or applied.sole is None:
+            if mode == "full" or applied.shared_read or applied.sole is None:
                 return result
             if not isinstance(result, Mapping):
                 return cast(R, {"ok": False, "error": _WITHHELD})

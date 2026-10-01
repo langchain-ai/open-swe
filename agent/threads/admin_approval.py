@@ -1,4 +1,4 @@
-"""One-use, owner-authorized approvals for shared-channel admin writes."""
+"""One-use, owner-authorized approvals for shared-channel writes and permitted disclosures."""
 
 import hashlib
 import json
@@ -106,7 +106,11 @@ def _live(record: Approval, owner: str, slack: SlackThreadRef) -> bool:
 
 
 async def authorize_admin_write(
-    cfg: RunConfig, tool: str, arguments: Mapping[str, object]
+    cfg: RunConfig,
+    tool: str,
+    arguments: Mapping[str, object],
+    *,
+    disclosure: bool = False,
 ) -> dict[str, object] | None:
     """Consume the exact approved call, or block it and request owner approval."""
     if not cfg.thread_id:
@@ -117,7 +121,6 @@ async def authorize_admin_write(
             "ok": False,
             "error": "This action is too large to review in Slack; use a private thread.",
         }
-    fingerprint = hashlib.sha256(json.dumps([cfg.thread_id, tool, serialized]).encode()).hexdigest()
     async with _lock(cfg.thread_id):
         identity = await approval_owner(cfg)
         if identity is None:
@@ -126,6 +129,11 @@ async def authorize_admin_write(
                 "error": "Only this thread's currently authorized admin owner can request this action.",
             }
         owner, slack = identity
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                [cfg.thread_id, owner, slack.location, tool, serialized, disclosure]
+            ).encode()
+        ).hexdigest()
         record = await APPROVALS.get(cfg.thread_id)
         if record and _live(record, owner, slack) and record.fingerprint == fingerprint:
             if record.status == "approved":
@@ -144,12 +152,23 @@ async def authorize_admin_write(
         )
         await APPROVALS.put(cfg.thread_id, record)
         assert cfg.slack_thread is not None
+        notice = (
+            f"Run this read and share its permitted results in channel {slack.channel_id}, "
+            f"thread {slack.thread_ts}? Everyone with access to the thread can see the results."
+            if disclosure
+            else "Review this admin action."
+        )
         sent = await post_slack_ephemeral_message(
             slack.channel_id,
             cfg.slack_thread.triggering_user_id,
-            "Review this admin action. Approval expires in 15 minutes and authorizes one attempt.",
+            f"{notice} Approval expires in 15 minutes and authorizes one attempt.",
             thread_ts=slack.thread_ts,
-            blocks=_blocks(tool, serialized, record.request_id),
+            blocks=_blocks(
+                tool,
+                serialized,
+                record.request_id,
+                disclosure_notice=notice if disclosure else None,
+            ),
         )
         if not sent:
             record.status = "rejected"
@@ -161,7 +180,9 @@ async def authorize_admin_write(
     return {"ok": False, "status": "approval_pending"}
 
 
-def _blocks(tool: str, arguments: str, request_id: str) -> list[dict[str, object]]:
+def _blocks(
+    tool: str, arguments: str, request_id: str, *, disclosure_notice: str | None = None
+) -> list[dict[str, object]]:
     blocks: list[dict[str, object]] = [
         {
             "type": "section",
@@ -171,6 +192,10 @@ def _blocks(tool: str, arguments: str, request_id: str) -> list[dict[str, object
             },
         },
     ]
+    if disclosure_notice:
+        blocks.append(
+            {"type": "section", "text": {"type": "plain_text", "text": disclosure_notice}}
+        )
     blocks.extend(
         {"type": "section", "text": {"type": "plain_text", "text": arguments[start : start + 2900]}}
         for start in range(0, len(arguments), 2900)
@@ -191,7 +216,13 @@ def _blocks(tool: str, arguments: str, request_id: str) -> list[dict[str, object
                         }
                     ),
                 }
-                for action, label in (("approve", "Approve exact action"), ("reject", "Reject"))
+                for action, label in (
+                    (
+                        "approve",
+                        "Approve read and share" if disclosure_notice else "Approve exact action",
+                    ),
+                    ("reject", "Reject"),
+                )
             ],
         }
     )

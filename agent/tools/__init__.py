@@ -37,6 +37,7 @@ _TOOL_MODULES = {
     "read_only_sql": ".read_only_sql",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
+    "share_my_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
     "refresh_workspace_start": ".workspaces",
@@ -109,6 +110,7 @@ __all__ = [
     "read_only_sql",
     "read_repo_file",
     "read_user_settings",
+    "share_my_settings",
     "record_human_input",
     "recreate_sandbox",
     "refresh_workspace_start",
@@ -187,7 +189,7 @@ if TYPE_CHECKING:
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_only_sql import read_only_sql
-    from agent.tools.read_user_settings import read_user_settings
+    from agent.tools.read_user_settings import read_user_settings, share_my_settings
     from agent.tools.record_human_input import record_human_input
     from agent.tools.recreate_sandbox import recreate_sandbox
     from agent.tools.reply_to_finding_thread import reply_to_finding_thread
