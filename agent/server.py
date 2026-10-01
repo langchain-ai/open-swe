@@ -219,6 +219,7 @@ from agent.tools import (
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
+    share_my_settings,
     slack_add_reaction,
     slack_attach_html,
     slack_list_channel_members,
@@ -604,6 +605,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "share_my_settings",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -1660,6 +1662,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             else ()
         ),
         read_user_settings,
+        share_my_settings,
         request_pr_review,
         recreate_sandbox,
         report_platform_issue,
