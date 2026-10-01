@@ -35,7 +35,7 @@ async def record_usage(
                 "properties": {
                     **properties,
                     "product": "open-swe",
-                    "environment": ENV.ANALYTICS_ENVIRONMENT.get(),
+                    "environment": ENV.DD_ENV.get(),
                 },
                 "context": {"ip": "0.0.0.0"},
             }
@@ -57,7 +57,7 @@ async def record_webhook(event: LoggedEvent) -> None:
         "action": action if isinstance(action, str) else "",
         "product": "open-swe",
         "surface": "webhook",
-        "environment": ENV.ANALYTICS_ENVIRONMENT.get(),
+        "environment": ENV.DD_ENV.get(),
         **{
             field: str(value) if value else None
             for field, value in {

@@ -4738,6 +4738,19 @@
         "title": "SubmittedReview",
         "type": "object"
       },
+      "TelemetryConfig": {
+        "properties": {
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment"
+        ],
+        "title": "TelemetryConfig",
+        "type": "object"
+      },
       "TextAnchor": {
         "properties": {
           "context_after": {
@@ -7211,6 +7224,28 @@
           }
         ],
         "summary": "Api Agent Usage Leaderboard",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/config": {
+      "get": {
+        "operationId": "api_telemetry_config_dashboard_api_analytics_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Telemetry Config",
         "tags": [
           "dashboard",
           "analytics"

@@ -17,6 +17,7 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     from agent.webhooks.event_log import LoggedEvent
 
     monkeypatch.setenv("SEGMENT_WRITE_KEY", "test-key")
+    monkeypatch.setenv("DD_ENV", "staging")
     requests: list[dict[str, object]] = []
 
     async def respond(request: httpx.Request) -> httpx.Response:
@@ -45,6 +46,7 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert requests[0]["event"] == "Webhook Received"
     assert "private content" not in json.dumps(requests)
     assert requests[0]["properties"]["action"] == "created"
+    assert requests[0]["properties"]["environment"] == "staging"
     monkeypatch.delenv("SEGMENT_WRITE_KEY")
     await segment.record_webhook(event)
     assert len(requests) == 1
