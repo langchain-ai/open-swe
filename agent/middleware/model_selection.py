@@ -1,8 +1,13 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Literal, NotRequired
+from typing import Annotated, Literal, NotRequired
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    OmitFromOutput,
+)
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
@@ -66,6 +71,7 @@ async def _select_jev_route(task: str) -> SelectedRoute:
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
+    requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
 def normalize_route(route: PersistedRoute) -> SelectedRoute:
@@ -100,17 +106,34 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         default_model: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
-        routing_mode: RoutingMode = "auto",
+        routing_mode: RoutingMode | None = "auto",
+        requested_model_factory: Callable[[str], BaseChatModel] | None = None,
     ) -> None:
         self._models = {**models, "default": default_model}
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
+        self._requested_model_factory = requested_model_factory
+        self._requested_models: dict[str, BaseChatModel] = {}
+
+    def use_requested_model(self, model_id: str) -> None:
+        if self._requested_model_factory is None:
+            raise ValueError("Requested model selection is not enabled")
+        if model_id not in self._requested_models:
+            self._requested_models[model_id] = self._requested_model_factory(model_id)
+        self._models["default"] = self._requested_models[model_id]
+        self._route_model_ids["default"] = model_id
 
     async def select_route(
         self,
         state: ModelSelectionState,
     ) -> SelectedRoute:
         """Select the model route for a turn."""
+        if requested_model := state.get("requested_model"):
+            if self._requested_model_factory is not None:
+                self.use_requested_model(requested_model)
+                return "default"
+        if self._routing_mode is None:
+            return "default"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
@@ -126,7 +149,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     ) -> dict[str, SelectedRoute]:
         del runtime
         route = await self.select_route(state)
-        if self._routing_mode == "auto":
+        if self._routing_mode == "auto" or state.get("requested_model"):
             await _emit_routed_model(self._models, self._route_model_ids, route)
         return {"model_route": route}
 

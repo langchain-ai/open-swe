@@ -69,33 +69,37 @@ afterEach(async () => {
   }
 })
 
-test("stdio MCP catalog and invocation respect the backend session", async () => {
-  const url = await backendUrl()
-  const admin = await connect(url, "admin")
-  const user = await connect(url, "user")
-  try {
-    const adminCatalog = await admin.listTools()
-    const userCatalog = await user.listTools()
-    expect(adminCatalog.tools.map((tool) => tool.name)).toContain(
-      "manage_feature_flags"
-    )
-    expect(userCatalog.tools.map((tool) => tool.name)).not.toContain(
-      "manage_feature_flags"
-    )
-    const result = await admin.callTool({
-      name: "manage_feature_flags",
-      arguments: { action: "read" },
-    })
-    expect(result.isError).toBeFalsy()
-    expect(result.content).toMatchObject([
-      { type: "text", text: expect.stringContaining('"scope": "instance"') },
-    ])
-    const denied = await user.callTool({
-      name: "manage_feature_flags",
-      arguments: { action: "read" },
-    })
-    expect(denied.isError).toBe(true)
-  } finally {
-    await Promise.all([admin.close(), user.close()])
-  }
-}, 20000)
+test.skipIf(!Bun.which("uv"))(
+  "stdio MCP catalog and invocation respect the backend session",
+  async () => {
+    const url = await backendUrl()
+    const admin = await connect(url, "admin")
+    const user = await connect(url, "user")
+    try {
+      const adminCatalog = await admin.listTools()
+      const userCatalog = await user.listTools()
+      expect(adminCatalog.tools.map((tool) => tool.name)).toContain(
+        "manage_feature_flags"
+      )
+      expect(userCatalog.tools.map((tool) => tool.name)).not.toContain(
+        "manage_feature_flags"
+      )
+      const result = await admin.callTool({
+        name: "manage_feature_flags",
+        arguments: { action: "read" },
+      })
+      expect(result.isError).toBeFalsy()
+      expect(result.content).toMatchObject([
+        { type: "text", text: expect.stringContaining('"scope": "instance"') },
+      ])
+      const denied = await user.callTool({
+        name: "manage_feature_flags",
+        arguments: { action: "read" },
+      })
+      expect(denied.isError).toBe(true)
+    } finally {
+      await Promise.all([admin.close(), user.close()])
+    }
+  },
+  20000
+)

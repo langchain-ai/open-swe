@@ -6,10 +6,14 @@ from typing import Any
 from fastapi import HTTPException
 
 from agent.schedules import store as schedules
-from agent.tools.admin_gate import configurable, require_admin
+from agent.tools.access import Policy, access, ack
+from agent.tools.admin_gate import configurable
 from agent.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
+
+_READ = Policy(trusted="admin_thread", actor="admin")
+_WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("automation.id"))
 
 
 async def _identity() -> tuple[str, str | None] | None:
@@ -33,14 +37,14 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 
 @expose_mcp(access="admin")
+@access(_READ)
 async def list_automations() -> dict[str, Any]:
     """Implement the `list_automations` tool."""
-    if error := await require_admin("manage workspace automations"):
-        return {"ok": False, "error": error}
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
 
 @expose_mcp(access="admin")
+@access(_WRITE)
 async def create_automation(
     prompt: str,
     workspace: str,
@@ -55,8 +59,6 @@ async def create_automation(
     admin_thread: bool = False,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
-    if error := await require_admin("manage workspace automations"):
-        return {"ok": False, "error": error}
     identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
@@ -87,6 +89,7 @@ async def create_automation(
 
 
 @expose_mcp(access="admin")
+@access(_WRITE)
 async def update_automation(
     automation_id: str,
     prompt: str | None = None,
@@ -105,8 +108,6 @@ async def update_automation(
     workspace: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
-    if error := await require_admin("manage workspace automations"):
-        return {"ok": False, "error": error}
     identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
@@ -149,10 +150,9 @@ async def update_automation(
 
 
 @expose_mcp(access="admin")
+@access(_WRITE)
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `trigger_automation` tool."""
-    if error := await require_admin("manage workspace automations"):
-        return {"ok": False, "error": error}
     try:
         result = await schedules.trigger_agent_schedule(automation_id)
     except Exception as exc:
@@ -161,10 +161,9 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
 
 
 @expose_mcp(access="admin")
+@access(_WRITE)
 async def delete_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `delete_automation` tool."""
-    if error := await require_admin("manage workspace automations"):
-        return {"ok": False, "error": error}
     try:
         await schedules.delete_agent_schedule(automation_id)
     except Exception as exc:

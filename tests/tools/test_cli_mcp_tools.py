@@ -25,7 +25,8 @@ async def test_catalog_respects_session_admin_and_uses_python_schema(
     assert "read_only_sql" in by_name
     assert "publish_workspace" not in by_name
     assert by_name["manage_feature_flags"].parameters["required"] == ["action"]
-    assert "flags" in by_name["manage_feature_flags"].parameters["properties"]
+    properties = by_name["manage_feature_flags"].parameters["properties"]
+    assert isinstance(properties, dict) and "flags" in properties
 
 
 @pytest.mark.asyncio

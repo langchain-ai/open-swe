@@ -42,7 +42,10 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await page.route("**/stream/events", (route) => route.abort());
     await page.goto(`/agents/${threadId}`);
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible();
     await expect(
       page.getByText("This thread has no messages yet."),
@@ -174,7 +177,10 @@ test.describe("transcript rendering", () => {
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/agents/${threadId}$`));
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible();
 
     // The transcript source hydrates from its snapshot once; coming back to
@@ -199,7 +205,10 @@ test.describe("transcript rendering", () => {
     );
     expect(await foregroundHydration).toBe(false);
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible();
 
     await typeIntoComposer(page, "Can you also add a docstring?");
@@ -207,7 +216,10 @@ test.describe("transcript rendering", () => {
       page.getByText(/anything else you'd like changed/),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Add greet() helper" }).first(),
+      page
+        .getByRole("main")
+        .getByRole("link", { name: "Add greet() helper", exact: true })
+        .first(),
     ).toBeVisible();
   });
 
@@ -262,8 +274,8 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    await page.getByRole("button", { name: /GPT-6 Sol/ }).click();
-    await page.getByText("GPT-6 Sol", { exact: true }).last().hover();
+    await page.getByRole("button", { name: /GPT-6\.1 Sol/ }).click();
+    await page.getByText("GPT-6.1 Sol", { exact: true }).last().hover();
     await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
     await waitForThreadIdle(page, threadId);

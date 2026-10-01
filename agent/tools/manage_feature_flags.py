@@ -1,4 +1,4 @@
-"""Read or change shared feature flags on private admin surfaces."""
+"""Read shared feature flags privately or change them through authorized admin writes."""
 
 from typing import Literal
 
@@ -14,22 +14,23 @@ from agent.dashboard.workspace_settings import (
     workspace_settings_view,
 )
 from agent.store import get_value
-from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.access import Policy, access, ack
 from agent.tools.mcp_exposure import expose_mcp
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
+_READ = Policy(trusted="admin_surface", actor="admin")
+_WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope", "workspace"))
 
 
 @expose_mcp(access="admin")
+@access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_feature_flags(
     action: Literal["read", "set"],
     flags: dict[str, bool | None] | None = None,
     workspace: str | None = None,
 ) -> dict[str, object]:
     """Read or set instance or workspace feature flags without replacing other settings."""
-    if error := await require_private_admin_surface("manage feature flags"):
-        raise ValueError(error)
     if action == "set":
         if not flags:
             raise ValueError("Provide at least one feature flag to set")

@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import var_child_runnable_config
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
@@ -92,7 +93,7 @@ async def cli_mcp_invoke(
     if entry is None:
         raise HTTPException(404, "Tool is unavailable")
     tool, _access = entry
-    config = {
+    config: RunnableConfig = {
         "configurable": {
             "source": "mcp",
             "github_login": session["sub"],

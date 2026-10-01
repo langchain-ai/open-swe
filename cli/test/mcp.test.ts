@@ -272,3 +272,66 @@ describe("upload_session", () => {
     expect(bodies).toEqual([])
   })
 })
+
+describe("human review", () => {
+  test("request_human_review posts the summary to the pull request's review endpoint", async () => {
+    const paths: string[] = []
+    const { client, bodies } = await connect((url) => {
+      if (!url.pathname.endsWith("/cli/mcp/tools")) paths.push(url.pathname)
+      return Response.json({
+        success: true,
+        error: "",
+        request_id: "r-1",
+        channel: "C1",
+        permalink: "https://slack.example/p1",
+        reused: false,
+        summary_updated: false,
+      })
+    })
+
+    const result = await client.callTool({
+      name: "request_human_review",
+      arguments: {
+        pr_url: "https://github.com/acme/web/pull/7",
+        inline_summary: "Keeps the login form's error visible after a retry.",
+      },
+    })
+
+    expect(result.isError).toBeFalsy()
+    expect(paths).toEqual([
+      "/dashboard/api/repos/acme/web/pulls/7/human-review",
+    ])
+    expect(JSON.parse(bodies[0] ?? "")).toEqual({
+      inline_summary: "Keeps the login form's error visible after a retry.",
+    })
+    expect(result.structuredContent).toEqual({
+      request_id: "r-1",
+      channel: "C1",
+      reused: false,
+      summary_updated: false,
+    })
+  })
+
+  test("dismiss_human_review_request posts to the dismiss endpoint", async () => {
+    const paths: string[] = []
+    const { client, bodies } = await connect((url) => {
+      if (!url.pathname.endsWith("/cli/mcp/tools")) paths.push(url.pathname)
+      return Response.json({ request_id: "r-1" })
+    })
+
+    const result = await client.callTool({
+      name: "dismiss_human_review_request",
+      arguments: {
+        pr_url: "https://github.com/acme/web/pull/7",
+        reason: "wrong summary",
+      },
+    })
+
+    expect(result.isError).toBeFalsy()
+    expect(paths).toEqual([
+      "/dashboard/api/repos/acme/web/pulls/7/human-review/dismiss",
+    ])
+    expect(JSON.parse(bodies[0] ?? "")).toEqual({ reason: "wrong summary" })
+    expect(result.structuredContent).toEqual({ request_id: "r-1" })
+  })
+})

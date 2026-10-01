@@ -1,5 +1,6 @@
 """Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
 
+from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
 import httpx2
@@ -96,23 +97,16 @@ async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> No
     assert await approval_mode_for("o", "r") == "approve"
 
 
-async def test_tool_rechecks_private_admin_and_repo_access(fake_store: FakeStore) -> None:
+async def test_tool_rechecks_private_admin_and_repo_access(
+    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+) -> None:
+    grant_tool_access(admin=True, admin_thread=True)
+    refused = await manage_review_approval_mode("set", "o/r", "approve")
+    assert "not available in this thread" in str(refused["error"])
+    grant_tool_access(admin=True, admin_surface=True)
     with (
         patch(
-            "agent.tools.manage_review_approval_mode.require_private_admin_surface",
-            AsyncMock(return_value="Private admin required"),
-        ),
-        pytest.raises(ValueError, match="Private admin"),
-    ):
-        await manage_review_approval_mode("set", "o/r", "approve")
-    with (
-        patch(
-            "agent.tools.manage_review_approval_mode.require_private_admin_surface",
-            AsyncMock(return_value=None),
-        ),
-        patch(
-            "agent.tools.manage_review_approval_mode.private_credential_login",
-            AsyncMock(return_value="admin"),
+            "agent.run_config.get_config", return_value={"configurable": {"github_login": "admin"}}
         ),
         patch(
             "agent.tools.manage_review_approval_mode.require_repo_access_for_user",

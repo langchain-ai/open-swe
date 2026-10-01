@@ -6,6 +6,12 @@ import { isRecord } from "./json.ts"
 import { ApiClient, ApiError } from "./api.ts"
 import { readConfig } from "./config.ts"
 import {
+  dismissHumanReviewRequestArgs,
+  dismissHumanReviewRequestResult,
+  requestHumanReviewArgs,
+  requestHumanReviewResult,
+} from "./review.ts"
+import {
   listThreadsArgs,
   listThreadsResult,
   listThreadsResultFrom,
@@ -85,6 +91,51 @@ export async function createMcpServer(
         thread_id: threadId,
         url: api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`),
       }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      }
+    }
+  )
+  server.registerTool(
+    "request_human_review",
+    {
+      title: "Request a human review in Slack",
+      description:
+        "Ask people in Slack to review an open GitHub pull request: posts a card with its title, your inline_summary, and an \"I'll review\" button in the repository's review channel. It merges on its own once every reviewer who signs up approves on GitHub, or two hours after the request with at least one approval, when checks pass. Refused while the pull request is a draft (if you authored it, run `gh pr ready` first), has merge conflicts, or fails a required check, and unless the person signed in turned on human review requests on the dashboard's Feature Flags page. Asking again for a pull request you already asked about replaces the open card's summary. The card is the announcement: never link to it, since Slack unfurls the link into a second copy.",
+      inputSchema: requestHumanReviewArgs,
+      outputSchema: requestHumanReviewResult,
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async ({ pr_url, inline_summary, channel }) => {
+      const api = await client()
+      const result = await api
+        .requestHumanReview(pr_url, {
+          inline_summary,
+          ...(channel ? { channel } : {}),
+        })
+        .catch(rejectedSession(api))
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      }
+    }
+  )
+  server.registerTool(
+    "dismiss_human_review_request",
+    {
+      title: "Dismiss a human review request",
+      description:
+        "Take down a pull request's open human review request in Slack, exactly as its card's Dismiss button does: the card is marked dismissed by you, and the pull request no longer merges on its own. It does not close the pull request.",
+      inputSchema: dismissHumanReviewRequestArgs,
+      outputSchema: dismissHumanReviewRequestResult,
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async ({ pr_url, reason }) => {
+      const api = await client()
+      const result = await api
+        .dismissHumanReviewRequest(pr_url, reason ? { reason } : {})
+        .catch(rejectedSession(api))
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
