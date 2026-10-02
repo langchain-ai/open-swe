@@ -13,7 +13,7 @@ Metrics: {{ metrics }}
 Query Datadog and compare this revision to the previous one. Query only these tags: {{ datadog_tags }}.
 A metric move describes this environment's revision, not proof this commit caused it.
 {% else %}
-No Datadog tag is configured for this environment. Do not invent one.
+No Datadog tag was recorded for this environment. Do not invent one.
 {% endif %}
 {% endif %}
 {% if not page and not metrics %}

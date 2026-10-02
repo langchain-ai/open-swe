@@ -103,13 +103,15 @@ def _targets(*, dev: bool, staging: bool) -> dict[str, Any]:
     }
 
 
+def _plan() -> list[dict[str, Any]]:
+    return [
+        {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev"]},
+        {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+    ]
+
+
 def _configure_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ROLLOUT_REPOS", "langchain-ai/langchainplus")
-    monkeypatch.setenv(
-        "ROLLOUT_ENVS",
-        "dev:gcp-dev,staging:gcp-staging,prod:gcp-us-prod|gcp-eu-prod|gcp-apac-prod|aws-us-prod",
-    )
-    monkeypatch.setenv("ROLLOUT_DATADOG_TAGS", "dev=env:dev,staging=env:staging,prod=env:prod")
     monkeypatch.setenv("ROLLOUT_LOCATE_TOOL", "releases.locate_commit")
 
 
@@ -122,10 +124,21 @@ def client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     return fake
 
 
-def test_envs_ready_waits_for_every_configured_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_rollout(monkeypatch)
+def test_envs_ready_waits_for_every_recorded_target() -> None:
+    stages = rollouts.normalize_stages(
+        [
+            {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev", "not a tag"]},
+            {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+            {"name": "skipped", "targets": []},
+            {
+                "name": "prod",
+                "targets": ["gcp-us-prod", "gcp-eu-prod", "gcp-apac-prod", "aws-us-prod"],
+                "datadog_tags": ["env:prod"],
+            },
+        ]
+    )
+    assert [stage.name for stage in stages] == ["dev", "staging", "prod"]
+    assert stages[0].datadog_tags == ["env:dev"]
     targets: list[dict[str, Any]] = [
         {"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""},
         {"id": "gcp-staging", "label": "GCP Staging", "contains": False, "error": ""},
@@ -133,7 +146,7 @@ def test_envs_ready_waits_for_every_configured_target(
         {"id": "gcp-eu-prod", "label": "GCP EU Prod", "contains": True, "error": "unavailable"},
         {"id": "self-hosted-main", "label": "Self-hosted main", "contains": True, "error": ""},
     ]
-    assert rollouts.envs_ready(targets) == {"dev"}
+    assert rollouts.envs_ready(targets, stages) == {"dev"}
 
     targets[3] = {**targets[3], "error": ""}
     targets.extend(
@@ -142,34 +155,7 @@ def test_envs_ready_waits_for_every_configured_target(
             {"id": "aws-us-prod", "label": "AWS US Prod", "contains": True, "error": ""},
         ]
     )
-    assert rollouts.envs_ready(targets) == {"dev", "prod"}
-
-
-def test_stages_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ROLLOUT_STAGES", raising=False)
-    monkeypatch.setenv("ROLLOUT_ENVS", "prod:target-prod,qa:target-qa,dev:target-dev")
-    assert rollouts.rollout_env_names() == ["dev", "prod"]
-
-    monkeypatch.setenv("ROLLOUT_STAGES", "qa,prod")
-    assert rollouts.rollout_stages() == ("qa", "prod")
-    assert rollouts.rollout_env_names() == ["qa", "prod"]
-
-    monkeypatch.setenv("ROLLOUT_STAGES", "@@@")
-    assert rollouts.rollout_stages() == ("dev", "staging", "prod")
-
-
-def test_a_missing_stage_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        "ROLLOUT_ENVS",
-        "prod:gcp-apac-prod|aws-us-prod,apac-prod:gcp-apac-prod,staging:gcp-staging",
-    )
-    assert rollouts.rollout_env_names() == ["staging", "prod"]
-    targets: list[dict[str, Any]] = [
-        {"id": "gcp-staging", "label": "GCP Staging", "contains": True, "error": ""},
-        {"id": "gcp-apac-prod", "label": "GCP APAC Prod", "contains": True, "error": ""},
-        {"id": "aws-us-prod", "label": "AWS US Prod", "contains": False, "error": ""},
-    ]
-    assert rollouts.envs_ready(targets) == {"staging"}
+    assert rollouts.envs_ready(targets, stages) == {"dev", "prod"}
 
 
 def test_watch_schedule_and_age_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,7 +194,7 @@ async def test_every_environment_waits_one_poll(
         pr_number=7,
         sha=SHA,
         author="octocat",
-        envs=["dev", "staging"],
+        stages=_plan(),
         page="projects",
         expected="the empty state is gone",
         metrics="p95 latency",
@@ -260,7 +246,7 @@ async def test_expired_watch_does_not_query_locate(
         pr_number=7,
         sha=SHA,
         author="octocat",
-        envs=["dev", "staging"],
+        stages=_plan(),
         page="",
         expected="",
         metrics="",
@@ -345,7 +331,7 @@ async def test_older_watch_finishes_without_closing_a_newer_check(
         pr_number=7,
         sha=SHA,
         author="octocat",
-        envs=["dev", "staging"],
+        stages=_plan(),
         page="",
         expected="",
         metrics="",
@@ -380,7 +366,7 @@ async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
         {
             "kind": "agent",
             "rollout_check": {
-                "envs": ["dev", "staging"],
+                "stages": _plan(),
                 "page": "projects",
                 "expected": "the chart renders",
                 "metrics": "",
@@ -404,13 +390,16 @@ async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
     assert watch.sha == SHA
     assert watch.workspace == "oss"
     assert watch.resolves_thread is True
+    assert [stage.name for stage in watch.stages] == ["dev", "staging"]
+    assert watch.stages[0].targets == ["gcp-dev"]
+    assert watch.stages[0].datadog_tags == ["env:dev"]
     assert client.threads.updated[-1]["metadata"] == {"rollout_status": "watching"}
 
 
 async def test_start_from_merge_ignores_other_repositories(client: _Client) -> None:
     await rollouts.start_from_merge(
         "thread-1",
-        {"kind": "agent", "rollout_check": {"envs": ["dev", "staging"]}},
+        {"kind": "agent", "rollout_check": {"stages": _plan()}},
         {
             "repository": {"full_name": "langchain-ai/open-swe"},
             "pull_request": {"number": 7, "merge_commit_sha": SHA, "user": {"login": "octocat"}},
@@ -421,6 +410,21 @@ async def test_start_from_merge_ignores_other_repositories(client: _Client) -> N
 
 async def test_start_from_merge_ignores_a_thread_without_a_check(client: _Client) -> None:
     await rollouts.start_from_merge("thread-1", {"kind": "agent"}, {"pull_request": {}})
+    assert client.store.values == {}
+
+
+async def test_start_from_merge_ignores_a_plan_without_targets(client: _Client) -> None:
+    await rollouts.start_from_merge(
+        "thread-1",
+        {
+            "kind": "agent",
+            "rollout_check": {"stages": [{"name": "dev", "datadog_tags": ["env:dev"]}]},
+        },
+        {
+            "repository": {"full_name": "langchain-ai/langchainplus"},
+            "pull_request": {"number": 7, "merge_commit_sha": SHA, "user": {"login": "octocat"}},
+        },
+    )
     assert client.store.values == {}
 
 
@@ -465,14 +469,23 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
     secret = "rollout-bot-test-secret"
 
     result = await record_tool.record_rollout_check(
+        environments=[
+            {"name": "Dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev", "not a tag"]},
+            {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+            {"name": "skipped", "targets": []},
+        ],
         page=f"https://user:{secret}@smith.langchain.com/o/org",
         expected="the chart renders",
         metrics="p95 latency",
     )
 
-    assert result["envs"] == ["dev", "staging", "prod"]
+    stored = [
+        {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev"]},
+        {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+    ]
+    assert result["environments"] == stored
     check = updates[0]["rollout_check"]
-    assert check["envs"] == ["dev", "staging", "prod"]
+    assert check["stages"] == stored
     assert isinstance(check["check_id"], str) and check["check_id"]
     assert secret not in json.dumps(check)
     assert check["run_config"]["workspace"] == "oss"
@@ -506,6 +519,37 @@ async def test_record_rollout_check_skips_other_repositories(
     monkeypatch.setattr(record_tool, "get_client", lambda: _LangGraph())
 
     result = await record_tool.record_rollout_check(page="projects")
+
+    assert result["watched"] is False
+    assert updated is False
+
+
+async def test_record_rollout_check_skips_an_empty_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    updated = False
+
+    class _Threads:
+        async def update(self, *, thread_id: str, metadata: dict[str, Any]) -> None:
+            del thread_id, metadata
+            nonlocal updated
+            updated = True
+
+    class _LangGraph:
+        threads = _Threads()
+
+    monkeypatch.setattr(
+        record_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "thread-1",
+                "repo": {"owner": "langchain-ai", "name": "langchainplus"},
+            }
+        },
+    )
+    monkeypatch.setattr(record_tool, "get_client", lambda: _LangGraph())
+    _configure_rollout(monkeypatch)
+
+    result = await record_tool.record_rollout_check(environments=[])
 
     assert result["watched"] is False
     assert updated is False

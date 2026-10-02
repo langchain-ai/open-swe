@@ -1,14 +1,15 @@
 """Store the rollout check on the thread that is opening a pull request."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
 from langgraph.config import get_config
 from langgraph_sdk import get_client
+from pydantic import Field
 
-from agent.rollouts import rollout_env_names, rollout_repo_allowed
+from agent.rollouts import normalize_stages, rollout_repo_allowed
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
 from agent.tools.manage_baby_sit import dispatch_run_config
@@ -32,6 +33,15 @@ def _without_userinfo(value: str) -> str:
 
 
 async def record_rollout_check(
+    environments: Annotated[
+        list[dict[str, Any]] | str | None,
+        Field(
+            description=(
+                "Deploy environments for this repository, earliest first. "
+                "Each object has name, targets, and datadog_tags."
+            )
+        ),
+    ] = None,
     page: str = "",
     expected: str = "",
     metrics: str = "",
@@ -47,12 +57,12 @@ async def record_rollout_check(
     repo_name = repo.strip() or (cfg.repo.name if cfg.repo else "")
     if not rollout_repo_allowed(repo_owner, repo_name):
         return {"success": True, "watched": False, "reason": "This repository is not watched"}
-    envs = rollout_env_names()
-    if not envs:
+    stages = normalize_stages(environments)
+    if not stages:
         return {
             "success": True,
             "watched": False,
-            "reason": "Rollout environments are not configured",
+            "reason": "No rollout environments were recorded",
         }
     dumped = cfg.dump()
     source = SourceContext.parse(
@@ -67,7 +77,7 @@ async def record_rollout_check(
         "page": _without_userinfo(_clip(page, _PAGE_LIMIT)),
         "expected": _clip(expected, _TEXT_LIMIT),
         "metrics": _clip(metrics, _TEXT_LIMIT),
-        "envs": envs,
+        "stages": [stage.model_dump() for stage in stages],
         "author": (cfg.github_login or "").strip(),
         "run_config": dispatch_run_config(cfg, thread_id, None),
         "source_context": source.dump(),
@@ -82,7 +92,7 @@ async def record_rollout_check(
     return {
         "success": True,
         "watched": True,
-        "envs": envs,
+        "environments": [stage.model_dump() for stage in stages],
         "page": bool(check["page"]),
         "metrics": bool(check["metrics"]),
     }

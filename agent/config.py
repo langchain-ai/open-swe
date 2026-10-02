@@ -283,22 +283,6 @@ ENV.var(
     "Comma-separated owner/repo pairs whose merged pull requests are watched. Empty watches none.",
 )
 ENV.var(
-    "ROLLOUT_STAGES",
-    "Comma-separated rollout stage names, in check order.",
-    default="dev,staging,prod",
-)
-ENV.var(
-    "ROLLOUT_ENVS",
-    "Targets for each stage as name:target|target. Names must be in ROLLOUT_STAGES. "
-    "A stage with no targets is skipped. A stage is ready when every listed target contains "
-    "the commit. Example: dev:target-dev,prod:target-a|target-b. Empty watches none.",
-)
-ENV.var(
-    "ROLLOUT_DATADOG_TAGS",
-    "Datadog tags per environment as name=tag|tag. Example: dev=tag-dev,prod=tag-a|tag-b. "
-    "Empty leaves a metric check without a tag.",
-)
-ENV.var(
     "ROLLOUT_LOCATE_TOOL",
     "MCP tool that reports which targets contain a commit. Example: releases.locate_commit. "
     "Empty skips the poll.",

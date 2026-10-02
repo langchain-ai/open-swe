@@ -1,11 +1,10 @@
 """Durable watch for a merged OpenSWE pull request.
 
 A scheduler cron polls the configured locate tool on ``ROLLOUT_WATCH_SCHEDULE``
-(every 15 minutes by default). The implementing thread is resumed when a
-configured stage newly contains the merge SHA. Stages default to dev, staging,
-and prod. Each stage waits one quiet poll, then runs the same check. A stage
-with no configured targets is skipped. ``rollout_page_check`` opens the page
-in the sandbox browser and does not log in.
+(every 15 minutes by default). The implementing thread records which environments
+to watch. The thread is resumed when a recorded environment newly contains the
+merge SHA. Each environment waits one quiet poll, then runs the same check.
+``rollout_page_check`` opens the page in the sandbox browser and does not log in.
 """
 
 import json
@@ -14,7 +13,7 @@ import re
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, NamedTuple
+from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
@@ -42,7 +41,9 @@ _CRON_FIELD = re.compile(r"^[A-Za-z0-9*,/\-]+$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
-_DEFAULT_STAGES = ("dev", "staging", "prod")
+_MAX_STAGES = 12
+_MAX_TARGETS = 20
+_MAX_TAGS = 20
 
 
 @asynccontextmanager
@@ -67,6 +68,14 @@ async def _watch_lock(key: str) -> AsyncIterator[bool]:
             logger.warning("Failed to release rollout lock for %s", key, exc_info=True)
 
 
+class RolloutStage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    targets: list[str] = Field(default_factory=list)
+    datadog_tags: list[str] = Field(default_factory=list)
+
+
 class RolloutWatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -79,7 +88,7 @@ class RolloutWatch(BaseModel):
     pr_url: str = ""
     sha: str = ""
     author: str = ""
-    envs: list[str] = Field(default_factory=lambda: ["dev", "staging"])
+    stages: list[RolloutStage] = Field(default_factory=list)
     page: str = ""
     expected: str = ""
     metrics: str = ""
@@ -121,11 +130,6 @@ WATCHES = RolloutWatchStore()
 
 def watch_key(owner: str, repo: str, pr_number: int) -> str:
     return f"{owner.strip().lower()}/{repo.strip().lower()}#{pr_number}"
-
-
-class RolloutEnv(NamedTuple):
-    name: str
-    targets: tuple[str, ...]
 
 
 def _name(value: str) -> str:
@@ -174,58 +178,71 @@ def rollout_watch_pending(metadata: Mapping[str, Any]) -> bool:
     return isinstance(check_id, str) and bool(check_id) and finished_for != check_id
 
 
-def rollout_stages() -> tuple[str, ...]:
-    """Stage names from ``ROLLOUT_STAGES``, in that order.
-
-    Unset or entirely invalid values use dev, staging, and prod.
-    """
-    stages: list[str] = []
-    for item in ENV.ROLLOUT_STAGES.get_list():
-        name = _name(item)
-        if name and name not in stages:
-            stages.append(name)
-    return tuple(stages) or _DEFAULT_STAGES
-
-
-def rollout_envs() -> list[RolloutEnv]:
-    """Stages from ``ROLLOUT_ENVS``, in ``ROLLOUT_STAGES`` order.
-
-    A stage is omitted when it has no targets. Extra entries for one stage are
-    combined. A name that is not a configured stage is ignored.
-    """
-    stages = rollout_stages()
-    grouped: dict[str, list[str]] = {stage: [] for stage in stages}
-    for item in ENV.ROLLOUT_ENVS.get_list():
-        name, sep, raw_targets = item.partition(":")
-        env_name = _name(name)
-        if not sep or env_name not in grouped:
-            continue
-        for part in raw_targets.split("|"):
-            target = _name(part)
-            if target and target not in grouped[env_name]:
-                grouped[env_name].append(target)
-    return [RolloutEnv(stage, tuple(grouped[stage])) for stage in stages if grouped[stage]]
-
-
-def rollout_env_names() -> list[str]:
-    return [spec.name for spec in rollout_envs()]
-
-
-def datadog_tags(env: str) -> list[str]:
-    """Tags from ``ROLLOUT_DATADOG_TAGS`` for one environment."""
-    wanted = _name(env)
-    if not wanted:
+def _tags(raw: object) -> list[str]:
+    if not isinstance(raw, list):
         return []
-    for item in ENV.ROLLOUT_DATADOG_TAGS.get_list():
-        name, sep, raw = item.partition("=")
-        if not sep or _name(name) != wanted:
+    tags: list[str] = []
+    for part in raw:
+        if len(tags) >= _MAX_TAGS:
+            break
+        if isinstance(part, str) and (tag := part.strip()) and _TAG_RE.fullmatch(tag):
+            if tag not in tags:
+                tags.append(tag)
+    return tags
+
+
+def _targets(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    targets: list[str] = []
+    for part in raw:
+        if len(targets) >= _MAX_TARGETS:
+            break
+        target = _name(part) if isinstance(part, str) else ""
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
+def normalize_stages(raw: object) -> list[RolloutStage]:
+    """Recorded environments, in the order the thread stored them.
+
+    A stage without a valid name or at least one target is dropped. Tags that
+    fall outside the Datadog tag charset are dropped.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    stages: list[RolloutStage] = []
+    seen: set[str] = set()
+    for item in raw:
+        if len(stages) >= _MAX_STAGES:
+            break
+        if not isinstance(item, Mapping):
             continue
-        return [tag for part in raw.split("|") if (tag := part.strip()) and _TAG_RE.fullmatch(tag)]
-    return []
+        name = _name(str(item.get("name") or ""))
+        targets = _targets(item.get("targets"))
+        if not name or name in seen or not targets:
+            continue
+        seen.add(name)
+        stages.append(
+            RolloutStage(name=name, targets=targets, datadog_tags=_tags(item.get("datadog_tags")))
+        )
+    return stages
 
 
-def envs_ready(targets: list[Any]) -> set[str]:
-    """Configured environments whose every target contains the commit and has no error."""
+def _as_stages(raw: object) -> list[RolloutStage]:
+    if isinstance(raw, list) and all(isinstance(item, RolloutStage) for item in raw):
+        return raw
+    return normalize_stages(raw)
+
+
+def envs_ready(targets: list[Any], stages: list[RolloutStage]) -> set[str]:
+    """Recorded environments whose every target contains the commit and has no error."""
     rows: dict[str, Mapping[str, Any]] = {}
     for target in targets:
         if not isinstance(target, Mapping):
@@ -234,13 +251,13 @@ def envs_ready(targets: list[Any]) -> set[str]:
         if target_id:
             rows[target_id] = target
     ready: set[str] = set()
-    for spec in rollout_envs():
-        matched = [rows.get(target_id) for target_id in spec.targets]
+    for stage in stages:
+        matched = [rows.get(target_id) for target_id in stage.targets]
         if all(
             row is not None and not row.get("error") and row.get("contains") is True
             for row in matched
         ):
-            ready.add(spec.name)
+            ready.add(stage.name)
     return ready
 
 
@@ -248,17 +265,6 @@ def _clip(value: object, limit: int) -> str:
     if not isinstance(value, str):
         return ""
     return value.strip()[:limit]
-
-
-def _normalize_envs(raw: object) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    envs: list[str] = []
-    for env in raw:
-        name = _name(env) if isinstance(env, str) else ""
-        if name and name not in envs:
-            envs.append(name)
-    return envs
 
 
 def _payload(raw: Any) -> dict[str, Any] | None:
@@ -436,7 +442,7 @@ async def start_watch(
     pr_number: int,
     sha: str,
     author: str,
-    envs: list[str],
+    stages: list[RolloutStage] | list[Mapping[str, Any]] | str,
     page: str,
     expected: str,
     metrics: str,
@@ -474,7 +480,7 @@ async def start_watch(
         pr_url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
         sha=sha,
         author=author,
-        envs=_normalize_envs(envs),
+        stages=_as_stages(stages),
         page=page,
         expected=expected,
         metrics=metrics,
@@ -521,8 +527,8 @@ async def start_from_merge(
     owner, repo, number = identity
     if not rollout_repo_allowed(owner, repo):
         return
-    envs = _normalize_envs(check.get("envs"))
-    if not envs:
+    stages = normalize_stages(check.get("stages"))
+    if not stages:
         return
     pull_requests = metadata.get("pull_requests")
     resolves_thread = isinstance(pull_requests, list) and any(
@@ -543,7 +549,7 @@ async def start_from_merge(
         pr_number=number,
         sha=sha,
         author=author.strip(),
-        envs=envs,
+        stages=stages,
         page=_clip(check.get("page"), 300),
         expected=_clip(check.get("expected"), 1000),
         metrics=_clip(check.get("metrics"), 1000),
@@ -595,17 +601,17 @@ async def _dispatch(watch: RolloutWatch, content: str) -> bool:
     return True
 
 
-def _check_prompt(watch: RolloutWatch, env: str, *, last: bool) -> str:
+def _check_prompt(watch: RolloutWatch, stage: RolloutStage, *, last: bool) -> str:
     return prompt(
         "runs/rollout-check",
-        env=env,
+        env=stage.name,
         sha=watch.sha,
         pr_url=watch.pr_url,
         author=watch.author,
         page=watch.page,
         expected=watch.expected,
         metrics=watch.metrics,
-        datadog_tags=", ".join(datadog_tags(env)),
+        datadog_tags=", ".join(stage.datadog_tags),
         last=last,
     )
 
@@ -656,7 +662,12 @@ async def evaluate_rollout(key: str) -> str:
         if watch is None or not watch.active:
             return "inactive"
         if _expired(watch):
-            waiting = ", ".join(env for env in watch.envs if env not in watch.dispatched) or "none"
+            waiting = (
+                ", ".join(
+                    stage.name for stage in watch.stages if stage.name not in watch.dispatched
+                )
+                or "none"
+            )
             sent = await _dispatch(
                 watch,
                 prompt(
@@ -678,23 +689,24 @@ async def evaluate_rollout(key: str) -> str:
             return "locate_unavailable"
         raw_targets = report.get("targets")
         targets: list[Any] = raw_targets if isinstance(raw_targets, list) else []
-        ready = envs_ready(targets)
+        ready = envs_ready(targets, watch.stages)
         changed = False
-        for env in watch.envs:
-            if env in watch.dispatched or env not in ready:
+        names = {stage.name for stage in watch.stages}
+        for stage in watch.stages:
+            if stage.name in watch.dispatched or stage.name not in ready:
                 continue
-            if env not in watch.seen:
-                watch.seen.append(env)
+            if stage.name not in watch.seen:
+                watch.seen.append(stage.name)
                 changed = True
                 continue
-            last = set(watch.dispatched) | {env} >= set(watch.envs)
-            content = _check_prompt(watch, env, last=last)
+            last = set(watch.dispatched) | {stage.name} >= names
+            content = _check_prompt(watch, stage, last=last)
             if not await _dispatch(watch, content):
                 await WATCHES.save(watch)
                 return "dispatch_failed"
-            watch.dispatched.append(env)
+            watch.dispatched.append(stage.name)
             changed = True
-        if set(watch.envs) <= set(watch.dispatched):
+        if names <= set(watch.dispatched):
             await _finish(watch)
             return "done"
         if changed:
