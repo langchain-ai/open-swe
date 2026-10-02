@@ -288,11 +288,11 @@ export function WorkspaceEditor({
             <div>Setup script (optional)</div>
             <p className="text-xs text-muted-foreground">
               Builds the image from the base snapshot immediately after creation
-              and nightly. Use OPENSWE_WORKSPACE_REPOS to preload bound
-              repositories. Without a setup script, no image is built.
+              and nightly. Without a setup script, no image is built.
             </p>
             <WorkspaceScriptEditor
               label="Setup script"
+              repos={draft.repos}
               value={draft.setupScript}
               onChange={(setupScript) => onChange({ ...draft, setupScript })}
               description="Edit the shell script, then create the workspace to save it and start building the image."
@@ -306,6 +306,7 @@ export function WorkspaceEditor({
             </p>
             <WorkspaceScriptEditor
               label="Update script"
+              repos={draft.repos}
               value={draft.updateScript}
               onChange={(updateScript) => onChange({ ...draft, updateScript })}
               description="Edit the shell script, then create the workspace to save it."
