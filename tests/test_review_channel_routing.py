@@ -3,7 +3,7 @@ from pytest import MonkeyPatch
 from agent.github.repo_files import RepoSettings
 
 
-def test_review_channel_majority_and_no_majority(monkeypatch: MonkeyPatch) -> None:
+def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
     settings = RepoSettings.model_validate(
         {
             "reviewChannel": "#fallback",
@@ -23,4 +23,7 @@ def test_review_channel_majority_and_no_majority(monkeypatch: MonkeyPatch) -> No
     monkeypatch.setattr("agent.github.repo_files.random.choice", choose)
     assert settings.channel_for_files(["ui/a", "agent/b", "README.md"]) == "#fallback"
     assert set(choices) == {"#frontend", "#backend", "#fallback"}
+    choices.clear()
+    assert settings.channel_for_files(["ui/a", "ui/b", "agent/c", "README.md"]) == "#frontend"
+    assert choices == ["#frontend"]
     assert settings.channel_for_files(["README.md"]) == "#fallback"

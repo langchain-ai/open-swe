@@ -92,8 +92,8 @@ class RepoSettings(BaseModel):
                 counts[channel] += 1
         if not counts:
             return self.review_channel.strip()
-        channel, count = counts.most_common(1)[0]
-        return channel if count > len(filenames) / 2 else random.choice(list(counts))
+        count = max(counts.values())
+        return random.choice([candidate for candidate, total in counts.items() if total == count])
 
     async def channel_for_pr(self, owner: str, repo: str, number: int, *, token: str) -> str:
         if not self.review_channel_rules:

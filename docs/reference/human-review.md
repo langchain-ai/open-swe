@@ -39,9 +39,9 @@ For monorepos, add ordered path rules:
 
 Patterns match case-sensitive repository-relative paths; `*` includes nested
 paths. The first matching rule assigns each changed file to a channel, and
-unmatched files count toward `reviewChannel` when configured. A channel with
-more than half of all changed files wins; otherwise one represented channel is
-chosen uniformly at random. Files count equally, including tests. The selected
+unmatched files count toward `reviewChannel` when configured. The channel with
+the most changed files wins; ties are broken uniformly at random among the tied
+channels. Files count equally, including tests. The selected
 channel gets one canonical request, which stays there once posted. Explicit
 channel overrides still take precedence. Expedited cards use the same routing
 for their broadcast destination.
