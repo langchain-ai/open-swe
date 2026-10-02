@@ -40,6 +40,7 @@ from agent.review.eval_jobs import (
 from agent.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
+    PostedReviewComment,
     PullRequestPreview,
     PullRequestReviewEvent,
     ReviewScoutTrigger,
@@ -56,6 +57,7 @@ from agent.review.reviews import (
     get_review_summaries,
     list_review_comments,
     list_reviews,
+    post_review_comment,
     proxy_pr_image,
     submit_pull_request_review,
     trigger_re_review,
@@ -362,6 +364,18 @@ async def api_list_review_comments(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await list_review_comments(owner, repo, pr_number)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
+async def api_post_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment: PendingReviewCommentInput,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PostedReviewComment:
+    token = await _viewer_token(session, owner, repo)
+    return await post_review_comment(owner, repo, pr_number, comment, token=token)
 
 
 class PullRequestReviewSubmit(BaseModel):
