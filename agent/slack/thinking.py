@@ -560,10 +560,3 @@ async def _thread_has_active_runs(client: LangGraphClient, thread_id: str) -> bo
         if await client.runs.list(thread_id, status=status, limit=1):
             return True
     return False
-
-
-async def _refresh_thinking_status(channel_id: str, thread_ts: str) -> None:
-    """Re-assert the status periodically; Slack drops it on each assistant message."""
-    while True:
-        await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-        await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)

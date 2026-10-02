@@ -370,20 +370,6 @@ class SlackChannelContext(SlackPayload):
         return "\n".join(value.strip() for value in (self.topic, self.purpose) if value.strip())
 
     @property
-    def has_metadata(self) -> bool:
-        """Whether any name or description field carries something."""
-        return any(
-            value.strip()
-            for value in (
-                self.name,
-                self.name_normalized,
-                self.topic,
-                self.purpose,
-                self.description,
-            )
-        )
-
-    @property
     def label(self) -> str:
         """The channel's display name, either spelling, else ``""``."""
         return self.name or self.name_normalized
