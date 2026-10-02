@@ -14,6 +14,7 @@ import type {
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -131,65 +132,44 @@ function ReviewViewTabs({
   fileCount: number | null
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label="Sidebar view"
-      className="mx-3 mb-1 flex border-b border-border"
+    <Tabs
+      value={view}
+      onValueChange={(next) => onChange(next === "files" ? "files" : "ai")}
+      className="mx-3 mb-1 border-b border-border"
     >
-      <ReviewViewTab
-        active={view === "ai"}
-        label="Walkthrough"
-        count={stepCount}
-        onClick={() => onChange("ai")}
-      >
-        <ListBulletsIcon className="size-3.5" />
-      </ReviewViewTab>
-      <ReviewViewTab
-        active={view === "files"}
-        label="Files"
-        count={fileCount}
-        onClick={() => onChange("files")}
-      >
-        <TreeViewIcon className="size-3.5" />
-      </ReviewViewTab>
-    </div>
+      <TabsList aria-label="Sidebar view" variant="line" className="w-full">
+        <ReviewViewTab value="ai" label="Walkthrough" count={stepCount}>
+          <ListBulletsIcon />
+        </ReviewViewTab>
+        <ReviewViewTab value="files" label="Files" count={fileCount}>
+          <TreeViewIcon />
+        </ReviewViewTab>
+      </TabsList>
+    </Tabs>
   )
 }
 
 function ReviewViewTab({
-  active,
+  value,
   label,
   count,
-  onClick,
   children,
 }: {
-  active: boolean
+  value: ReviewSidebarView
   label: string
   count: number | null
-  onClick: () => void
   children: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        active
-          ? "border-primary font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
-      )}
-    >
+    <TabsTrigger value={value}>
       {children}
       {label}
       {count !== null && (
-        <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+        <span className="font-normal text-muted-foreground/70 tabular-nums">
           {count}
         </span>
       )}
-    </button>
+    </TabsTrigger>
   )
 }
 
@@ -253,25 +233,13 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
     () => onSelectGroup(group.index),
     [onSelectGroup, group.index]
   )
-  const onKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault()
-        onSelectGroup(group.index)
-      }
-    },
-    [onSelectGroup, group.index]
-  )
-
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       aria-current={active ? "true" : undefined}
       onClick={selectGroup}
-      onKeyDown={onKeyDown}
       className={cn(
-        "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
+        "flex w-full cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
           ? "border-primary bg-sidebar-row-hover"
           : "border-transparent hover:bg-sidebar-row-hover"
@@ -288,7 +256,7 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       >
         {title}
       </span>
-    </div>
+    </button>
   )
 })
 
