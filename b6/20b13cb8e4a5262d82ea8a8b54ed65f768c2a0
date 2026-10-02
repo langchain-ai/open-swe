@@ -1,0 +1,93 @@
+agent/dashboard/routes.py
+  s_1a3ac8f281779f::t_55caf6124e5684 19,59
+agent/docs/__init__.py
+  s_1a3ac8f281779f::t_32a1f3aa58ca4a 1
+agent/docs/browser.py
+  s_1a3ac8f281779f::t_49b4a1b507e968 1-106
+agent/docs/collect_changes.py
+  s_1a3ac8f281779f::t_1d65b79b7c01d2 1-85
+agent/docs/coordinator.py
+  s_1a3ac8f281779f::t_2be18804e027cc 1-282
+agent/docs/github.py
+  s_1a3ac8f281779f::t_a914fa065bebab 1-155
+agent/docs/graph.py
+  s_1a3ac8f281779f::t_7b98a188b44da3 1-312
+agent/docs/models.py
+  s_1a3ac8f281779f::t_b057d00ff4ad08 1-162
+agent/docs/publish.py
+  s_1a3ac8f281779f::t_5db820c159ebda 1-316
+agent/docs/routes.py
+  s_1a3ac8f281779f::t_8b03fc00220641 1-58
+agent/github/checks.py
+  s_1a3ac8f281779f::t_22c471fb0419df 47-49,57,62-63
+agent/github/proxy.py
+  s_1a3ac8f281779f::t_5a8e8c6812d159 169-171
+agent/github/routes.py
+  s_1a3ac8f281779f::t_ba47c85f2a1227 71-111
+agent/graphs/docs.py
+  s_1a3ac8f281779f::t_763a457788a2e3 1-3
+agent/resources/prompts/docs/main.md.jinja
+  s_1a3ac8f281779f::t_b6173aac1b11bd 1-52
+agent/resources/prompts/tools/finish_docs_review.md
+  s_1a3ac8f281779f::t_2ba2a4102b5fde 1-5
+agent/resources/prompts/tools/publish_docs_pr.md
+  s_1a3ac8f281779f::t_5744414eacc6a4 1-5
+agent/resources/prompts/tools/take_docs_screenshot.md
+  s_1a3ac8f281779f::t_b094f4636cba8d 1-3
+agent/run_config.py
+  s_1a3ac8f281779f::t_ebe476b5747fbe 113-116
+agent/sandboxes/lifecycle.py
+  s_1a3ac8f281779f::t_f8bba6072222b6 20,180,197-199,201-202,215,262,271-275,277-278,291,301,311,366,394,405,439-446,477,491,509,534-535,609
+agent/sandboxes/tool_access.py
+  s_1a3ac8f281779f::t_30dbdf2dcd493e 91-92,102-103
+agent/skills/docs-author/SKILL.md
+  s_1a3ac8f281779f::t_4aa7f92b91ac29 1-29
+agent/skills/docs-review/SKILL.md
+  s_1a3ac8f281779f::t_aca63f84708fa5 1-27
+agent/tools/open_pull_request.py
+  s_1a3ac8f281779f::t_d3b15a0d5c362b 1183,1197-1203
+docs/DOCS_AGENT.md
+  s_1a3ac8f281779f::t_dc55a98679ab16 1-79
+langgraph.json
+  s_1a3ac8f281779f::t_0448394be457c9 9
+tests/docs/test_capabilities.py
+  s_1a3ac8f281779f::t_6a5380e55c34ba 1-33
+tests/docs/test_sandbox_utilities.py
+  s_1a3ac8f281779f::t_b036316b539f7e 1-107
+tests/docs/test_workflow.py
+  s_1a3ac8f281779f::t_09ec5bedaf72e7 1-370
+ui/src/components/AppSidebar.tsx
+  s_1a3ac8f281779f::t_2947d009e84bba 56
+ui/src/lib/api.ts
+  s_1a3ac8f281779f::t_5073b5021216ff 1295-1303,1305-1307
+ui/src/routeTree.gen.ts
+  s_1a3ac8f281779f::t_0ac6176088dce0 13-25,27-28,30-37,39,41-44,48-50,53-55,58-60,63-65,68-70,73-75,83-85,88-90,93-95,98-100,103-105,108-110,113-115,118,121,123-126,128-130,133-135,138-140,143-146,153-156,158-160,163-175,178-180,188-191,198-200,203-212,232,267,304,343,378,414,452,472-476,479-483,486-490,493-497,500-504,507-511,521-525,528-532,535-539,542-546,549-553,556-560,563-567,570-583,591-595,598-602,605-610,619-624,626-630,633-651,654-658,668-679,689-693,696-700,783
+ui/src/routes/-docs.test.tsx
+  s_1a3ac8f281779f::t_fc6363311c40aa 1-72
+ui/src/routes/docs.tsx
+  s_1a3ac8f281779f::t_45f46a766bbd14 1-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b620b13cb8e4a5262d82ea8a8b54ed65f768c2a0",
+  "prompts": {},
+  "humans": {
+    "h_3a9d271fbf3886": {
+      "author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    },
+    "h_fd2bd7aaf435a7": {
+      "author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_1a3ac8f281779f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fd7c-6bd3-7083-b326-0bf98c2a0a67",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    }
+  }
+}
