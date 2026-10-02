@@ -1180,7 +1180,7 @@ async def open_pull_request(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
-    return await _open_pull_request(
+    result = await _open_pull_request(
         owner=owner,
         repo=repo,
         head=head,
@@ -1193,6 +1193,13 @@ async def open_pull_request(
         author=author or None,
         state=state,
     )
+
+    number = result.get("number")
+    if result.get("success") and isinstance(number, int):
+        from agent.docs.coordinator import coding_pr_opened
+
+        await coding_pr_opened(f"{owner}/{repo}", number)
+    return result
 
 
 def _ref_name(pr: dict[str, Any], side: str) -> str:

@@ -68,6 +68,47 @@ async def github_webhook(
         "name": webhook_repo.get("name", ""),
     }
 
+    repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+    # Docs dispatch is independent of reviewer opt-in and bot mentions. Signature
+    # has already been validated; source routing is enforced by the coordinator. Fail with 503 so GitHub
+    # redelivery can recover unavailable stores/API calls instead of silently dropping docs work.
+    from agent.docs.coordinator import handle_event as handle_docs_event
+
+    try:
+        docs_event = False
+        is_docs_repo = False
+        if event_type in {
+            "pull_request",
+            "issue_comment",
+            "pull_request_review_comment",
+            "pull_request_review",
+        }:
+            from agent.docs.models import settings as docs_settings
+
+            docs_config = await docs_settings()
+            is_docs_repo = repository.lower() == docs_config.docs_repository
+            if is_docs_repo or repository.lower() in docs_config.source_repositories:
+                gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
+                # Dispatch retains the public-repo gate; cancellation uses authoritative
+                # PR state regardless of who delivered a close/draft/skip event.
+                docs_event = await handle_docs_event(
+                    payload, event_type, allow_dispatch=gate_rejection is None
+                )
+    except Exception:
+        common.logger.exception(
+            "Docs webhook dispatch failed", extra={"github_delivery": delivery_id}
+        )
+        response.status_code = 503
+        return {"status": "error", "reason": "docs dispatch temporarily unavailable"}
+    if docs_event and (
+        is_docs_repo
+        or (
+            payload.get("action") in {"edited", "labeled", "unlabeled"}
+            and event_type == "pull_request"
+        )
+    ):
+        return {"status": "accepted", "message": "Processing documentation PR event"}
+
     if webhook_repo_config["owner"] and webhook_repo_config["name"]:
         repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
         try:

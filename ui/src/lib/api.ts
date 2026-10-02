@@ -1292,7 +1292,19 @@ function pullRequestThread(
   )
 }
 
+export interface DocsSettings {
+  enabled: boolean
+  docs_repository: string
+  docs_base_branch: string
+  docs_mcp_url: string
+  source_repositories: string[]
+  revision: string
+}
+
 export const api = {
+  getDocsSettings: () => request<DocsSettings>("/docs-settings"),
+  saveDocsSettings: (body: DocsSettings) =>
+    request<DocsSettings>("/docs-settings", { method: "PUT", body: JSON.stringify(body) }),
   recordPageView: (page_name: string) =>
     request<void>("/analytics/page", {
       method: "POST",

@@ -53,6 +53,7 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         label: "Open SWE Review",
         icon: IoGitPullRequestOutline,
       },
+      { to: "/docs", label: "Open SWE Docs", icon: IoGitPullRequestOutline },
       { to: "/workspaces", label: "Workspaces", icon: IoCubeOutline },
       {
         to: "/admin",
