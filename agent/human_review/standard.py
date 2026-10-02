@@ -50,7 +50,7 @@ from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from agent.human_review.picking import Pick, Wait, choose_reviewer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
-from agent.points.ledger import POINTS, Point
+from agent.points.ledger import POINTS, PickExpired, Point
 from agent.prompts import prompt
 from agent.slack.blocks import actions, block_payload, escape, section
 from agent.slack.channels import SlackChannel
@@ -812,11 +812,12 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     )
     for pick in dropped:
         await Point.award(
-            user_id=pick.user_id,
-            reason="pick_expired",
-            repository_key=f"{pr.owner}/{pr.repo}",
-            pr_number=pr.number,
-            request_id=request.id,
+            pick.user_id,
+            PickExpired(
+                repository=f"{pr.owner}/{pr.repo}".lower(),
+                pr_number=pr.number,
+                request_id=request.id,
+            ),
         )
     current = await HumanReviewRequest.get(request.id)
     if current is None or current.state != "open":

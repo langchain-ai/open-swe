@@ -5,7 +5,7 @@ import logging
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent.database import postgres
-from agent.points.ledger import Point
+from agent.points.ledger import Point, Reviewed
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,9 @@ async def award_review(payload: dict[str, object]) -> None:
         )
         return
     await Point.award(
-        user_id=user.id,
-        reason="reviewed",
-        repository_key=f"{event.repository.owner.login}/{event.repository.name}",
-        pr_number=event.pull_request.number,
+        user.id,
+        Reviewed(
+            repository=f"{event.repository.owner.login}/{event.repository.name}".lower(),
+            pr_number=event.pull_request.number,
+        ),
     )

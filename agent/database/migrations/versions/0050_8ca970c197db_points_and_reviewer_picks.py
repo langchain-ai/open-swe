@@ -16,9 +16,7 @@ def upgrade() -> None:
             user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
             delta integer NOT NULL CHECK (delta <> 0),
             reason text NOT NULL,
-            repository_key text,
-            pr_number integer CHECK (pr_number > 0),
-            request_id uuid REFERENCES human_review_request (id) ON DELETE SET NULL,
+            details jsonb NOT NULL DEFAULT '{}'::jsonb,
             created_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """
@@ -28,14 +26,14 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE UNIQUE INDEX point_one_review_per_pull_request
-            ON point (user_id, repository_key, pr_number)
+            ON point (user_id, (details ->> 'repository'), (details ->> 'pr_number'))
             WHERE reason = 'reviewed'
         """
     )
     op.execute(
         """
         CREATE UNIQUE INDEX point_one_per_missed_pick
-            ON point (user_id, request_id)
+            ON point (user_id, (details ->> 'request_id'))
             WHERE reason = 'pick_expired'
         """
     )
