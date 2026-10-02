@@ -309,10 +309,6 @@ async def create_durable_run(
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
     means the caller already created and titled the thread.
     """
-    if source != "task":
-        from agent.tasks import assert_user_entry
-
-        await assert_user_entry(thread_id)
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)

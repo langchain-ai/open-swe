@@ -244,3 +244,32 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})
     assert set_status.await_args.args == ("C1", "123.45", "Waiting for background tasks…")
+
+
+@pytest.mark.parametrize("membership_failure", [False, True])
+async def test_task_notification_failure_preserves_bookkeeping(monkeypatch, membership_failure):
+    from uuid import uuid4
+
+    from agent.tasks import TaskRole
+    from agent.tools import task_threads
+
+    lookup = AsyncMock(return_value=TaskRole(uuid4(), "parent", "worker", True, ["ship"], False))
+    if membership_failure:
+        lookup.side_effect = RuntimeError("database unavailable")
+    monkeypatch.setattr(task_threads, "role", lookup)
+    monkeypatch.setattr(
+        task_threads, "notify", AsyncMock(side_effect=RuntimeError("parent deleted"))
+    )
+    telemetry, transcript, delivery, failure = (AsyncMock() for _ in range(4))
+    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", telemetry)
+    monkeypatch.setattr(completion, "_settle_transcript_turn", transcript)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", delivery)
+    monkeypatch.setattr(completion, "_post_failure_reply", failure)
+    result = await completion.handle_run_completion(
+        {"thread_id": "worker", "run_id": "run-1", "status": "error"}
+    )
+    assert result["status"] == ("error" if membership_failure else "ok")
+    telemetry.assert_awaited_once()
+    transcript.assert_awaited_once()
+    delivery.assert_awaited_once_with("worker", "enqueue")
+    failure.assert_not_awaited()

@@ -74,12 +74,13 @@ async def test_delegation_serializes_with_implementation_and_never_resets(regist
             observed.append("delegated")
 
     first = asyncio.create_task(implementation())
-    second = asyncio.create_task(delegate())
     await started.wait()
-    await asyncio.sleep(0.05)
+    with pytest.raises(PermissionError, match="conflicts with active tools"):
+        await delegate()
     assert observed == []
     release.set()
-    await asyncio.gather(first, second)
+    await first
+    await delegate()
     assert observed == ["implementation", "delegated"]
     await update_task("coordinator", ["ship", "verify"], True, "Both criteria satisfied")
     await update_task("coordinator", ["follow-up"], False, "")
@@ -238,6 +239,18 @@ async def test_worker_reservation_survives_dispatch_failure_and_retries(monkeypa
     await task_threads.control_worker(worker, "retry")
     assert client.runs.create.call_count == calls
     assert len(await event_matches.EventMatch.owed(worker, [])) == 1
+    async with postgres.session() as session:
+        await event_matches.EventMatch(
+            thread_id=worker,
+            subscription_id=uuid4(),
+            source="github",
+            delivery_id="ci-finished",
+            content="CI completed",
+            run_config=dispatched["config"]["configurable"],
+        ).record(session)
+    await event_matches.EventMatch.deliver(worker, "enqueue")
+    assert client.runs.create.call_count == calls + 1
+    assert "CI completed" in str(client.runs.create.call_args.kwargs["input"])
 
 
 @pytest.mark.asyncio
@@ -257,3 +270,31 @@ async def test_authority_rejects_inherited_nested_execution_but_expires(registry
         await asyncio.sleep(0)
     release.set()
     assert await pending
+
+
+@pytest.mark.asyncio
+async def test_parallel_and_proxy_tool_admissions_release_pool_connections(registry_db):
+    from contextvars import Context
+
+    async def proxy():
+        async with authority("host", tool_call=True, exclusive=False):
+            assert await role("host") is None
+
+    async with authority("host", tool_call=True, exclusive=False):
+        await asyncio.wait_for(asyncio.create_task(proxy(), context=Context()), 2)
+        with pytest.raises(PermissionError, match="conflicts"):
+            await asyncio.create_task(update_task("host", ["ship"], False, ""), context=Context())
+        assert postgres.engine().pool.checkedout() == 0
+    entered = 0
+    ready = asyncio.Event()
+
+    async def call(index):
+        nonlocal entered
+        async with authority(f"host-{index}", tool_call=True, exclusive=False):
+            entered += 1
+            if entered == 12:
+                ready.set()
+            await ready.wait()
+            assert await role(f"host-{index}") is None
+
+    await asyncio.wait_for(asyncio.gather(*(call(i) for i in range(12))), 5)

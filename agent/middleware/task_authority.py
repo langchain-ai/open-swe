@@ -84,8 +84,10 @@ class TaskAuthorityMiddleware(OpenSWEMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         thread_id = current_thread()
-        async with authority(thread_id, tool_call=True):
-            name = request.tool_call["name"]
+        name = request.tool_call["name"]
+        async with authority(
+            thread_id, tool_call=True, exclusive=name in {"spawn_worker", "configure_task"}
+        ):
             error = await reject_tool(thread_id, name)
             current = await role(thread_id)
             if name in self.client_tool_names and current is not None:

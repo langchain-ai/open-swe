@@ -296,10 +296,15 @@ async def worker_finished(thread_id: str, run_id: str, status: str) -> bool:
     membership = await role(thread_id)
     if membership is None or membership.role != "worker":
         return False
-    await notify(
-        thread_id,
-        membership.coordinator_id,
-        f"finished:{thread_id}:{run_id}",
-        prompt("tasks/finished", worker_id=thread_id, run_id=run_id, status=status),
-    )
+    try:
+        await notify(
+            thread_id,
+            membership.coordinator_id,
+            f"finished:{thread_id}:{run_id}",
+            prompt("tasks/finished", worker_id=thread_id, run_id=run_id, status=status),
+        )
+    except Exception:
+        logger.exception(
+            "Worker outcome delivery failed", extra={"worker_id": thread_id, "run_id": run_id}
+        )
     return True

@@ -1,6 +1,5 @@
 """Durable task membership and execution authority."""
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -17,6 +16,7 @@ from agent.database import postgres
 @dataclass
 class _Lease:
     thread_id: str
+    exclusive: bool
     active: bool = True
 
 
@@ -52,32 +52,54 @@ async def role(thread_id: str) -> TaskRole | None:
 
 
 @asynccontextmanager
-async def authority(thread_id: str, *, tool_call: bool = False) -> AsyncIterator[None]:
+async def authority(
+    thread_id: str, *, tool_call: bool = False, exclusive: bool = True
+) -> AsyncIterator[None]:
     held = _HELD.get()
     if held is not None and held.active and held.thread_id == thread_id:
         if tool_call:
             raise PermissionError("Nested tool execution must pass through a new invocation")
+        if exclusive and not held.exclusive:
+            raise PermissionError("A tool admission cannot upgrade to a task transition")
         yield
         return
     if not postgres.configured():
         yield
         return
-    while True:
-        async with postgres.transaction() as conn:
-            acquired = await conn.scalar(
-                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
-                {"key": f"task-authority:{thread_id}"},
+    admission_id = uuid4()
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"task-authority:{thread_id}"},
+        )
+        conflict = await conn.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM task_tool_admission "
+                "WHERE thread_id = :thread AND (:exclusive OR exclusive))"
+            ),
+            {"thread": thread_id, "exclusive": exclusive},
+        )
+        if conflict:
+            raise PermissionError(
+                "Task transition conflicts with active tools; retry after they finish"
             )
-            if acquired:
-                lease = _Lease(thread_id)
-                token = _HELD.set(lease)
-                try:
-                    yield
-                finally:
-                    lease.active = False
-                    _HELD.reset(token)
-                return
-        await asyncio.sleep(0.05)
+        await conn.execute(
+            text(
+                "INSERT INTO task_tool_admission (id, thread_id, exclusive) VALUES (:id, :thread, :exclusive)"
+            ),
+            {"id": admission_id, "thread": thread_id, "exclusive": exclusive},
+        )
+    lease = _Lease(thread_id, exclusive)
+    token = _HELD.set(lease)
+    try:
+        yield
+    finally:
+        lease.active = False
+        _HELD.reset(token)
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                text("DELETE FROM task_tool_admission WHERE id = :id"), {"id": admission_id}
+            )
 
 
 async def ensure_task(thread_id: str) -> TaskRole:
