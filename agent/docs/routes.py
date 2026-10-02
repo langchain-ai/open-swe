@@ -5,11 +5,12 @@ from urllib.parse import quote
 from uuid import uuid7
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, field_validator
 
-from agent.dashboard.deps import ADMIN_DEP
+from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.docs import github
 from agent.docs.coordinator import cancel, job_lock
-from agent.docs.models import JOBS, SETTINGS, DocsSettings, settings
+from agent.docs.models import JOBS, SETTINGS, DocsSettings, repository_name, settings
 from agent.utils.url_safety import resolve_and_validate
 
 router = APIRouter()
@@ -20,10 +21,61 @@ async def get_docs_settings(_session: dict[str, object] = ADMIN_DEP) -> DocsSett
     return await settings()
 
 
+class DocsRepoUpdate(BaseModel):
+    full_name: str
+    enabled: bool
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        return repository_name(value)
+
+
+@router.get("/enabled-docs-repos")
+async def get_docs_repositories(_session: dict[str, object] = SESSION_DEP) -> dict[str, list[str]]:
+    config = await settings()
+    return {"repos": config.source_repositories if config.enabled else []}
+
+
+@router.put("/enabled-docs-repos")
+async def put_docs_repository(
+    update: DocsRepoUpdate, _session: dict[str, object] = ADMIN_DEP
+) -> dict[str, list[str]]:
+    async with job_lock("docs-settings"):
+        current = await settings()
+        if update.enabled and not current.docs_repository:
+            raise HTTPException(422, "Configure the docs target before enabling documentation")
+        sources = set(current.source_repositories)
+        if update.enabled:
+            sources.add(update.full_name)
+        else:
+            sources.discard(update.full_name)
+        try:
+            next_settings = DocsSettings.model_validate(
+                {
+                    **current.model_dump(),
+                    "enabled": bool(current.docs_repository),
+                    "source_repositories": sorted(sources),
+                }
+            )
+        except ValueError as exc:
+            raise HTTPException(422, "The docs target cannot check its own documentation") from exc
+        await save_docs_settings(next_settings)
+    return {"repos": sorted(sources)}
+
+
 @router.put("/docs-settings", response_model=DocsSettings)
 async def put_docs_settings(
     update: DocsSettings, _session: dict[str, object] = ADMIN_DEP
 ) -> DocsSettings:
+    async with job_lock("docs-settings"):
+        current = await settings()
+        if update.revision != current.revision:
+            raise HTTPException(409, "Docs settings changed; reload and try again")
+        return await save_docs_settings(update)
+
+
+async def save_docs_settings(update: DocsSettings) -> DocsSettings:
     if update.docs_mcp_url:
         safe, _, _, _ = await asyncio.to_thread(resolve_and_validate, update.docs_mcp_url)
         if not safe:

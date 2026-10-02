@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 def public_addresses(host: str) -> list[str]:
     resolved = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    addresses = list(dict.fromkeys(entry[4][0] for entry in resolved))
+    addresses = list(dict.fromkeys(str(entry[4][0]) for entry in resolved))
     if not addresses:
         raise ValueError("Browser destination has no public address")
     for address in addresses:
@@ -30,7 +30,7 @@ def public_addresses(host: str) -> list[str]:
 
 
 class PublicHTTPSProxy(BaseHTTPRequestHandler):
-    def log_message(self, _format: str, *args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         pass
 
     def do_CONNECT(self) -> None:

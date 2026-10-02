@@ -1,11 +1,14 @@
 # Open SWE Docs
 
 Open SWE Docs checks user-facing documentation against changes in source PRs.
-Configure it under **Open SWE Docs**, immediately below Open SWE Review in the
-settings sidebar. Settings are instance-wide and require an administrator.
+Configure its **Documentation target** under **Open SWE Review**. Settings are
+instance-wide and require an administrator. Each repository has independent
+**Review** and **Docs** switches: enable code review only, docs only, or both.
+Both capabilities run through the reviewer agent in one canonical thread per PR,
+with prompts, tools and skills selected for the enabled capabilities.
 
-Choose a docs repository, its target base branch, and the source repositories to
-check. Sources must belong to a routed Open SWE workspace. The docs repository
+Choose a docs repository and its target base branch. Enable Docs on each source
+repository in the repository settings. Sources must belong to a routed Open SWE workspace. The docs repository
 can be outside that workspace. Optionally provide a public HTTPS, streamable HTTP
 docs MCP URL for current published documentation. The connection exposes only
 read-only annotated tools or non-destructive search/fetch/read/get/list tools.
@@ -27,16 +30,21 @@ sandbox; redirects and page assets cannot reach private addresses.
 
 Signed PR events (open, ready for review, reopen, synchronize, edits, labels,
 close, draft conversion), PR comments, and linked docs PR changes use the same
-coordinator. The coding agent also invokes it after opening a source PR. It only
-starts work for enabled, open, non-draft source PRs without `skip-docs`.
-Settings create the `skip-docs` label in each enabled source repository. Adding
-that label, closing a PR, or converting it to draft invalidates/cancels active work;
+coordinator. The coding agent also invokes it after opening a source PR. Documentation only starts for enabled, open, non-draft source PRs without
+`skip-docs`. Code review is independently enabled; its existing draft-review
+preferences still apply. `skip-docs` disables docs in code, without disabling
+code review. Code-only review retains its existing on-demand and automatic behavior.
+Enabling Docs creates the `skip-docs` label in that source repository. Adding
+that label, closing a PR, or converting it to draft invalidates/cancels active docs work;
+if code review remains eligible, a code-only run replaces the combined run;
 removing the label or marking the source ready starts a current check.
 Source events retain Open SWE's existing public-repository organization gate.
 
 Runs deduplicate across coding-agent hooks, webhook retries, and workers using a
-shared source-PR lock and an input fingerprint. Changes to source SHA, source
-body/title, linked docs SHA/state, docs base, or settings invalidate prior evidence.
+shared source-PR lock and an input fingerprint. Changes to source base/head SHA, enabled capabilities, source body/title, linked
+docs SHA/state, docs base, or settings invalidate prior evidence. PR synchronize
+events own automatic updates on docs-enabled sources, so a separate push webhook
+does not create a duplicate code-review run.
 Store/API failures return 503 from the webhook so delivery failures remain visible and can be redelivered. If a run fails,
 a subsequent PR event retries it; there is no separate periodic docs reconciler.
 Changing settings cancels existing work; subsequent PR events use the new settings.
@@ -67,7 +75,7 @@ instructions are evidence rather than authoritative guidance. Source and linked
 PR code is inspected as text and must not be executed. Public docs output must
 omit private source identifiers and implementation details.
 
-Run threads are private and visible to administrators because either checkout may
+Reviewer threads that carry docs context are private and visible to administrators because either checkout may
 contain private content. Detailed assessments stay in the private run; source
 checks use a short informational result.
 

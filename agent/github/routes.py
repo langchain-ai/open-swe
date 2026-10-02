@@ -68,10 +68,54 @@ async def github_webhook(
         "name": webhook_repo.get("name", ""),
     }
 
+    if webhook_repo_config["owner"] and webhook_repo_config["name"]:
+        repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+        try:
+            routable = await repo_is_routable(
+                webhook_repo_config["owner"], webhook_repo_config["name"]
+            )
+        except WorkspaceLookupError:
+            # Ownership is unknown, so dropping the delivery may drop real work.
+            # GitHub retries a 5xx and nothing else, so answer 503 and let it.
+            common.logger.error(
+                "Workspace lookup failed for a GitHub delivery; asking GitHub to retry",
+                extra={"repository": repository, "github_delivery": delivery_id},
+                exc_info=True,
+            )
+            response.status_code = 503
+            return {"status": "error", "reason": "workspace ownership is temporarily unreadable"}
+        if not routable:
+            from agent.docs.models import settings as docs_settings
+
+            config = (
+                await docs_settings()
+                if event_type
+                in {
+                    "pull_request",
+                    "issue_comment",
+                    "pull_request_review_comment",
+                    "pull_request_review",
+                }
+                else None
+            )
+            if config is not None and repository.lower() == config.docs_repository:
+                from agent.docs.coordinator import handle_event
+
+                rejection = await common.enforce_public_repo_org_gate(payload, event_type)
+                if await handle_event(payload, event_type, allow_dispatch=rejection is None):
+                    return {
+                        "status": "accepted",
+                        "message": "Processing linked documentation PR event",
+                    }
+            common.logger.info(
+                "Ignoring GitHub event for a repository no workspace owns",
+                extra={"repository": repository},
+            )
+            return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
     repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
-    # Docs dispatch is independent of reviewer opt-in and bot mentions. Signature
-    # has already been validated; source routing is enforced by the coordinator. Fail with 503 so GitHub
-    # redelivery can recover unavailable stores/API calls instead of silently dropping docs work.
+    # The shared coordinator handles both capabilities for docs-enabled repositories.
+    # Store/API failures remain visible for redelivery.
     from agent.docs.coordinator import handle_event as handle_docs_event
 
     try:
@@ -100,37 +144,8 @@ async def github_webhook(
         )
         response.status_code = 503
         return {"status": "error", "reason": "docs dispatch temporarily unavailable"}
-    if docs_event and (
-        is_docs_repo
-        or (
-            payload.get("action") in {"edited", "labeled", "unlabeled"}
-            and event_type == "pull_request"
-        )
-    ):
+    if docs_event and is_docs_repo:
         return {"status": "accepted", "message": "Processing documentation PR event"}
-
-    if webhook_repo_config["owner"] and webhook_repo_config["name"]:
-        repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
-        try:
-            routable = await repo_is_routable(
-                webhook_repo_config["owner"], webhook_repo_config["name"]
-            )
-        except WorkspaceLookupError:
-            # Ownership is unknown, so dropping the delivery may drop real work.
-            # GitHub retries a 5xx and nothing else, so answer 503 and let it.
-            common.logger.error(
-                "Workspace lookup failed for a GitHub delivery; asking GitHub to retry",
-                extra={"repository": repository, "github_delivery": delivery_id},
-                exc_info=True,
-            )
-            response.status_code = 503
-            return {"status": "error", "reason": "workspace ownership is temporarily unreadable"}
-        if not routable:
-            common.logger.info(
-                "Ignoring GitHub event for a repository no workspace owns",
-                extra={"repository": repository},
-            )
-            return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
@@ -157,6 +172,10 @@ async def github_webhook(
             background_tasks.add_task(service.settle_human_review_on_close, payload)
         elif action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(service.settle_human_reviews, payload)
+        if docs_event:
+            if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
+                background_tasks.add_task(service.process_github_pr_close, payload)
+            return {"status": "accepted", "message": "Processing PR review capabilities"}
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -181,6 +200,14 @@ async def github_webhook(
         }
 
     if event_type == "push":
+        from agent.docs.models import settings as docs_settings
+
+        config = await docs_settings()
+        if config.enabled and repository.lower() in config.source_repositories:
+            return {
+                "status": "accepted",
+                "message": "Review updates use pull_request synchronize events",
+            }
         if not await common.is_repo_auto_review_enabled(webhook_repo_config):
             return {"status": "ignored", "reason": "Automatic review disabled for repository"}
         common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")

@@ -111,6 +111,8 @@ class RunConfig(BaseModel):
     local_project_path: str | None = None
 
     # Cross-repository documentation runs
+    code_review_enabled: bool = True
+    docs_enabled: bool = False
     docs_job_key: str | None = None
     docs_fingerprint: str | None = None
 

@@ -20,7 +20,10 @@ import logging
 import posixpath
 import re
 import warnings
-from typing import Any, NotRequired, cast
+from typing import TYPE_CHECKING, Any, NotRequired, cast
+
+if TYPE_CHECKING:
+    from agent.docs.runtime import DocsContext
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +171,7 @@ def _reviewer_system_prompt(
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
+    docs_enabled: bool = False,
 ) -> str:
     return prompt(
         "reviewer/main",
@@ -176,6 +180,7 @@ def _reviewer_system_prompt(
         repo_name=repo_name or "<repo>",
         pr_number=pr_number if pr_number != "" else "<pr_number>",
         reviewer_eval=reviewer_eval,
+        docs_enabled=docs_enabled,
         approval_policy=approval_policy or "",
         repo_checkout_note=_repo_checkout_note(
             repo_ready=repo_ready,
@@ -519,12 +524,17 @@ async def _ensure_reviewer_sandbox_for_thread(
     thread_id: str,
     cfg: RunConfig,
 ) -> tuple[SandboxBackendProtocol, str | None]:
-    repo_name = cfg.repo.name if cfg.repo else ""
+    repositories = [cfg.repo.full_name] if cfg.repo else []
+    if cfg.docs_enabled:
+        from agent.docs.runtime import current_docs_job
+
+        job = await current_docs_job(cfg)
+        repositories = [job.snapshot.source_repository, job.snapshot.settings.docs_repository]
     github_token: str | None = None
     if cfg.source:
-        repositories = [repo_name] if repo_name else None
+        token_repositories = [cfg.repo.name] if cfg.repo else None
         github_token, expires_at = await get_github_app_installation_token_with_expiry(
-            repositories=repositories
+            repositories=token_repositories
         )
         if not github_token:
             raise RuntimeError(
@@ -535,19 +545,22 @@ async def _ensure_reviewer_sandbox_for_thread(
             github_token,
             expires_at=expires_at,
             is_bot_token=True,
-            repositories=repositories,
+            repositories=token_repositories,
         )
 
     return (
         await ensure_sandbox_for_thread(
             thread_id,
             workspace_slug=cfg.workspace_slug,
-            github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+            github_proxy_repositories=repositories,
+            github_proxy_permissions={"contents": "read", "pull_requests": "read", "issues": "read"}
+            if cfg.docs_enabled
+            else None,
             # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
             # re-derives every run, and reviewer threads outlive their sandbox: one
             # thread per PR, re-triggered on every push. Refusing to replace an
             # unreachable one would brick reviews on that PR for good.
-            allow_replacement=True,
+            allow_replacement=not cfg.docs_enabled,
         ),
         github_token,
     )
@@ -562,15 +575,20 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        docs_context: DocsContext | None = None,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._docs_context = docs_context
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
         return {
             "invocation_id": cfg.invocation_id,
+            "code_review_enabled": cfg.code_review_enabled,
+            "docs_enabled": cfg.docs_enabled,
+            "docs_fingerprint": cfg.docs_fingerprint,
             "thread_id": self._thread_id,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "pr_number": cfg.pr_number,
@@ -585,6 +603,15 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
         cfg = RunConfig.from_config(self._config)
+        if not cfg.code_review_enabled:
+            if self._docs_context is None:
+                raise ValueError("No review capability enabled")
+            return {
+                "rendered_system_prompt": self._docs_context.system_prompt,
+                "diff_text": "",
+                "diff_line_set": None,
+                "review_approval_policy": None,
+            }
         try:
             sandbox_backend, github_token = await _ensure_reviewer_sandbox_for_thread(
                 self._thread_id, cfg
@@ -859,6 +886,7 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             agents_md_content=agents_md_content,
             scoped_agents_md=scoped_agents_md,
             api_standards_skill=api_standards_skill,
+            docs_enabled=cfg.docs_enabled,
         )
         if review_context:
             system_prompt = f"{system_prompt}\n\n{review_context}"
@@ -901,6 +929,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
                     )
                 )
 
+        if self._docs_context is not None:
+            system_prompt = f"{system_prompt}\n\n{self._docs_context.system_prompt}"
+
         return {
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
@@ -922,6 +953,11 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
+
+    if cfg.docs_enabled:
+        from agent.docs.runtime import current_docs_job
+
+        await current_docs_job(cfg)
 
     if cfg.reviewer_model_id:
         model_id = cfg.reviewer_model_id
@@ -981,25 +1017,44 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         return sandbox_backend
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    docs_context = None
+    if cfg.docs_enabled:
+        from agent.docs.runtime import prepare_docs_context, settle_docs_run
+
+        try:
+            docs_backend, _ = await _ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+            docs_context = await prepare_docs_context(cfg, docs_backend)
+        except Exception:
+            await settle_docs_run(config)
+            raise
+    review_tools = (
+        [
+            fetch_review_diff,
+            add_finding,
+            update_finding,
+            list_findings,
+            publish_review,
+            resolve_finding_thread,
+            reply_to_finding_thread,
+            web_search,
+            fetch_url,
+            http_request,
+        ]
+        if cfg.code_review_enabled
+        else []
+    )
+    tools = apply_tool_descriptions(review_tools)
+    if docs_context is not None:
+        tools.extend(docs_context.tools)
 
     return create_deep_agent(
         model=reviewer_model,
         system_prompt="",
-        tools=apply_tool_descriptions(
-            [
-                fetch_review_diff,
-                add_finding,
-                update_finding,
-                list_findings,
-                publish_review,
-                resolve_finding_thread,
-                reply_to_finding_thread,
-                web_search,
-                fetch_url,
-                http_request,
-            ]
-        ),
-        subagents=[_reviewer_subagent(reviewer_subagent_model)],
+        tools=tools,
+        skills=docs_context.skills if docs_context is not None else None,
+        subagents=[_reviewer_subagent(reviewer_subagent_model)]
+        if cfg.code_review_enabled and not cfg.docs_enabled
+        else [],
         backend=backend,
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
@@ -1008,6 +1063,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                     thread_id=thread_id,
                     config=config,
                     use_gateway=use_gateway,
+                    docs_context=docs_context,
                 ),
                 ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),

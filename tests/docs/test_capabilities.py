@@ -9,12 +9,15 @@ from fastapi import HTTPException
 from agent.sandboxes import tool_access
 
 
-async def test_docs_cannot_use_a_coding_tool_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "metadata", [{"agent_kind": "docs"}, {"agent_kind": "reviewer", "docs_context": True}]
+)
+async def test_docs_cannot_use_a_coding_tool_capability(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, object]
+) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "docs-test-signing-key-32-characters")
     client = MagicMock()
-    client.threads.get = AsyncMock(
-        return_value={"metadata": {"agent_kind": "docs", "sandbox_id": "box"}}
-    )
+    client.threads.get = AsyncMock(return_value={"metadata": {**metadata, "sandbox_id": "box"}})
     monkeypatch.setattr(tool_access, "get_client", lambda: client)
     capability = jwt.encode(
         {"aud": tool_access.TOOLS_AUDIENCE, "thread_id": "thread", "sandbox_id": "box"},

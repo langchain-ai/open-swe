@@ -1302,9 +1302,18 @@ export interface DocsSettings {
 }
 
 export const api = {
+  listAutoDocsRepos: () => request<{ repos: string[] }>("/enabled-docs-repos"),
+  setAutoDocsRepo: (full_name: string, enabled: boolean) =>
+    request<{ repos: string[] }>("/enabled-docs-repos", {
+      method: "PUT",
+      body: JSON.stringify({ full_name, enabled }),
+    }),
   getDocsSettings: () => request<DocsSettings>("/docs-settings"),
   saveDocsSettings: (body: DocsSettings) =>
-    request<DocsSettings>("/docs-settings", { method: "PUT", body: JSON.stringify(body) }),
+    request<DocsSettings>("/docs-settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   recordPageView: (page_name: string) =>
     request<void>("/analytics/page", {
       method: "POST",

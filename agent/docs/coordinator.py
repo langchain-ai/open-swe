@@ -11,8 +11,12 @@ from pydantic import BaseModel
 
 from agent.dispatch import dispatch_agent_run
 from agent.docs import github
-from agent.docs.models import JOBS, DocsJob, DocsSnapshot, eligible, settings, thread_id
+from agent.docs.models import JOBS, DocsJob, DocsSnapshot, eligible, settings
 from agent.github.checks import complete_review_check_run, create_review_check_run
+from agent.prompts import prompt
+from agent.review.enabled_repos import is_review_repo_enabled
+from agent.review.findings import get_thread_metadata, set_reviewer_thread_metadata
+from agent.thread_ids import reviewer_thread_id
 from agent.threads.creation import create_lock_thread, create_thread
 from agent.workspaces.routing import repo_is_routable, workspace_for_repo
 
@@ -71,20 +75,42 @@ async def coordinate(repository: str, number: int, *, allow_dispatch: bool = Tru
         if not await repo_is_routable(owner, name):
             return "skipped"
         pr = await github.pull_request(repository, number)
-        if not eligible(config, repository, pr):
-            if previous and previous.status in {"pending", "running"}:
-                await cancel(previous, "Source PR is closed, draft, or labeled skip-docs.")
+        code_review = await is_review_repo_enabled(owner, name) and pr.state == "open"
+        if code_review and pr.draft:
+            from agent.webhooks.common import draft_review_enabled_for_author
+
+            code_review = await draft_review_enabled_for_author(
+                pr.user.login if pr.user else "", {"owner": owner, "name": name}
+            )
+        docs = eligible(config, repository, pr)
+        if (
+            not docs
+            and previous
+            and (previous.snapshot.docs_enabled or not code_review)
+            and previous.status in {"pending", "running"}
+        ):
+            await cancel(previous, "Source PR is closed, draft, or labeled skip-docs.")
+        if not code_review and not docs:
             return "skipped"
         if not allow_dispatch:
             return "ignored"
-        current = await github.snapshot(repository, number, config)
+        if docs:
+            current = await github.snapshot(repository, number, config)
+            if not eligible(config, repository, current.source):
+                if previous and previous.status in {"pending", "running"}:
+                    await cancel(previous, "Source PR became ineligible during preparation.")
+                return "skipped"
+        else:
+            current = DocsSnapshot(
+                source_repository=repository, source=pr, settings=config, docs_base_sha=""
+            )
+        current = current.model_copy(
+            update={"code_review_enabled": code_review, "docs_enabled": docs}
+        )
         pr = current.source
-        if not eligible(config, repository, pr):
-            if previous and previous.status in {"pending", "running"}:
-                await cancel(previous, "Source PR became ineligible during docs preparation.")
-            return "skipped"
         if (
             previous
+            and docs
             and previous.docs_pr_url
             and not current.links
             and previous.snapshot.settings.docs_repository == config.docs_repository
@@ -103,7 +129,7 @@ async def coordinate(repository: str, number: int, *, allow_dispatch: bool = Tru
             await cancel(previous, "Docs inputs changed; replaced by a current run.")
         job = DocsJob(
             snapshot=current,
-            thread_id=thread_id(key, current.fingerprint),
+            thread_id=reviewer_thread_id(owner, name, number),
             docs_pr_url=previous.docs_pr_url if previous else "",
         )
         client = get_client()
@@ -112,10 +138,12 @@ async def coordinate(repository: str, number: int, *, allow_dispatch: bool = Tru
         await create_thread(
             client,
             job.thread_id,
-            title=f"Docs: {repository}#{number}",
+            title=f"Review: {repository}#{number}",
             if_exists="do_nothing",
             metadata={
-                "agent_kind": "docs",
+                "agent_kind": "reviewer",
+                "docs_context": True,
+                "kind": "reviewer",
                 "source": "github",
                 "owner_type": "system",
                 # Either checkout may contain private content, including for a public source PR.
@@ -126,33 +154,91 @@ async def coordinate(repository: str, number: int, *, allow_dispatch: bool = Tru
                 "github_token_repositories": [repository, config.docs_repository],
             },
         )
+        await client.threads.update(
+            job.thread_id,
+            metadata={
+                "agent_kind": "reviewer",
+                "docs_context": True,
+                "visibility": "private",
+                "admin_thread": True,
+                "github_token_repositories": [repository, config.docs_repository],
+            },
+        )
+        metadata = await get_thread_metadata(job.thread_id)
+        await set_reviewer_thread_metadata(
+            job.thread_id,
+            pr={
+                "owner": owner,
+                "name": repo,
+                "number": number,
+                "url": pr.html_url,
+                "title": pr.title,
+                "head_ref": pr.head.ref,
+                "base_ref": pr.base.ref,
+                "author": pr.user.login if pr.user else "",
+            },
+            head_sha=pr.head.sha,
+            watch=code_review,
+        )
         await JOBS.put(key, job)
         try:
             try:
-                job.check_id = await create_review_check_run(
-                    owner=owner,
-                    repo=repo,
-                    head_sha=pr.head.sha,
-                    token=await github.token(repository, {"checks": "write"}),
-                    name="Open SWE Docs",
-                    title="Docs review in progress",
-                    summary="Checking documentation accuracy and coverage.",
+                job.check_id = (
+                    await create_review_check_run(
+                        owner=owner,
+                        repo=repo,
+                        head_sha=pr.head.sha,
+                        token=await github.token(repository, {"checks": "write"}),
+                        name="Open SWE Docs",
+                        title="Docs review in progress",
+                        summary="Checking documentation accuracy and coverage.",
+                    )
+                    if docs
+                    else None
                 )
+                if code_review:
+                    from agent.webhooks.common import track_review_check_run
+
+                    check = await create_review_check_run(
+                        owner=owner,
+                        repo=repo,
+                        head_sha=pr.head.sha,
+                        token=await github.token(repository, {"checks": "write"}),
+                    )
+                    if check is not None:
+                        await track_review_check_run(
+                            job.thread_id,
+                            owner=owner,
+                            repo=repo,
+                            token=await github.token(repository, {"checks": "write"}),
+                            check_run_id=check,
+                        )
             except Exception:
                 # Missing Checks permission must not disable docs work.
                 logger.exception("Could not create docs check", extra={"source_pr": key})
             await JOBS.put(key, job)
             run = await dispatch_agent_run(
                 job.thread_id,
-                "Check documentation for this source PR using the appropriate docs skill.",
+                prompt("reviewer/dispatch", code_review_enabled=code_review, docs_enabled=docs),
                 {
                     "docs_job_key": key,
                     "docs_fingerprint": current.fingerprint,
                     "workspace": workspace,
+                    "repo": {"owner": owner, "name": repo},
+                    "pr_number": number,
+                    "pr_url": pr.html_url,
+                    "source": "github",
+                    "base_sha": pr.base.sha,
+                    "head_sha": pr.head.sha,
+                    "branch_name": pr.head.ref,
+                    "code_review_enabled": code_review,
+                    "docs_enabled": docs,
+                    "re_review": bool(metadata.get("last_reviewed_sha")),
+                    "last_reviewed_sha": metadata.get("last_reviewed_sha", ""),
                 },
                 source="github",
-                thread_title=f"Docs: {repository}#{number}",
-                assistant_id="docs",
+                thread_title=f"Review: {repository}#{number}",
+                assistant_id="reviewer",
                 client=client,
             )
             job.run_id = run["run_id"]
@@ -189,6 +275,8 @@ async def recover_link(snapshot: DocsSnapshot, url: str) -> None:
 async def publication_guard(expected: DocsSnapshot) -> DocsJob:
     job = await JOBS.get(expected.key)
     config = await settings()
+    if not expected.docs_enabled:
+        raise ValueError("Documentation is disabled for this run")
     if (
         not job
         or job.status not in {"pending", "running"}
@@ -280,3 +368,13 @@ async def coding_pr_opened(repository: str, number: int) -> None:
         logger.exception(
             "Docs dispatch failed for coding PR", extra={"repository": repository, "pr": number}
         )
+
+
+async def invalidate_repository(repository: str) -> None:
+    for job in await JOBS.search_all():
+        if job.snapshot.source_repository.lower() != repository.lower():
+            continue
+        async with job_lock(job.snapshot.key):
+            current = await JOBS.get(job.snapshot.key)
+            if current and current.status in {"pending", "running"}:
+                await cancel(current, "Repository review settings changed.")

@@ -38,6 +38,44 @@ function RepositoriesOwnerPage() {
     enabled: !!session.data,
   })
 
+  const autoDocs = useQuery({
+    queryKey: ["autoDocsRepos"],
+    queryFn: api.listAutoDocsRepos,
+    enabled: !!session.data,
+  })
+  const [togglingDocs, setTogglingDocs] = useState<ReadonlySet<string>>(
+    new Set()
+  )
+  const setRepoAutoDocs = (full_name: string, on: boolean) =>
+    qc.setQueryData<AutoReviewRepos>(["autoDocsRepos"], (old) => {
+      const rest = (old?.repos ?? []).filter((name) => name !== full_name)
+      return { repos: on ? [...rest, full_name] : rest }
+    })
+  const toggleAutoDocs = useMutation({
+    mutationKey: ["setAutoDocsRepo"],
+    mutationFn: ({ full_name, on }: { full_name: string; on: boolean }) =>
+      api.setAutoDocsRepo(full_name, on),
+    meta: { errorTitle: "Couldn't update documentation checks" },
+    onMutate: async ({ full_name, on }) => {
+      setTogglingDocs((prev) => new Set(prev).add(full_name))
+      await qc.cancelQueries({ queryKey: ["autoDocsRepos"] })
+      setRepoAutoDocs(full_name, on)
+    },
+    onError: (_error, { full_name, on }) => setRepoAutoDocs(full_name, !on),
+    onSettled: (_data, _error, { full_name }) => {
+      setTogglingDocs((prev) => {
+        const next = new Set(prev)
+        next.delete(full_name)
+        return next
+      })
+      if (qc.isMutating({ mutationKey: ["setAutoDocsRepo"] }) === 1) {
+        void qc.invalidateQueries({ queryKey: ["autoDocsRepos"] })
+        void qc.invalidateQueries({ queryKey: ["docsSettings"] })
+      }
+    },
+  })
+  const autoDocsSet = new Set(autoDocs.data?.repos ?? [])
+
   const [toggling, setToggling] = useState<ReadonlySet<string>>(new Set())
   const setRepoAutoReview = (full_name: string, on: boolean) =>
     qc.setQueryData<AutoReviewRepos>(["autoReviewRepos"], (old) => {
@@ -116,7 +154,7 @@ function RepositoriesOwnerPage() {
   const autoReviewCount = ownerRepos.filter((r) =>
     autoReviewSet.has(r.full_name)
   ).length
-  const loading = repos.isLoading || autoReview.isLoading
+  const loading = repos.isLoading || autoReview.isLoading || autoDocs.isLoading
 
   return (
     <AppShell
@@ -124,7 +162,7 @@ function RepositoriesOwnerPage() {
       title={owner}
       description={
         canEdit
-          ? "Choose which repositories run Open SWE Review automatically. All installed repositories remain available for on-demand reviews."
+          ? "Enable code review, documentation checks, or both per repository. Both capabilities share one review thread. Configure a documentation target on Open SWE Review before enabling docs."
           : "Automatic review settings are read-only for non-admins."
       }
       backTo={{ to: "/review", label: "Back to Open SWE Review" }}
@@ -135,7 +173,12 @@ function RepositoriesOwnerPage() {
             Repositories
           </h2>
           <span className="text-xs text-muted-foreground">
-            {autoReviewCount}/{ownerRepos.length} run automatically
+            Review {autoReviewCount} · Docs{" "}
+            {
+              ownerRepos.filter((r) =>
+                autoDocsSet.has(r.full_name.toLowerCase())
+              ).length
+            }
           </span>
         </div>
         <Input
@@ -183,7 +226,7 @@ function RepositoriesOwnerPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">
-                      Run automatically
+                      Review
                     </span>
                     <span
                       title={
@@ -205,6 +248,15 @@ function RepositoriesOwnerPage() {
                         }
                       />
                     </span>
+                    <span className="text-xs text-muted-foreground">Docs</span>
+                    <Switch
+                      aria-label={`Run docs automatically for ${r.full_name}`}
+                      checked={autoDocsSet.has(r.full_name.toLowerCase())}
+                      disabled={!canEdit || togglingDocs.has(r.full_name)}
+                      onCheckedChange={(on) =>
+                        toggleAutoDocs.mutate({ full_name: r.full_name, on })
+                      }
+                    />
                   </div>
                 </li>
               )

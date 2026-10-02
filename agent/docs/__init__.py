@@ -1,1 +1,1 @@
-"""Cross-repository documentation review and authoring."""
+"""Documentation capability for Open SWE Review."""

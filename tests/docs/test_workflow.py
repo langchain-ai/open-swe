@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from agent.docs import coordinator, github
-from agent.docs.graph import run_docs
 from agent.docs.models import (
     JOBS,
     SETTINGS,
@@ -23,6 +22,9 @@ from agent.docs.models import (
 )
 from agent.docs.publish import Finding, finish, publish
 from agent.docs.routes import router
+from agent.docs.runtime import current_docs_job
+from agent.run_config import RunConfig
+from agent.thread_ids import reviewer_thread_id
 from tests.conftest import FakeStore
 
 
@@ -184,11 +186,15 @@ async def test_linked_pr_requires_review_and_draft_docs_is_valid(
     assert (await JOBS.get(evidence.key)).status == "completed"
 
 
+@pytest.mark.parametrize("code_review,docs", [(False, True), (True, True), (True, False)])
 async def test_concurrent_webhook_and_coding_hook_create_one_run(
-    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch, code_review: bool, docs: bool
 ) -> None:
     evidence = snapshot()
     await SETTINGS.put("default", evidence.settings)
+    if not docs:
+        evidence.source.labels = [Label(name="skip-docs")]
+    monkeypatch.setattr(coordinator, "is_review_repo_enabled", AsyncMock(return_value=code_review))
     mutex = asyncio.Lock()
 
     @asynccontextmanager
@@ -198,6 +204,10 @@ async def test_concurrent_webhook_and_coding_hook_create_one_run(
 
     client = MagicMock()
     client.runs.get = AsyncMock(return_value={"status": "running"})
+    client.threads.update = AsyncMock()
+    monkeypatch.setattr(coordinator, "get_thread_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(coordinator, "set_reviewer_thread_metadata", AsyncMock())
+    monkeypatch.setattr("agent.webhooks.common.track_review_check_run", AsyncMock())
     monkeypatch.setattr(coordinator, "get_client", lambda: client)
     monkeypatch.setattr(coordinator, "job_lock", serialized)
     monkeypatch.setattr(coordinator, "repo_is_routable", AsyncMock(return_value=True))
@@ -215,6 +225,13 @@ async def test_concurrent_webhook_and_coding_hook_create_one_run(
         )
     ) == ["dispatched", "unchanged"]
     dispatch.assert_awaited_once()
+    args, kwargs = dispatch.await_args
+    assert args[0] == reviewer_thread_id("org", "app", 12)
+    assert kwargs["assistant_id"] == "reviewer"
+    assert args[2]["code_review_enabled"] is code_review
+    assert args[2]["docs_enabled"] is docs
+    job = await JOBS.get(evidence.key)
+    assert job is not None and job.thread_id == args[0]
 
 
 async def test_graph_rechecks_eligibility_before_model_or_sandbox(
@@ -224,22 +241,13 @@ async def test_graph_rechecks_eligibility_before_model_or_sandbox(
     await seed(evidence)
     evidence.source.draft = True
     monkeypatch.setattr(github, "pull_request", AsyncMock(return_value=evidence.source))
-    prepare = AsyncMock()
-    model = MagicMock()
-    monkeypatch.setattr("agent.docs.graph.ensure_sandbox_for_thread", prepare)
-    monkeypatch.setattr("agent.docs.graph.make_model", model)
     with pytest.raises(ValueError, match="draft"):
-        await run_docs(
-            {"messages": []},
-            {
-                "configurable": {
-                    "docs_job_key": evidence.key,
-                    "docs_fingerprint": (await JOBS.get(evidence.key)).snapshot.fingerprint,
-                }
-            },
+        await current_docs_job(
+            RunConfig(
+                docs_job_key=evidence.key,
+                docs_fingerprint=(await JOBS.get(evidence.key)).snapshot.fingerprint,
+            )
         )
-    prepare.assert_not_awaited()
-    model.assert_not_called()
 
 
 async def test_docs_settings_are_admin_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,6 +260,9 @@ async def test_docs_settings_are_admin_only(monkeypatch: pytest.MonkeyPatch) -> 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/docs-settings")).status_code == 403
         assert (await client.put("/docs-settings", json={})).status_code == 403
+        assert (
+            await client.put("/enabled-docs-repos", json={"full_name": "org/app", "enabled": True})
+        ).status_code == 403
 
 
 async def test_created_docs_pr_is_reused_after_source_comment_failure(
@@ -359,6 +370,7 @@ async def test_public_repo_gate_does_not_prevent_skip_cancellation(
     job = await seed(evidence)
     evidence.source.labels = [Label(name="skip-docs")]
     monkeypatch.setattr(coordinator, "job_lock", unlocked)
+    monkeypatch.setattr(coordinator, "is_review_repo_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(coordinator, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(github, "pull_request", AsyncMock(return_value=evidence.source))
     stop = AsyncMock()
@@ -366,5 +378,29 @@ async def test_public_repo_gate_does_not_prevent_skip_cancellation(
     dispatch = AsyncMock()
     monkeypatch.setattr(coordinator, "dispatch_agent_run", dispatch)
     assert await coordinator.coordinate("org/app", 12, allow_dispatch=False) == "skipped"
-    stop.assert_awaited_once_with(job, "Source PR is closed, draft, or labeled skip-docs.")
+    assert stop.await_args.args[0].thread_id == job.thread_id
+    assert "skip-docs" in stop.await_args.args[1]
     dispatch.assert_not_awaited()
+
+
+async def test_docs_repo_switch_preserves_independent_code_review_setting(
+    fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.docs import routes
+    from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
+
+    config = snapshot().settings.model_copy(update={"source_repositories": []})
+    await SETTINGS.put("default", config)
+    await set_review_repo_enabled("org/app", True)
+    monkeypatch.setattr(routes, "job_lock", unlocked)
+    monkeypatch.setattr(github, "token", AsyncMock(return_value="test-app-token"))
+    monkeypatch.setattr(github, "ensure_skip_label", AsyncMock())
+    monkeypatch.setattr(github, "request", AsyncMock(return_value={"sha": "c" * 40}))
+    assert await routes.put_docs_repository(
+        routes.DocsRepoUpdate(full_name="ORG/app", enabled=True), {}
+    ) == {"repos": ["org/app"]}
+    assert await list_enabled_review_repos() == ["org/app"]
+    assert await routes.put_docs_repository(
+        routes.DocsRepoUpdate(full_name="org/app", enabled=False), {}
+    ) == {"repos": []}
+    assert await list_enabled_review_repos() == ["org/app"]

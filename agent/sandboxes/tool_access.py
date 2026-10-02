@@ -88,7 +88,9 @@ async def authenticate_tool_access(token: str | None) -> ToolAccess:
         raise
     if (thread.get("metadata") or {}).get("sandbox_id") != access.sandbox_id:
         raise HTTPException(401, "Invalid sandbox capability")
-    if (thread.get("metadata") or {}).get("agent_kind") == "docs":
+    if (thread.get("metadata") or {}).get("agent_kind") == "docs" or (
+        thread.get("metadata") or {}
+    ).get("docs_context") is True:
         raise HTTPException(403, "Docs sandboxes cannot invoke coding tools")
     return access
 
@@ -99,7 +101,9 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
         return None
     url, token = access
     host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
-    if (host.get("metadata") or {}).get("agent_kind") == "docs":
+    if (host.get("metadata") or {}).get("agent_kind") == "docs" or (host.get("metadata") or {}).get(
+        "docs_context"
+    ) is True:
         return None
     workspace = (host.get("metadata") or {}).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")

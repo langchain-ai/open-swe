@@ -4,7 +4,6 @@ import hashlib
 import json
 import re
 from typing import Literal
-from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -82,6 +81,10 @@ class Label(BaseModel):
     name: str
 
 
+class PRUser(BaseModel):
+    login: str = ""
+
+
 class PullRequest(BaseModel):
     number: int = Field(gt=0)
     state: str
@@ -92,6 +95,7 @@ class PullRequest(BaseModel):
     head: PRRef
     base: PRRef
     labels: list[Label] = Field(default_factory=list)
+    user: PRUser | None = None
 
 
 class LinkedPR(BaseModel):
@@ -109,6 +113,8 @@ class DocsSnapshot(BaseModel):
     settings: DocsSettings
     docs_base_sha: str
     links: list[LinkedPR] = Field(default_factory=list)
+    code_review_enabled: bool = False
+    docs_enabled: bool = True
 
     @property
     def key(self) -> str:
@@ -121,6 +127,9 @@ class DocsSnapshot(BaseModel):
             "repository": self.source_repository,
             "number": self.source.number,
             "head": self.source.head.sha,
+            "base": self.source.base.sha,
+            "code_review_enabled": self.code_review_enabled,
+            "docs_enabled": self.docs_enabled,
             "body": self.source.body,
             "title": self.source.title,
             "settings": self.settings.revision,
@@ -156,7 +165,3 @@ def eligible(config: DocsSettings, repository: str, pr: PullRequest) -> bool:
         and not pr.draft
         and all(label.name.lower() != "skip-docs" for label in pr.labels)
     )
-
-
-def thread_id(key: str, fingerprint: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"open-swe:docs:{key}:{fingerprint}"))
