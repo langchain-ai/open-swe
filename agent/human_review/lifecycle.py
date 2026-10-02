@@ -31,6 +31,7 @@ from agent.expedited_review.readiness import (
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from agent.github.pull_requests import PullRequestPayload
 from agent.github.repo_files import RepoSettings
 from agent.human_review import card as standard_card
@@ -57,6 +58,7 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from agent.users import User
+from agent.utils.authorship import OPEN_SWE_BOT_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,19 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     if not approval.awaiting_ready:
         return None
     pr = approval.pull_request
+    if pr.author == OPEN_SWE_BOT_NAME:
+        token = await repo_token(pr.owner, pr.repo)
+        if token is None:
+            return "Could not mark the Open SWE draft ready; try again."
+        try:
+            await act_on_pull_request(
+                pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
+            )
+        except Exception as exc:
+            return f"Could not mark the Open SWE draft ready: {exc}"
+        approval.awaiting_ready = False
+        await approval.save()
+        return None
     author = (
         await User.get(pr.author_user_id)
         if pr.author_user_id

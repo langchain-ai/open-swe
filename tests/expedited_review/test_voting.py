@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from agent.expedited_review import voting
+from agent.github.pull_requests import PullRequest
 from agent.human_review import lifecycle, people
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -245,6 +246,37 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert "open_swe_option_select_approve" in str(ready_blocks)
     assert await lifecycle.prompt_author_ready(current) is None
     assert len(private_messages) == 1
+
+
+async def test_open_swe_draft_is_marked_ready_and_gets_a_shared_card(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pr = await PullRequest(owner="lc", repo="repo", number=8, author="open-swe[bot]").save()
+    approval = await HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc123",
+        kind="expedited",
+        awaiting_ready=True,
+        thread_id="thread-1",
+        slack_channel_id="C1",
+        slack_thread_ts="1.0",
+    ).save()
+    marked_ready = AsyncMock()
+    posted = AsyncMock(return_value=("3.0", None))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="app-token"))
+    monkeypatch.setattr(lifecycle, "act_on_pull_request", marked_ready)
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
+
+    current = await _stored(approval)
+    assert await lifecycle.prompt_author_ready(current) is None
+    await lifecycle.refresh_card(await _stored(approval))
+
+    marked_ready.assert_awaited_once()
+    assert not (await _stored(approval)).awaiting_ready
+    assert posted.await_count == 1
 
 
 async def test_draft_card_is_not_posted_until_ready(

@@ -195,10 +195,10 @@ async def expedite_pr_approval(
             updated = await transition(active.id, expected=("open",), awaiting_ready=False)
             if updated is not None:
                 active = updated
+        readiness_warning = await prompt_author_ready(active)
         if not active.awaiting_ready:
             await refresh_card(active)
             await broadcast_configured(active)
-        readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
             "readiness_warning": readiness_warning,
@@ -266,16 +266,17 @@ async def expedite_pr_approval(
             if displaced is not None:
                 await reopen(displaced)
             return _failure(readiness_warning)
-        await remove_superseded_cards(approval)
-        return {
-            "success": True,
-            "approval_id": str(approval.id),
-            "pr_url": pr_ref.url,
-            "head_sha": head_sha,
-            "slack_channel_id": channel_id,
-            "next": "The full draft card was sent only to the author by DM. The thread card "
-            "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
-        }
+        if approval.awaiting_ready:
+            await remove_superseded_cards(approval)
+            return {
+                "success": True,
+                "approval_id": str(approval.id),
+                "pr_url": pr_ref.url,
+                "head_sha": head_sha,
+                "slack_channel_id": channel_id,
+                "next": "The full draft card was sent only to the author by DM. The thread card "
+                "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
+            }
     try:
         message_ts, error = await post_card(approval, title=payload.title, files=files)
     except BaseException:
