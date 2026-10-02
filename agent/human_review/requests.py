@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, select
+from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -272,6 +272,32 @@ class HumanReviewRequest(Base):
                 .order_by(cls.created_at, cls.id)
             )
             return list(rows)
+
+    @classmethod
+    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
+        """Whether this Slack thread contains an Open SWE review-request card."""
+        if not postgres.configured():
+            return False
+        async with postgres.session() as session:
+            request_id = await session.scalar(
+                select(cls.id)
+                .where(
+                    cls.kind.in_(("standard", "expedited")),
+                    or_(
+                        (cls.slack_channel_id == channel_id)
+                        & (
+                            func.coalesce(
+                                func.nullif(cls.slack_thread_ts, ""), cls.slack_message_ts
+                            )
+                            == thread_ts
+                        ),
+                        (cls.slack_copy_channel_id == channel_id)
+                        & (cls.slack_copy_ts == thread_ts),
+                    ),
+                )
+                .limit(1)
+            )
+            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
