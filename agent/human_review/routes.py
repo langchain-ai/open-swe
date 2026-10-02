@@ -2,13 +2,15 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from agent.dashboard.deps import SESSION_DEP
+from agent.dashboard.deps import SESSION_DEP, session_is_admin
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.database import postgres
 from agent.github.pull_request_status import pull_request_identity
 from agent.human_review.card import mention
+from agent.human_review.leaderboard import CodeReviewLeaderboard, LeaderboardPeriod, standings
 from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, RequestResult, request_review
@@ -92,3 +94,17 @@ async def api_dismiss_human_review_request(
     if not await dismiss_by(request, by, (body or HumanReviewDismissBody()).reason):
         raise HTTPException(409, "This review request is already closed")
     return HumanReviewDismissResult(request_id=str(request.id))
+
+
+@router.get("/human-review/leaderboard")
+async def api_code_review_leaderboard(
+    period: LeaderboardPeriod = "7d",
+    limit: int = Query(default=25, ge=1, le=100),
+    session: dict[str, Any] = SESSION_DEP,
+) -> CodeReviewLeaderboard:
+    """Who reviewed the most pull requests on GitHub, one point per pull request."""
+    if not postgres.configured():
+        raise HTTPException(503, "The code review leaderboard is unavailable on this deployment.")
+    return await standings(
+        period, limit=limit, current_login=str(session["sub"]), admin=session_is_admin(session)
+    )

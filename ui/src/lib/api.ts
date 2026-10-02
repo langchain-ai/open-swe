@@ -444,14 +444,31 @@ export interface AnalyticsMetadata {
   build_info?: BuildInfo
 }
 
+export interface LeaderboardUser {
+  name: string
+  github_login: string | null
+  email?: string | null
+  avatar_url?: string | null
+}
+
+export interface CodeReviewLeaderboardRow {
+  rank: number
+  user: LeaderboardUser
+  points: number
+  reviewed: number
+  missed_picks: number
+  is_current: boolean
+}
+
+export interface CodeReviewLeaderboardPayload {
+  period: UsageLeaderboardPeriod
+  rows: Array<CodeReviewLeaderboardRow>
+  current_user: CodeReviewLeaderboardRow | null
+}
+
 export interface UsageLeaderboardRow {
   rank: number
-  user: {
-    name: string
-    github_login: string | null
-    email: string | null
-    avatar_url?: string | null
-  }
+  user: LeaderboardUser
   favorite_model: string
   favorite_model_effort?: string | null
   invocations: number
@@ -1610,6 +1627,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
+  codeReviewLeaderboard: (period: UsageLeaderboardPeriod, limit = 25) =>
+    request<CodeReviewLeaderboardPayload>(
+      `/human-review/leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+    ),
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",
     limit = 10,
