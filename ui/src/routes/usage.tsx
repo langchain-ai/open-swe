@@ -418,7 +418,7 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
-      <CodeReviewLeaderboardSection
+      <PointsLeaderboardSection
         period={activePeriod}
         login={login}
         isAdmin={isAdmin}
@@ -1572,7 +1572,7 @@ function CounterList({
   )
 }
 
-function CodeReviewLeaderboardSection({
+function PointsLeaderboardSection({
   period,
   login,
   isAdmin,
@@ -1582,8 +1582,8 @@ function CodeReviewLeaderboardSection({
   isAdmin: boolean
 }) {
   const leaderboard = useQuery({
-    queryKey: ["codeReviewLeaderboard", period, login, isAdmin],
-    queryFn: () => api.codeReviewLeaderboard(period),
+    queryKey: ["pointsLeaderboard", period, login, isAdmin],
+    queryFn: () => api.pointsLeaderboard(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -1598,8 +1598,8 @@ function CodeReviewLeaderboardSection({
 
   return (
     <SettingsSection
-      title="Code review leaderboard"
-      description="One point for each pull request reviewed on GitHub; minus one when Open SWE picks you and you don't accept in time."
+      title="Points leaderboard"
+      description="+1 for each pull request you review on GitHub; −1 when Open SWE picks you to review and you don't accept in time."
     >
       {leaderboard.isLoading ? (
         <div className="space-y-2 p-4">
@@ -1609,7 +1609,7 @@ function CodeReviewLeaderboardSection({
       ) : leaderboard.isError ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
-            Could not load the code review leaderboard.
+            Could not load the points leaderboard.
           </p>
           <button
             type="button"
@@ -1621,8 +1621,8 @@ function CodeReviewLeaderboardSection({
         </div>
       ) : !data?.rows.length ? (
         <div className="p-6 text-center text-xs text-muted-foreground">
-          No code reviews have been recorded for{" "}
-          {PERIOD_LABELS[period].toLowerCase()} yet.
+          No points have been awarded for {PERIOD_LABELS[period].toLowerCase()}{" "}
+          yet.
         </div>
       ) : (
         <div className="overflow-x-auto">

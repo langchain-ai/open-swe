@@ -23,9 +23,9 @@ from agent.github.ci import has_repo_write_permission
 from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.org_membership import team_members
-from agent.human_review.leaderboard import ReviewPoint
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
+from agent.points.ledger import Point
 from agent.slack.client import get_slack_user_info
 from agent.users import User
 
@@ -237,7 +237,7 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     logins = sorted((owned.keys() | touched.keys()) - {(pr.author or "").lower()})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
     taken = {participant.user_id for participant in request.participants}
-    missed = await ReviewPoint.missed_pick_ids(request.id)
+    missed = await Point.missed_pick_ids(request.id)
     people = {
         login: user
         for login, user in zip(logins, users, strict=True)
