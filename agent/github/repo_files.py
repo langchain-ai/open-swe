@@ -86,12 +86,12 @@ class RepoSettings(BaseModel):
                     for rule in self.review_channel_rules
                     if any(fnmatchcase(filename, path) for path in rule.paths)
                 ),
-                self.review_channel.strip(),
+                "" if self.review_channel_rules else self.review_channel.strip(),
             )
             if channel:
                 counts[channel] += 1
         if not counts:
-            return self.review_channel.strip()
+            return "" if self.review_channel_rules else self.review_channel.strip()
         count = max(counts.values())
         return random.choice([candidate for candidate, total in counts.items() if total == count])
 

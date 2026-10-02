@@ -39,7 +39,10 @@ For monorepos, add ordered path rules:
 
 Patterns match case-sensitive repository-relative paths; `*` includes nested
 paths. The first matching rule assigns each changed file to a channel, and
-unmatched files count toward `reviewChannel` when configured. The channel with
+unmatched files do not count toward any channel when rules are configured. If no
+rule matches, no review channel is available and the PR page hides the Slack
+review request button. Without rules, `reviewChannel` remains the repo-wide
+destination. The channel with
 the most changed files wins; ties are broken uniformly at random among the tied
 channels. Files count equally, including tests. The selected
 channel gets one canonical request, which stays there once posted. Explicit

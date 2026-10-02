@@ -21,9 +21,10 @@ def test_review_channel_most_files_and_ties(monkeypatch: MonkeyPatch) -> None:
         return channels[-1]
 
     monkeypatch.setattr("agent.github.repo_files.random.choice", choose)
-    assert settings.channel_for_files(["ui/a", "agent/b", "README.md"]) == "#fallback"
-    assert set(choices) == {"#frontend", "#backend", "#fallback"}
+    assert settings.channel_for_files(["ui/a", "agent/b", "README.md"]) == "#backend"
+    assert set(choices) == {"#frontend", "#backend"}
     choices.clear()
     assert settings.channel_for_files(["ui/a", "ui/b", "agent/c", "README.md"]) == "#frontend"
     assert choices == ["#frontend"]
-    assert settings.channel_for_files(["README.md"]) == "#fallback"
+    assert settings.channel_for_files(["README.md"]) == ""
+    assert RepoSettings(reviewChannel="#fallback").channel_for_files(["README.md"]) == "#fallback"
