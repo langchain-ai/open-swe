@@ -15,6 +15,8 @@ const POLL_LIMIT = 8
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 10_000
 const REPLY_ATTEMPTS = 3
+/** How long `close` waits for stopped commands to report before releasing the bridge. */
+const CLOSE_GRACE_MS = 5_000
 /** Margin over the server's long-poll window before the request is abandoned. */
 const POLL_TIMEOUT_MS = (POLL_WAIT_SECONDS + 15) * 1_000
 
@@ -118,7 +120,18 @@ export class Bridge {
     this.heartbeatTimer = null
     for (const controller of this.pollControllers) controller.abort()
     this.pollControllers.clear()
-    await Promise.allSettled(this.inFlight)
+    // Closing is quitting: a build or test run the agent started must not hold
+    // the app or the CLI open, so its process group is killed, and a reply that
+    // cannot be posted is not waited on past the grace period.
+    this.executor.stopAll()
+    let grace: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled(this.inFlight),
+      new Promise<void>((done) => {
+        grace = setTimeout(done, CLOSE_GRACE_MS)
+      }),
+    ])
+    clearTimeout(grace)
     try {
       await this.api.deleteBridge(this.session.bridgeId)
     } catch (cause) {

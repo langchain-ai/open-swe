@@ -162,6 +162,7 @@ export interface LocalExecutorOptions {
  */
 export class LocalExecutor {
   private readonly env: Record<string, string>
+  private readonly running = new Set<() => void>()
 
   /** `root` may be a getter: a desktop thread can move between worktrees. */
   constructor(
@@ -232,11 +233,20 @@ export class LocalExecutor {
 
     const captured = new OutputWindow()
     let timedOut = false
+    let stopped = false
     let escalation: ReturnType<typeof setTimeout> | null = null
+    const terminate = () => {
+      signalGroup("SIGTERM")
+      escalation ??= setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
+    }
+    const stop = () => {
+      stopped = true
+      terminate()
+    }
+    this.running.add(stop)
     const deadline = setTimeout(() => {
       timedOut = true
-      signalGroup("SIGTERM")
-      escalation = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
+      terminate()
     }, seconds * 1000)
     proc.stdout.on("data", (chunk: Buffer) => captured.push(chunk))
     proc.stderr.on("data", (chunk: Buffer) => captured.push(chunk))
@@ -248,11 +258,19 @@ export class LocalExecutor {
         proc.once("close", (code) => done(code))
       })
     } finally {
+      this.running.delete(stop)
       clearTimeout(deadline)
       if (escalation !== null) clearTimeout(escalation)
     }
 
     const { output, truncated } = captured.finish()
+    if (stopped) {
+      return {
+        output: `${output}\n[command stopped: this machine stopped serving the thread]`,
+        exit_code: TIMEOUT_EXIT_CODE,
+        truncated,
+      }
+    }
     if (timedOut) {
       return {
         output: `${output}\n[command timed out after ${seconds}s]`,
@@ -261,6 +279,11 @@ export class LocalExecutor {
       }
     }
     return { output, exit_code: exitCode, truncated }
+  }
+
+  /** Terminate every running command; each resolves once its process group exits. */
+  stopAll(): void {
+    for (const stop of this.running) stop()
   }
 
   async uploadFiles(
