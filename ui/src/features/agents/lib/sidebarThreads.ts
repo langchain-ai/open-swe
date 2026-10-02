@@ -223,7 +223,8 @@ export function applyRepoKeyAliases(
 export function groupSidebarThreadsByRepo(
   threads: ReadonlyArray<SidebarThreadItem>,
   repos: ReadonlyArray<SidebarRepoOption>,
-  mode: SidebarSort = "updated"
+  mode: SidebarSort = "updated",
+  retainEmpty = false
 ): { repos: Array<SidebarRepoGroup>; recents: Array<SidebarThreadItem> } {
   const buckets = new Map<string, SidebarRepoGroup>(
     repos.map((repo) => [repo.key, { ...repo, threads: [] }])
@@ -236,7 +237,7 @@ export function groupSidebarThreadsByRepo(
   }
   return {
     repos: [...buckets.values()]
-      .filter((group) => group.threads.length > 0)
+      .filter((group) => retainEmpty || group.threads.length > 0)
       .sort(
         (left, right) =>
           (right.threads[0]?.updatedAt ?? 0) - (left.threads[0]?.updatedAt ?? 0)

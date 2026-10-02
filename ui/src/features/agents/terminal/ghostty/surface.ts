@@ -374,13 +374,6 @@ export function terminalLinkAtPositionWithRange(
   return null
 }
 
-export function terminalLinkAtColumn(
-  row: GhosttySnapshot["rowData"][number],
-  column: number
-) {
-  return terminalLinkAtPosition([row], 0, column)
-}
-
 export function isTerminalCopyShortcut(
   event: Pick<KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "shiftKey">,
   platform = navigator.platform

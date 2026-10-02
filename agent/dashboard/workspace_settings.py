@@ -22,7 +22,6 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -80,6 +79,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     )
     fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     org_guidelines: str | None = None
@@ -258,9 +260,6 @@ def _normalize_stale_model_pair(
 ) -> tuple[str | None, str | None]:
     if model in DEPRECATED_MODEL_IDS:
         return None, None
-    canonical = canonical_model_pair(model, effort)
-    if canonical is not None:
-        return canonical
     return model, effort
 
 
@@ -321,6 +320,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "sandbox_openai_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -683,6 +683,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def sandbox_openai_enabled(self) -> bool:
+        """Whether sandbox clients may use the experimental Responses API."""
+        return self.get("sandbox_openai_enabled") is True
 
     @property
     def org_review_guidelines(self) -> str | None:

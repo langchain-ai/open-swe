@@ -199,6 +199,97 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     assert stored.approvers == ["grace"]
 
 
+async def test_readiness_button_is_delivered_only_to_the_author(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    private_messages: list[tuple[str, object]] = []
+
+    async def deliver(user: str, text: str, *, blocks: object) -> tuple[str, str]:
+        private_messages.append((user, blocks))
+        return "D_ADA", "4.0"
+
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    from agent.expedited_review.eligibility import ChangedFile
+
+    monkeypatch.setattr(
+        lifecycle,
+        "fetch_changed_files",
+        AsyncMock(
+            return_value=[
+                ChangedFile(filename="agent/example.py", additions=1, deletions=0, patch="+fixed")
+            ]
+        ),
+    )
+    current = await _stored(approval)
+
+    assert await lifecycle.prompt_author_ready(current) is None
+    _, shared_blocks = await lifecycle.render(current, None)
+
+    assert len(private_messages) == 1
+    recipient, private_blocks = private_messages[0]
+    assert recipient == "U_ADA"
+    assert "+fixed" in str(private_blocks)
+    assert ephemeral.call_args.args[:2] == ("C1", "U_ADA")
+    assert ephemeral.call_args.args[3] == "1.0"
+    assert ephemeral.call_args.kwargs["blocks"] == private_blocks
+    assert "open_swe_option_select_ready" in str(private_blocks)
+    assert "open_swe_option_select_ready" not in str(shared_blocks)
+    assert "open_swe_option_select_approve" not in str(shared_blocks)
+    current.awaiting_ready = False
+    _, ready_blocks = await lifecycle.render(current, None)
+    assert "open_swe_option_select_approve" in str(ready_blocks)
+    assert await lifecycle.prompt_author_ready(current) is None
+    assert len(private_messages) == 1
+
+
+async def test_draft_card_is_not_posted_until_ready(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    approval.slack_message_ts = ""
+    approval = await approval.save()
+    posted = AsyncMock(return_value=("3.0", None))
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
+
+    assert await lifecycle.post_card(approval, title="Fix", files=[]) == (
+        None,
+        "draft card is author-only",
+    )
+    await lifecycle.refresh_card(approval)
+    posted.assert_not_called()
+    approval.awaiting_ready = False
+    await approval.save()
+    await lifecycle.refresh_card(approval)
+
+    assert (await _stored(approval)).slack_message_ts == "3.0"
+    assert "open_swe_option_select_approve" in str(posted.call_args)
+
+
+async def test_author_only_prompt_delivery_failure_is_reported(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", AsyncMock(return_value=False))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+
+    problem = await lifecycle.prompt_author_ready(await _stored(approval))
+
+    assert problem is not None and "mark it ready on GitHub" in problem
+    assert (await _stored(approval)).awaiting_ready
+
+
 async def test_a_fork_author_without_write_access_can_mark_their_draft_ready(
     harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:

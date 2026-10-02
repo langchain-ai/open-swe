@@ -16,15 +16,17 @@ routed to a workspace boot from its image and get its prompt appended to
 their system prompt. The workspace named `default` is what a run uses when
 routing picks no other.
 
-Only workspace admins can change a workspace's image, and only from an admin
-thread. Anyone can read workspaces on the **Workspaces** page. If the asker
-is not an admin, tell them what would need to happen and who can do it; do
-not try the tools.
+Only workspace admins can change a workspace's image, from an admin thread
+or through supported writes in a verified sole-writer shared thread. Shared
+writes return only acknowledgements; workspace reads and switching to another
+workspace's image still require a private admin surface. Anyone can read
+workspaces on the **Workspaces** page. If the asker is not an admin, tell
+them what would need to happen and who can do it; do not try the tools.
 
 ## The one rule: build here, publish from here
 
 You do not write a workspace's image as a script and hope. You build it in
-the admin thread's own sandbox with ordinary tools — `execute`, the file
+the current thread's own sandbox with ordinary tools — `execute`, the file
 tools — and when it works you call `publish_workspace`. That captures **this
 sandbox** as the image and writes the record only after the capture
 succeeded. Nothing is half-written on failure, and the image is usable the
@@ -53,7 +55,7 @@ Two consequences:
 - The script must describe the **whole** build from base, even for a fork. By hand you only did the delta on top of the parent; the nightly does not start from the parent.
 - Leaving it off is allowed. The workspace then has no nightly check and keeps whatever image was last published.
 
-Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the preferred repos listed in `OPENSWE_WORKSPACE_REPOS` (runs clone any other repository on demand); install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
+Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the preferred repos listed in `OPENSWE_WORKSPACE_REPOS` into `/workspace/<repo>`, where runs expect every checkout (runs clone any other repository on demand); install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
 
 ## `update_script` — keeping a live image fresh
 

@@ -27,7 +27,6 @@ __all__ = ["github_headers"]
 logger = logging.getLogger(__name__)
 
 REVIEW_CHECK_RUN_NAME = "Open SWE Review"
-AUTOFIX_CHECK_RUN_NAME = "Open SWE Auto-fix"
 
 _GITHUB_API_BASE = GITHUB_API_BASE
 
@@ -108,45 +107,6 @@ async def complete_review_check_run(
         logger.exception(
             "Failed to complete review check run %s on %s/%s", check_run_id, owner, repo
         )
-        return False
-    return True
-
-
-async def post_autofix_status_check(
-    *,
-    owner: str,
-    repo: str,
-    head_sha: str,
-    token: str,
-    title: str,
-    summary: str,
-    details_url: str | None = None,
-) -> bool:
-    """Post an informational, completed ``Open SWE Auto-fix`` check on ``head_sha``.
-
-    Completed immediately as ``neutral`` so it's non-blocking and never leaves a
-    dangling in-progress check that could gate branch protection. Used as the
-    auto-fix status channel instead of a PR comment (PR comments can trigger
-    ``issue_comment`` automation like Atlantis/Terraform).
-    """
-    payload: dict[str, object] = {
-        "name": AUTOFIX_CHECK_RUN_NAME,
-        "head_sha": head_sha,
-        "status": "completed",
-        "conclusion": "neutral",
-        "started_at": _utc_now_iso(),
-        "completed_at": _utc_now_iso(),
-        "output": {"title": title, "summary": summary},
-    }
-    if details_url:
-        payload["details_url"] = details_url
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/check-runs"
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "POST", url, json=payload)
-            response.raise_for_status()
-    except httpx2.HTTPError:
-        logger.warning("Failed to post auto-fix status check for %s/%s@%s", owner, repo, head_sha)
         return False
     return True
 

@@ -11,7 +11,6 @@ from agent.expedited_review.readiness import (
     readiness_blockers,
 )
 from agent.github.pull_request_status import Mergeability
-from agent.github.pull_requests import PullRequest, ReviewLink
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -77,42 +76,20 @@ def test_every_gate_reports_independently() -> None:
             check_state="pending",
             unresolved_threads=2,
             changes_requested_by=["grace"],
-            open_swe_review_required=True,
         )
     )
 
-    assert len(blockers) == 5
+    assert len(blockers) == 4
     assert any("draft" in b for b in blockers)
     assert any("still running" in b for b in blockers)
     assert any("2 unresolved review threads" in b for b in blockers)
     assert any("grace" in b for b in blockers)
-    assert any("Open SWE" in b for b in blockers)
 
 
-def test_open_swe_review_only_required_where_enabled() -> None:
-    assert readiness_blockers(_snapshot(open_swe_review_required=False)) == []
-    assert (
-        readiness_blockers(_snapshot(open_swe_review_required=True, open_swe_reviewed_head=True))
-        == []
-    )
-
-
-@pytest.mark.parametrize(
-    "reviewed_sha, registry_fails", [("newsha", False), ("oldsha", False), ("newsha", True)]
-)
 @pytest.mark.parametrize("live_approval_id", [None, 123])
-async def test_assess_readiness_requires_durable_exact_head_completion(
-    reviewed_sha: str, registry_fails: bool, live_approval_id: int | None
+async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
+    live_approval_id: int | None,
 ) -> None:
-    stored = PullRequest(
-        owner="lc",
-        repo="repo",
-        number=7,
-        reviews=[
-            ReviewLink(reviewer_thread_id="reviewer", github_review_id=11, head_sha="oldsha"),
-            ReviewLink(reviewer_thread_id="reviewer", head_sha=reviewed_sha),
-        ],
-    )
     live_reviews = (
         [{"id": live_approval_id, "state": "APPROVED", "user": {"login": "grace"}}]
         if live_approval_id is not None
@@ -136,7 +113,7 @@ async def test_assess_readiness_requires_durable_exact_head_completion(
             "agent.expedited_review.readiness.list_check_runs",
             AsyncMock(
                 return_value=[
-                    {"name": "Open SWE Review", "status": "completed", "conclusion": "success"}
+                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"}
                 ]
             ),
         ),
@@ -153,29 +130,12 @@ async def test_assess_readiness_requires_durable_exact_head_completion(
             "agent.expedited_review.readiness._fetch_reviews", AsyncMock(return_value=live_reviews)
         ),
         patch("agent.expedited_review.readiness.fetch_mergeability", AsyncMock(return_value=None)),
-        patch(
-            "agent.expedited_review.readiness.is_review_repo_enabled", AsyncMock(return_value=True)
-        ),
-        patch.object(
-            PullRequest,
-            "get",
-            AsyncMock(
-                return_value=stored,
-                side_effect=RuntimeError("Registry unavailable") if registry_fails else None,
-            ),
-        ),
     ):
         result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
 
-    if registry_fails:
-        assert result is None
-        return
     assert result is not None
     assert result.snapshot.check_state == "success"
-    assert result.ready is (reviewed_sha == "newsha")
-    assert result.blockers == (
-        [] if reviewed_sha == "newsha" else ["Open SWE has not finished reviewing this commit"]
-    )
+    assert result.ready
     assert result.snapshot.approved_review_ids == (
         frozenset({live_approval_id}) if live_approval_id is not None else frozenset()
     )

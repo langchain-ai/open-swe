@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,7 +18,19 @@ _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_i
 
 
 def _config(**configurable: object) -> RunnableConfig:
-    return cast(RunnableConfig, {"configurable": configurable})
+    return cast(RunnableConfig, {"configurable": {"thread_id": "t-1", **configurable}})
+
+
+@pytest.fixture(autouse=True)
+def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
+            )
+        )
+    )
+    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
 
 
 # --- snapshot precedence ---
@@ -271,7 +284,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     bob = CollaboratorIdentity(
         display_name="bob", commit_name="bob", commit_email="bob@example.com", github_login="bob"
     )
-    admin_requester_config = {"configurable": {"user_email": "admin@example.com"}}
+    admin_requester_config = _config(user_email="admin@example.com")
 
     as_seen_by_admin = await server._thread_participant(bob, admin_requester_config)
     assert as_seen_by_admin.workspace_admin is False

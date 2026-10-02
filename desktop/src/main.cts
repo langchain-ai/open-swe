@@ -73,6 +73,7 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -882,6 +883,19 @@ function configureDesktopIpc() {
       return { status: "error", files: [], truncated: false };
     }
   });
+  /** The checked-out branch's pull request, for the composer PR link. */
+  ipcMain.handle("desktop:get-local-pr", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await diffThread(threadId);
+    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
+      return null;
+    try {
+      const { pr } = await repositoryMetadata(thread.checkpoint.repo);
+      return pr;
+    } catch {
+      return null;
+    }
+  });
 }
 
 function profileConfigPath() {
@@ -946,8 +960,8 @@ async function shareBackendSession() {
 
 function readStoredBackendUrl() {
   try {
-    const { backendUrl } = readSharedConfig(configPath());
-    return backendUrl ? validateBackendUrl(backendUrl) : undefined;
+    const { backendUrl: storedBackendUrl } = readSharedConfig(configPath());
+    return storedBackendUrl ? validateBackendUrl(storedBackendUrl) : undefined;
   } catch (error) {
     console.warn("Could not read the stored backend URL", error);
     return undefined;
@@ -1606,6 +1620,8 @@ function createSetupWindow() {
       }
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
+      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
+        pendingDeepLink = null;
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1637,6 +1653,34 @@ function configurePermissions() {
   );
 }
 
+let pendingDeepLink = null;
+
+function openDesktopLink(url) {
+  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
+  if (!target) return false;
+  const existingWindow =
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const window = existingWindow || createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  if (existingWindow) void window.loadURL(target);
+  else
+    window.webContents.once(
+      "did-finish-load",
+      () => void window.loadURL(target),
+    );
+  return true;
+}
+
+app.on("continue-activity", (event, type, _userInfo, details) => {
+  if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
+  if (!backendUrl) pendingDeepLink = details.webpageURL;
+  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
+  event.preventDefault();
+  if (backendUrl) openDesktopLink(details.webpageURL);
+});
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -1647,6 +1691,7 @@ if (!hasSingleInstanceLock) {
       app.quit();
       return;
     }
+
     const window = mainWindow || setupWindow || createWindow();
     if (window.isMinimized()) window.restore();
     window.show();
@@ -1724,6 +1769,8 @@ if (!hasSingleInstanceLock) {
     configureDesktopIpc();
     createMenu();
     createWindow();
+    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
+      pendingDeepLink = null;
     // Otherwise the first local thread opened after launch waits behind the
     // backend's boot, showing a blank page for seconds.
     if (localThreadStore.list().length) {
