@@ -60,6 +60,9 @@ REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 # Sidebar label for reviewer threads that have no PR identity yet. Real PR
 # titles land in ``pr`` metadata from the first webhook that reaches them.
 REVIEWER_UNTITLED = "Review: pending"
+# Metadata marker, set on an explicit rename, that stops later PR-record writes
+# from replacing the user's chosen title with the generated one.
+REVIEWER_TITLE_LOCKED_KEY = "title_locked"
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -1068,8 +1071,10 @@ async def set_reviewer_thread_metadata(
 
     Always sets ``kind=reviewer`` so the future UI can list reviewer threads by
     filtering on metadata, and keeps the sidebar title ``Review: #nn <PR
-    title>`` in step with the PR record. Only includes the fields the caller
-    passed in (langgraph metadata updates merge rather than overwrite).
+    title>`` in step with the PR record — unless an explicit rename set
+    ``title_locked``, which a rename marks and this never clears. Only includes
+    the fields the caller passed in (langgraph metadata updates merge rather
+    than overwrite).
 
     ``head_sha`` records the current PR head the dispatching webhook is acting
     on. A push that lands mid-run is queued into the still-running run, whose
@@ -1091,6 +1096,10 @@ async def set_reviewer_thread_metadata(
         metadata["slack_thread"] = slack_thread
     if extra:
         metadata.update(extra)
+    stored = await _get_thread_metadata_strict(thread_id)
+    if stored.get(REVIEWER_TITLE_LOCKED_KEY) is True:
+        metadata.pop("title", None)
+    metadata.pop(REVIEWER_TITLE_LOCKED_KEY, None)
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata)
     except LangGraphSDKNotFoundError as exc:

@@ -15,6 +15,7 @@ from agent.github.pull_request_checks import PullRequestState, get_pull_request_
 from agent.github.pull_request_context import get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
+from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
@@ -482,6 +483,10 @@ async def rename_dashboard_thread(
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
     metadata_update = {"title": title, "title_seed": None}
+    if thread_metadata(thread).get("kind") == REVIEWER_THREAD_KIND:
+        # A later PR-record write would otherwise replace the chosen title with
+        # the generated one.
+        metadata_update["title_locked"] = True
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001

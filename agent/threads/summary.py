@@ -14,7 +14,6 @@ from agent.github.pull_requests import PullRequest
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
     REVIEWER_UNTITLED,
-    get_thread_pr_meta,
     reviewer_thread_title,
 )
 from agent.review.session import ReviewSessionMetadata
@@ -266,8 +265,8 @@ def metadata_title(metadata: Mapping[str, Any]) -> str:
     if isinstance(raw_title, str) and raw_title.strip():
         return raw_title
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
-        pr = get_thread_pr_meta(as_thread_dict({"metadata": dict(metadata)}))
-        if pr is not None:
+        pr = metadata.get("pr")
+        if isinstance(pr, Mapping) and (pr.get("number") is not None or pr.get("title")):
             return reviewer_thread_title(pr)
         return REVIEWER_UNTITLED
     return "Untitled agent"
