@@ -7,7 +7,7 @@ middleware stack. All per-thread state lives in the sandbox + thread metadata;
 the agent itself is stateless.
 """
 
-# ruff: noqa: E402
+# ruff: noqa: E402, PLC2701
 import hashlib
 import logging
 import warnings
@@ -47,6 +47,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -101,7 +104,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
@@ -748,6 +750,34 @@ async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[A
     if credential_login:
         sources.append(user_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
+
+
+async def _mcp_code_mode(
+    thread_id: str, tools: Sequence[BaseTool], *, local_run: bool
+) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+    if local_run or not tools:
+        return None, tools
+    import langgraph_sdk
+
+    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    launcher_login = thread_metadata(thread).get("owner_login")
+    profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
+    if not profile or profile.get("experimental_mcp_ptc") is not True:
+        return None, tools
+    ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    if not ptc_tools:
+        return None, tools
+    ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
+    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+
+
+def _integration_middleware(
+    mcp_tools: Sequence[BaseTool], notion_tools: Sequence[BaseTool], reserved_names: set[str]
+) -> DynamicToolMiddleware | None:
+    candidate = DynamicToolMiddleware(
+        {"MCPs": mcp_tools, "Notion": notion_tools}, reserved_names=reserved_names
+    )
+    return candidate if candidate.has_groups else None
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -1792,31 +1822,16 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
-    from langchain_quickjs import CodeInterpreterMiddleware
-
-    mcp_ptc: CodeInterpreterMiddleware | None = None
-    if not local_run and mcp_tools:
-        import langgraph_sdk
-
-        thread = await langgraph_sdk.get_client().threads.get(thread_id)
-        launcher_login = thread_metadata(thread).get("owner_login")
-        launcher_profile = (
-            await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
-        )
-        if launcher_profile and launcher_profile.get("experimental_mcp_ptc") is True:
-            mcp_ptc = CodeInterpreterMiddleware(ptc=mcp_tools, subagents=False, mode="turn")
-    dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "MCPs": [] if mcp_ptc is not None else mcp_tools,
-        "Notion": notion_tools,
-    }
-    if integration_tool_groups:
-        candidate = DynamicToolMiddleware(
-            integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
-        )
-        if candidate.has_groups:
-            dynamic_tool_middleware = candidate
+    mcp_ptc, ordinary_mcp_tools = await _mcp_code_mode(thread_id, mcp_tools, local_run=local_run)
+    integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
+    full_dynamic_tools = _integration_middleware(
+        mcp_tools, notion_tools, integration_reserved_names
+    )
+    dynamic_tool_middleware = (
+        _integration_middleware(ordinary_mcp_tools, notion_tools, integration_reserved_names)
+        if mcp_ptc is not None
+        else full_dynamic_tools
+    )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1959,14 +1974,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     subagent_model,
                     tools=[tool for tool in static_tools if tool is not save_user_settings],
                     workspace_skills=workspace_skills,
-                    dynamic_tools=(
-                        DynamicToolMiddleware(
-                            {"MCPs": mcp_tools, "Notion": notion_tools},
-                            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
-                        )
-                        if mcp_ptc is not None
-                        else dynamic_tool_middleware
-                    ),
+                    dynamic_tools=full_dynamic_tools,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
@@ -2082,7 +2090,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ).with_config(bindable_config(config))
     if tool_surface is not None:
         tool_surface.graph = graph
-        tool_surface.dynamic = dynamic_tool_middleware
+        tool_surface.dynamic = full_dynamic_tools
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode

@@ -165,6 +165,48 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
 
 
 @pytest.mark.asyncio
+async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_quickjs.middleware import filter_tools_for_ptc
+
+    from agent import server
+
+    async def invoke() -> str:
+        return "ok"
+
+    tools = [
+        StructuredTool.from_function(coroutine=invoke, name=name, description="Integration")
+        for name in ("mcp_valid_tool", "mcp_github-2_tool", "mcp_sentry_get-Issue", "mcp_tail-")
+    ]
+    monkeypatch.setattr(
+        langgraph_sdk,
+        "get_client",
+        lambda: SimpleNamespace(
+            threads=SimpleNamespace(
+                get=AsyncMock(return_value={"metadata": {"owner_login": "alice"}})
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        server, "_cached_profile", AsyncMock(return_value={"experimental_mcp_ptc": True})
+    )
+    code_mode, ordinary = await server._mcp_code_mode("thread", tools, local_run=False)
+    assert code_mode is not None
+    assert filter_tools_for_ptc([], tools[:1], self_tool_name="eval") == tools[:1]
+    assert list(ordinary) == tools[1:]
+    dynamic = server._integration_middleware(ordinary, [], set())
+    full = server._integration_middleware(tools, [], set())
+    assert dynamic is not None and full is not None
+    assert {tool.name for tool in await dynamic.catalog_tools()} == {
+        tool.name for tool in tools[1:]
+    }
+    catalog = await full.catalog_tools()
+    assert {tool.name for tool in catalog} == {tool.name for tool in tools}
+    assert await catalog[0].ainvoke({}) == "ok"
+
+
+@pytest.mark.asyncio
 async def test_notion_connection_changes_are_visible_without_waiting_for_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
