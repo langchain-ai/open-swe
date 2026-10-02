@@ -15,7 +15,12 @@ from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card as expedited_card
-from agent.expedited_review.channels import channel_choices, own_choices
+from agent.expedited_review.channels import (
+    channel_choices,
+    own_choices,
+    sendable_channel,
+    still_internal,
+)
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
 from agent.expedited_review.readiness import (
@@ -27,6 +32,7 @@ from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequestPayload
+from agent.github.repo_files import RepoSettings
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
 from agent.human_review.requests import (
@@ -154,7 +160,7 @@ async def post_card(
         author=await approval.author_mention(),
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
-        choices=approval.slack_channel_choices,
+        choices=await _channel_choices(approval),
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -231,6 +237,15 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
 
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if (
+        token is not None
+        and (
+            await RepoSettings.fetch(pr.owner, pr.repo, token=token, ref=approval.head_sha)
+        ).review_channel.strip()
+    ):
+        return []
     return approval.slack_channel_choices or await own_choices(approval)
 
 
@@ -324,6 +339,38 @@ async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> 
         await note_for_concierge(author.slack_user_id, request.slack_dm_channel_id, text)
 
 
+async def broadcast_configured(approval: HumanReviewRequest) -> None:
+    if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
+        return
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        logger.warning("Could not resolve expedited review broadcast channel without a token")
+        return
+    configured = (
+        await RepoSettings.fetch(pr.owner, pr.repo, token=token, ref=approval.head_sha)
+    ).review_channel.strip()
+    if not configured:
+        return
+    channel = await SlackChannel.resolve(configured)
+    if channel is None:
+        logger.warning(
+            "Configured expedited review channel is unavailable", extra={"channel": configured}
+        )
+        return
+    if not await still_internal(approval.slack_channel_id):
+        logger.warning("Cannot broadcast expedited review from an externally shared channel")
+        return
+    if (channel := await sendable_channel(channel.id)) is None:
+        logger.warning("Configured expedited review channel cannot receive cards")
+        return
+    if channel.id == approval.slack_channel_id:
+        if not await broadcast_card(approval):
+            logger.warning("Could not broadcast expedited review card to its channel")
+    elif error := await copy_card(approval, channel):
+        logger.warning("Could not broadcast expedited review card", extra={"slack_error": error})
+
+
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
     await _refresh_dm_card(request, outcome)
@@ -344,6 +391,7 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         if message_ts:
             request.slack_message_ts = message_ts
             await request.save()
+            await broadcast_configured(request)
         else:
             logger.warning("Could not publish ready expedited card", extra={"slack_error": error})
         return
