@@ -2,7 +2,8 @@
 
 A request is refused while the pull request is closed, a draft, conflicted, or
 failing a required check. People sign up from the card; after
-``UNCLAIMED_AFTER_MINUTES`` with nobody signed up the agent picks someone. The
+``UNCLAIMED_AFTER_MINUTES`` with nobody signed up Open SWE picks someone (see
+``agent.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request merges once every reviewer approves on GitHub, or once
 ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval, and only while
 it is otherwise ready.
@@ -45,6 +46,7 @@ from agent.human_review.lifecycle import (
 )
 from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
+from agent.human_review.picking import Pick, Wait, choose_reviewer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
 from agent.slack.blocks import escape
@@ -654,11 +656,37 @@ async def settle_repository(owner: str, repo: str) -> None:
         await settle(request)
 
 
-async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False) -> bool:
-    """Wake an agent to pick a reviewer, as the unclaimed deadline does; whether one was woken.
+@dataclass(frozen=True, slots=True)
+class AutoAssignResult:
+    status: Literal["picked", "waiting", "woken", "failed"]
+    reviewer: str = ""
+    at: datetime | None = None
+
+
+async def start_auto_assign(
+    request: HumanReviewRequest, *, asked: bool = False
+) -> AutoAssignResult:
+    """Pick a reviewer as the unclaimed deadline does, waking an agent when nobody qualifies.
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    choice = await choose_reviewer(request)
+    if isinstance(choice, Wait):
+        if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
+            return AutoAssignResult("waiting", choice.login, choice.until)
+        return AutoAssignResult("failed")
+    if isinstance(choice, Pick):
+        result = await assign(request, choice.login, choice.reason)
+        if result.success:
+            return AutoAssignResult("picked", choice.login)
+        logger.warning(
+            "Open SWE's reviewer pick was refused; waking an agent to pick",
+            extra={"request_id": str(request.id), "github_login": choice.login},
+        )
+    return AutoAssignResult("woken" if await _wake_picker(request, asked=asked) else "failed")
+
+
+async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
@@ -713,7 +741,7 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             # Re-checked later in case the approval is dismissed while the request stays open.
             await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
             return {"status": "approved"}
-        return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
+        return {"status": (await start_auto_assign(request)).status}
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}
