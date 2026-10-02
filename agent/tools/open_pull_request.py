@@ -317,6 +317,7 @@ async def _revoked_token_payload(
 
     if login := await pr_author_login(author):
         await mark_access_token_revoked(login, token)
+    settings_url = build_settings_url()
     return _failure_payload(
         code="github_user_auth_revoked",
         owner=owner,
@@ -327,8 +328,8 @@ async def _revoked_token_payload(
         http_status=401,
         reason="GitHub rejected the PR author's stored sign-in",
         likely_cause=(
-            "their GitHub authorization was revoked. Ask them to sign in with GitHub again "
-            f"at {build_settings_url()}, then retry"
+            "their GitHub authorization was revoked. Ask them to sign in with GitHub again"
+            f"{f' at {settings_url}' if settings_url else ''}, then retry"
         ),
         branch_pushed=None,
         failed_step="preflight_repo",
