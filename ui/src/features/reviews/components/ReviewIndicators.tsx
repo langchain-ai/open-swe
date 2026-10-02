@@ -12,7 +12,7 @@ export function ReviewIndicators({ review }: { review: ReviewSummary }) {
         <ReviewCounts counts={review.counts} withLabels />
       </span>
       {review.status === "running" && (
-        <span className="text-amber-700 dark:text-amber-400">Reviewing…</span>
+        <span className="text-warning-foreground">Reviewing…</span>
       )}
       {review.status === "error" && (
         <span className="text-destructive">Review failed</span>
