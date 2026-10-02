@@ -1107,6 +1107,15 @@ async def _process_slack_mention_impl(
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             load_prompt("runs/slack-review-request.md")
             if event_ts != thread_ts
+            and context_thread_ts == thread_ts
+            and any(
+                slack_utils.is_own_slack_message(message, bot_user_id)
+                and isinstance(message.get("text"), str)
+                and message["text"].startswith(
+                    ("Review requested for ", "Expedited review requested for ")
+                )
+                for message in thread_messages
+            )
             and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
             else "",
             resolved_links_section,
