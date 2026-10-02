@@ -146,7 +146,8 @@ async def post_card(
     if location is None:
         return None, "no Slack thread"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
-    approval.slack_channel_choices = await channel_choices(approval)
+    if not approval.slack_channel_choices:
+        approval.slack_channel_choices = await channel_choices(approval)
     text, blocks = expedited_card.open_card(
         approval,
         title=title,
@@ -230,7 +231,6 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
 
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
-    # Cards posted before choices were stored still offer their own channel.
     return approval.slack_channel_choices or await own_choices(approval)
 
 
