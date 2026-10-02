@@ -5,8 +5,10 @@ import re
 from dataclasses import dataclass
 
 from agent.slack import webhook as service
+from agent.slack.blocks import block_payload, section
 from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     get_active_slack_thread,
@@ -169,9 +171,18 @@ async def _start(
             await _tell_sender(request, "Private threads cannot be broken out to another channel.")
             return
     heading = f"`/breakout`: {_title(instruction)}"
+    text = await _root_text(request, heading)
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
-        await _root_text(request, heading),
+        text,
+        blocks=block_payload(
+            [
+                section(text),
+                *await origin_footer(
+                    request.thread_id or "", (request.channel_id, request.thread_ts)
+                ),
+            ]
+        ),
         unfurl_links=False,
         unfurl_media=False,
     )
