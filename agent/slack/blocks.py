@@ -92,6 +92,7 @@ class ButtonElement(TypedDict):
     action_id: str
     value: NotRequired[str]
     url: NotRequired[str]
+    accessibility_label: NotRequired[str]
     style: NotRequired[ButtonStyle]
 
 
