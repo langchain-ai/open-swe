@@ -201,8 +201,18 @@ async def _stale_reply_guard(
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    seen: set[str] = set()
-    conflicts = 0
+    client = get_langgraph_client()
+    namespace = ("slack_reply_freshness", run_id)
+    item = await client.store.get_item(namespace, "progress")
+    progress = item.get("value", {}) if item else {}
+    stored_seen = progress.get("seen", [])
+    seen = (
+        {ts for ts in stored_seen if isinstance(ts, str)}
+        if isinstance(stored_seen, list)
+        else set()
+    )
+    stored_conflicts = progress.get("conflicts", 0)
+    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
     for message in messages:
         if not isinstance(message, BaseMessage):
             continue
@@ -216,8 +226,6 @@ async def _stale_reply_guard(
                 timestamps = payload.get("human_timestamps")
                 if isinstance(timestamps, list):
                     seen.update(ts for ts in timestamps if isinstance(ts, str))
-                if payload.get("error") == "new_slack_messages" and payload.get("run_id") == run_id:
-                    conflicts += 1
     if conflicts >= 2 or not seen:
         return None
     try:
@@ -230,6 +238,14 @@ async def _stale_reply_guard(
         isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
     ):
         return None
+    await client.store.put_item(
+        namespace,
+        "progress",
+        {
+            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
+            "conflicts": conflicts + 1,
+        },
+    )
     return {
         "success": False,
         "error": "new_slack_messages",
