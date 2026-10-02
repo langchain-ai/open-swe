@@ -874,7 +874,9 @@ async def process_github_ci_event(
         await settle_human_reviews(payload)
 
 
-_UNTAGGED_PR_TRIGGER_EVENTS = frozenset(["issue_comment", "pull_request_review"])
+_UNTAGGED_PR_TRIGGER_EVENTS = frozenset(
+    ["issue_comment", "pull_request_review", "pull_request_review_comment"]
+)
 
 
 class _GitHubAccount(BaseModel):
@@ -940,7 +942,7 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
         return None
     if event.action not in common.SUPPORTED_GH_COMMENT_ACTIONS[event_type]:
         return None
-    target = event.pull_request if event_type == "pull_request_review" else event.issue
+    target = event.issue if event_type == "issue_comment" else event.pull_request
     if target is None or target.state != "open":
         return None
     if event_type == "issue_comment" and target.pull_request is None:

@@ -214,6 +214,7 @@ async def github_webhook(
         )
         return {"status": "ignored", "reason": "Sender is not a registered Open SWE user"}
 
+    agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event_type)
     if (
         event_type == "pull_request_review_comment"
         and common.review_comment_reply_parent_id(payload) is not None
@@ -222,10 +223,10 @@ async def github_webhook(
         if gate_rejection is not None:
             return gate_rejection
         background_tasks.add_task(service.process_github_review_finding_reply, payload)
-        return {"status": "accepted", "message": "Processing review finding reply"}
+        if agent_thread_id is None:
+            return {"status": "accepted", "message": "Processing review finding reply"}
 
-    if not common.mentions_open_swe(comment_body):
-        agent_thread_id = await service.untagged_agent_pr_thread_id(payload, event_type)
+    if agent_thread_id is not None or not common.mentions_open_swe(comment_body):
         if agent_thread_id is not None:
             gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
             if gate_rejection is not None:

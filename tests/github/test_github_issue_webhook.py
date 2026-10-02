@@ -239,6 +239,18 @@ def _untagged_pr_event(
             "repository": repository,
             "sender": sender,
         }
+    if event_type == "pull_request_review_comment":
+        return {
+            "action": action or "created",
+            "pull_request": {"number": number, "state": "open"},
+            "comment": {
+                "id": 7,
+                "body": "Fix this line",
+                **({"in_reply_to_id": 6} if action == "edited" else {}),
+            },
+            "repository": repository,
+            "sender": sender,
+        }
     return {
         "action": action or "submitted",
         "pull_request": {"number": number, "state": "open", "head": {"ref": "feature"}},
@@ -257,6 +269,10 @@ def _untagged_pr_event(
         ("issue_comment", "", {"login": "vercel[bot]"}, False),
         ("issue_comment", "", {"login": "open-swe[bot]"}, False),
         ("issue_comment", "", {"login": "stranger"}, False),
+        ("pull_request_review_comment", "created", {"login": "octocat"}, True),
+        ("pull_request_review_comment", "edited", {"login": "octocat"}, True),
+        ("pull_request_review_comment", "deleted", {"login": "octocat"}, False),
+        ("pull_request_review_comment", "created", {"login": "stranger"}, False),
         ("pull_request_review", "", {"login": "octocat"}, True),
         ("pull_request_review", "edited", {"login": "octocat"}, True),
         ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, False),
