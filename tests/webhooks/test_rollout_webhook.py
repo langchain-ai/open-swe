@@ -47,9 +47,8 @@ def _token(**overrides: object) -> str:
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.setenv("ROLLOUT_OIDC_REPOS", _REPO)
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
     monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOWS", _WORKFLOWS)
-    monkeypatch.setenv("ROLLOUT_OIDC_AUDIENCE", _AUDIENCE)
     monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
@@ -108,7 +107,7 @@ async def test_rollout_webhook_accepts_each_listed_workflow(app: FastAPI) -> Non
 async def test_rollout_webhook_rejects_when_no_workflow_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("ROLLOUT_OIDC_REPOS", _REPO)
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
     monkeypatch.delenv("ROLLOUT_OIDC_WORKFLOWS", raising=False)
     monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
@@ -119,10 +118,10 @@ async def test_rollout_webhook_rejects_when_no_workflow_is_allowed(
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_when_no_repository_is_allowed(
+async def test_rollout_webhook_rejects_when_no_organization_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ROLLOUT_OIDC_REPOS", raising=False)
+    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
