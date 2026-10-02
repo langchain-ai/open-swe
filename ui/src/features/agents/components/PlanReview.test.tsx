@@ -17,8 +17,10 @@ const mocks = vi.hoisted(() => ({
   getPlanComments: vi.fn(),
   deletePlanComment: vi.fn(),
   submitPlanComments: vi.fn(),
+  reportError: vi.fn(),
 }))
 
+vi.mock("@/lib/errorReporting", () => ({ reportError: mocks.reportError }))
 vi.mock("@/lib/plan", () => ({
   addPlanComment: mocks.addPlanComment,
   deletePlanComment: mocks.deletePlanComment,
@@ -157,6 +159,70 @@ describe("PlanReview", () => {
       )
     }
   )
+
+  it("adds a general comment without selecting text and clears a previous anchor", async () => {
+    mocks.addPlanComment.mockResolvedValue({ ...comment, anchor: null })
+    render(<PlanReview plan={plan} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    expect(
+      screen.getByTestId("comment-composer").querySelector("blockquote")
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByTestId("comment-composer")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Select text" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "Clarify this step" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    expect(
+      screen.getByTestId("comment-composer").querySelector("blockquote")
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+
+    await waitFor(() =>
+      expect(mocks.addPlanComment).toHaveBeenCalledWith(
+        "thread-1",
+        "Clarify this step",
+        null
+      )
+    )
+    const posted = await screen.findByTestId("plan-comment")
+    expect(posted.textContent).toContain("Clarify this step")
+    expect(posted.querySelector("blockquote")).toBeNull()
+    expect(screen.queryByTestId("comment-composer")).toBeNull()
+  })
+
+  it("rolls back a failed optimistic comment without losing the draft", async () => {
+    let rejectComment!: (error: Error) => void
+    mocks.addPlanComment.mockReturnValueOnce(
+      new Promise<PlanComment>((_, reject) => {
+        rejectComment = reject
+      })
+    )
+    render(<PlanReview plan={plan} />)
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
+    fireEvent.change(screen.getByTestId("comment-input"), {
+      target: { value: "General feedback" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    expect(screen.getByTestId("plan-comment").textContent).toContain(
+      "General feedback"
+    )
+    expect(screen.queryByTestId("comment-delete")).toBeNull()
+
+    const error = new Error("Offline")
+    rejectComment(error)
+    await waitFor(() => expect(screen.queryByTestId("plan-comment")).toBeNull())
+    expect(
+      (screen.getByTestId("comment-input") as HTMLTextAreaElement).value
+    ).toBe("General feedback")
+    expect(mocks.reportError).toHaveBeenCalledWith({
+      title: "Couldn't add comment",
+      error,
+    })
+  })
 
   it("submits comments once and allows another submission after new feedback", async () => {
     render(<PlanReview plan={plan} />)
