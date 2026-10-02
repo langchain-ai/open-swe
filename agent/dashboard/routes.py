@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from agent.analytics.routes import router as analytics_router
 from agent.api_keys.routes import router as api_keys_router
+from agent.audit_logs.routes import router as audit_logs_router
 from agent.bridge.routes import router as bridge_router
 from agent.dashboard.agent_instructions import router as agent_instructions_router
 from agent.dashboard.auth_routes import router as auth_router
@@ -58,6 +59,7 @@ router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)
+router.include_router(audit_logs_router)
 router.include_router(schedules_router)
 router.include_router(threads_router)
 router.include_router(transcript_router)

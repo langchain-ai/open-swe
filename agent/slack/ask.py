@@ -19,12 +19,14 @@ from agent.prompts import prompt
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     acknowledge_slack_command,
+    add_slack_reaction,
     clear_slack_command_message,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
+    remove_slack_reaction,
     replace_slack_command_message,
     strip_bot_mention,
 )
@@ -164,6 +166,9 @@ async def _budgeted_transcript(messages: list[SlackMessage]) -> str:
 
 async def _settle_thinking_status(request: SlackAskRequest) -> None:
     if request.by_the_way:
+        await remove_slack_reaction(
+            request.channel_id, request.message_ts, "hourglass_flowing_sand"
+        )
         await settle_slack_thread_status(request.channel_id, request.reply_thread_ts)
 
 
@@ -208,6 +213,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     if request.response_url:
         await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
     if request.by_the_way:
+        await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
         if not request.question:
             await _refuse(request, _BY_THE_WAY_USAGE)
             return
@@ -286,6 +292,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_ask": True,
         "slack_ask_response_url": request.response_url,
         "slack_by_the_way_thread_ts": request.reply_thread_ts,
+        "slack_by_the_way_message_ts": request.message_ts,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,

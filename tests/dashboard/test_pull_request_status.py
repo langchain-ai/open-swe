@@ -156,7 +156,12 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                                         "author": {"login": "bob"},
                                                         "body": "question",
                                                         "url": "https://github.com/o/r/pull/7#discussion_r2",
-                                                    }
+                                                    },
+                                                    {
+                                                        "author": {"login": "alice"},
+                                                        "body": "answer",
+                                                        "url": "https://github.com/o/r/pull/7#discussion_r3",
+                                                    },
                                                 ]
                                             },
                                         }
@@ -235,6 +240,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "path": "a.py",
                     "line": 4,
                     "url": "https://github.com/o/r/pull/7#discussion_r1",
+                    "replies": [],
                 },
                 {
                     "thread_id": "PRRT_2",
@@ -243,6 +249,13 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "path": "b.py",
                     "line": 9,
                     "url": "https://github.com/o/r/pull/7#discussion_r2",
+                    "replies": [
+                        {
+                            "author": "alice",
+                            "body": "answer",
+                            "url": "https://github.com/o/r/pull/7#discussion_r3",
+                        }
+                    ],
                 },
             ],
         }
