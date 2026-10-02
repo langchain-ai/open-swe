@@ -1,18 +1,20 @@
 """HTTP API for the PR review feature: reviews, review chat, and review styles."""
 
-from typing import Any
+from typing import Any, Self
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from agent.dashboard.options import model_supports_effort
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
+from agent.review.approvals import fetch_approvals_md
 from agent.review.assessment_feedback import (
     AssessmentFeedback,
     FeedbackSubmission,
@@ -28,10 +30,17 @@ from agent.review.chat import (
     proxy_review_chat_stream_events,
 )
 from agent.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
-from agent.review.eval_jobs import get_reviewer_eval_status
+from agent.review.eval_jobs import (
+    ScoreMode,
+    Severity,
+    get_reviewer_eval_status,
+    resolve_eval_config,
+    start_reviewer_eval,
+)
 from agent.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
+    PostedReviewComment,
     PullRequestPreview,
     PullRequestReviewEvent,
     ReviewScoutTrigger,
@@ -44,9 +53,11 @@ from agent.review.reviews import (
     get_pull_request_preview,
     get_review,
     get_review_diff,
+    get_review_file_contents,
     get_review_summaries,
     list_review_comments,
     list_reviews,
+    post_review_comment,
     proxy_pr_image,
     submit_pull_request_review,
     trigger_re_review,
@@ -100,8 +111,39 @@ async def api_set_enabled_review_repo(
 async def admin_get_reviewer_eval(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
-    """Read-only status for the reviewer eval (triggered from the GitHub Action)."""
+    """Status of the latest reviewer eval."""
     return await get_reviewer_eval_status()
+
+
+class ReviewerEvalStart(BaseModel):
+    dataset_name: str = Field(min_length=1, max_length=200)
+    experiment_prefix: str = Field(min_length=1, max_length=200)
+    max_concurrency: int = Field(ge=1, le=50)
+    model_id: str
+    reasoning_effort: str
+    score_mode: ScoreMode
+    severity_threshold: Severity
+    limit: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _check_model_effort(self) -> Self:
+        if not model_supports_effort(self.model_id, self.reasoning_effort):
+            raise ValueError(f"{self.model_id} does not support effort {self.reasoning_effort}")
+        return self
+
+
+@router.post("/admin/evals/reviewer")
+async def admin_start_reviewer_eval(
+    body: ReviewerEvalStart,
+    session: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
+    config = resolve_eval_config()
+    config.update(body.model_dump(exclude={"limit"}))
+    try:
+        return await start_reviewer_eval(config, body.limit, session.get("email") or session["sub"])
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/review-styles")
@@ -233,6 +275,23 @@ async def api_get_review_diff(
     return await get_review_diff(owner, repo, pr_number)
 
 
+@router.get("/reviews/{owner}/{repo}/{pr_number}/file-contents")
+async def api_get_review_file_contents(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    path: str,
+    base_sha: str,
+    head_sha: str,
+    original_path: str = "",
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, str | None]:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_file_contents(
+        owner, repo, pr_number, path, original_path, base_sha, head_sha
+    )
+
+
 @router.get("/reviews/{owner}/{repo}/{pr_number}/image")
 async def api_get_review_image(
     owner: str,
@@ -305,6 +364,18 @@ async def api_list_review_comments(
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await list_review_comments(owner, repo, pr_number)
+
+
+@router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
+async def api_post_review_comment(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    comment: PendingReviewCommentInput,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PostedReviewComment:
+    token = await _viewer_token(session, owner, repo)
+    return await post_review_comment(owner, repo, pr_number, comment, token=token)
 
 
 class PullRequestReviewSubmit(BaseModel):
@@ -555,6 +626,24 @@ async def api_create_review_style(
     return await REVIEW_STYLES.create(body.full_name, session["sub"])
 
 
+class ApprovalsFileStatus(BaseModel):
+    found: bool
+
+
+# Declared before the detail route, whose ``{full_name:path}`` would otherwise swallow the suffix.
+@router.get("/review-styles/{full_name:path}/approvals-file")
+async def api_get_review_style_approvals_file(
+    full_name: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ApprovalsFileStatus:
+    full_name = normalize_repo_full_name(full_name)
+    token = await require_repo_access_for_user(session["sub"], full_name)
+    owner, _, name = full_name.partition("/")
+    return ApprovalsFileStatus(
+        found=await fetch_approvals_md(owner, name, None, token=token) is not None
+    )
+
+
 @router.get("/review-styles/{full_name:path}")
 async def api_get_review_style(
     full_name: str,
@@ -580,7 +669,7 @@ async def api_update_review_style_prompt(
     await require_repo_access_for_user(session["sub"], full_name)
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
-    if "approval_policy" in body.model_fields_set:
+    if "approval_mode" in body.model_fields_set:
         from agent.dashboard.deps import require_admin
 
         require_admin(session)
@@ -630,7 +719,7 @@ async def api_delete_review_style(
     record = await REVIEW_STYLES.get(full_name)
     if not record:
         raise HTTPException(404, "review style not found")
-    if record.approval_policy:
+    if record.approval_mode is not None:
         from agent.dashboard.deps import require_admin
 
         require_admin(session)

@@ -4,11 +4,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from operator import attrgetter
 from pathlib import Path
+from time import perf_counter
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, make_url, text
+from sqlalchemy import (
+    Connection,
+    ExceptionContext,
+    ExecutionContext,
+    bindparam,
+    event,
+    make_url,
+    text,
+)
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -76,8 +85,55 @@ def engine() -> AsyncEngine:
             pool_timeout=ENV.ANALYTICS_POOL_TIMEOUT_SECONDS.get_int(5),
             connect_args={"server_settings": {"application_name": "open-swe"}},
         )
+        event.listen(_ENGINE.sync_engine, "before_cursor_execute", _query_started)
+        event.listen(_ENGINE.sync_engine, "after_cursor_execute", _query_finished)
+        event.listen(_ENGINE.sync_engine, "handle_error", _query_failed)
         _ENGINE_URI = database_uri
     return _ENGINE
+
+
+def _query_started(
+    conn: Connection,
+    cursor: object,
+    statement: str,
+    parameters: object,
+    context: ExecutionContext,
+    executemany: bool,
+) -> None:
+    conn.info["slow_query_started"] = perf_counter()
+
+
+def _log_slow_query(conn: Connection, statement: str | None, failed: bool) -> None:
+    started = conn.info.pop("slow_query_started", None)
+    threshold = ENV.POSTGRES_SLOW_QUERY_MS.get_int(1000)
+    if not isinstance(started, float) or threshold <= 0:
+        return
+    duration_ms = (perf_counter() - started) * 1000
+    if duration_ms >= threshold:
+        logger.warning(
+            "Slow PostgreSQL query",
+            extra={
+                "duration_ms": round(duration_ms, 2),
+                "sql_statement": statement,
+                "query_failed": failed,
+            },
+        )
+
+
+def _query_finished(
+    conn: Connection,
+    cursor: object,
+    statement: str,
+    parameters: object,
+    context: ExecutionContext,
+    executemany: bool,
+) -> None:
+    _log_slow_query(conn, statement, False)
+
+
+def _query_failed(context: ExceptionContext) -> None:
+    if context.connection is not None:
+        _log_slow_query(context.connection, context.statement, True)
 
 
 @asynccontextmanager
@@ -179,8 +235,38 @@ def upgrade(
             "transaction_per_migration": True,
         },
     )
+    if ENV.OPENSWE_ENV.optional() == "preview":
+        drop_superseded_revisions(conn, context, migrations, schema)
     with Operations.context(context):
         context.run_migrations()
+
+
+def drop_superseded_revisions(
+    conn: Connection,
+    context: MigrationContext,
+    migrations: ScriptDirectory,
+    schema: str,
+) -> None:
+    """Forget stamped revisions that a rebased preview branch now chains beneath another."""
+    current = set(context.get_current_heads())
+    superseded = current & {
+        script.revision
+        for head in current
+        for script in migrations.walk_revisions(head=head)
+        if script.revision != head
+    }
+    if not superseded:
+        return
+    logger.warning(
+        "Dropping superseded migration revisions",
+        extra={"superseded_revisions": sorted(superseded)},
+    )
+    conn.execute(
+        text(f"DELETE FROM {schema}.alembic_version WHERE version_num IN :revisions").bindparams(
+            bindparam("revisions", expanding=True)
+        ),
+        {"revisions": sorted(superseded)},
+    )
 
 
 def execute_revision(conn: Connection, migrations: ScriptDirectory, revision: str) -> None:

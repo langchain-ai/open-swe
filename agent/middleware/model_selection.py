@@ -1,26 +1,32 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, NotRequired
+from typing import Annotated, Literal, NotRequired
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    OmitFromOutput,
+)
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
 
 from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
+from agent.utils.jev import select_jev_choice
 
 logger = logging.getLogger(__name__)
 
 Route = Literal["fast", "balanced", "performance"]
-PersistedRoute = Route | Literal["fast_alt"]
+SelectedRoute = Route | Literal["default"]
+PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
 
 
-def _latest_human_task(messages: Sequence[Any]) -> str:
+def _latest_human_task(messages: Sequence[object]) -> str:
     """The user's own request, skipping injected context envelopes.
 
     Context blocks (sender metadata, dynamic context) are appended as
@@ -44,22 +50,39 @@ def _latest_human_task(messages: Sequence[Any]) -> str:
     return plain
 
 
-class RouteDecision(BaseModel):
-    model_route: Route
+ROUTES: tuple[Route, ...] = ("fast", "balanced", "performance")
+
+
+def _route_criteria() -> dict[Route, str]:
+    return {route: prompt(f"model-selection/{route}") for route in ROUTES}
+
+
+async def _select_jev_route(task: str) -> SelectedRoute:
+    return (
+        await select_jev_choice(
+            task,
+            question="route",
+            instructions=prompt("model-selection/instructions"),
+            criteria=_route_criteria(),
+        )
+        or "default"
+    )
 
 
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
+    requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
+    requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
 
 
-def normalize_route(route: PersistedRoute) -> Route:
+def normalize_route(route: PersistedRoute) -> SelectedRoute:
     return "fast" if route == "fast_alt" else route
 
 
 async def _emit_routed_model(
     models: Mapping[str, BaseChatModel],
     route_model_ids: Mapping[str, str],
-    route: Route,
+    route: SelectedRoute,
 ) -> None:
     """Stream the routed model's id so the UI can show it next to `Auto`."""
     model_id = route_model_ids.get(route)
@@ -81,51 +104,54 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
     def __init__(
         self,
         models: Mapping[str, BaseChatModel],
-        classifier: BaseChatModel,
+        default_model: BaseChatModel,
         *,
         route_model_ids: Mapping[str, str] | None = None,
-        routing_mode: RoutingMode = "auto",
+        routing_mode: RoutingMode | None = "auto",
+        requested_model_factory: Callable[[str, str | None], BaseChatModel] | None = None,
     ) -> None:
-        self._models = dict(models)
+        self._models = {**models, "default": default_model}
         self._route_model_ids = dict(route_model_ids or {})
         self._routing_mode = routing_mode
-        # `nostream` keeps the routing decision out of the user-facing message
-        # stream; it stays visible in traces, unlike the offloading summarizer.
-        hidden_classifier = classifier.model_copy(
-            update={"tags": [*(classifier.tags or []), "nostream"]}
-        )
-        self._classifier = hidden_classifier.with_structured_output(
-            RouteDecision, method="json_schema"
-        )
+        self._requested_model_factory = requested_model_factory
+        self._requested_models: dict[tuple[str, str | None], BaseChatModel] = {}
+
+    def use_requested_model(self, model_id: str, effort: str | None = None) -> None:
+        if self._requested_model_factory is None:
+            raise ValueError("Requested model selection is not enabled")
+        key = (model_id, effort)
+        if key not in self._requested_models:
+            self._requested_models[key] = self._requested_model_factory(model_id, effort)
+        self._models["default"] = self._requested_models[key]
+        self._route_model_ids["default"] = model_id
 
     async def select_route(
         self,
         state: ModelSelectionState,
-    ) -> Route:
+    ) -> SelectedRoute:
         """Select the model route for a turn."""
+        if requested_model := state.get("requested_model"):
+            if self._requested_model_factory is not None:
+                self.use_requested_model(requested_model, state.get("requested_effort"))
+                return "default"
+        if self._routing_mode is None:
+            return "default"
         if model_route := state.get("model_route"):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
         messages = state.get("messages", [])
-        task = _latest_human_task(messages)
-        route: Route = "balanced"
-        try:
-            decision = await self._classifier.ainvoke(prompt("model-selection", task=task[-8_000:]))
-            if isinstance(decision, RouteDecision):
-                route = decision.model_route
-        except Exception:  # noqa: BLE001
-            logger.exception("Model routing classifier failed")
-        return route
+        task = _latest_human_task(messages)[-8_000:]
+        return await _select_jev_route(task)
 
     async def abefore_model(
         self,
         state: ModelSelectionState,
         runtime: Runtime,
-    ) -> dict[str, Route]:
+    ) -> dict[str, SelectedRoute]:
         del runtime
         route = await self.select_route(state)
-        if self._routing_mode == "auto":
+        if self._routing_mode == "auto" or state.get("requested_model"):
             await _emit_routed_model(self._models, self._route_model_ids, route)
         return {"model_route": route}
 
@@ -134,8 +160,6 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        route: PersistedRoute = request.state.get("model_route", "balanced")
-        model = self._models.get(normalize_route(route)) or self._models.get("balanced")
-        if model is None:
-            model = self._models["balanced"]
+        route: PersistedRoute = request.state.get("model_route", "default")
+        model = self._models.get(normalize_route(route)) or self._models["default"]
         return await handler(request.override(model=model))

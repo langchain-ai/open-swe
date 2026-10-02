@@ -65,14 +65,10 @@ class Settings:
     reset_zone: ZoneInfo
     url: str
     agent_timeout_seconds: float
-    excluded_pr: int | None
     force: bool
 
     @classmethod
     def from_env(cls) -> Self:
-        excluded = os.environ.get("EXCLUDE_PR_NUMBER", "")
-        if excluded and not excluded.isdigit():
-            raise PreviewError(f"invalid EXCLUDE_PR_NUMBER: {excluded}")
         return cls(
             repo=os.environ["GH_REPO"],
             branch=_env("PREVIEW_BRANCH", "preview"),
@@ -87,7 +83,6 @@ class Settings:
                 "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents",
             ),
             agent_timeout_seconds=float(_env("PREVIEW_AGENT_TIMEOUT_SECONDS", "1800")),
-            excluded_pr=int(excluded) if excluded else None,
             force=os.environ.get("FORCE") == "true",
         )
 
@@ -508,11 +503,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
     async def merge_pulls(self, defer_conflicts: bool) -> list[Pending]:
         s = self.settings
         pulls = sorted(
-            (
-                pull
-                for pull in await open_pulls(s.repo)
-                if pull.has_label(s.label) and pull.number != s.excluded_pr
-            ),
+            (pull for pull in await open_pulls(s.repo) if pull.has_label(s.label)),
             key=lambda pull: pull.number,
         )[: s.max_prs]
         pending: list[Pending] = []
@@ -614,6 +605,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
             await git("commit", "--allow-empty", "-m", "preview: force deployment")
         await git("push", "--force", "origin", f"HEAD:refs/heads/{branch}")
         set_output("changed", "true")
+        set_output("sha", await rev_parse("HEAD"))
 
     async def build(self) -> None:
         await git("config", "user.name", "github-actions[bot]")

@@ -72,6 +72,20 @@ async function deleteWorkspace(page: Page, slug: string) {
   });
 }
 
+// `default` cannot be deleted, so specs put the seeded row back instead.
+async function resetDefaultWorkspace(page: Page) {
+  const res = await page.request.post("/control/reset-default-workspace");
+  expect(res.ok()).toBeTruthy();
+}
+
+async function setDefaultWorkspacePrompt(page: Page, prompt: string) {
+  const res = await page.request.put(
+    `/dashboard/api/workspaces/${DEFAULT_SLUG}`,
+    { headers: SAME_ORIGIN_HEADERS, data: { prompt, repos: ["e2e/default"] } },
+  );
+  expect(res.ok()).toBeTruthy();
+}
+
 // Saving a default model retires the first-run onboarding modal, which otherwise
 // covers the composer on the new-agent page.
 async function saveDefaultModel(page: Page) {
@@ -152,6 +166,52 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Workspaces", () => {
+  test("creating a workspace with scripts builds its first image", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    const slug = "initial-build";
+    await deleteWorkspace(page, slug);
+    try {
+      await page.goto("/workspaces");
+      await page.getByRole("button", { name: "Add workspace" }).click();
+      await page.getByLabel("Workspace name").fill("Initial Build");
+      await page.getByRole("button", { name: "Choose repositories" }).click();
+      await page
+        .getByLabel("Add a repository by name")
+        .fill("e2e/initial-build");
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByRole("button", { name: "Save 1 repository" }).click();
+      for (const [label, script] of [
+        ["Setup script", "set -euo pipefail\necho initial-setup-complete"],
+        ["Update script", "echo initial-update-complete"],
+      ]) {
+        await page
+          .getByRole("button", { name: `Edit ${label.toLowerCase()}` })
+          .click();
+        await page.getByRole("textbox", { name: label, exact: true }).focus();
+        await page.keyboard.insertText(script);
+        await page.getByRole("button", { name: "Done", exact: true }).click();
+      }
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page
+        .getByRole("button", { name: "Create workspace", exact: true })
+        .click();
+      await expect(page.getByLabel("Workspace name")).toHaveCount(0);
+      await expect
+        .poll(async () => (await findWorkspace(page, slug))?.refresh_status, {
+          timeout: 60_000,
+        })
+        .toBe("success");
+      const workspace = await findWorkspace(page, slug);
+      expect(workspace?.snapshot_status).toBe("ready");
+      expect(workspace?.refresh_log).toContain("initial-setup-complete");
+      expect(workspace?.refresh_log).toContain("initial-update-complete");
+    } finally {
+      await deleteWorkspace(page, slug);
+    }
+  });
+
   test("an admin views workspaces and editing instructions in Settings", async ({
     page,
   }) => {
@@ -233,9 +293,9 @@ test.describe("Workspaces", () => {
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteWorkspace(page, DEFAULT_SLUG);
+    await resetDefaultWorkspace(page);
     await deleteWorkspace(page, ALT_SLUG);
-    await createWorkspace(page, "default", DEFAULT_WORKSPACE_PROMPT);
+    await setDefaultWorkspacePrompt(page, DEFAULT_WORKSPACE_PROMPT);
 
     // One workspace: the choice is already made, so no control is rendered.
     // Exact: the sidebar's "Workspaces" group header is a button too.
@@ -249,7 +309,7 @@ test.describe("Workspaces", () => {
     const picker = page.getByRole("button", { name: "Workspace", exact: true });
     await expect(picker).toBeVisible();
     // Defaults to the workspace named `default`.
-    await expect(picker).toContainText("default");
+    await expect(picker).toContainText("Default");
 
     await picker.click();
     await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
@@ -279,7 +339,7 @@ test.describe("Workspaces", () => {
     );
 
     await deleteWorkspace(page, ALT_SLUG);
-    await deleteWorkspace(page, DEFAULT_SLUG);
+    await resetDefaultWorkspace(page);
   });
 
   test("an env: tag on the opening Slack message selects the workspace", async ({
@@ -315,7 +375,7 @@ test.describe("Workspaces", () => {
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteWorkspace(page, DEFAULT_SLUG);
+    await resetDefaultWorkspace(page);
     await page.request.post("/control/reset");
 
     await openNewAgentHome(page);
@@ -444,8 +504,12 @@ test.describe("Workspaces", () => {
       page.getByRole("link", { name: "Configure default", exact: true }),
     ).toBeVisible();
 
-    // Leave no default behind: later specs' runs would boot from it.
-    await deleteWorkspace(page, DEFAULT_SLUG);
-    await expect.poll(() => findWorkspace(page, DEFAULT_SLUG)).toBeUndefined();
+    // Leave a fresh default behind: later specs' runs would boot from its image.
+    await resetDefaultWorkspace(page);
+    await expect
+      .poll(
+        async () => (await findWorkspace(page, DEFAULT_SLUG))?.snapshot_status,
+      )
+      .toBe("none");
   });
 });

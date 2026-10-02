@@ -25,6 +25,7 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
+import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type {
   FollowUpBehavior,
@@ -58,6 +59,7 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function PreferencesSection() {
   const { theme, setTheme } = useTheme()
+  const { prefs, setCollapseSubagentsByDefault } = useSidebarPrefs()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -240,23 +242,36 @@ export function PreferencesSection() {
           </Select>
         }
       />
+      {typeof window !== "undefined" && window.openSweDesktop && (
+        <SettingsRow
+          label="Local tracing project"
+          description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+          control={
+            <Input
+              className="w-56"
+              placeholder={
+                preferences.data?.default_local_tracing_project ??
+                "Shared cloud project"
+              }
+              defaultValue={preferences.data?.local_tracing_project ?? ""}
+              disabled={preferences.isLoading}
+              onBlur={(event) =>
+                savePreferences.mutate({
+                  local_tracing_project: event.target.value.trim() || null,
+                })
+              }
+            />
+          }
+        />
+      )}
       <SettingsRow
-        label="Local tracing project"
-        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+        label="Collapse subagent threads by default"
+        description="Keep nested subagent threads folded in the sidebar until you expand them."
         control={
-          <Input
-            className="w-56"
-            placeholder={
-              preferences.data?.default_local_tracing_project ??
-              "Shared cloud project"
-            }
-            defaultValue={preferences.data?.local_tracing_project ?? ""}
-            disabled={preferences.isLoading}
-            onBlur={(event) =>
-              savePreferences.mutate({
-                local_tracing_project: event.target.value.trim() || null,
-              })
-            }
+          <Switch
+            aria-label="Collapse subagent threads by default"
+            checked={prefs.collapseSubagentsByDefault}
+            onCheckedChange={setCollapseSubagentsByDefault}
           />
         }
       />

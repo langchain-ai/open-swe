@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from agent.analytics.routes import router as analytics_router
 from agent.api_keys.routes import router as api_keys_router
+from agent.audit_logs.routes import router as audit_logs_router
 from agent.bridge.routes import router as bridge_router
 from agent.dashboard.agent_instructions import router as agent_instructions_router
 from agent.dashboard.auth_routes import router as auth_router
@@ -17,6 +18,7 @@ from agent.dashboard.user_preferences import router as user_preferences_router
 from agent.dashboard.workspace_settings import router as workspace_settings_router
 from agent.github.dashboard_routes import router as repos_router
 from agent.github.pull_request_dashboard_routes import router as pull_requests_router
+from agent.human_review.routes import router as human_review_router
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
 from agent.mcp.routes import router as mcp_router
@@ -51,11 +53,13 @@ router.include_router(mcp_router)
 router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)
+router.include_router(human_review_router)
 router.include_router(review_router)
 router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
 router.include_router(analytics_router)
+router.include_router(audit_logs_router)
 router.include_router(schedules_router)
 router.include_router(threads_router)
 router.include_router(transcript_router)

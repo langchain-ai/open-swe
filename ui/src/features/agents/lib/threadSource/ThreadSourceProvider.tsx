@@ -1,5 +1,7 @@
 import { createContext, useContext } from "react"
 
+import { useStreamPreference } from "@/lib/streamPreference"
+
 import { useAgentStreamSource } from "./useAgentStreamSource"
 import { useTranscriptSource } from "./useTranscriptSource"
 import type { ReactNode } from "react"
@@ -13,10 +15,15 @@ const ThreadSourceContext = createContext<ThreadSource | null>(null)
  * backends differ in exactly one place: which provider the page mounts.
  */
 export function useThreadSource(): ThreadSource {
-  const source = useContext(ThreadSourceContext)
+  const source = useOptionalThreadSource()
   if (!source)
     throw new Error("useThreadSource requires a ThreadSourceProvider")
   return source
+}
+
+/** For UI shared with pages that mount no provider, such as local threads. */
+export function useOptionalThreadSource(): ThreadSource | null {
+  return useContext(ThreadSourceContext)
 }
 
 function StreamSource({
@@ -65,7 +72,8 @@ export function ThreadSourceProvider({
   transcript: boolean
   children: ReactNode
 }) {
-  return transcript ? (
+  const preferStream = useStreamPreference()
+  return transcript && !preferStream ? (
     <TranscriptSource threadId={threadId}>{children}</TranscriptSource>
   ) : (
     <StreamSource threadId={threadId}>{children}</StreamSource>

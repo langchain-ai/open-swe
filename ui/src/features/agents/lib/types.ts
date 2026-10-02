@@ -60,6 +60,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
+  | "service-connection"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -241,6 +242,8 @@ export interface AgentSchedule {
   schedule: string | null
   trigger: AutomationTrigger
   scope: "workspace"
+  /** Slug of the workspace every run launches in. */
+  workspace: string
   repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
@@ -364,6 +367,9 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
+/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
+export type ThreadFixScope = "conflicts" | "checks" | "comments"
+
 export interface AgentPullRequestContextResponse {
   context: {
     repoFullName: string
@@ -426,6 +432,7 @@ export interface AgentSubagentSummary {
 }
 
 export interface AgentThread {
+  ownerLogin?: string | null
   visibility?: "public" | "private"
   id: string
   /** Set on a PR review listed in the sidebar: its row opens this review page. */

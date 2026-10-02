@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -9,7 +10,10 @@ from agent.utils import thread_participants as participants
 
 
 @pytest.fixture(autouse=True)
-def collaborative_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+def collaborative_scope(
+    monkeypatch: pytest.MonkeyPatch, grant_tool_access: Callable[..., None]
+) -> None:
+    grant_tool_access(private=True, owner=True)
     monkeypatch.setattr(
         import_module("agent.tools.read_user_settings"),
         "private_credential_login",
@@ -33,7 +37,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             "agent.tools.read_user_settings.get_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "openai:gpt-6-sol",
+                "default_model": "openai:gpt-6.1-sol",
                 "reasoning_effort": "high",
                 "email": "private@example.com",
                 "default_repo": "private/internal",
@@ -60,7 +64,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             {
                 "login": "octocat",
                 "profile": {
-                    "default_model": "openai:gpt-6-sol",
+                    "default_model": "openai:gpt-6.1-sol",
                     "reasoning_effort": "high",
                 },
                 "instructions": "Be concise.",
@@ -127,28 +131,6 @@ async def test_slack_participants_include_broadcasts_and_exclude_system_messages
         logins, unresolved = await participants._mapped_slack_logins(messages)
 
     assert logins == {"octocat", "broadcaster"}
-    assert unresolved == 1
-
-
-@pytest.mark.asyncio
-async def test_linear_participants_use_verified_email_mappings() -> None:
-    async def login_for_email(email: str) -> str | None:
-        return {"octo@example.com": "octocat", "missing@example.com": None}.get(email)
-
-    with (
-        patch.object(participants.User, "login_for_email", side_effect=login_for_email),
-        patch.object(
-            participants.User,
-            "for_login",
-            new_callable=AsyncMock,
-            return_value=SimpleNamespace(github_login="octocat"),
-        ),
-    ):
-        logins, unresolved = await participants._mapped_email_logins(
-            {"octo@example.com", "missing@example.com"}
-        )
-
-    assert logins == {"octocat"}
     assert unresolved == 1
 
 

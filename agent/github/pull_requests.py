@@ -287,7 +287,7 @@ class PullRequest(Base):
         head_sha: str = "",
         finding_count: int | None = None,
     ) -> Self:
-        """Record a published review against this PR; a same-identity row is updated."""
+        """Record review completion, optionally with a GitHub publication; deduplicate by identity."""
         self.reviews.append(
             ReviewLink(
                 reviewer_thread_id=reviewer_thread_id,
@@ -327,10 +327,6 @@ class PullRequest(Base):
             if all(link.thread_id != thread_id for link in self.threads):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
-
-    async def primary_thread(self, *, backfill: bool = True) -> str | None:
-        threads = await self.linked_threads(backfill=backfill)
-        return threads[0] if threads else None
 
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.
@@ -515,6 +511,7 @@ class PullRequest(Base):
 class PullRequestPayload(BaseModel):
     number: int | None = None
     title: str = ""
+    body: str | None = None
     state: str = ""
     draft: bool = False
     merged: bool = False

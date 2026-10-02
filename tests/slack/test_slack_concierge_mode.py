@@ -104,24 +104,6 @@ async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
     return cast(SlackRequest, background_tasks.tasks[0][1][0])
 
 
-async def test_untagged_dm_routes_to_the_one_concierge_thread() -> None:
-    request = await _queued_request(_dm_payload("Ev-dm"))
-
-    assert request.thread_ts == CONCIERGE_TS
-    assert request.concierge_mode is True
-    assert request.reply_thread_ts == ""
-    assert request.treat_all_messages_as_mentions is True
-
-
-async def test_every_dm_message_shares_one_agent_thread() -> None:
-    first = await _queued_request(_dm_payload("Ev-dm-1"))
-    second_payload = _dm_payload("Ev-dm-2")
-    second_payload["event"]["ts"] = "1786573999.000100"
-    second = await _queued_request(second_payload)
-
-    assert first.thread_ts == second.thread_ts == CONCIERGE_TS
-
-
 async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> None:
     request = await _queued_request(
         _dm_payload("Ev-dm-thread", thread_ts="1786573300.000000"),
@@ -146,18 +128,24 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
     assert request.treat_all_messages_as_mentions is True
 
 
-async def test_channel_message_still_uses_its_own_slack_thread(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concierge_on", [True, False])
+async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
+    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
 ) -> None:
-    async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
-        return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False, is_im=False)
+    from agent.slack import dm
 
-    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
-    payload = _dm_payload("Ev-channel", channel_type="channel")
-    payload["event"]["channel"] = "C1"
-    payload["event"]["text"] = "<@BOT> fix the flaky test"
+    monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
+    lookup = AsyncMock(return_value="concierge-thread")
+    monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(dm, "langgraph_client", lambda: object())
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
 
-    request = await _queued_request(payload)
+    await dm.note_for_concierge("U1", "D1", "a note")
 
-    assert request.thread_ts == "1786573369.551099"
-    assert request.concierge_mode is False
+    if concierge_on:
+        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
+    else:
+        queue.assert_not_awaited()

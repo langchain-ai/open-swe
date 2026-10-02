@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import {
   IoArrowBackOutline,
+  IoBarChartOutline,
   IoCloudOutline,
   IoCubeOutline,
   IoFlaskOutline,
@@ -9,8 +10,9 @@ import {
   IoSettingsOutline,
   IoStatsChartOutline,
 } from "react-icons/io5"
-import type { ComponentType, SVGProps } from "react"
+import { Fragment, type ComponentType, type SVGProps } from "react"
 
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import {
@@ -19,7 +21,6 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
-import { useFeatureFlagsPanel } from "@/lib/featureFlags"
 import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>
@@ -29,7 +30,6 @@ interface NavItem {
   label: string
   icon: IconType
   adminOnly?: boolean
-  featureFlagsOnly?: boolean
 }
 
 const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
@@ -43,7 +43,6 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         to: "/feature-flags",
         label: "Feature Flags",
         icon: IoFlaskOutline,
-        featureFlagsOnly: true,
       },
     ],
   },
@@ -62,6 +61,12 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         icon: IoSettingsOutline,
         adminOnly: true,
       },
+      {
+        to: "/admin/evals",
+        label: "Evals",
+        icon: IoBarChartOutline,
+        adminOnly: true,
+      },
     ],
   },
 ]
@@ -69,10 +74,35 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
 const LINK_CLASS =
   "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 
+const ACTIVE_LINK_PROPS = {
+  className: "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+}
+
+function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
+  const options = useWorkspaceOptions()
+  const workspaces = options.data?.workspaces ?? []
+  if (workspaces.length === 0) return null
+  return (
+    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-border pl-2">
+      {workspaces.map((workspace) => (
+        <Link
+          key={workspace.slug}
+          to="/workspaces/$slug"
+          params={{ slug: workspace.slug }}
+          onClick={onNavigate}
+          className={cn(LINK_CLASS, "py-1")}
+          activeProps={ACTIVE_LINK_PROPS}
+        >
+          <span className="truncate">{workspace.name}</span>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
-  const showFeatureFlags = useFeatureFlagsPanel()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -100,11 +130,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
 
       <nav className="flex flex-1 flex-col gap-5 px-2">
         {NAV.map((group) => {
-          const items = group.items.filter(
-            (i) =>
-              (!i.adminOnly || user.is_admin) &&
-              (!i.featureFlagsOnly || showFeatureFlags)
-          )
+          const items = group.items.filter((i) => !i.adminOnly || user.is_admin)
           if (items.length === 0) return null
           return (
             <div key={group.heading} className="flex flex-col gap-0.5">
@@ -113,20 +139,26 @@ export function AppSidebar({ user }: { user: SessionUser }) {
               </span>
               {items.map((item) => {
                 const Icon = item.icon
+                const withWorkspaces =
+                  item.to === "/workspaces" && user.is_admin
                 return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={layout.closeOnMobile}
-                    className={LINK_CLASS}
-                    activeProps={{
-                      className:
-                        "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-                    }}
-                  >
-                    <Icon className="size-4" />
-                    <span>{item.label}</span>
-                  </Link>
+                  <Fragment key={item.to}>
+                    <Link
+                      to={item.to}
+                      onClick={layout.closeOnMobile}
+                      className={LINK_CLASS}
+                      activeOptions={{
+                        exact: withWorkspaces || item.to === "/admin",
+                      }}
+                      activeProps={ACTIVE_LINK_PROPS}
+                    >
+                      <Icon className="size-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                    {withWorkspaces && (
+                      <WorkspaceNavItems onNavigate={layout.closeOnMobile} />
+                    )}
+                  </Fragment>
                 )
               })}
             </div>

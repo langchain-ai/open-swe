@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.11",
+  "version": "0.2.13",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -88,7 +88,8 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
-      "entitlementsInherit": "entitlements.mac.plist",
+      "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
+      "entitlementsInherit": "entitlements.mac.inherit.plist",
       "target": [
         "dmg",
         "zip"
@@ -114,10 +115,10 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@electron/notarize": "3.1.1",
-    "@types/node": "26.3.0",
-    "electron": "43.4.1",
+    "@types/node": "26.6.3",
+    "electron": "44.4.5",
     "electron-builder": "26.15.3",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "dependencies": {
     "electron-updater": "6.8.9",

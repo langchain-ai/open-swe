@@ -45,22 +45,36 @@ export function ThreadFeedbackCard({
   const [showComment, setShowComment] = useState(false)
   const [comment, setComment] = useState("")
   const [showConfirmation, setShowConfirmation] = useState(false)
+  const [optimisticDismissed, setOptimisticDismissed] = useState(false)
   const mutation = useMutation({
     mutationFn: (value: ThreadFeedbackSubmission) =>
       agentsApi.submitThreadFeedback(threadId, value),
     meta: { errorTitle: "Couldn't save feedback" },
     onMutate: (value) => {
-      if (!("rating" in value)) return
-      setShowComment(value.rating === "bad")
-      setShowConfirmation(value.rating !== "bad")
+      if (value.action === "dismiss") {
+        setOptimisticDismissed(true)
+      } else if ("rating" in value) {
+        setShowComment(value.rating === "bad")
+        setShowConfirmation(value.rating !== "bad")
+      } else {
+        setShowComment(false)
+        setShowConfirmation(true)
+      }
     },
     onError: (_error, value) => {
-      if (!("rating" in value)) return
-      setShowComment(false)
-      setShowConfirmation(false)
+      if (value.action === "dismiss") {
+        setOptimisticDismissed(false)
+      } else if ("rating" in value) {
+        setShowComment(false)
+        setShowConfirmation(false)
+      } else {
+        setShowComment(true)
+        setShowConfirmation(false)
+      }
     },
     onSuccess: (data, value) => {
       queryClient.setQueryData(["thread-feedback", threadId, login], data)
+      if (value.action === "dismiss") return
       const shouldShowComment =
         "rating" in value &&
         value.rating === "bad" &&
@@ -95,6 +109,7 @@ export function ThreadFeedbackCard({
 
   if (
     !login ||
+    optimisticDismissed ||
     (feedback?.status !== "ready" && feedback?.status !== "completed")
   ) {
     return null

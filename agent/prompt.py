@@ -39,12 +39,16 @@ def _load_default_prompt() -> str:
 
 
 def _render_source_guidance(
-    source: str, slack_context: bool, slack_ask: bool = False, slack_breakout: bool = False
+    source: str,
+    slack_context: bool,
+    slack_ask: bool = False,
+    slack_breakout: bool = False,
+    slack_by_the_way: bool = False,
 ) -> str:
     if source == "background_task":
         name = "background-task"
     elif source == "slack" and slack_context:
-        name = "slack-ask" if slack_ask else "slack"
+        name = "slack-by-the-way" if slack_by_the_way else "slack-ask" if slack_ask else "slack"
     elif source in {"linear", "github", "schedule", "dashboard"}:
         name = source
     else:
@@ -75,14 +79,17 @@ def _render_repo_instructions_section(instructions: str | None) -> str:
     return prompt("system/repo-instructions", instructions=instructions.strip())
 
 
-def _render_workspace_section(name: str | None, instructions: str | None) -> str:
-    if not instructions or not instructions.strip():
+def _render_workspace_section(
+    name: str | None, instructions: str | None, repos: list[str] | None
+) -> str:
+    if not (instructions and instructions.strip()) and not repos:
         return ""
     label = f" ({name.strip()})" if name and name.strip() else ""
     return prompt(
         "system/workspace-instructions",
         label=label,
-        instructions=instructions.strip(),
+        instructions=(instructions or "").strip(),
+        repos=repos or [],
     )
 
 
@@ -113,14 +120,17 @@ def construct_system_prompt(
     workspace_name: str | None = None,
     workspace_instructions: str | None = None,
     admin_workspaces: bool = False,
+    sole_writer: bool = False,
     source: str = "dashboard",
     slack_context: bool = False,
     slack_ask: bool = False,
     slack_breakout: bool = False,
+    slack_by_the_way: bool = False,
     sandbox_file_downloads: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     recent_thread_context: str | None = None,
+    workspace_repos: list[str] | None = None,
 ) -> str:
     """Render the agent's system prompt.
 
@@ -135,6 +145,7 @@ def construct_system_prompt(
         local_checkout=local_checkout,
         desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
+        sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
         default_repo=(
@@ -154,7 +165,7 @@ def construct_system_prompt(
         source_guidance_section=prompt(
             "system/source-context",
             source_guidance=_render_source_guidance(
-                source, slack_context, slack_ask, slack_breakout
+                source, slack_context, slack_ask, slack_breakout, slack_by_the_way
             ),
         ),
         default_prompt_section=_load_default_prompt(),
@@ -165,5 +176,7 @@ def construct_system_prompt(
         external_untrusted_comments_section=EXTERNAL_UNTRUSTED_COMMENTS_SECTION,
         repo_instructions_section=_render_repo_instructions_section(repo_custom_instructions),
         recent_thread_context_section=recent_thread_context or "",
-        workspace_section=_render_workspace_section(workspace_name, workspace_instructions),
+        workspace_section=_render_workspace_section(
+            workspace_name, workspace_instructions, workspace_repos
+        ),
     )

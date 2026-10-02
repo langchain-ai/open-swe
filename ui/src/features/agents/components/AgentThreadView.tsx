@@ -20,6 +20,7 @@ import type {
   AgentThread,
   ImageChunk,
   Message,
+  ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
@@ -42,6 +43,7 @@ import type {
 } from "@/features/agents/components/messages"
 import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
+import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
   agentThreadKeys,
   useAgentSkills,
@@ -134,6 +136,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort])
   const [selection, setSelection] = useState<ModelSelection | null>(null)
   const [autoSelected, setAutoSelected] = useState(false)
+  const [autoIntent] = useState(createAutoSelectionIntent)
   const activeSelection = autoSelected
     ? null
     : (selection ??
@@ -143,6 +146,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const handleSelectionChange = (next: ModelSelection | null) => {
     setAutoSelected(next === null)
     setSelection(next)
+    autoIntent.select(next === null)
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
@@ -176,22 +180,34 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
-      await sendMessage.mutateAsync({
-        content,
-        images,
-        model_id: activeSelection?.modelId ?? null,
-        effort: activeSelection?.effort ?? null,
-        enqueue: isStreaming && queue,
-      })
+      const messageId = crypto.randomUUID()
+      const carriesAutoSelection = autoIntent.claim(
+        messageId,
+        content.trim() !== "/offload" && (!isStreaming || queue)
+      )
+      const restoreAutoSelection = () => autoIntent.restore(messageId)
+      try {
+        await sendMessage.mutateAsync({
+          content,
+          images,
+          client_message_id: messageId,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+          model_selection_changed: carriesAutoSelection,
+          enqueue: isStreaming && queue,
+          ...(carriesAutoSelection
+            ? { onStartError: restoreAutoSelection }
+            : {}),
+        })
+      } catch (error) {
+        restoreAutoSelection()
+        throw error
+      }
     },
-    [
-      activeSelection?.effort,
-      activeSelection?.modelId,
-      followUpBehavior,
-      isStreaming,
-      sendMessage,
-    ]
+    [activeSelection, autoIntent, followUpBehavior, isStreaming, sendMessage]
   )
+
+  const restoreQueuedAutoSelection = autoIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
     entry.message.chunks
@@ -203,6 +219,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
 
   const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [droppedFiles, setDroppedFiles] = useState<{
+    key: number
+    files: Array<File>
+  } | null>(null)
   const restoreQueuedToComposer = useCallback(
     (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
       if (texts.length === 0 && images.length === 0) return
@@ -236,12 +256,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     async (entry: QueuedTurn) => {
       if (entry.runId === null) return
       if (source.kind === "stream") {
-        await source.cancelQueued(entry.turnId)
-        return
+        if (!(await source.cancelQueued(entry.turnId))) {
+          throw new Error("The queued message could not be cancelled.")
+        }
+      } else {
+        await agentsApi.cancelRun(thread.id, entry.runId)
       }
-      await agentsApi.cancelRun(thread.id, entry.runId)
+      restoreQueuedAutoSelection(entry.message.id)
     },
-    [source, thread.id]
+    [restoreQueuedAutoSelection, source, thread.id]
   )
   const steerInFlightRef = useRef(false)
   // Send now: the follow-up leaves the queue and goes into the live run.
@@ -309,6 +332,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ...unacknowledged.flatMap((message) => message.images ?? []),
     ])
     if (!(await source.stop())) return
+    for (const entry of pending) restoreQueuedAutoSelection(entry.message.id)
+    for (const message of unacknowledged) restoreQueuedAutoSelection(message.id)
     if (source.kind === "stream" && pending.length > 0) {
       // Same reasoning as withdrawQueued: syncs the adapter's queue store.
       await Promise.allSettled(
@@ -347,17 +372,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     isOwnQueued,
     queryClient,
     queued,
+    restoreQueuedAutoSelection,
     restoreQueuedToComposer,
     source,
     thread.id,
     thread.pendingMessages,
   ])
   const fixPullRequest = useCallback(
-    async (pullRequest: AgentPullRequest) => {
+    async (pullRequest: AgentPullRequest, scope: ThreadFixScope) => {
       const result = await agentsApi.getThreadPullRequestContext(
         thread.id,
         pullRequest.repoFullName,
-        pullRequest.number
+        pullRequest.number,
+        scope
       )
       await submitMessage(result.prompt, [])
     },
@@ -567,7 +594,33 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             </Alert>
           </div>
         )}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+          onDragOver={(event) => {
+            if (canPost && event.dataTransfer.types.includes("Files"))
+              event.preventDefault()
+          }}
+          onDrop={(event) => {
+            if (
+              !canPost ||
+              !event.dataTransfer.types.includes("Files") ||
+              (event.target instanceof Element &&
+                event.target.closest("[data-chat-composer]"))
+            )
+              return
+            event.preventDefault()
+            const files = Array.from(event.dataTransfer.files).filter((file) =>
+              ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+                file.type
+              )
+            )
+            if (files.length)
+              setDroppedFiles((previous) => ({
+                key: (previous?.key ?? 0) + 1,
+                files,
+              }))
+          }}
+        >
           {hydrationFailed || hydrationTimedOut ? (
             <LoadError
               title="Unable to load messages"
@@ -601,7 +654,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <Messages
                   messages={visibleMessages}
                   threadId={thread.id}
-                  showUserNames={thread.visibility !== "private"}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
@@ -684,6 +736,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
+                droppedFiles={droppedFiles}
                 models={models}
                 routed={routed}
                 selection={activeSelection}

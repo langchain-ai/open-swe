@@ -3,6 +3,7 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   CircleNotchIcon,
+  ChatCircleIcon,
   DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -18,11 +19,12 @@ import {
   StackIcon,
 } from "@phosphor-icons/react"
 import { Radar } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
-import type { SessionUser } from "@/lib/api"
+import { api, type SessionUser } from "@/lib/api"
+import { useProfile } from "@/lib/profile"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -203,6 +205,13 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const chat = useChatRoutes()
+  const profile = useProfile()
+  const concierge = useQuery({
+    queryKey: ["concierge", user?.login],
+    queryFn: api.concierge,
+    enabled: !localOnly && !!user && !!profile.data?.concierge_mode,
+    refetchInterval: 30_000,
+  })
   const {
     viewport: scrollViewport,
     edges: scrollEdges,
@@ -415,8 +424,12 @@ export function AgentsSidebar({
   const localGroups = repoMode
     ? groupSidebarThreadsByRepo(
         filterThreads(unpinnedLocalItems, prefs.filters),
-        sidebarRepoOptions(unpinnedLocalItems, localRepos),
-        prefs.sortChats
+        sidebarRepoOptions(unpinnedLocalItems, localRepos).map((repo) => ({
+          ...repo,
+          key: aliases.get(repo.label.trim().toLowerCase()) ?? repo.key,
+        })),
+        prefs.sortChats,
+        true
       ).repos
     : []
   const repoGroups: Array<HydratedRepoGroup> = repoMode
@@ -444,9 +457,9 @@ export function AgentsSidebar({
           .map((group) => ({
             ...group,
             repoFullName: null,
-            localRepoPath: group.threads.find(
-              (thread) => thread.location === "local"
-            )?.thread.cwd,
+            localRepoPath: localRepos.find(
+              (repo) => sidebarRepoKey(repo.cwd) === group.key
+            )?.cwd,
             updatedAt: group.threads[0]?.updatedAt ?? 0,
           })),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
@@ -458,8 +471,8 @@ export function AgentsSidebar({
   const unpinnedGroups = repoGroups.filter(
     (group) => !pinnedRepoKeys.has(group.key)
   )
-  // Every repository sits in exactly one workspace, so the unpinned repo
-  // folders nest cleanly under workspace headers; local-only folders (no
+  // Each repository folder sits under the workspace that prefers it, even
+  // though threads from other workspaces may use it; local-only folders (no
   // server-side repo) fall under the default workspace.
   const repoWorkspaceOptions = keyedCloudRepos.map(({ repo, key }) => ({
     key,
@@ -740,6 +753,33 @@ export function AgentsSidebar({
           <NotePencilIcon className="size-4" />
           New Thread
         </Link>
+        {!localOnly && profile.data?.concierge_mode && (
+          <a
+            href={
+              concierge.data?.thread_id
+                ? `${chat.home}/${concierge.data.thread_id}`
+                : concierge.data?.channel_id
+                  ? `slack://channel?id=${concierge.data.channel_id}`
+                  : undefined
+            }
+            onClick={layout.closeOnMobile}
+            aria-current={
+              !!concierge.data?.thread_id &&
+              activeThreadId === concierge.data.thread_id
+                ? "page"
+                : undefined
+            }
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover",
+              !!concierge.data?.thread_id &&
+                activeThreadId === concierge.data.thread_id &&
+                "bg-sidebar-row-active"
+            )}
+          >
+            <ChatCircleIcon className="size-4" />
+            Concierge
+          </a>
+        )}
       </div>
 
       <TooltipProvider delay={500} closeDelay={100}>

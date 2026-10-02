@@ -18,6 +18,7 @@ vi.mock("@/lib/theme", () => ({
 
 afterEach(() => {
   cleanup()
+  delete window.openSweDesktop
   vi.restoreAllMocks()
 })
 
@@ -39,6 +40,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
         repos: [],
         default_repo: null,
         slack_channel_ids: [],
+        kitchen_channel_ids: [],
         is_default: true,
         has_snapshot: true,
       },
@@ -53,11 +55,12 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  render(
+  const { rerender } = render(
     <QueryClientProvider client={client}>
       <PreferencesSection />
     </QueryClientProvider>
   )
+  expect(screen.queryByText("Local tracing project")).toBeNull()
   const workspace = screen.getAllByRole("combobox")[2]!
 
   await waitFor(() => expect(workspace.hasAttribute("disabled")).toBe(false))
@@ -109,4 +112,15 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   await waitFor(() =>
     expect(workspace.textContent).toContain("Workspace default")
   )
+
+  Object.defineProperty(window, "openSweDesktop", {
+    configurable: true,
+    value: {},
+  })
+  rerender(
+    <QueryClientProvider client={client}>
+      <PreferencesSection />
+    </QueryClientProvider>
+  )
+  expect(screen.getByText("Local tracing project")).toBeTruthy()
 })

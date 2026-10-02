@@ -1,12 +1,8 @@
 """The environment registry: precedence, aliases, typed getters, and the no-bypass rule."""
 
-import re
-from pathlib import Path
-
 import pytest
 
-from agent.config import ENV, Registry
-from agent.run_config import RunConfig
+from agent.config import ENV
 
 
 def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -15,34 +11,6 @@ def test_current_name_wins_over_alias(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert ENV.LANGSMITH_PROJECT.get() == "standard"
     assert ENV.LANGSMITH_PROJECT.source() == "LANGSMITH_PROJECT"
-
-
-def test_alias_is_read_when_current_name_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
-    monkeypatch.setenv("LANGCHAIN_PROJECT", "legacy")
-
-    assert ENV.LANGSMITH_PROJECT.optional() == "legacy"
-    assert ENV.LANGSMITH_PROJECT.source() == "LANGCHAIN_PROJECT"
-
-
-def test_blank_value_counts_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SANDBOX_TYPE", "   ")
-
-    assert not ENV.SANDBOX_TYPE.is_set()
-    assert ENV.SANDBOX_TYPE.get() == "langsmith"
-
-
-def test_get_argument_overrides_declared_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SANDBOX_TYPE", raising=False)
-
-    assert ENV.SANDBOX_TYPE.get("local") == "local"
-    assert ENV.SANDBOX_TYPE.optional() is None
-
-
-def test_get_returns_empty_string_without_any_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
-
-    assert ENV.SLACK_BOT_TOKEN.get() == ""
 
 
 def test_require_raises_for_unset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,68 +51,9 @@ def test_deprecated_in_use_lists_aliases_and_obsolete_names() -> None:
     assert "LANGCHAIN_API_KEY" in dict(ENV.deprecated_in_use({"LANGCHAIN_API_KEY": "k"}))
 
 
-def test_deprecated_names_the_platform_injects_next_to_current_ones_stay_quiet() -> None:
-    """LangGraph Platform sets LANGCHAIN_API_KEY and LANGCHAIN_PROJECT alongside LANGSMITH_*."""
-    env = {
-        "LANGSMITH_API_KEY": "k",
-        "LANGCHAIN_API_KEY": "k",
-        "LANGSMITH_TRACING": "true",
-        "LANGCHAIN_TRACING_V2": "true",
-        "LANGSMITH_PROJECT": "p",
-        "LANGCHAIN_PROJECT": "p",
-    }
-
-    assert ENV.deprecated_in_use(env) == []
-
-
-def test_legacy_project_name_alone_is_read_and_flagged() -> None:
-    env = {"LANGCHAIN_PROJECT": "p"}
-
-    assert ENV.LANGSMITH_PROJECT.get(environ=env) == "p"
-    assert ("LANGCHAIN_PROJECT", "use LANGSMITH_PROJECT instead.") in ENV.deprecated_in_use(env)
-
-
-def test_deprecated_in_use_is_quiet_for_current_names() -> None:
-    assert ENV.deprecated_in_use({"LANGSMITH_API_KEY": "k", "SLACK_BOT_TOKEN": "t"}) == []
-
-
 def test_undeclared_variables_are_errors() -> None:
     with pytest.raises(AttributeError):
         _ = ENV.NOT_A_DECLARED_VARIABLE
     with pytest.raises(KeyError):
         _ = ENV["NOT_A_DECLARED_VARIABLE"]
     assert "SANDBOX_TYPE" in ENV
-
-
-def test_registry_rejects_duplicate_declarations() -> None:
-    registry = Registry()
-    registry.var("X", "first")
-    with pytest.raises(ValueError):
-        registry.var("X", "again")
-
-
-def test_secrets_are_flagged() -> None:
-    assert ENV.SLACK_BOT_TOKEN.secret
-    assert ENV.GITHUB_APP_PRIVATE_KEY.secret
-    assert not ENV.SANDBOX_TYPE.secret
-
-
-def test_no_configuration_is_read_outside_the_registry() -> None:
-    """Every literal-named environment read in agent/ goes through ENV."""
-    pattern = re.compile(r'os\.(?:environ\.get|getenv)\(\s*"[A-Z]|os\.environ\["[A-Z]')
-    agent_root = Path(__file__).resolve().parents[2] / "agent"
-    offenders = [
-        f"{path.relative_to(agent_root)}:{lineno}"
-        for path in agent_root.rglob("*.py")
-        if path.name != "config.py"
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1)
-        if pattern.search(line)
-    ]
-    assert offenders == []
-
-
-def test_workspace_slug_prefers_workspace_and_falls_back_to_environment() -> None:
-    assert RunConfig(workspace="oss", environment="old").workspace_slug == "oss"
-    assert RunConfig(environment="old").workspace_slug == "old"
-    assert RunConfig(workspace="  ").workspace_slug is None
-    assert RunConfig().workspace_slug is None

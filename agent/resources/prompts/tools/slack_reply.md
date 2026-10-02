@@ -18,11 +18,19 @@ essential. End the run by posting a concise final outcome here.
 
 Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~,
 [link text](url), and Markdown lists. Replies use Slack's native Markdown blocks.
-Use fenced code blocks with a language identifier such as ```python or ```sql
-for syntax highlighting, preserving the code's original whitespace.
-Messages over 12,000 characters fall back to Slack's legacy mrkdwn and may lose
-less-common Markdown formatting. A message with `options` must stay within 12,000
-characters so its buttons are not hidden; shorten it or share the body as an artifact.
+
+Show source code, diffs, commands, logs, and config in fenced code blocks
+rather than inline, and always give the fence a language identifier so Slack
+highlights it: ```python, ```typescript, ```sql, ```bash, ```json, ```yaml,
+or ```diff for a change (`+` lines render green, `-` lines red). Paste the
+code verbatim with its original whitespace, and keep each fence at the top
+level of the message rather than inside a list or quote, so it stays
+highlighted even in a long message.
+
+Past 12,000 characters, prose falls back to Slack's legacy mrkdwn and may lose
+less-common Markdown formatting; top-level code blocks stay highlighted. A
+message with `options` must stay within 12,000 characters so its buttons are
+not hidden; shorten it or share the body as an artifact.
 If supplying explicit `blocks`, use the formatting required by each block type.
 
 To ask a user to choose from predefined options, pass `options`. Slack will

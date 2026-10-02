@@ -1041,6 +1041,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  model_selection_changed?: boolean
   client_message_id?: string
   /** Queue behind the live run instead of steering it. */
   enqueue?: boolean
@@ -1087,6 +1088,20 @@ export function useDeleteAgentThread() {
       if (path === `${chat.home}/${threadId}`) {
         navigate({ to: chat.home })
       }
+    },
+  })
+}
+
+export function useShareThreadWithWorkspace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.shareThreadWithWorkspace(threadId),
+    meta: { errorTitle: "Couldn't share thread with workspace" },
+    onSuccess: (thread) => {
+      storeAgentThread(queryClient, thread)
+      invalidateAgentThreadLists(queryClient)
     },
   })
 }

@@ -286,12 +286,27 @@ class User(Base):
             return frozenset(rows.all())
 
     @classmethod
-    async def page(cls, *, offset: int, limit: int) -> tuple[list[Self], int]:
-        """One page of people, oldest first, with the total count."""
+    async def page(cls, *, offset: int, limit: int, search: str = "") -> tuple[list[Self], int]:
+        """One page of matching people, oldest first, with the total count."""
+        query = select(cls)
+        if search := search.strip():
+            query = query.where(
+                or_(
+                    cls.display_name.icontains(search, autoescape=True),
+                    cls.identities.any(
+                        or_(
+                            UserIdentity.login.icontains(search, autoescape=True),
+                            UserIdentity.email.icontains(search, autoescape=True),
+                            (UserIdentity.provider == "slack")
+                            & UserIdentity.external_id.icontains(search, autoescape=True),
+                        )
+                    ),
+                )
+            )
         async with postgres.session() as session:
-            total = await session.scalar(select(func.count()).select_from(cls)) or 0
+            total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
             rows = await session.scalars(
-                cls._with_identities(select(cls))
+                cls._with_identities(query)
                 .order_by(cls.created_at, cls.id)
                 .offset(offset)
                 .limit(limit)
@@ -502,7 +517,7 @@ class User(Base):
         )
 
     @classmethod
-    def _with_identities(cls, statement: Select[tuple[Self]]) -> Select[tuple[Self]]:
+    def _with_identities(cls, statement: Select[Self]) -> Select[Self]:
         return statement.options(selectinload(cls.identities))
 
 

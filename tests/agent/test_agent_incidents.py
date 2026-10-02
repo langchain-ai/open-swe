@@ -189,8 +189,6 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
     )
-    kwargs = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(config))
-    kwargs.pop("make_model_calls")
     context = turns.context_block("C1", {"ts": "1.0", "user": "U1", "text": "Errors reported"})
     performed = AsyncMock(return_value={"url": "https://github.com/acme/api/pull/42"})
 
@@ -226,6 +224,12 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
                 reply = report_call("slack:1.0", "Errors reported")
             return ChatResult(generations=[ChatGeneration(message=reply)])
 
+    model = TurnModel(responses=[])
+    kwargs = cast(
+        dict[str, Any],
+        await _capture_create_deep_agent_kwargs(config, make_model=lambda *_args, **_kwargs: model),
+    )
+    kwargs.pop("make_model_calls")
     if requested_action:
 
         async def open_pull_request() -> dict:
@@ -238,8 +242,6 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
             if getattr(tool, "__name__", getattr(tool, "name", "")) != "open_pull_request"
         ]
         kwargs["tools"].append(StructuredTool.from_function(coroutine=open_pull_request))
-    model = TurnModel(responses=[])
-    kwargs["model"] = model
     for subagent in kwargs["subagents"]:
         subagent["model"] = ScriptedModel(responses=[])
     kwargs["checkpointer"] = InMemorySaver()

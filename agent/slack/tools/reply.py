@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
@@ -7,33 +8,46 @@ from typing import Annotated, Any, Literal
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import ConflictError
 
 from agent.run_config import RunConfig
-from agent.slack.blocks import SECTION_TEXT_MAX_CHARS, block_payload, section
+from agent.slack.blocks import (
+    MARKDOWN_TEXT_MAX_CHARS,
+    MESSAGE_MAX_BLOCKS,
+    SECTION_TEXT_MAX_CHARS,
+    block_payload,
+    section,
+)
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
     slack_thread_detached,
 )
 from agent.slack.run_feedback import feedback_block
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.threads.creation import create_lock_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
-_NATIVE_MARKDOWN_MAX_CHARS = 12000
+_NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+_BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
+# The posting helpers append a dashboard-link context block.
+_WEB_LINK_BLOCKS = 1
 
 
 def _usage_with_effort(
@@ -64,6 +78,10 @@ async def slack_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True and cfg.slack_by_the_way_thread_ts:
+        return await _by_the_way_reply(
+            cfg, cfg.slack_by_the_way_thread_ts, message, response_type, blocks, options
+        )
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
@@ -104,13 +122,15 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
-        slack_blocks = blocks if blocks is not None else _build_option_blocks(message, options)
-        if blocks is None and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
-            if options:
-                return _oversized_options_error(message)
-            message = markdown_to_mrkdwn(message)
-            slack_blocks = None
-        if response_type == "final" and run_id and _triggering_user_id(cfg):
+        if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            return _oversized_options_error(message)
+        feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
+        slack_blocks = blocks
+        if blocks is None:
+            slack_blocks = _reply_blocks(message, options, reserve=_WEB_LINK_BLOCKS + feedback)
+            if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+                message = markdown_to_mrkdwn(message)
+        if feedback and run_id:
             if slack_blocks is None:
                 slack_blocks = block_payload(
                     [
@@ -134,6 +154,21 @@ async def slack_reply(
             run_id=run_id,
             triggering_user_id=_triggering_user_id(cfg),
         )
+        if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
+            try:
+                await _handle_kickoff(
+                    client,
+                    str(channel_id),
+                    str(thread_ts),
+                    message_ts,
+                    response_type=response_type,
+                    eligible=cfg.slack_kickoff_eligible is True and not cfg.slack_breakout,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not update Slack investigation kickoff state",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
+                )
     if message_ts is None:
         if slack_error == "thread_not_found":
             moved = bool(thread_id) and await move_thread_to_dashboard(
@@ -151,6 +186,115 @@ async def slack_reply(
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _handle_kickoff(
+    client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    update_ts: str,
+    *,
+    response_type: Literal["progress", "final"],
+    eligible: bool,
+) -> None:
+    namespace = ("slack_kickoff", channel_id)
+    item = await client.store.get_item(namespace, thread_ts)
+    value = item.get("value") if isinstance(item, dict) else None
+    if isinstance(value, dict) and value.get("removed") is True:
+        return
+    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
+    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
+        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
+        return
+    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+        return
+    try:
+        async with SlackClient.bot() as slack:
+            await slack.chat_delete(channel=channel_id, ts=kickoff_ts)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Could not remove Slack investigation kickoff",
+            extra={
+                "slack_channel": channel_id,
+                "slack_thread_ts": thread_ts,
+                "slack_error": slack_error(exc),
+            },
+        )
+        return
+    await client.store.put_item(namespace, thread_ts, {"removed": True})
+
+
+async def _by_the_way_reply(
+    cfg: RunConfig,
+    thread_ts: str,
+    message: str,
+    response_type: Literal["progress", "final"],
+    blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
+) -> dict[str, Any]:
+    """Post the one public `/btw` answer, with no link back to the asker's private thread."""
+    if options or response_type != "final":
+        return {
+            "success": False,
+            "error": "only one final answer is posted for /btw",
+            "retry": True,
+            "hint": (
+                "Nothing was posted. Everyone in the Slack thread reads this reply and this run "
+                "ends with it, so send a single `final` reply without `options`."
+            ),
+        }
+    channel_id = cfg.slack_thread.channel_id if cfg.slack_thread else ""
+    if not channel_id:
+        return {"success": False, "error": "Missing the Slack channel to answer in"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    if blocks is None:
+        blocks = _reply_blocks(message, None, reserve=0)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            message = markdown_to_mrkdwn(message)
+    client = get_langgraph_client()
+    reservation = _by_the_way_answer_id(cfg.thread_id or "")
+    try:
+        await create_lock_thread(client, reservation, ttl_minutes=_BY_THE_WAY_ANSWER_TTL_MINUTES)
+    except ConflictError:
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
+    except Exception:
+        logger.exception(
+            "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
+        )
+        return {"success": False, "error": "could not reserve the answer", "retry": True}
+    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+        channel_id, thread_ts, message, blocks=blocks
+    )
+    if message_ts is None:
+        try:
+            await client.threads.delete(reservation)
+        except Exception:
+            logger.exception(
+                "Could not release the /btw answer reservation",
+                extra={"agent_thread_id": cfg.thread_id},
+            )
+        return {
+            "success": False,
+            "error": slack_error or "post failed",
+            "slack_error": slack_error,
+            "hint": _slack_reply_failure_hint(slack_error),
+        }
+    if cfg.slack_by_the_way_message_ts:
+        await remove_slack_reaction(
+            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
+        )
+    # Slack drops a thread's status on any bot post, including a conversation's already there.
+    await settle_slack_thread_status(channel_id, thread_ts)
+    return {"success": True}
+
+
+def _by_the_way_answer_id(thread_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-by-the-way-answer:{thread_id}"))
 
 
 async def _ephemeral_reply(
@@ -178,11 +322,9 @@ async def _ephemeral_reply(
         return {"success": False, "error": "Missing the Slack channel or user to answer"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
-    native_markdown = blocks is None and len(message) <= _NATIVE_MARKDOWN_MAX_CHARS
     if blocks is None:
-        if native_markdown:
-            blocks = _build_option_blocks(message, None)
-        else:
+        blocks = _reply_blocks(message, None, reserve=_WEB_LINK_BLOCKS)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
     usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
     response_url = cfg.slack_ask_response_url or ""
@@ -272,12 +414,22 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
     }
 
 
-def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[str, Any]]:
+def _reply_blocks(
+    message: str, options: list[str] | None, *, reserve: int
+) -> list[dict[str, Any]] | None:
+    """``message`` then option buttons; ``None`` when they cannot fit in one message."""
+    actions = _option_actions(options)
+    body = markdown_blocks(message)
+    if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
+        return None
+    return [*block_payload(body), *actions]
+
+
+def _option_actions(options: list[str] | None) -> list[dict[str, Any]]:
     clean_options = [option.strip() for option in options or [] if option.strip()]
-    blocks: list[dict[str, Any]] = [{"type": "markdown", "text": message}]
     if not clean_options:
-        return blocks
-    blocks.append(
+        return []
+    return [
         {
             "type": "actions",
             "elements": [
@@ -290,8 +442,7 @@ def _build_option_blocks(message: str, options: list[str] | None) -> list[dict[s
                 for index, option in enumerate(clean_options[:5])
             ],
         }
-    )
-    return blocks
+    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

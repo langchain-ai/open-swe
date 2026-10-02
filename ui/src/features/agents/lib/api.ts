@@ -1,5 +1,6 @@
 import type {
   AgentPullRequestContextResponse,
+  ThreadFixScope,
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
@@ -40,6 +41,8 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
+  /** Slug of the workspace every run launches in. */
+  workspace: string
 }
 
 export interface ScheduleUpdateRequest {
@@ -54,6 +57,7 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
+  workspace?: string | null
 }
 
 export interface ScheduleTriggerResult {
@@ -313,6 +317,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  shareThreadWithWorkspace: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
+      { method: "POST" }
+    ),
   continueThreadPrivately: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/continue-private`,
@@ -382,11 +391,13 @@ export const agentsApi = {
   getThreadPullRequestContext: (
     threadId: string,
     repoFullName: string,
-    number: number
+    number: number,
+    scope: ThreadFixScope
   ) => {
     const query = new URLSearchParams({
       repo_full_name: repoFullName,
       number: String(number),
+      scope,
     })
     return agentsRequest<AgentPullRequestContextResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-context?${query}`
@@ -454,40 +465,4 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-}
-
-export type ThreadGroup = "today" | "last7" | "last30" | "older"
-
-export function groupThreads(
-  threads: Array<AgentThread>,
-  timestampField: "createdAt" | "updatedAt" = "updatedAt"
-): Record<ThreadGroup, Array<AgentThread>> {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-
-  const groups: Record<ThreadGroup, Array<AgentThread>> = {
-    today: [],
-    last7: [],
-    last30: [],
-    older: [],
-  }
-
-  for (const thread of [...threads].sort(
-    (a, b) => b[timestampField] - a[timestampField]
-  )) {
-    const timestamp = thread[timestampField]
-    if (timestamp >= todayStart.getTime()) {
-      groups.today.push(thread)
-    } else if (timestamp >= sevenDaysAgo) {
-      groups.last7.push(thread)
-    } else if (timestamp >= thirtyDaysAgo) {
-      groups.last30.push(thread)
-    } else {
-      groups.older.push(thread)
-    }
-  }
-
-  return groups
 }

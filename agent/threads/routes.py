@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
+from agent.github.pull_request_context import PullRequestFixScope
 from agent.threads import terminal
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -41,7 +42,7 @@ from agent.threads.handlers import (
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
-    send_dashboard_message,
+    share_thread_with_workspace,
 )
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
@@ -62,10 +63,10 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
-    ThreadMessageBody,
     ThreadRenameBody,
     ThreadResolveBody,
 )
+from agent.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.timing import server_timing_header
 
@@ -96,6 +97,14 @@ async def api_list_threads(
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
+
+
+@router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+async def api_upload_session(
+    request: Request,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    return await upload_session(UploadStream(request), session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/resolve-all")
@@ -231,6 +240,7 @@ async def api_get_thread_pull_request_context(
     thread_id: str,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_pull_request_context(
@@ -238,6 +248,7 @@ async def api_get_thread_pull_request_context(
         session["sub"],
         repo_full_name=repo_full_name,
         number=number,
+        scope=scope,
         email=session.get("email"),
     )
 
@@ -339,15 +350,6 @@ async def api_get_thread_pr_diff(
     )
 
 
-@router.post("/threads/{thread_id}/messages")
-async def api_send_thread_message(
-    thread_id: str,
-    body: ThreadMessageBody,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
-
-
 @router.patch("/threads/{thread_id}")
 async def api_rename_thread(
     thread_id: str,
@@ -360,6 +362,14 @@ async def api_rename_thread(
         title=body.title,
         email=session.get("email"),
     )
+
+
+@router.post("/threads/{thread_id}/share-to-workspace")
+async def api_share_thread_with_workspace(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/continue-private")

@@ -1,7 +1,4 @@
-"""Admin gate for tools wired only into admin threads.
-
-Tools recheck user admin membership or a system invocation's saved authorization.
-"""
+"""Admin identity checks shared by tool access policies."""
 
 from agent.dashboard.admin import is_admin
 from agent.run_config import RunConfig
@@ -53,19 +50,8 @@ async def actor_has_admin_context(cfg: RunConfig, *, login: str | None = None) -
     return cfg.admin_thread is True and await actor_is_admin(cfg, login=login)
 
 
-async def actor_has_private_admin_surface(cfg: RunConfig, *, login: str | None = None) -> bool:
-    """Whether a private admin surface's current actor remains authorized."""
-    return is_private_admin_surface(cfg) and await actor_is_admin(cfg, login=login)
-
-
 async def require_admin(action: str) -> str | None:
     """Recheck either the triggering admin or the saved system authorization."""
     if await actor_is_admin(configurable()):
         return None
     return f"Only workspace admins can {action}."
-
-
-async def require_private_admin_surface(action: str) -> str | None:
-    if await actor_has_private_admin_surface(configurable()):
-        return None
-    return f"Only workspace admins on a private admin surface can {action}."

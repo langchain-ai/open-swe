@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { XIcon } from "@phosphor-icons/react"
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useRef, useState, type ReactNode } from "react"
 import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 
 import type {
   OpenPullRequest,
   PreviewCheck,
-  PreviewFile,
   PreviewThread,
   PullRequestPreview,
 } from "@/lib/api"
@@ -17,29 +16,22 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
+import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
+import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import { useScrollAnchor } from "@/features/reviews/lib/scrollAnchor"
+import {
+  useAgentBatch,
+  useAgentBatchStore,
+  useSubmitAgentBatch,
+} from "@/features/reviews/lib/agentBatch"
+import { pullRequestKey } from "@/features/reviews/lib/status"
 import {
   PullRequestActions,
   type PullRequestOutcome,
 } from "./PullRequestActions"
-
-const fileMarks: Record<string, string> = {
-  added: "A",
-  removed: "D",
-  modified: "M",
-  renamed: "R",
-  copied: "C",
-  changed: "M",
-  unchanged: "·",
-}
-
-const fileTones: Record<string, string> = {
-  added: "text-emerald-700 dark:text-emerald-400",
-  removed: "text-destructive",
-  renamed: "text-sky-700 dark:text-sky-400",
-  copied: "text-sky-700 dark:text-sky-400",
-}
 
 const skippedConclusions = new Set(["neutral", "skipped"])
 
@@ -84,33 +76,6 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function FileRow({ file }: { file: PreviewFile }) {
-  const cut = file.path.lastIndexOf("/")
-  return (
-    <li className="flex items-baseline gap-2.5 py-1 font-mono text-xs">
-      <span
-        aria-hidden="true"
-        className={cn("w-3 shrink-0", fileTones[file.status])}
-        title={file.status}
-      >
-        {fileMarks[file.status] ?? "M"}
-      </span>
-      <span className="min-w-0 flex-1 truncate" title={file.path}>
-        <span className="text-muted-foreground">
-          {cut < 0 ? "" : file.path.slice(0, cut + 1)}
-        </span>
-        <span className="text-foreground">{file.path.slice(cut + 1)}</span>
-      </span>
-      <span className="shrink-0 text-emerald-700 tabular-nums dark:text-emerald-400">
-        +{file.additions}
-      </span>
-      <span className="w-12 shrink-0 text-destructive tabular-nums">
-        −{file.deletions}
-      </span>
-    </li>
   )
 }
 
@@ -211,25 +176,32 @@ interface PullRequestRef {
 
 function useResolveThreads(target: PullRequestRef) {
   const queryClient = useQueryClient()
-  const [owner, name] = target.repo.split("/")
-  const previewKey = ["pr-preview", owner, name, target.number]
+  const previewKey = pullRequestPreviewQuery(target).queryKey
   return useMutation({
     mutationFn: (threadIds: Array<string>) =>
       api.resolveReviewThreads(target.repo, target.number, threadIds),
     meta: { errorTitle: "Couldn't resolve conversations" },
-    onSuccess: (result) => {
-      const resolved = new Set(result.resolved)
-      queryClient.setQueryData<PullRequestPreview>(previewKey, (current) =>
-        current?.unresolved
-          ? {
-              ...current,
-              unresolved: current.unresolved.filter(
-                (thread) =>
-                  thread.thread_id === null || !resolved.has(thread.thread_id)
-              ),
-            }
-          : current
+    onMutate: async (threadIds) => {
+      const resolving = new Set(threadIds)
+      const undo = await optimisticUpdate<PullRequestPreview>(
+        queryClient,
+        previewKey,
+        (current) =>
+          current.unresolved
+            ? {
+                ...current,
+                unresolved: current.unresolved.filter(
+                  (thread) =>
+                    thread.thread_id === null ||
+                    !resolving.has(thread.thread_id)
+                ),
+              }
+            : current
       )
+      return { undo }
+    },
+    onError: (_error, _threadIds, context) => context?.undo(),
+    onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: previewKey })
       void queryClient.invalidateQueries({ queryKey: ["my-pr-details"] })
       if (result.failed.length)
@@ -240,48 +212,87 @@ function useResolveThreads(target: PullRequestRef) {
   })
 }
 
-function SendToAgent({
+function AddToAgentBatch({
   target,
   commentUrl,
 }: {
   target: PullRequestRef
   commentUrl: string
 }) {
-  const queryClient = useQueryClient()
-  const send = useMutation({
-    mutationFn: (instructions: string) =>
-      api.addressPullRequestComment(
-        target.repo,
-        target.number,
-        commentUrl,
-        instructions
-      ),
-    meta: { errorTitle: "Couldn't send comment to agent" },
-    onSuccess: (result) => {
-      toast.success(
-        result.already_running
-          ? `Agent already running on ${target.repo}#${target.number}`
-          : `Sent comment to agent for ${target.repo}#${target.number}`
-      )
-      void queryClient.invalidateQueries({ queryKey: ["pr-thread-status"] })
-    },
-  })
+  const key = pullRequestKey(target)
+  const entry = useAgentBatch(key).find(
+    ({ item }) => item.kind === "thread" && item.commentUrl === commentUrl
+  )
+  const add = useAgentBatchStore((state) => state.add)
+  const remove = useAgentBatchStore((state) => state.remove)
+  if (entry?.state === "sent")
+    return (
+      <Button size="sm" variant="outline" disabled>
+        Sent to agent
+      </Button>
+    )
+  if (entry)
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        title="Remove from the agent batch"
+        onClick={() => remove(key, entry.item.id)}
+      >
+        Queued for agent
+        <XIcon className="size-3" />
+      </Button>
+    )
   return (
     <TextPopover
       trigger={
-        <Button size="sm" variant="outline" disabled={send.isPending}>
-          {send.isPending ? "Sending…" : "Send to agent"}
+        <Button size="sm" variant="outline">
+          Add to agent batch
         </Button>
       }
-      title="Send this comment to the agent"
-      description="The agent addresses it on the PR branch and replies on the thread."
+      title="Queue this comment for the agent"
+      description="Queued comments go to the agent together when you send the batch. It addresses each on the PR branch and replies on the thread."
       placeholder="Instructions (optional)"
-      submitLabel="Send"
-      pending={send.isPending}
-      onSubmit={(instructions, done) =>
-        send.mutate(instructions, { onSuccess: done })
+      submitLabel="Add to batch"
+      onSubmit={async (instructions) =>
+        add(key, {
+          kind: "thread",
+          id: crypto.randomUUID(),
+          commentUrl,
+          instructions,
+        })
       }
     />
+  )
+}
+
+function AgentBatchBar({ target }: { target: PullRequestRef }) {
+  const key = pullRequestKey(target)
+  const queued = useAgentBatch(key).filter(({ state }) => state === "queued")
+  const discard = useAgentBatchStore((state) => state.discard)
+  const submit = useSubmitAgentBatch(target)
+  if (!queued.length) return null
+  return (
+    <div className="flex items-center gap-2 border-t border-border bg-card px-5 py-3">
+      <span className="text-xs text-foreground">
+        {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
+        agent
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="ml-auto"
+        onClick={() => discard(key)}
+      >
+        Discard
+      </Button>
+      <Button
+        size="sm"
+        onClick={() => submit.mutate(queued.map(({ item }) => item))}
+      >
+        Send to agent
+      </Button>
+    </div>
   )
 }
 
@@ -296,10 +307,6 @@ function Conversation({
 }) {
   const [open, setOpen] = useState(false)
   const [clamped, setClamped] = useState(false)
-  const resolving =
-    resolve.isPending &&
-    thread.thread_id !== null &&
-    resolve.variables.includes(thread.thread_id)
   // Only offer the toggle when there is something hidden to show.
   const measure = useCallback((node: HTMLParagraphElement | null) => {
     if (node) setClamped(node.scrollHeight > node.clientHeight + 1)
@@ -317,16 +324,15 @@ function Conversation({
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-2 text-foreground">
           {thread.url && (
-            <SendToAgent target={target} commentUrl={thread.url} />
+            <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
           {thread.thread_id && (
             <Button
               size="sm"
               variant="outline"
-              disabled={resolve.isPending}
               onClick={() => resolve.mutate([thread.thread_id!])}
             >
-              {resolving ? "Resolving…" : "Resolve"}
+              Resolve
             </Button>
           )}
           {thread.url && (
@@ -345,6 +351,18 @@ function Conversation({
       {open ? (
         <div className="mt-1 max-w-[72ch]">
           <Markdown content={thread.body} />
+          {thread.replies.length > 0 && (
+            <ul className="mt-2 space-y-2 border-t border-border pt-2">
+              {thread.replies.map((reply, index) => (
+                <li key={reply.url ?? index}>
+                  <span className="text-xs font-medium text-foreground">
+                    {reply.author ?? "Someone"}
+                  </span>
+                  <Markdown content={reply.body} />
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <p
@@ -354,13 +372,17 @@ function Conversation({
           {thread.body}
         </p>
       )}
-      {(clamped || open) && (
+      {(clamped || open || thread.replies.length > 0) && (
         <button
           type="button"
           onClick={() => setOpen(!open)}
           className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
         >
-          {open ? "Show less" : "Show more"}
+          {open
+            ? "Show less"
+            : thread.replies.length > 0
+              ? `Show more · ${thread.replies.length} ${thread.replies.length === 1 ? "reply" : "replies"}`
+              : "Show more"}
         </button>
       )}
     </li>
@@ -417,21 +439,28 @@ export function PullRequestDetail({
   onClose,
   onSettled,
   onReady,
+  expandedFiles,
+  scrollAnchor,
+  onPositionChange,
 }: {
   pr: OpenPullRequest
   login: string
   outcome?: PullRequestOutcome
   onClose: () => void
-  onSettled: (outcome: PullRequestOutcome) => void
+  onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
+  expandedFiles?: Array<string>
+  scrollAnchor?: string
+  onPositionChange: (changes: { files?: Array<string>; at?: string }) => void
 }) {
-  const [owner, name] = pr.repo.split("/")
-  const preview = useQuery({
-    queryKey: ["pr-preview", owner, name, pr.number],
-    queryFn: () => api.getPullRequestPreview(owner!, name!, pr.number),
-    staleTime: 60_000,
-  })
+  const preview = useQuery(pullRequestPreviewQuery(pr))
   const data = preview.data
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const onScrollAnchor = useCallback(
+    (at: string | undefined) => onPositionChange({ at }),
+    [onPositionChange]
+  )
+  useScrollAnchor(scrollRef, scrollAnchor, onScrollAnchor, Boolean(data))
   const resolve = useResolveThreads(pr)
   const resolvableIds = (data?.unresolved ?? []).flatMap((thread) =>
     thread.thread_id ? [thread.thread_id] : []
@@ -492,7 +521,7 @@ export function PullRequestDetail({
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {preview.isPending && (
           <div className="space-y-3 p-5">
             <Skeleton className="h-4 w-1/3" />
@@ -537,13 +566,9 @@ export function PullRequestDetail({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={resolve.isPending}
                     onClick={() => resolve.mutate(resolvableIds)}
                   >
-                    {resolve.isPending &&
-                    resolve.variables.length === resolvableIds.length
-                      ? "Resolving…"
-                      : "Resolve all"}
+                    Resolve all
                   </Button>
                 )
               }
@@ -564,11 +589,17 @@ export function PullRequestDetail({
                   No files changed.
                 </p>
               ) : (
-                <ul>
-                  {data.files.map((file) => (
-                    <FileRow key={file.path} file={file} />
-                  ))}
-                </ul>
+                <PullRequestFiles
+                  pr={pr}
+                  login={login}
+                  files={data.files}
+                  expanded={expandedFiles ?? []}
+                  onExpandedChange={(files) =>
+                    onPositionChange({
+                      files: files.length ? files : undefined,
+                    })
+                  }
+                />
               )}
             </Section>
 
@@ -587,6 +618,7 @@ export function PullRequestDetail({
           </>
         )}
       </div>
+      <AgentBatchBar target={pr} />
     </aside>
   )
 }

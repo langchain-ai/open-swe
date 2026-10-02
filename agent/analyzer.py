@@ -32,8 +32,6 @@ from agent.middleware import (
     BasePrepareRunMiddleware,
     PrepareRunState,
     SanitizeOpenAIResponsesMiddleware,
-    SanitizeToolInputsMiddleware,
-    TimeoutWrapupMiddleware,
     ToolErrorMiddleware,
 )
 from agent.prompts import apply_tool_descriptions, prompt
@@ -65,8 +63,6 @@ async def _analyzer_workspace(cfg: RunConfig) -> str | None:
         return cfg.workspace_slug
     from agent.workspaces.store import WORKSPACES
 
-    if WORKSPACES.repo_import_is_pending(cfg.review_style_full_name):
-        raise RuntimeError("Analyzer repository workspace has not been imported")
     return await WORKSPACES.owner_of_repo(cfg.review_style_full_name)
 
 
@@ -163,13 +159,11 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,
                     exit_behavior="end",
                 ),
                 ToolErrorMiddleware(),
-                TimeoutWrapupMiddleware(),
                 SanitizeOpenAIResponsesMiddleware(),
             ],
         ),

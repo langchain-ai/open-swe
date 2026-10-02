@@ -22,10 +22,12 @@ from typing import Annotated, Any, Literal
 
 from fastapi import Depends, HTTPException, Request
 
-from agent.api_keys.deps import api_key_from_token
+from agent.api_keys.deps import api_key_from_token, bind_audit_key
 from agent.api_keys.models import ApiKey
+from agent.audit_logs.middleware import bind_actor
+from agent.audit_logs.models import AuditLogEnrichments
 from agent.dashboard.admin import is_admin
-from agent.dashboard.oauth import optional_session
+from agent.dashboard.oauth import bind_audit_session, optional_session
 from agent.federation.github_oidc import (
     GitHubActionsClaims,
     InvalidFederatedToken,
@@ -61,6 +63,8 @@ class Principal:
     created_by: str = ""
     # A workflow names no repository when it means its own.
     default_repo: str = ""
+    # The repositories the threads it starts may reach; None is the installation.
+    token_repositories: tuple[str, ...] | None = None
 
     @classmethod
     def of_key(cls, key: ApiKey) -> Principal:
@@ -81,6 +85,13 @@ class Principal:
             started_by_name=f"{claims.repository} ({claims.workflow or 'workflow'})",
             created_by=claims.repository,
             default_repo=claims.repository,
+            # Anyone can open a pull request against a public repository, and a
+            # workflow it triggers must not reach the rest of the installation.
+            token_repositories=(
+                None
+                if claims.repository_visibility in ("private", "internal")
+                else (claims.repository,)
+            ),
         )
 
     @classmethod
@@ -186,13 +197,25 @@ async def require_principal(request: Request) -> Principal:
     if token:
         key = await api_key_from_token(token)
         if key is not None:
+            bind_audit_key(request, key)
             return Principal.of_key(key)
         if looks_federated(token):
-            return await _federated_principal(token)
+            principal = await _federated_principal(token)
+            bind_actor(
+                request,
+                enrichments=AuditLogEnrichments(
+                    actor_kind="github_actions",
+                    actor_login=principal.started_by_id,
+                    workspace=principal.workspace,
+                ),
+            )
+            return principal
     session = optional_session(request)
     if session is None:
         raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
-    return Principal.of_person(session)
+    principal = Principal.of_person(session)
+    bind_audit_session(request, session)
+    return principal
 
 
 PRINCIPAL_DEP = Depends(require_principal)

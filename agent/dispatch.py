@@ -25,6 +25,7 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -223,6 +224,18 @@ def _slack_conversation_type(source: str, config: LangGraphRunConfig | None) -> 
     return "dm" if is_im else "channel"
 
 
+def _slack_channel_metadata(configurable: object) -> dict[str, str]:
+    slack_thread = RunConfig.parse(configurable).slack_thread
+    if slack_thread is None:
+        return {}
+    channel = slack_thread.channel_context
+    values = {
+        "slack_channel_id": slack_thread.channel_id,
+        "slack_channel_name": channel.label if channel else "",
+    }
+    return {key: value for key, value in values.items() if value}
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -234,6 +247,7 @@ def prepare_run_config(
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
     if metadata is not None:
         merged_metadata.update(metadata)
+    merged_metadata.update(_slack_channel_metadata(configurable))
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
@@ -243,6 +257,34 @@ def prepare_run_config(
     run_config["configurable"] = configurable
     run_config["metadata"] = with_invocation_id(merged_metadata, invocation_id)
     return run_config
+
+
+async def _run_user_id(
+    config: LangGraphRunConfig | None, *, source: str | None = None
+) -> str | None:
+    configurable = (config or {}).get("configurable")
+    if not isinstance(configurable, Mapping):
+        return None
+    cfg = RunConfig.parse(dict(configurable))
+    if cfg.background_task_completion:
+        return None
+    try:
+        if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
+            user = await User.for_login("github", cfg.github_login)
+        elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
+            user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
+        elif cfg.github_user_id:
+            user = await User.for_identity("github", str(cfg.github_user_id))
+        elif cfg.github_login:
+            user = await User.for_login("github", cfg.github_login)
+        elif cfg.user_email:
+            user = await User.for_email(cfg.user_email)
+        else:
+            return None
+        return str(user.id) if user else None
+    except Exception:
+        logger.warning("Could not resolve run user for trace metadata", exc_info=True)
+        return None
 
 
 async def create_durable_run(
@@ -274,7 +316,15 @@ async def create_durable_run(
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
+    user_id = await _run_user_id(config, source=source)
+    if user_id:
+        run_metadata["user_id"] = user_id
     run_config = prepare_run_config(config, run_metadata)
+    if user_id is None:
+        run_config["metadata"].pop("user_id", None)
+        configurable = run_config["configurable"]
+        if isinstance(configurable, dict):
+            configurable.pop("user_id", None)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,
