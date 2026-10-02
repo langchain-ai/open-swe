@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo } from "react"
 import {
   Check,
   Cloud,
@@ -17,6 +17,15 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@/components/ui/combobox"
 import {
   Menu,
   MenuGroup,
@@ -216,86 +225,51 @@ export function LocalBranchSelector({
   onRefresh: () => void
   onSelectBranch: (branch: string) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  const filtered = useMemo(() => {
-    const value = query.trim().toLowerCase()
-    if (!value) return refs
-    return refs.filter((ref) => ref.name.toLowerCase().includes(value))
-  }, [query, refs])
-
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handlePointerDown)
-    return () => document.removeEventListener("mousedown", handlePointerDown)
-  }, [])
-
-  const select = (branch: string) => {
-    onSelectBranch(branch)
-    setOpen(false)
-    setQuery("")
-  }
+  const refsByName = useMemo(
+    () => new Map(refs.map((ref) => [ref.name, ref])),
+    [refs]
+  )
+  const names = useMemo(() => [...refsByName.keys()], [refsByName])
 
   return (
-    <div ref={containerRef} className="relative min-w-0 shrink">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          if (!open) onRefresh()
-          setOpen((value) => !value)
-        }}
-        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
+    <Combobox
+      disabled={disabled}
+      items={names}
+      value={selectedBranch}
+      onOpenChange={(open) => {
+        if (open) onRefresh()
+      }}
+      onValueChange={(value) => {
+        if (value) onSelectBranch(value)
+      }}
+    >
+      <ComboboxTrigger
+        aria-label="Branch"
+        className="flex max-w-[260px] min-w-0 shrink cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
       >
         <GitBranch className="size-3.5 shrink-0" />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>
-        <ComposerControlChevron />
-      </button>
-      {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="border-b border-border">
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search refs..."
-              className="w-full bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-1">
-            {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
-                No refs found.
-              </div>
-            ) : (
-              filtered.map((ref) => (
-                <button
-                  key={ref.name}
-                  type="button"
-                  onClick={() => select(ref.name)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                    ref.name === selectedBranch
-                      ? "text-foreground"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{ref.name}</span>
-                  {badge(ref) && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                      {badge(ref)}
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+      </ComboboxTrigger>
+      <ComboboxContent side="top" sideOffset={4} className="w-72">
+        <ComboboxInput placeholder="Search refs..." showTrigger={false} />
+        <ComboboxEmpty>No refs found.</ComboboxEmpty>
+        <ComboboxList>
+          {(name: string) => {
+            const ref = refsByName.get(name)
+            const label = ref ? badge(ref) : null
+            return (
+              <ComboboxItem key={name} value={name} className="pr-7">
+                <span className="min-w-0 flex-1 truncate">{name}</span>
+                {label && (
+                  <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                    {label}
+                  </span>
+                )}
+              </ComboboxItem>
+            )
+          }}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }

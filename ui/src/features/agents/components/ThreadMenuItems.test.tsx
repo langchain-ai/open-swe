@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 
-import { Menu } from "@base-ui/react/menu"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ThreadMenuItems } from "./ThreadMenuItems"
@@ -75,24 +75,20 @@ describe("Copy thread ID", () => {
     })
 
     render(
-      <Menu.Root>
-        <Menu.Trigger>Thread actions</Menu.Trigger>
-        <Menu.Portal>
-          <Menu.Positioner>
-            <Menu.Popup>
-              <ThreadMenuItems
-                {...props}
-                pinned={false}
-                archived={false}
-                isDeleting={false}
-                onTogglePin={vi.fn()}
-                onToggleArchived={vi.fn()}
-                onDelete={vi.fn()}
-              />
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
+      <Menu>
+        <MenuTrigger>Thread actions</MenuTrigger>
+        <MenuPopup>
+          <ThreadMenuItems
+            {...props}
+            pinned={false}
+            archived={false}
+            isDeleting={false}
+            onTogglePin={vi.fn()}
+            onToggleArchived={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </MenuPopup>
+      </Menu>
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Thread actions" }))

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import {
   Copy,
-  LoaderCircle,
   Plus,
   RefreshCw,
   SquareSplitHorizontal,
@@ -14,6 +13,10 @@ import type { TerminalGroupsController } from "@/features/agents/lib/terminalGro
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import type { TerminalSplitDirection } from "@/features/agents/lib/terminalState"
 import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
 import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surface"
@@ -75,6 +78,7 @@ function TerminalViewport({
   const previousRef = useRef({ buffer: "", version: 0 })
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<string | null>(null)
+  const { copy } = useCopyToClipboard()
   const targetId = target.kind === "local" ? target.sessionId : target.threadId
   const state = useAttachedTerminal(
     target,
@@ -212,36 +216,36 @@ function TerminalViewport({
       {selection && (
         <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
           {onAddToChat && (
-            <button
-              type="button"
-              className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-none text-[11px] font-normal"
               onClick={() => {
                 onAddToChat(selection)
                 surfaceRef.current?.clearSelection()
               }}
             >
               <Plus className="size-3" /> Add to chat
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            aria-label="Copy selection"
+          <TooltipIconButton
+            label="Copy selection"
             className={cn(
-              "p-1.5 hover:bg-accent",
+              "rounded-none text-foreground",
               onAddToChat && "border-l border-border"
             )}
             onClick={() => {
-              void navigator.clipboard.writeText(selection)
+              void copy(selection)
               surfaceRef.current?.clearSelection()
             }}
           >
             <Copy className="size-3" />
-          </button>
+          </TooltipIconButton>
         </div>
       )}
       {target.kind === "cloud" && state.status === "starting" && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
-          <LoaderCircle className="size-3 animate-spin" />
+          <Spinner className="size-3" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
         </div>
       )}
@@ -266,16 +270,14 @@ function ActionButton({
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
+    <TooltipIconButton
+      label={label}
       disabled={disabled}
       onClick={onClick}
-      className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      size="icon"
     >
       {children}
-    </button>
+    </TooltipIconButton>
   )
 }
 
