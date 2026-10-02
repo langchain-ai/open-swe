@@ -66,8 +66,12 @@ the card says who approved. Once merged or cancelled, the whole card becomes one
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
 the PR link. Reactions are never votes.
 
-The card is posted in the thread only. Once it is open for approval it can be sent to
-one channel, once:
+When `reviewChannel` is configured in `.open-swe/settings.json`, the ready card is
+automatically broadcast there, without send controls. Drafts wait until the author
+marks them ready. The destination must be public and not externally shared.
+
+Otherwise the card is posted in the thread only. Once it is open for approval it can
+be sent to one channel, once:
 
 - When the card is posted, it lists its thread's channel, then the public, not
   externally shared channels where the PR author's non-private Open SWE threads ran

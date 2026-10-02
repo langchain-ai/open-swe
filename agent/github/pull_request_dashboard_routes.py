@@ -2,11 +2,13 @@
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from agent.dashboard.deps import SESSION_DEP
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.github.comments import PrState
 from agent.github.http import github_client
 from agent.github.pull_request_actions import (
     PullRequestAction,
@@ -23,6 +25,8 @@ from agent.github.pull_request_status import (
     load_open_pull_request,
     pull_request_identity,
 )
+from agent.github.pull_requests import PullRequest
+from agent.github.repos import accessible_repo_full_names
 from agent.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -32,6 +36,47 @@ from agent.threads.pr_fixes import (
 )
 
 router = APIRouter(tags=["pull-requests"])
+
+
+class PullRequestSearchResult(BaseModel):
+    repo: str
+    number: int
+    url: str
+    title: str
+    body: str
+    state: PrState
+
+
+class PullRequestSearchResults(BaseModel):
+    pull_requests: list[PullRequestSearchResult]
+    has_more: bool
+
+
+@router.get("/pull-requests/search")
+async def api_search_pull_requests(
+    q: str = Query(min_length=1, max_length=1000),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: dict[str, str] = SESSION_DEP,
+) -> PullRequestSearchResults:
+    accessible = await accessible_repo_full_names(session["sub"])
+    rows = await PullRequest.search(
+        q, repositories=sorted(accessible), limit=limit + 1, offset=offset
+    )
+    return PullRequestSearchResults(
+        pull_requests=[
+            PullRequestSearchResult(
+                repo=row.repo_full_name,
+                number=row.number,
+                url=row.url,
+                title=row.title,
+                body=row.body,
+                state=row.state,
+            )
+            for row in rows[:limit]
+        ],
+        has_more=len(rows) > limit,
+    )
 
 
 @router.get("/pull-requests")

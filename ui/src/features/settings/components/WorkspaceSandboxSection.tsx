@@ -4,12 +4,6 @@ import { useMutation } from "@tanstack/react-query"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { api, type WorkspaceRecord } from "@/lib/api"
 
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
@@ -22,22 +16,6 @@ const SNAPSHOT_LABEL: Record<
   capturing: "Capturing…",
   ready: "Image ready",
   failed: "Capture failed",
-}
-
-function WorkspaceReposPopover({ repos }: { repos: string[] }) {
-  return (
-    <Popover>
-      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
-        OPENSWE_WORKSPACE_REPOS
-      </PopoverTrigger>
-      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle>Expanded value</PopoverTitle>
-        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
-          <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
-        </pre>
-      </PopoverPopup>
-    </Popover>
-  )
 }
 
 function resourceValue(value: number | null | undefined, divisor = 1) {
@@ -200,12 +178,11 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Bound repositories are
-            available in <WorkspaceReposPopover repos={record.repos} /> to
-            preload; runs clone any other repository on demand.
+            Runs on the base snapshot to build the image.
           </span>
           <WorkspaceScriptEditor
             label="Setup script"
+            repos={record.repos}
             value={setupScript}
             onChange={setSetupScript}
           />
@@ -213,11 +190,11 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Update script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the current image to bring it up to date, with the same{" "}
-            <WorkspaceReposPopover repos={record.repos} /> value.
+            Runs on the current image to bring it up to date.
           </span>
           <WorkspaceScriptEditor
             label="Update script"
+            repos={record.repos}
             value={updateScript}
             onChange={setUpdateScript}
           />

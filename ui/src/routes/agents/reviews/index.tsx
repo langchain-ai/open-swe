@@ -40,6 +40,7 @@ function ReviewsPage() {
         )
           ? { page: undefined }
           : {}),
+        ...("pr" in changes ? { files: undefined, at: undefined } : {}),
       }),
       replace,
     })

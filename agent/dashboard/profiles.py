@@ -37,8 +37,6 @@ from agent.store import (
     get_value,
     now_iso,
     put_value,
-    search_all_values,
-    search_values,
 )
 from agent.users import User, UserPreferences, UserPreferencesPatch
 
@@ -153,18 +151,6 @@ async def get_profile(login: str) -> dict[str, Any] | None:
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     """The raw encrypted-token record, for callers that need its expiry metadata."""
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
-
-
-async def resolve_oauth_login(login: str) -> str | None:
-    """Recover the stored OAuth key when older thread metadata lost its casing."""
-    if await get_oauth_token_record(login):
-        return login
-    matches = {
-        candidate
-        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
-        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
 
 
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
@@ -317,6 +303,13 @@ async def delete_access_token(login: str) -> None:
     await delete_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
+async def mark_access_token_revoked(login: str, token: str) -> None:
+    """Flag a stored token GitHub rejected so callers prompt a re-login."""
+    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
+    if record and _decrypt_access_token(record) == token:
+        await put_value(OAUTH_TOKENS_NAMESPACE, login, {**record, "revoked": True})
+
+
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
     encrypted = record.get("encrypted_gh_token")
     if not encrypted:
@@ -356,7 +349,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
     """Return a GitHub access token, refreshing proactively when near expiry."""
     record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-    if not record:
+    if not record or record.get("revoked"):
         return None
 
     access_token = _decrypt_access_token(record)
@@ -411,10 +404,6 @@ async def has_access_token_record(login: str) -> bool:
     but won't decrypt / was revoked), so callers can prompt accurately.
     """
     return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
-
-
-async def list_profiles() -> list[dict[str, Any]]:
-    return await search_values(PROFILES_NAMESPACE, limit=1000)
 
 
 router = APIRouter(tags=["profiles"])

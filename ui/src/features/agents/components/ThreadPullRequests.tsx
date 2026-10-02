@@ -11,10 +11,16 @@ import {
 import type {
   AgentPullRequest,
   AgentPullRequestHealth,
+  ThreadFixScope,
 } from "@/features/agents/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+
+export type ThreadFix = (
+  pullRequest: AgentPullRequest,
+  scope: ThreadFixScope
+) => Promise<void> | void
 
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
   draft: "bg-muted text-muted-foreground",
@@ -318,27 +324,12 @@ function PullRequestLink({
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
-  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
+  onFix?: ThreadFix
   fixDisabled: boolean
   compact?: boolean
 }) {
-  const [fixing, setFixing] = useState(false)
-  const [fixFailed, setFixFailed] = useState(false)
   const state = pullRequestState(pullRequest, health)
   const tone = pullRequestTone(pullRequest, health)
-  const actionable = hasActionableIssues(pullRequest, health)
-  const handleFix = async () => {
-    if (!health || !onFix) return
-    setFixFailed(false)
-    setFixing(true)
-    try {
-      await onFix(pullRequest)
-    } catch {
-      setFixFailed(true)
-    } finally {
-      setFixing(false)
-    }
-  }
 
   return (
     <div className="flex min-w-0 items-stretch gap-1.5">
@@ -406,19 +397,80 @@ function PullRequestLink({
           />
         </TooltipPopup>
       </Tooltip>
-      {actionable && onFix && !compact && (
-        <button
-          type="button"
-          aria-label={`Fix PR #${pullRequest.number} issues`}
-          disabled={fixDisabled || fixing}
-          onClick={() => void handleFix()}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/8 px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Wrench className="size-3.5" />
-          {fixing ? "Starting…" : fixFailed ? "Retry" : "Fix"}
-        </button>
-      )}
+      {onFix &&
+        !compact &&
+        fixScopes(pullRequest, health).map((scope) => (
+          <FixButton
+            key={scope}
+            pullRequest={pullRequest}
+            scope={scope}
+            onFix={onFix}
+            disabled={fixDisabled}
+          />
+        ))}
     </div>
+  )
+}
+
+const FIX_LABELS: Record<ThreadFixScope, string> = {
+  conflicts: "Fix conflicts",
+  checks: "Fix checks",
+  comments: "Address comments",
+}
+
+/** One button per problem, so a fix never quietly takes on the others. */
+function fixScopes(
+  pullRequest: AgentPullRequest,
+  health: AgentPullRequestHealth | undefined
+): Array<ThreadFixScope> {
+  if (!health || !hasActionableIssues(pullRequest, health)) return []
+  return [
+    ...(health.mergeConflictState === "conflicting"
+      ? (["conflicts"] as const)
+      : []),
+    ...(health.failingChecks.length > 0 ? (["checks"] as const) : []),
+    ...((health.unresolvedReviewThreadCount ?? 0) > 0
+      ? (["comments"] as const)
+      : []),
+  ]
+}
+
+function FixButton({
+  pullRequest,
+  scope,
+  onFix,
+  disabled,
+}: {
+  pullRequest: AgentPullRequest
+  scope: ThreadFixScope
+  onFix: ThreadFix
+  disabled: boolean
+}) {
+  const [fixing, setFixing] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const handleFix = async () => {
+    setFailed(false)
+    setFixing(true)
+    try {
+      await onFix(pullRequest, scope)
+    } catch (error) {
+      console.error("Could not start a pull request fix", { scope, error })
+      setFailed(true)
+    } finally {
+      setFixing(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
+      disabled={disabled || fixing}
+      onClick={() => void handleFix()}
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/8 px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Wrench className="size-3.5" />
+      {fixing ? "Starting…" : failed ? "Retry" : FIX_LABELS[scope]}
+    </button>
   )
 }
 
@@ -433,7 +485,7 @@ export function ThreadPullRequests({
   pullRequests: Array<AgentPullRequest>
   health?: Array<AgentPullRequestHealth>
   healthUnavailable?: boolean
-  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
+  onFix?: ThreadFix
   fixDisabled?: boolean
   /** One-line row above the composer: title instead of repo and branch. */
   compact?: boolean

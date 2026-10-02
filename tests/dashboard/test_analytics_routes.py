@@ -4,10 +4,52 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.analytics import queries
+from agent.analytics import queries, segment
 from agent.analytics import routes as analytics_routes
 from agent.dashboard import oauth, routes
 from agent.database import analytics as database
+
+
+@pytest.mark.asyncio
+async def test_page_tracking_requires_session_and_rejects_raw_paths(monkeypatch) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+    delivery = AsyncMock()
+    monkeypatch.setattr(segment, "record_usage", delivery)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/dashboard/api/analytics/page", json={"page_name": "agents"})
+        assert response.status_code == 401
+        app.dependency_overrides[oauth.require_session] = lambda: {"sub": "alice"}
+        response = await client.post(
+            "/dashboard/api/analytics/page", json={"page_name": "/agents/private-thread"}
+        )
+        assert response.status_code == 422
+        delivery.assert_not_awaited()
+        response = await client.post("/dashboard/api/analytics/page", json={"page_name": "agents"})
+        assert response.status_code == 204
+    delivery.assert_awaited_once_with(
+        login="alice",
+        email=None,
+        event_type="page",
+        name="agents",
+        properties={"page_name": "agents", "surface": "dashboard"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_telemetry_config_is_public_and_excludes_credentials(monkeypatch) -> None:
+    app = FastAPI()
+    app.include_router(routes.router)
+    monkeypatch.setenv("DD_ENV", "staging")
+    monkeypatch.setenv("SEGMENT_WRITE_KEY", "private-key")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/dashboard/api/analytics/config")
+    assert response.status_code == 200
+    assert response.json() == {"environment": "staging"}
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 
-// Slack channel messages require an explicit Open SWE mention on every turn.
-
 type SendResult = {
   thread_ts: string;
   thread_id: string;
@@ -70,11 +68,10 @@ async function openTwoPartyThread(
 }
 
 test.describe("Slack untagged two-party replies", () => {
-  test("an untagged follow-up is ignored once Open SWE is in the thread", async ({
+  test("an untagged follow-up is accepted in a single-human thread", async ({
     request,
   }) => {
     const { thread_ts, thread_id } = await openTwoPartyThread(request);
-    const before = await stateText(request, thread_id);
 
     const followUp = await send(request, {
       text: "actually, can you also add a docstring?",
@@ -82,8 +79,10 @@ test.describe("Slack untagged two-party replies", () => {
       thread_ts,
     });
 
-    expect(followUp.webhook.status).toBe("ignored");
-    expect(await stateText(request, thread_id)).toBe(before);
+    expect(followUp.webhook.status).toBe("accepted");
+    await expect
+      .poll(() => stateText(request, thread_id), { timeout: 30_000 })
+      .toContain("actually, can you also add a docstring?");
   });
 
   test("an untagged message tagging another user is ignored", async ({

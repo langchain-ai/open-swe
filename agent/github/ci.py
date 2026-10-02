@@ -32,10 +32,6 @@ FAILING_CONCLUSIONS: frozenset[str] = frozenset(["failure", "timed_out", "action
 _OPEN_SWE_CHECK_NAMES: frozenset[str] = frozenset([REVIEW_CHECK_RUN_NAME, "Open SWE Auto-fix"])
 
 
-class FailingCheck(dict):
-    """A failing check run: ``name``, ``conclusion``, ``details_url``."""
-
-
 async def list_check_runs(
     *, owner: str, repo: str, ref: str, token: str
 ) -> list[dict[str, Any]] | None:
@@ -329,22 +325,6 @@ async def fetch_pr(*, owner: str, repo: str, pr_number: int, token: str) -> dict
         return None
     data = response.json()
     return data if isinstance(data, dict) else None
-
-
-async def head_commit_author_login(*, owner: str, repo: str, sha: str, token: str) -> str | None:
-    """Return the GitHub login that authored commit ``sha`` (or ``None``)."""
-    url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}"
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "GET", url)
-            response.raise_for_status()
-    except httpx2.HTTPError:
-        logger.debug("Failed to fetch commit %s/%s@%s for author check", owner, repo, sha)
-        return None
-    data = response.json()
-    author = data.get("author") if isinstance(data, dict) else None
-    login = author.get("login") if isinstance(author, dict) else None
-    return login if isinstance(login, str) and login else None
 
 
 async def has_repo_write_permission(*, owner: str, repo: str, username: str, token: str) -> bool:

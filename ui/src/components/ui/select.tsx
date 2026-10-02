@@ -47,11 +47,9 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon
-        render={
-          <CaretDownIcon className="pointer-events-none size-3.5 text-muted-foreground" />
-        }
-      />
+      <SelectPrimitive.Icon className="flex">
+        <CaretDownIcon className="pointer-events-none size-3.5 text-muted-foreground" />
+      </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   )
 }

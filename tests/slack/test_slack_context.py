@@ -963,7 +963,7 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
 
 @pytest.mark.parametrize(
     ("run_cost", "expected_cost"),
-    [(0.42, "$0.42"), (0.001, "$0.42 • +<$0.01")],
+    [(0.42, "$0.42"), (0.001, "$0.42 (<$0.01)")],
 )
 def test_pending_cost_marks_latest_reply_until_cost_arrives(
     run_cost: float, expected_cost: str

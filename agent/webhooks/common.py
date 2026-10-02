@@ -974,6 +974,7 @@ SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
         "opened",
+        "edited",
         "ready_for_review",
         "converted_to_draft",
         "closed",
@@ -1376,11 +1377,6 @@ async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
         return None
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     return metadata if isinstance(metadata, dict) else {}
-
-
-def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
-    event = PullRequestEvent.parse(payload)
-    return event.state if event is not None else None
 
 
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:

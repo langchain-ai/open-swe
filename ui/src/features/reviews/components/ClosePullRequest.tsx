@@ -7,12 +7,19 @@ import { TextPopover } from "./TextPopover"
 
 export function ClosePullRequest({
   pr,
+  apply,
   onClosed,
 }: {
   pr: OpenPullRequest
-  onClosed: () => void
+  apply: () => () => void
+  onClosed?: () => void
 }) {
-  const close = usePullRequestAction({ pr, action: "close", onDone: onClosed })
+  const close = usePullRequestAction({
+    pr,
+    action: "close",
+    apply,
+    onDone: onClosed,
+  })
   return (
     <div>
       <TextPopover
@@ -30,8 +37,7 @@ export function ClosePullRequest({
         description="GitHub closes it without merging. A reason is posted as a comment."
         placeholder="Reason (optional)"
         submitLabel="Close pull request"
-        pending={close.isPending}
-        onSubmit={(reason, done) => close.mutate(reason, { onSuccess: done })}
+        onSubmit={(reason) => close.mutateAsync(reason)}
       />
     </div>
   )
