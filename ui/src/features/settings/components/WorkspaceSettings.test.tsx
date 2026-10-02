@@ -149,6 +149,48 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("shows model labels before the dropdown opens and after it closes", async () => {
+    mockApis()
+    vi.mocked(api.options).mockResolvedValue({
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium"],
+          default_effort: "medium",
+        },
+      ],
+      default_agent_model: "openai:gpt-6.1-sol",
+      default_agent_reasoning_effort: "medium",
+      default_agent_subagent_model: "openai:gpt-6.1-sol",
+      default_agent_subagent_reasoning_effort: "medium",
+    })
+    vi.mocked(api.getWorkspaceSettings).mockResolvedValue({
+      effective: {
+        ...SETTINGS,
+        default_agent_model: "openai:gpt-6.1-sol",
+        default_agent_reasoning_effort: "medium",
+      },
+      overrides: {},
+    })
+    renderPage()
+
+    const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
+    const models = screen
+      .getByRole("heading", { name: "Model defaults" })
+      .closest("section")!
+    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
+    expect(screen.queryByRole("listbox")).toBeNull()
+    fireEvent.click(trigger)
+    expect(
+      await screen.findByRole("option", { name: "GPT-6.1 Sol" })
+    ).toBeTruthy()
+    fireEvent.keyDown(trigger, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(within(trigger).getByText("GPT-6.1 Sol")).toBeTruthy()
+  })
+
   it("offers no way to delete the default workspace", async () => {
     mockApis({ ...RECORD, slug: "default", name: "Default" })
     renderPage(true, vi.fn(), "default")
