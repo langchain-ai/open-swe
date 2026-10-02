@@ -1,13 +1,11 @@
-import asyncio
 import subprocess
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
+from deepagents.backends import LocalShellBackend
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage
 
-from agent.desktop_branch import rename_temporary_worktree_branch, schedule_worktree_branch_rename
+from agent.bridge.worktree_branch import rename_temporary_worktree_branch
 
 
 class _FakeModel:
@@ -53,7 +51,7 @@ async def test_renames_a_temporary_branch_from_the_request(tmp_path: Path) -> No
     model = _FakeModel("Retry Flaky Login!")
 
     renamed = await rename_temporary_worktree_branch(
-        worktree_path=str(repo),
+        backend=LocalShellBackend(root_dir=str(repo), virtual_mode=False),
         request="Make the login test stop flaking",
         model=cast(BaseChatModel, model),
     )
@@ -62,31 +60,13 @@ async def test_renames_a_temporary_branch_from_the_request(tmp_path: Path) -> No
     assert _branch(repo) == "open-swe/retry-flaky-login"
 
 
-async def test_never_renames_a_branch_in_the_users_own_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = _repo(tmp_path / "project", "open-swe/local-abc12345")
-    model = _FakeModel("retry flaky login")
-    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
-
-    before = asyncio.all_tasks()
-    schedule_worktree_branch_rename(
-        worktree_path=str(project),
-        messages=[HumanMessage(content="Make the login test stop flaking")],
-        model=cast(BaseChatModel, model),
-    )
-
-    assert asyncio.all_tasks() == before
-    assert _branch(project) == "open-swe/local-abc12345"
-
-
 async def test_leaves_a_deliberately_named_branch_alone(tmp_path: Path) -> None:
     repo = _repo(tmp_path / "worktree", "feature/login")
     model = _FakeModel("retry flaky login")
 
     assert (
         await rename_temporary_worktree_branch(
-            worktree_path=str(repo),
+            backend=LocalShellBackend(root_dir=str(repo), virtual_mode=False),
             request="Make the login test stop flaking",
             model=cast(BaseChatModel, model),
         )

@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { ApiClient } from "../src/api.ts"
 import { SessionCredential } from "../src/credentials.ts"
-import { Bridge } from "../src/bridge.ts"
+import { Bridge } from "open-swe-bridge-client"
 import { isRecord } from "../src/json.ts"
 
 interface Reply {
@@ -112,7 +112,10 @@ describe("Bridge", () => {
         params: { command: "echo bridged", timeout: 30 },
       },
     ])
-    const bridge = await Bridge.open(fake.api, {
+    const bridge = await Bridge.open(fake.api.bridges(), {
+      client: "cli",
+      credentialRejected: "rejected",
+      log: () => {},
       rootPath: root,
       label: "repo",
       bridgeId: null,
@@ -131,6 +134,7 @@ describe("Bridge", () => {
       expect(result["truncated"]).toBe(false)
       expect(String(result["output"]).trim()).toBe("bridged")
       expect(fake.opened()[0]).toEqual({
+        client: "cli",
         root_path: root,
         hostname: expect.any(String),
         label: "repo",
@@ -147,7 +151,10 @@ describe("Bridge", () => {
     const fake = fakeBackend([], { reopen404: true })
     try {
       await expect(
-        Bridge.open(fake.api, {
+        Bridge.open(fake.api.bridges(), {
+          client: "cli",
+          credentialRejected: "rejected",
+          log: () => {},
           rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
           label: null,
           bridgeId: "stale-bridge",
@@ -165,7 +172,10 @@ describe("Bridge", () => {
     const fake = fakeBackend([
       { request_id: "req-2", method: "teleport", params: {} },
     ])
-    const bridge = await Bridge.open(fake.api, {
+    const bridge = await Bridge.open(fake.api.bridges(), {
+      client: "cli",
+      credentialRejected: "rejected",
+      log: () => {},
       rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
       label: null,
       bridgeId: null,

@@ -1,0 +1,29 @@
+{
+  "name": "open-swe-bridge-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The machine side of an Open SWE sandbox bridge, shared by the oswe CLI and the desktop app",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json",
+    "test": "bun test",
+    "check": "pnpm run typecheck && pnpm run test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/node": "26.6.3",
+    "typescript": "^7.0.2"
+  }
+}

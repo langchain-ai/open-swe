@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
+  Laptop as LaptopIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
@@ -50,7 +51,7 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   materializeImages,
@@ -62,6 +63,7 @@ import type {
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
+import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -114,9 +116,35 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
+  // A "This Mac" thread can only run where its checkout is: the Mac whose app
+  // started it. Everywhere else it is read-only.
+  const localThread = useLocalThread(thread.id)
+  const runsElsewhere = runsOnAMac(thread) && !localThread
   const canPost =
-    (thread.threadCategory !== "automation" && !thread.adminThread) ||
-    session.data?.is_admin === true
+    !runsElsewhere &&
+    ((thread.threadCategory !== "automation" && !thread.adminThread) ||
+      session.data?.is_admin === true)
+  // The bridge outlives a thread view but not the app; serve the checkout
+  // again for whatever this thread runs next, wherever that run is started.
+  const localBridge = useQuery({
+    queryKey: ["local-bridge", thread.id],
+    queryFn: async () =>
+      (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
+    enabled: Boolean(localThread),
+    retry: false,
+    refetchOnWindowFocus: "always",
+  })
+  const refetchLocalBridge = localBridge.refetch
+  const ensureLocalBridge = useCallback(async () => {
+    if (!localThread) return
+    const result = await refetchLocalBridge({ throwOnError: true })
+    if (result.isError) throw result.error
+  }, [localThread, refetchLocalBridge])
+  const bridgeError = localBridge.error
+    ? localBridge.error instanceof Error
+      ? localBridge.error.message
+      : "This Mac could not be reached"
+    : null
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -187,6 +215,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
+        await ensureLocalBridge()
         await sendMessage.mutateAsync({
           content,
           images,
@@ -204,7 +233,14 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         throw error
       }
     },
-    [activeSelection, autoIntent, followUpBehavior, isStreaming, sendMessage]
+    [
+      activeSelection,
+      autoIntent,
+      ensureLocalBridge,
+      followUpBehavior,
+      isStreaming,
+      sendMessage,
+    ]
   )
 
   const restoreQueuedAutoSelection = autoIntent.restore
@@ -550,11 +586,32 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
           target={
-            thread.sandboxId?.startsWith("bridge:") ? "Local CLI" : "Cloud"
+            thread.sandboxBridgeClient === "desktop"
+              ? "This Mac"
+              : thread.sandboxBridgeClient === "cli"
+                ? "Local CLI"
+                : "Cloud"
           }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
+        {(runsElsewhere || bridgeError) && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert
+              variant={bridgeError ? "error" : "info"}
+              controlAlignment="first-line"
+            >
+              <LaptopIcon />
+              <AlertDescription>
+                <span>
+                  {bridgeError
+                    ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
+                    : "This thread runs in a checkout on another Mac. Open it in the Open SWE app there to continue it."}
+                </span>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -720,11 +777,13 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               />
               <AgentPromptBar
                 placeholder={
-                  canPost
-                    ? hasConversation
-                      ? "Add a follow up"
-                      : "Send the first message"
-                    : "Only workspace admins can send messages in this thread"
+                  runsElsewhere
+                    ? "This thread runs on another Mac"
+                    : canPost
+                      ? hasConversation
+                        ? "Add a follow up"
+                        : "Send the first message"
+                      : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact

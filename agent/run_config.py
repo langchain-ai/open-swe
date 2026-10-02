@@ -108,7 +108,6 @@ class RunConfig(BaseModel):
     task: str | None = None
     environment: str | None = None
     workspace: str | None = None
-    local_project_path: str | None = None
 
     # Actor
     github_login: str | None = None

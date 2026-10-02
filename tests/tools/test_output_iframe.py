@@ -73,7 +73,7 @@ async def test_output_iframe_snapshots_html_and_returns_signed_urls(
         "filename": "chart.html",
     }
     assert backend.commands == [
-        "test -f /workspace/project/chart.html && stat -c %s -- /workspace/project/chart.html",
+        "test -f /workspace/project/chart.html && wc -c < /workspace/project/chart.html",
         "mkdir -p -- /workspace/project/.open-swe/iframe-artifacts/artifact-id && "
         + sandbox_wrap_command(
             "/workspace/project/chart.html",
