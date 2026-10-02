@@ -1796,7 +1796,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     mcp_ptc: CodeInterpreterMiddleware | None = None
     if not local_run and mcp_tools:
-        thread = await client.threads.get(thread_id=thread_id)
+        import langgraph_sdk
+
+        thread = await langgraph_sdk.get_client().threads.get(thread_id)
         launcher_login = thread_metadata(thread).get("owner_login")
         launcher_profile = (
             await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
