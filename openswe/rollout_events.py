@@ -12,7 +12,8 @@ from typing import Literal, TypedDict
 from fastapi import APIRouter, HTTPException, Request
 
 from openswe.config import ENV
-from openswe.federation.github_oidc import InvalidFederatedToken, verify_audience
+from openswe.federation.github_oidc import InvalidFederatedToken
+from openswe.federation.github_oidc import verify as verify_github_oidc
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ async def _authorize(header: str) -> None:
     if not token:
         raise HTTPException(status_code=401, detail="Invalid token")
     try:
-        claims = await verify_audience(token, _AUDIENCE)
+        claims = await verify_github_oidc(token, _AUDIENCE)
     except InvalidFederatedToken as exc:
         logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
         raise HTTPException(status_code=401, detail="Invalid token") from None
