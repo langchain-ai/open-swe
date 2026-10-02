@@ -30,6 +30,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.dm import note_for_concierge
 from agent.slack.events import claim_slack_event
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
@@ -190,6 +191,8 @@ async def slack_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if cfg.automation_dm_user_id:
+        await note_for_concierge(cfg.automation_dm_user_id, str(channel_id), message)
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))

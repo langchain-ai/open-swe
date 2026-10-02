@@ -569,13 +569,20 @@ async def delete_workspace_automations(workspace: str) -> int:
     return deleted
 
 
-def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> str:
+def _slack_root_message(
+    record: dict[str, Any], *, test_run: bool = False, concierge: bool = False
+) -> str:
     repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
     run_kind = "test" if test_run else "scheduled"
+    follow_up = (
+        "Its updates are shared with this DM; message me here to follow up."
+        if concierge
+        else "Reply in this thread to follow up with the agent."
+    )
     return (
         f"*Open SWE automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
-        f"A {run_kind} run started. Reply in this thread to follow up with the agent."
+        f"A {run_kind} run started. {follow_up}"
     )
 
 
@@ -711,8 +718,9 @@ async def _agent_run_config(
             "mode": "on_action",
             "schedule_id": record["id"],
             "schedule_name": record.get("name"),
-            "slack_user_id": record.get("slack_dm_user_id") or "",
         }
+    if dm_user_id := record.get("slack_dm_user_id"):
+        configurable["automation_dm_user_id"] = dm_user_id
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
@@ -779,7 +787,8 @@ async def _launch_agent_schedule_record(
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
-        root_message = _slack_root_message(record, test_run=test_run)
+        concierge = dm_user_id is not None and await User.concierge_mode_for_slack(dm_user_id)
+        root_message = _slack_root_message(record, test_run=test_run, concierge=concierge)
         message_ts, slack_error = await post_slack_top_level_message_with_ts(
             slack_channel_id,
             root_message,

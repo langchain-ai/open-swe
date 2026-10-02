@@ -194,8 +194,8 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                     "slack_error": slack_error,
                 }
 
-            if notification.slack_user_id:
-                await note_for_concierge(notification.slack_user_id, channel_id, text)
+            if cfg.automation_dm_user_id:
+                await note_for_concierge(cfg.automation_dm_user_id, channel_id, text)
             record = record.model_copy(update={"status": "posted", "message_ts": posted_ts})
             try:
                 await store.put(thread_id, record)
