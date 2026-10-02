@@ -66,16 +66,6 @@ async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
             )
 
 
-async def _require_breakout_eligible(channel_id: str) -> None:
-    channel = await SlackChannel.load(channel_id, use_cache=False)
-    if channel is None or not channel.public or not channel.can_be_kitchen:
-        raise HTTPException(
-            400,
-            f"Slack channel {channel_id} cannot be a breakout destination: choose a public, "
-            "internal Slack channel that Open SWE has joined.",
-        )
-
-
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -92,8 +82,6 @@ async def api_create_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     await _require_kitchen_eligible(body.kitchen_channel_ids)
-    if body.breakout_channel_id is not None:
-        await _require_breakout_eligible(body.breakout_channel_id)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -166,10 +154,6 @@ async def api_update_workspace(
         await _require_kitchen_eligible(
             [channel for channel in body.kitchen_channel_ids if channel not in already]
         )
-    if body.breakout_channel_id is not None and (
-        previous is None or body.breakout_channel_id != previous.breakout_channel_id
-    ):
-        await _require_breakout_eligible(body.breakout_channel_id)
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:

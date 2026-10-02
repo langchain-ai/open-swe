@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
-from agent.slack import breakout_destination
 from agent.slack import move as slack_move
 from agent.slack import thinking as slack_thinking
 from agent.slack.channels import SlackChannel
@@ -278,8 +277,8 @@ async def test_unreadable_binding_after_a_breakout_leaves_the_old_thread_alone(
     assert statuses[-1] == ("C2", "2.0", "")
 
 
-@pytest.mark.parametrize("explicit, target", [(None, "C2"), ("C3", "C3")])
-async def test_move_tool_uses_workspace_destination_without_moving_twice(
+@pytest.mark.parametrize("explicit, target", [(None, "C1"), ("C3", "C3")])
+async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     monkeypatch: pytest.MonkeyPatch, statuses: list[StatusCall], explicit: str | None, target: str
 ) -> None:
     client = cast(LangGraphClient, _LangGraph({"channel_id": "C1", "thread_ts": "1.0"}))
@@ -293,11 +292,6 @@ async def test_move_tool_uses_workspace_destination_without_moving_twice(
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
     monkeypatch.setattr("agent.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
-    monkeypatch.setattr(
-        breakout_destination.WORKSPACES,
-        "get",
-        AsyncMock(return_value=SimpleNamespace(breakout_channel_id="C2")),
-    )
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=True)))
     root = AsyncMock(return_value=("2.0", None))
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)

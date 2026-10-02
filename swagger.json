@@ -5431,17 +5431,6 @@
             ],
             "title": "Base Snapshot Id"
           },
-          "breakout_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Breakout Channel Id"
-          },
           "create_params": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5748,17 +5737,6 @@
               }
             ],
             "title": "Base Snapshot Id"
-          },
-          "breakout_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Breakout Channel Id"
           },
           "create_params": {
             "additionalProperties": {
@@ -6318,17 +6296,6 @@
               }
             ],
             "title": "Base Snapshot Id"
-          },
-          "breakout_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Breakout Channel Id"
           },
           "create_params": {
             "anyOf": [
