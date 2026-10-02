@@ -131,13 +131,16 @@ test("groups file reads and edits with expandable original calls", async ({
       },
     );
     await expect(summary).toBeVisible();
-    const group = summary.locator("..");
-    await expect(
-      group.locator("summary").filter({ hasText: name }),
-    ).toHaveCount(count);
+    const group = summary.locator(
+      "xpath=ancestor::*[@data-transcript-disclosure][1]",
+    );
+    const calls = group
+      .locator("[data-transcript-disclosure] > button")
+      .filter({ hasText: name });
+    await expect(calls).toHaveCount(count);
     await expect(group.getByText(result, { exact: true })).toBeHidden();
     await summary.click();
-    await group.locator("summary").filter({ hasText: name }).first().click();
+    await calls.first().click();
     await expect(group.getByText(result, { exact: true })).toBeVisible();
     await summary.click();
     await expect(group.getByText(result, { exact: true })).toBeHidden();
@@ -187,7 +190,7 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
 
   await composer(page).fill("Keep this draft when opening a new thread.");
   await sidebar.getByRole("button", { name: "Search", exact: true }).click();
-  await page.getByRole("combobox").fill("New thread");
+  await page.getByRole("dialog").getByRole("combobox").fill("New thread");
   await page.getByRole("option", { name: /New thread/ }).click();
   await expect(page).toHaveURL(/\/assistant$/);
   await expect(composer(page)).toHaveValue("");
@@ -296,8 +299,8 @@ test("preserves no-project selection despite a default repository", async ({
   });
   await page.goto("/agents?noRepo=true");
   await expect(page).toHaveURL(/\/assistant\?noRepo=true$/);
-  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue(
-    "",
+  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveText(
+    "No repository",
   );
   const submitted = page.waitForRequest(
     (request) =>
