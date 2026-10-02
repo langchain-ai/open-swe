@@ -129,6 +129,7 @@ export interface ThreadsPageParams {
   ownerless?: boolean
   sortBy?: ThreadSortBy
   hideSlackWithoutCodeChanges?: boolean
+  hideSlackThreads?: boolean
 }
 
 export interface ThreadsPage {
@@ -251,6 +252,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
       "hide_slack_without_code_changes",
       String(params.hideSlackWithoutCodeChanges)
     )
+  if (params.hideSlackThreads != null)
+    search.set("hide_slack_threads", String(params.hideSlackThreads))
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -259,6 +262,7 @@ function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
   hideSlackWithoutCodeChanges?: boolean
+  hideSlackThreads?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -271,6 +275,8 @@ function buildReposQuery(params: {
       "hide_slack_without_code_changes",
       String(params.hideSlackWithoutCodeChanges)
     )
+  if (params.hideSlackThreads != null)
+    search.set("hide_slack_threads", String(params.hideSlackThreads))
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -321,6 +327,7 @@ export const agentsApi = {
       includeResolved?: boolean
       includeAutomations?: boolean
       hideSlackWithoutCodeChanges?: boolean
+      hideSlackThreads?: boolean
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(

@@ -27,6 +27,7 @@ function warmApiRequests(
     let includeAutomations = false
     let includeResolved = false
     let hideSlackWithoutCodeChanges = true
+    let hideSlackThreads = false
     let repoMode = true
     let sortByCreated = true
     try {
@@ -41,6 +42,7 @@ function warmApiRequests(
           (Array.isArray(filters.sources) &&
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
+        hideSlackThreads = filters.hideSlackThreads === true
         hideSlackWithoutCodeChanges =
           filters.hideSlackWithoutCodeChanges !== false
       }
@@ -60,6 +62,7 @@ function warmApiRequests(
       "hide_slack_without_code_changes",
       String(hideSlackWithoutCodeChanges)
     )
+    search.set("hide_slack_threads", String(hideSlackThreads))
     targets.push(sidebarPath + "?" + search.toString())
   }
 

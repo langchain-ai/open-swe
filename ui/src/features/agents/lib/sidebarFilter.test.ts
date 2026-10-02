@@ -98,6 +98,9 @@ describe("filterThreads", () => {
     expect(
       filterThreads(threads, filters({ hideSlackWithoutCodeChanges: false }))
     ).toEqual(threads)
+    expect(filterThreads(threads, filters({ hideSlackThreads: true }))).toEqual(
+      [dashboard]
+    )
   })
 
   it("filters by source, defaulting missing source to dashboard", () => {

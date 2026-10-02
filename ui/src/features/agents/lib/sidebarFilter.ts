@@ -5,6 +5,7 @@ export interface SidebarFilters {
   includeAutomations: boolean
   includeResolved: boolean
   hideSlackWithoutCodeChanges: boolean
+  hideSlackThreads: boolean
 }
 
 export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
@@ -12,6 +13,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
   includeAutomations: false,
   includeResolved: false,
   hideSlackWithoutCodeChanges: true,
+  hideSlackThreads: false,
 }
 
 interface FilterableThread {
@@ -39,6 +41,8 @@ export function filterThreads<T extends FilterableThread>(
   filters: SidebarFilters
 ): Array<T> {
   return threads.filter((thread) => {
+    if (filters.hideSlackThreads && threadSource(thread) === "slack")
+      return false
     if (
       filters.hideSlackWithoutCodeChanges &&
       threadSource(thread) === "slack" &&
@@ -68,6 +72,7 @@ export function filterThreads<T extends FilterableThread>(
 export function hasActiveFilters(filters: SidebarFilters): boolean {
   return (
     filters.sources.length > 0 ||
+    filters.hideSlackThreads !== DEFAULT_SIDEBAR_FILTERS.hideSlackThreads ||
     filters.includeAutomations !== DEFAULT_SIDEBAR_FILTERS.includeAutomations ||
     filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved ||
     filters.hideSlackWithoutCodeChanges !==

@@ -281,6 +281,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     hideSlackWithoutCodeChanges: prefs.filters.hideSlackWithoutCodeChanges,
+    hideSlackThreads: prefs.filters.hideSlackThreads,
     sort: prefs.sortChats,
     enabled: !localOnly,
   })
@@ -288,6 +289,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     hideSlackWithoutCodeChanges: prefs.filters.hideSlackWithoutCodeChanges,
+    hideSlackThreads: prefs.filters.hideSlackThreads,
     enabled: !localOnly && repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(
@@ -636,6 +638,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckboxItem>
         <MenuCheckboxItem
+          checked={prefs.filters.hideSlackThreads}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, hideSlackThreads: checked })
+          }
+        >
+          Hide all Slack chats
+        </MenuCheckboxItem>
+        <MenuCheckboxItem
           checked={prefs.filters.hideSlackWithoutCodeChanges}
           onCheckedChange={(checked) =>
             setFilters({
@@ -672,6 +682,7 @@ export function AgentsSidebar({
       expanded={prefs.expandedRepoKeys.includes(group.key)}
       pinned={pinnedRepoKeys.has(group.key)}
       hideSlackWithoutCodeChanges={prefs.filters.hideSlackWithoutCodeChanges}
+      hideSlackThreads={prefs.filters.hideSlackThreads}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       sort={prefs.sortChats}
@@ -1113,6 +1124,7 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   hideSlackWithoutCodeChanges,
+  hideSlackThreads,
   sort,
   activeThreadId,
   openThread,
@@ -1134,6 +1146,7 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   hideSlackWithoutCodeChanges: boolean
+  hideSlackThreads: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1156,6 +1169,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     hideSlackWithoutCodeChanges,
+    hideSlackThreads,
     sort,
     enabled: !collapsed,
   })

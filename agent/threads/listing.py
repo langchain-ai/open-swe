@@ -337,6 +337,7 @@ async def _collect_thread_candidates(
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
@@ -363,7 +364,9 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
-                if thread_source(metadata) == "incidents_agent":
+                if thread_source(metadata) == "incidents_agent" or (
+                    hide_slack_threads and thread_source(metadata) == "slack"
+                ):
                     continue
                 review = ReviewSessionMetadata.parse(metadata)
                 if review is not None and not review.owned_by(viewer_login):
@@ -501,6 +504,7 @@ async def list_dashboard_thread_repos(
     include_resolved: bool = False,
     include_automations: bool = False,
     hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     include_all: bool = False,
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
@@ -517,6 +521,7 @@ async def list_dashboard_thread_repos(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
         hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -576,6 +581,7 @@ async def list_dashboard_threads_page(
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
     hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
@@ -607,6 +613,7 @@ async def list_dashboard_threads_page(
         target_per_search=target,
         surfaced_only=surfaced_only,
         hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
         sort_by=sort_by,
     )
 

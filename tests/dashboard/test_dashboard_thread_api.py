@@ -976,6 +976,11 @@ async def test_slack_code_filter_pages_past_questions_and_counts_subagent_edits(
         legacy["thread_id"],
     ]
     assert next_page["hasMore"] is False
+    without_slack = await thread_listing.list_dashboard_threads_page(
+        "octocat", limit=2, hide_slack_threads=True
+    )
+    assert [item["id"] for item in without_slack["items"]] == [dashboard["thread_id"]]
+    assert without_slack["hasMore"] is False
     unfiltered = await thread_listing.list_dashboard_threads_page("octocat", limit=2)
     assert [item["id"] for item in unfiltered["items"]] == [
         threads[0]["thread_id"],

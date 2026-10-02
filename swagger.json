@@ -15509,6 +15509,16 @@
               "title": "Hide Slack Without Code Changes",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "hide_slack_threads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Slack Threads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -15661,6 +15671,16 @@
             "schema": {
               "default": false,
               "title": "Hide Slack Without Code Changes",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_slack_threads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Slack Threads",
               "type": "boolean"
             }
           },
