@@ -65,6 +65,7 @@ const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
+  fable_enabled: false,
 }
 
 const clients: Array<QueryClient> = []
@@ -110,6 +111,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     default_agent_subagent_model: "anthropic:claude-opus-5-5",
     default_agent_subagent_reasoning_effort: "medium",
   })
+  vi.spyOn(api, "getInstanceSettings").mockResolvedValue(SETTINGS)
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue({
     effective: SETTINGS,
     overrides: {},
