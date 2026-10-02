@@ -3,7 +3,7 @@
 A human review request is a Slack card asking people to review one pull request.
 It has two kinds, stored in one `human_review_request` table:
 
-- **Standard** (this document): any open pull request, posted in the repository's
+- **Standard** (this document): any open pull request, posted in the configured
   review channel; people sign up and review on GitHub, and it merges once they approve.
 - **Expedited** ([expedited-slack-review.md](expedited-slack-review.md)): a tiny pull
   request approved straight from the diff on the card.
@@ -14,16 +14,26 @@ for a standard review while an expedited card is open is refused.
 
 ## Configuration
 
-`.open-swe/settings.json` in the repository:
+Set **Review broadcast destination** in a workspace's settings to choose one of its
+bound public, internal Slack channels that Open SWE has joined. Removing that channel
+from the workspace clears the destination.
+
+Requests use an explicit `channel` first, then the resolved workspace's destination,
+then `reviewChannel` in the repository's `.open-swe/settings.json`:
 
 ```json
 { "reviewChannel": "#eng-reviews" }
 ```
 
-The value is a channel name or id. It is read from the pull request's head commit,
-falling back to the default branch when the head has no settings file. The
-`request_human_review` tool accepts a `channel` that overrides it or stands in when
-the repository sets none.
+The repository value is a channel name or id. It is read from the pull request's head
+commit, falling back to the default branch when the head has no settings file. An
+agent request uses its thread's workspace; without one, normal workspace routing
+uses the source Slack channel, repository, requester's default, then `default`.
+Dashboard requests resolve from the repository and requester. An unavailable chosen
+channel fails the request rather than sending it to a different audience.
+
+The workspace destination also overrides the repository setting for expedited cards'
+**Broadcast** button, without changing where their initial approval card is posted.
 
 ## Requesting
 

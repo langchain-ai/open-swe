@@ -11,12 +11,18 @@ from agent.human_review.lifecycle import _render_standard
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
+    Origin,
+    RequestResult,
+    _target_channel,
     merge_wait,
     request_blockers,
     summary_line,
 )
 from agent.slack.blocks import block_payload
+from agent.slack.channels import SlackChannel
+from agent.slack.client import GitHubPrRef
 from agent.users import User, UserIdentity
+from agent.workspaces.store import WORKSPACES, Workspace
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -173,6 +179,61 @@ async def test_approved_card_collapses_without_closing_the_request(
     assert request.state == "open"
 
 
+@pytest.mark.parametrize(
+    ("override", "workspace", "source_channel", "workspace_channel", "available", "expected"),
+    [
+        (" CEXPLICIT ", "thread", "CSOURCE", "CTHREAD", True, "CEXPLICIT"),
+        ("", "thread", "CSOURCE", "CTHREAD", True, "CTHREAD"),
+        ("", None, "CSOURCE", "CTHREAD", True, "CSLACK"),
+        ("", None, "", "CTHREAD", True, "CREPOWORKSPACE"),
+        ("", "thread", "CSOURCE", None, True, "CREPOCONFIG"),
+        ("", "thread", "CSOURCE", "CTHREAD", False, "CTHREAD"),
+    ],
+)
+async def test_review_channel_precedence(
+    override: str,
+    workspace: str | None,
+    source_channel: str,
+    workspace_channel: str | None,
+    available: bool,
+    expected: str,
+) -> None:
+    definitions = {
+        "thread": Workspace(slug="thread", review_channel_id=workspace_channel),
+        "slack": Workspace(slug="slack", review_channel_id="CSLACK"),
+        "repo": Workspace(slug="repo", review_channel_id="CREPOWORKSPACE"),
+    }
+
+    async def channel_for(reference: str) -> SlackChannel | None:
+        return SlackChannel(id=reference) if available else None
+
+    with (
+        patch.object(WORKSPACES, "get", AsyncMock(side_effect=definitions.get)),
+        patch.object(WORKSPACES, "owner_of_slack_channel", AsyncMock(return_value="slack")),
+        patch.object(WORKSPACES, "owner_of_repo", AsyncMock(return_value="repo")),
+        patch.object(
+            RepoSettings,
+            "fetch",
+            AsyncMock(return_value=RepoSettings(review_channel="CREPOCONFIG")),
+        ),
+        patch.object(SlackChannel, "resolve", channel_for),
+    ):
+        target = await _target_channel(
+            GitHubPrRef(owner="o", repo="r", number=1, url="https://github.com/o/r/pull/1"),
+            override,
+            "token",
+            "head",
+            Origin(workspace=workspace, slack_channel_id=source_channel),
+        )
+    if available:
+        assert isinstance(target, SlackChannel)
+        assert target.id == expected
+    else:
+        assert isinstance(target, RequestResult)
+        assert not target.success
+        assert expected in target.error
+
+
 def _github(status: int, text: str = "") -> AsyncMock:
     return AsyncMock(return_value=httpx2.Response(status, text=text))
 
@@ -182,6 +243,7 @@ async def test_repo_settings_prefer_the_pull_request_head() -> None:
     with patch("agent.github.repo_files.github_request", request):
         settings = await RepoSettings.fetch("o", "r", token="t", ref="abc123")
     assert settings.review_channel == "#eng-reviews"
+    assert request.await_args is not None
     _client, _method, url = request.await_args.args
     assert url.endswith("/repos/o/r/contents/.open-swe/settings.json")
     assert request.await_args.kwargs["params"] == {"ref": "abc123"}

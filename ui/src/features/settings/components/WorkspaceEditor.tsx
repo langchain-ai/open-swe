@@ -67,6 +67,7 @@ export interface WorkspaceDraft {
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
   breakoutChannelId: string | null
+  reviewChannelId: string | null
   prompt: string
   setupScript: string
   updateScript: string
@@ -79,6 +80,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
     breakoutChannelId: workspace.breakout_channel_id ?? null,
+    reviewChannelId: workspace.review_channel_id ?? null,
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -91,6 +93,7 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   slackChannelIds: [],
   kitchenChannelIds: [],
   breakoutChannelId: null,
+  reviewChannelId: null,
   prompt: "",
   setupScript: "",
   updateScript: "",
@@ -251,6 +254,11 @@ export function WorkspaceEditor({
                   slackChannelIds.includes(draft.breakoutChannelId)
                     ? draft.breakoutChannelId
                     : null,
+                reviewChannelId:
+                  draft.reviewChannelId &&
+                  slackChannelIds.includes(draft.reviewChannelId)
+                    ? draft.reviewChannelId
+                    : null,
               })
             }
             workspaceSlug={workspaceSlug}
@@ -285,6 +293,36 @@ export function WorkspaceEditor({
         <p className="text-xs text-muted-foreground">
           Send breakouts to a bound public channel, such as a kitchen channel.
           An explicitly requested channel takes precedence.
+        </p>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div>Review broadcast destination</div>
+        <Select
+          value={draft.reviewChannelId ?? ""}
+          onValueChange={(value) =>
+            onChange({ ...draft, reviewChannelId: value || null })
+          }
+        >
+          <SelectTrigger aria-label="Review broadcast destination">
+            <SelectValue>
+              {draft.reviewChannelId
+                ? channelLabel(draft.reviewChannelId)
+                : "Repository default"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Repository default</SelectItem>
+            {draft.slackChannelIds.map((id) => (
+              <SelectItem key={id} value={id}>
+                {channelLabel(id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Send review requests to a bound public channel instead of the
+          repository’s review channel. An explicitly requested channel takes
+          precedence.
         </p>
       </div>
       <label className="block text-sm">

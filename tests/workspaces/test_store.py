@@ -217,6 +217,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
             "slack_channel_ids": [],
             "kitchen_channel_ids": [],
             "breakout_channel_id": None,
+            "review_channel_id": None,
             "is_default": True,
             "has_snapshot": True,
             "refresh_status": "success",
@@ -284,6 +285,7 @@ def _fully_populated(now: str) -> Workspace:
         slack_channel_ids=["C0API"],
         kitchen_channel_ids=["C0API"],
         breakout_channel_id="C0API",
+        review_channel_id="C0API",
         mem_bytes=8 * 1024**3,
         vcpus=4,
         fs_capacity_bytes=128 * 1024**3,
@@ -482,24 +484,25 @@ async def test_a_claim_that_races_the_pre_check_still_names_the_owner() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_breakout_destination_stays_bound_and_can_be_cleared() -> None:
+@pytest.mark.parametrize("field", ["breakout_channel_id", "review_channel_id"])
+async def test_destination_stays_bound_and_can_be_cleared(field: str) -> None:
     with pytest.raises(ValidationError, match="bound to this workspace"):
-        WorkspaceCreate(name="Core", breakout_channel_id="C0API")
+        WorkspaceCreate.model_validate({"name": "Core", field: "C0API"})
     await WORKSPACES.create(
-        WorkspaceCreate(
-            name="Core", slack_channel_ids=["C0API", "C0WEB"], breakout_channel_id="c0api"
+        WorkspaceCreate.model_validate(
+            {"name": "Core", "slack_channel_ids": ["C0API", "C0WEB"], field: " c0api "}
         ),
         "alice",
     )
     with pytest.raises(ValueError, match="bound to this workspace"):
-        await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id="C0OTHER"))
+        await WORKSPACES.apply_update("core", WorkspaceUpdate.model_validate({field: "C0OTHER"}))
 
     edited = await WORKSPACES.apply_update("core", WorkspaceUpdate(prompt="new"))
-    assert edited.breakout_channel_id == "C0API"
-    cleared = await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id=None))
-    assert cleared.breakout_channel_id is None
-    await WORKSPACES.apply_update("core", WorkspaceUpdate(breakout_channel_id="C0WEB"))
+    assert getattr(edited, field) == "C0API"
+    cleared = await WORKSPACES.apply_update("core", WorkspaceUpdate.model_validate({field: None}))
+    assert getattr(cleared, field) is None
+    await WORKSPACES.apply_update("core", WorkspaceUpdate.model_validate({field: "C0WEB"}))
     await WORKSPACES.apply_update("core", WorkspaceUpdate(slack_channel_ids=["C0API"]))
     stored = await WORKSPACES.get("core")
     assert stored is not None
-    assert stored.breakout_channel_id is None
+    assert getattr(stored, field) is None

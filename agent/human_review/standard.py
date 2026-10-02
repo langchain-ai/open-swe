@@ -31,8 +31,8 @@ from agent.expedited_review.readiness import (
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
+from agent.human_review.destination import default_review_channel
 from agent.human_review.lifecycle import (
     mark_approved,
     mark_closed,
@@ -89,6 +89,7 @@ class Origin:
     run_config: JsonObject = field(default_factory=dict)
     slack_channel_id: str = ""
     slack_thread_ts: str = ""
+    workspace: str | None = None
 
     def asked(self, request: HumanReviewRequest) -> bool:
         """Whether ``request`` came from this thread or this person."""
@@ -127,17 +128,21 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 
 
 async def _target_channel(
-    pr_ref: GitHubPrRef, override: str, token: str, head_sha: str
+    pr_ref: GitHubPrRef, override: str, token: str, head_sha: str, origin: Origin
 ) -> SlackChannel | RequestResult:
-    configured = override.strip()
+    configured = override.strip() or await default_review_channel(
+        pr_ref,
+        token=token,
+        head_sha=head_sha,
+        workspace=origin.workspace,
+        slack_channel_id=origin.slack_channel_id,
+        login=origin.requester.github_login if origin.requester else None,
+    )
     if not configured:
-        configured = (
-            await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
-        ).review_channel
-    if not configured.strip():
         return _failure(
-            f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
-            "`.open-swe/settings.json`, or name a Slack channel."
+            f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set a workspace review "
+            "broadcast destination, set `reviewChannel` in `.open-swe/settings.json`, "
+            "or name a Slack channel."
         )
     channel = await SlackChannel.resolve(configured)
     if channel is None:
@@ -268,7 +273,7 @@ async def request_review(
             "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
         )
 
-    target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
+    target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha, origin)
     if isinstance(target, RequestResult):
         return target
     recorded = await record_pull_request(pr_ref, token)

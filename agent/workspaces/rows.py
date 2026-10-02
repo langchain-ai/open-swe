@@ -38,6 +38,7 @@ class WorkspaceRow(Base):
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
     breakout_channel_id: Mapped[str | None] = mapped_column(default=None)
+    review_channel_id: Mapped[str | None] = mapped_column(default=None)
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     vcpus: Mapped[int | None] = mapped_column(default=None)
     fs_capacity_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -116,6 +117,7 @@ def to_workspace(
             "slack_channel_ids": channels,
             "kitchen_channel_ids": kitchen_channels,
             "breakout_channel_id": row.breakout_channel_id,
+            "review_channel_id": row.review_channel_id,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,
@@ -176,6 +178,7 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     row.update_script = record.update_script
     row.base_snapshot_id = record.base_snapshot_id
     row.breakout_channel_id = record.breakout_channel_id
+    row.review_channel_id = record.review_channel_id
     row.mem_bytes = record.mem_bytes
     row.vcpus = record.vcpus
     row.fs_capacity_bytes = record.fs_capacity_bytes

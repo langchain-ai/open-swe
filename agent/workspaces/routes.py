@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -66,12 +66,14 @@ async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
             )
 
 
-async def _require_breakout_eligible(channel_id: str) -> None:
+async def _require_destination_eligible(
+    channel_id: str, destination: Literal["breakout", "review"]
+) -> None:
     channel = await SlackChannel.load(channel_id, use_cache=False)
     if channel is None or not channel.public or not channel.can_be_kitchen:
         raise HTTPException(
             400,
-            f"Slack channel {channel_id} cannot be a breakout destination: choose a public, "
+            f"Slack channel {channel_id} cannot be a {destination} destination: choose a public, "
             "internal Slack channel that Open SWE has joined.",
         )
 
@@ -93,7 +95,9 @@ async def api_create_workspace(
 ) -> Workspace:
     await _require_kitchen_eligible(body.kitchen_channel_ids)
     if body.breakout_channel_id is not None:
-        await _require_breakout_eligible(body.breakout_channel_id)
+        await _require_destination_eligible(body.breakout_channel_id, "breakout")
+    if body.review_channel_id is not None:
+        await _require_destination_eligible(body.review_channel_id, "review")
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -169,7 +173,11 @@ async def api_update_workspace(
     if body.breakout_channel_id is not None and (
         previous is None or body.breakout_channel_id != previous.breakout_channel_id
     ):
-        await _require_breakout_eligible(body.breakout_channel_id)
+        await _require_destination_eligible(body.breakout_channel_id, "breakout")
+    if body.review_channel_id is not None and (
+        previous is None or body.review_channel_id != previous.review_channel_id
+    ):
+        await _require_destination_eligible(body.review_channel_id, "review")
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:

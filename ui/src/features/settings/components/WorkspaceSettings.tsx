@@ -84,6 +84,7 @@ function GeneralSection({
         slack_channel_ids: draft.slackChannelIds,
         kitchen_channel_ids: draft.kitchenChannelIds,
         breakout_channel_id: draft.breakoutChannelId,
+        review_channel_id: draft.reviewChannelId,
         prompt: draft.prompt,
       })
       onSaved(saved)

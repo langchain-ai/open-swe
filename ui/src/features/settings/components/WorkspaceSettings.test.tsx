@@ -307,6 +307,7 @@ describe("WorkspaceSettingsPanel", () => {
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
         breakout_channel_id: null,
+        review_channel_id: null,
         prompt: "Run make test.",
       })
     )
@@ -318,35 +319,43 @@ describe("WorkspaceSettingsPanel", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it("clears the breakout destination when its channel is unbound", async () => {
-    mockApis({ ...RECORD, breakout_channel_id: "C1" })
-    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
-      ...RECORD,
-      slack_channel_ids: [],
-      breakout_channel_id: null,
-    })
-    renderPage()
+  it.each([
+    ["breakout_channel_id", "Breakout destination", "Current channel"],
+    ["review_channel_id", "Review broadcast destination", "Repository default"],
+  ] as const)(
+    "clears %s when its channel is unbound",
+    async (field, label, fallback) => {
+      mockApis({ ...RECORD, [field]: "C1" })
+      const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+        ...RECORD,
+        slack_channel_ids: [],
+        [field]: null,
+      })
+      renderPage()
 
-    const destination = await screen.findByRole("combobox", {
-      name: "Breakout destination",
-    })
-    await waitFor(() => expect(destination.textContent).toContain("#oss-help"))
-    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: "#oss-help" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
-    expect(destination.textContent).toContain("Current channel")
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() =>
-      expect(update).toHaveBeenCalledWith(
-        "oss",
-        expect.objectContaining({
-          slack_channel_ids: [],
-          breakout_channel_id: null,
-        })
+      const destination = await screen.findByRole("combobox", { name: label })
+      await waitFor(() =>
+        expect(destination.textContent).toContain("#oss-help")
       )
-    )
-  })
+      fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
+      fireEvent.click(
+        await screen.findByRole("checkbox", { name: "#oss-help" })
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
+      expect(destination.textContent).toContain(fallback)
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+      await waitFor(() =>
+        expect(update).toHaveBeenCalledWith(
+          "oss",
+          expect.objectContaining({
+            slack_channel_ids: [],
+            [field]: null,
+          })
+        )
+      )
+    }
+  )
 
   it.each([
     ["refreshing", "success"],

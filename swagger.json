@@ -5626,6 +5626,17 @@
             "title": "Repos",
             "type": "array"
           },
+          "review_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Id"
+          },
           "setup_script": {
             "default": "",
             "title": "Setup Script",
@@ -5813,6 +5824,17 @@
             },
             "title": "Repos",
             "type": "array"
+          },
+          "review_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Id"
           },
           "setup_script": {
             "default": "",
@@ -6417,6 +6439,17 @@
               }
             ],
             "title": "Repos"
+          },
+          "review_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Channel Id"
           },
           "setup_script": {
             "anyOf": [

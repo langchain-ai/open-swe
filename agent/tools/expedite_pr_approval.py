@@ -15,8 +15,8 @@ from agent.expedited_review.eligibility import (
 )
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
+from agent.human_review.destination import default_review_channel
 from agent.human_review.lifecycle import (
     post_card,
     prompt_author_ready,
@@ -169,14 +169,20 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
-    review_channel = (
-        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
-    ).review_channel.strip()
+    review_channel = await default_review_channel(
+        pr_ref,
+        token=token,
+        head_sha=head_sha,
+        workspace=cfg.workspace_slug,
+        slack_channel_id=own_channel,
+        login=cfg.github_login,
+    )
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:
         return _failure(
             f"The configured review channel {review_channel!r} is unavailable to the bot. "
-            "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
+            "Invite the bot to that channel or update the workspace review broadcast "
+            "destination or `reviewChannel` in `.open-swe/settings.json`."
         )
     broadcast_choice = (
         [{"id": broadcast_target.id, "name": broadcast_target.name}]

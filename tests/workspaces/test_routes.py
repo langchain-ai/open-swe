@@ -206,8 +206,9 @@ async def test_deleting_the_default_workspace_is_a_409(admin_client: httpx.Async
     ],
 )
 @pytest.mark.parametrize("creating", [True, False])
-async def test_breakout_destination_requires_fresh_public_internal_membership(
-    admin_client: httpx.AsyncClient, payload: dict[str, bool] | None, creating: bool
+@pytest.mark.parametrize("field", ["breakout_channel_id", "review_channel_id"])
+async def test_destination_requires_fresh_public_internal_membership(
+    admin_client: httpx.AsyncClient, payload: dict[str, bool] | None, creating: bool, field: str
 ) -> None:
     if not creating:
         await WORKSPACES.create(WorkspaceCreate(name="OSS", slack_channel_ids=["C0API"]), "admin")
@@ -220,23 +221,23 @@ async def test_breakout_destination_requires_fresh_public_internal_membership(
                 json={
                     "name": "OSS",
                     "slack_channel_ids": ["C0API"],
-                    "breakout_channel_id": "C0API",
+                    field: "C0API",
                 },
             )
         else:
             response = await admin_client.put(
-                "/dashboard/api/workspaces/oss", json={"breakout_channel_id": "C0API"}
+                "/dashboard/api/workspaces/oss", json={field: "C0API"}
             )
     load.assert_awaited_once_with("C0API", use_cache=False)
     stored = await WORKSPACES.get("oss")
     if channel is not None and channel.public and channel.can_be_kitchen:
         assert response.status_code == 200
         assert stored is not None
-        assert stored.breakout_channel_id == "C0API"
+        assert getattr(stored, field) == "C0API"
     else:
         assert response.status_code == 400
         if creating:
             assert stored is None
         else:
             assert stored is not None
-            assert stored.breakout_channel_id is None
+            assert getattr(stored, field) is None

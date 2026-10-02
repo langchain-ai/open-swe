@@ -321,6 +321,13 @@ describe("WorkspacesSection", () => {
         key: "Enter",
       }
     )
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Review broadcast destination" })
+    )
+    fireEvent.keyDown(
+      await screen.findByRole("option", { name: "#oss-help" }),
+      { key: "Enter" }
+    )
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
@@ -330,6 +337,7 @@ describe("WorkspacesSection", () => {
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
       breakout_channel_id: "C0000000002",
+      review_channel_id: "C0000000002",
     })
   })
 })

@@ -63,6 +63,7 @@ async def request_human_review(
         run_config=dispatch_run_config(cfg, thread_id, None),
         slack_channel_id=own_channel,
         slack_thread_ts=own_thread,
+        workspace=cfg.workspace_slug,
     )
     result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
     if not result.success:
