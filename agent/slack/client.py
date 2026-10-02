@@ -22,6 +22,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from agent.config import ENV
+from agent.slack.blocks import ActionsBlock, block_payload
 from agent.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
@@ -766,7 +767,12 @@ def _with_slack_web_link_context_block(
         if cost_text:
             label = f"{label} • {cost_text}"
         if feedback["type"] == "context_actions":
-            feedback = {"type": "actions", "block_id": "open_swe_usage_footer", "elements": []}
+            web_block: ActionsBlock = {
+                "type": "actions",
+                "block_id": "open_swe_usage_footer",
+                "elements": [],
+            }
+            [feedback] = block_payload([web_block])
             updated_blocks.append(feedback)
         feedback["elements"].append(
             {
