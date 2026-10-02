@@ -1,5 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
@@ -22,6 +23,19 @@ const outcomeLabels: Record<PullRequestOutcome, string> = {
 
 const interactive =
   'a,button,input,select,textarea,[role="button"],[role="menu"]'
+
+function Timestamp({ value }: { value: string | null }) {
+  const label = dateLabel(value)
+  if (!value) return <time>{label}</time>
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<time dateTime={value} />}>
+        {label}
+      </TooltipTrigger>
+      <TooltipPopup>{value}</TooltipPopup>
+    </Tooltip>
+  )
+}
 
 export function PullRequestCard({
   pr,
@@ -89,8 +103,10 @@ export function PullRequestCard({
   // controls, and a click that lands on one of those means that control. The
   // title stays a real button so the card is reachable without a pointer.
   const openFromCard = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest(interactive))
-      return
+    if (!(event.target instanceof Element)) return
+    // Portalled popups (select options, menus) bubble here through React.
+    if (!event.currentTarget.contains(event.target)) return
+    if (event.target.closest(interactive)) return
     if (window.getSelection()?.toString()) return
     onSelect()
   }
@@ -131,26 +147,14 @@ export function PullRequestCard({
           <Diffstat pr={pr} />
           {review}
           <span>
-            Updated{" "}
-            <time
-              dateTime={pr.updatedAt ?? undefined}
-              title={pr.updatedAt ?? undefined}
-            >
-              {dateLabel(pr.updatedAt)}
-            </time>
+            Updated <Timestamp value={pr.updatedAt} />
           </span>
           <span>
-            Opened{" "}
-            <time
-              dateTime={pr.createdAt ?? undefined}
-              title={pr.createdAt ?? undefined}
-            >
-              {dateLabel(pr.createdAt)}
-            </time>
+            Opened <Timestamp value={pr.createdAt} />
           </span>
           <UnresolvedConversations pr={pr} />
           {!pr.statusAvailable && !pr.detailsLoading && (
-            <span className="text-amber-700 dark:text-amber-400">
+            <span className="text-warning-foreground">
               Live PR status unavailable
             </span>
           )}
