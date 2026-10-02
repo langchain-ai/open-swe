@@ -17,6 +17,7 @@ import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { Toaster } from "@/components/ui/sonner"
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { THEME_COLOR } from "@/lib/theme"
@@ -108,7 +109,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <VersionMismatchBanner />
-          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          <ConfirmProvider>
+            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          </ConfirmProvider>
           <PerfHudMount />
           {import.meta.env.VITE_DEVTOOLS !== "false" && (
             <>
