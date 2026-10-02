@@ -305,20 +305,6 @@ def _reject_forbidden_fields(value: object) -> None:
             _reject_forbidden_fields(nested)
 
 
-def deterministic_event_id(
-    workspace_id: UUID,
-    event_name: EventName,
-    immutable_natural_key: str,
-    source_version: str,
-) -> UUID:
-    return event_uuid(
-        workspace_id,
-        "open-swe",
-        f"{immutable_natural_key}:{source_version}",
-        event_name,
-    )
-
-
 def event_uuid(
     workspace_id: UUID,
     producer: str,

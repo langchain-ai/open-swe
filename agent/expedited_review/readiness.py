@@ -1,15 +1,12 @@
 """When a pull request revision is ready to merge on its expedited approvals.
 
 Ready means: open, not a draft, no merge conflict, no check still running, no
-required check failing or yet to report, no unresolved review thread, no
-standing request for changes, and — where Open SWE reviews the repository — an
-Open SWE review completed for this exact head SHA. Silence from a reviewer is
-not completion.
+required check failing or yet to report, no unresolved review thread, and no
+standing request for changes.
 
 A failing check that GitHub does not require does not block the merge.
 """
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,10 +29,7 @@ from agent.github.pull_request_status import (
     fetch_mergeability,
     fetch_unresolved_review_threads,
 )
-from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.review.enabled_repos import is_review_repo_enabled
-
-logger = logging.getLogger(__name__)
+from agent.github.pull_requests import PullRequestPayload
 
 
 @dataclass(slots=True)
@@ -56,8 +50,6 @@ class PullRequestSnapshot:
     unreported_required_checks: list[str] = field(default_factory=list)
     failures_are_required: bool = True
     changes_requested_by: list[str] = field(default_factory=list)
-    open_swe_review_required: bool = False
-    open_swe_reviewed_head: bool = False
     allowed_merge_methods: list[str] = field(default_factory=list)
     approved_review_ids: frozenset[int] = frozenset()
     # The latest time any check or status on the head finished.
@@ -136,8 +128,6 @@ def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append(f"{snapshot.unresolved_threads} unresolved review {noun}")
     if snapshot.changes_requested_by:
         blockers.append(f"changes requested by {', '.join(snapshot.changes_requested_by)}")
-    if snapshot.open_swe_review_required and not snapshot.open_swe_reviewed_head:
-        blockers.append("Open SWE has not finished reviewing this commit")
     return blockers
 
 
@@ -176,6 +166,22 @@ async def _fetch_reviews(
             page += 1
     except httpx2.HTTPError, ValueError:
         return None
+
+
+async def review_authors(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> set[str] | None:
+    """Lowercased logins of everyone who submitted a review, comment-only ones included."""
+    reviews = await _fetch_reviews(client, owner, repo, number)
+    if reviews is None:
+        return None
+    authors: set[str] = set()
+    for review in reviews:
+        user = review.get("user")
+        login = user.get("login") if isinstance(user, Mapping) else None
+        if isinstance(login, str) and review.get("state") != "PENDING":
+            authors.add(login.lower())
+    return authors
 
 
 async def latest_review_states(
@@ -248,22 +254,6 @@ async def assess_readiness(
         return None
     mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
-    review_required = await is_review_repo_enabled(owner, repo)
-    reviewed_head = False
-    if review_required:
-        try:
-            stored = await PullRequest.get(owner, repo, pr_number)
-        except Exception:
-            logger.warning(
-                "Pull request registry unavailable while checking Open SWE review",
-                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": pr_number},
-                exc_info=True,
-            )
-            return None
-        reviewed_head = stored is not None and any(
-            review.head_sha == head_sha for review in stored.reviews
-        )
-
     check_state, failures = aggregate_check_state(check_runs, statuses)
     author_login = author if isinstance(author, str) else ""
     snapshot = PullRequestSnapshot(
@@ -289,8 +279,6 @@ async def assess_readiness(
             for login, state in _latest_reviews_by_user(reviews, author_login).items()
             if state == "CHANGES_REQUESTED"
         ),
-        open_swe_review_required=review_required,
-        open_swe_reviewed_head=reviewed_head,
         allowed_merge_methods=_merge_methods(pr),
         approved_review_ids=frozenset(
             parsed.id

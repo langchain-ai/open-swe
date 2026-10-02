@@ -2,8 +2,6 @@
 
 import asyncio
 import logging
-import posixpath
-import re
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -13,6 +11,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
+from agent.act_as.gate import require_consent
 from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import (
     PrAuthorNotAParticipant,
@@ -37,7 +36,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
+from agent.transcript.mirror import mirror_thread_metadata
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -597,6 +596,7 @@ async def _record_pr_telemetry(
     base: str,
     pr: dict[str, Any],
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
 ) -> None:
@@ -747,7 +747,13 @@ async def _record_pr_telemetry(
             }
             if repo_private is not None:
                 metadata["repo_private"] = repo_private
+            if record_opening and retitle_thread and isinstance(pr_title, str) and pr_title:
+                metadata.update({"title": pr_title, "title_seed": None})
             await get_client().threads.update(thread_id=thread_id, metadata=metadata)
+            if "title" in metadata:
+                await mirror_thread_metadata(
+                    thread_id, {"title": metadata["title"], "title_seed": None}
+                )
             origin = (
                 cfg.slack_thread
                 if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id
@@ -959,7 +965,9 @@ async def _maybe_append_references(
             lines.append(plan_line)
         try:
             source_lines = await _build_source_reference_lines(cfg)
-            if source_lines and await _is_private_repo(client, token, owner, repo):
+            if source_lines and (
+                cfg.source == "slack" or await _is_private_repo(client, token, owner, repo)
+            ):
                 lines.extend(source_lines)
         except Exception:
             logger.debug("Failed to append source references to PR body", exc_info=True)
@@ -987,6 +995,7 @@ async def _open_pull_request(
     body: str,
     draft: bool,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str | None = None,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1038,6 +1047,17 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
+        if refusal := await require_consent(
+            thread_id=_configurable().thread_id,
+            token_kind=kind,
+            author=author,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            title=title,
+        ):
+            return dict(refusal)
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,
@@ -1078,6 +1098,7 @@ async def _open_pull_request(
                     base=base,
                     pr=pr,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     creation_response=pr,
                 )
             return {
@@ -1103,6 +1124,7 @@ async def _open_pull_request(
                     base=base,
                     pr=existing,
                     resolves_thread=resolves_thread,
+                    retitle_thread=retitle_thread,
                     record_opening=False,
                 )
                 return {
@@ -1153,6 +1175,7 @@ async def open_pull_request(
     body: str,
     draft: bool = True,
     resolves_thread: bool = False,
+    retitle_thread: bool = True,
     author: str = "",
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
@@ -1166,6 +1189,7 @@ async def open_pull_request(
         body=body,
         draft=draft,
         resolves_thread=resolves_thread,
+        retitle_thread=retitle_thread,
         author=author or None,
         state=state,
     )
@@ -1207,81 +1231,3 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
             record_opening=False,
         )
     return {"success": True, "url": pr.get("html_url"), "number": ref.number}
-
-
-UPLOADS_URL = "https://uploads.github.com/user-attachments/assets"
-MAX_BYTES = 10 * 1024 * 1024
-ATTACHMENT_TYPES = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
-    ".mp4": "video/mp4",
-    ".mov": "video/quicktime",
-    ".webm": "video/webm",
-}
-
-
-def _upload_failure(error: str) -> dict[str, object]:
-    return {"success": False, "error": error}
-
-
-async def _read_attachment(file_path: str) -> tuple[str, bytes]:
-    backend, path, _ = await resolve_sandbox_file(file_path)
-    downloads = await backend.adownload_files([path])
-    content = downloads[0].content if downloads else None
-    if not content:
-        raise ValueError("file_path must identify a non-empty file")
-    if len(content) > MAX_BYTES:
-        raise ValueError("file exceeds the 10 MB attachment limit")
-    return path, content
-
-
-async def _upload_attachment(
-    owner: str, repo: str, name: str, content_type: str, content: bytes
-) -> str:
-    token, _kind = await _resolve_pr_author_token()
-    if not token:
-        raise ValueError("no GitHub token is available for this thread")
-    async with httpx2.AsyncClient(timeout=60.0) as client:
-        if await private_credential_login() is None and not await _workspace_has_repository(
-            client, owner, repo
-        ):
-            raise ValueError(f"{owner}/{repo} is not in the workspace GitHub App installation")
-        repo_resp = await client.get(
-            f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token)
-        )
-        if repo_resp.status_code != 200:
-            raise ValueError(f"GitHub returned {repo_resp.status_code} for {owner}/{repo}")
-        resp = await client.post(
-            UPLOADS_URL,
-            params={
-                "name": name,
-                "content_type": content_type,
-                "repository_id": repo_resp.json()["id"],
-            },
-            headers={**_auth_headers(token), "Content-Type": "application/octet-stream"},
-            content=content,
-        )
-    if resp.status_code not in (200, 201):
-        raise ValueError(f"GitHub upload returned {resp.status_code}: {resp.text[:500]}")
-    return resp.json()["url"]
-
-
-async def upload_pr_attachment(owner: str, repo: str, file_path: str) -> dict[str, object]:
-    """Implement the `upload_pr_attachment` tool."""
-    content_type = ATTACHMENT_TYPES.get(posixpath.splitext(file_path)[1].lower())
-    if content_type is None:
-        return _upload_failure("unsupported file type")
-    try:
-        path, content = await _read_attachment(file_path)
-        name = posixpath.basename(path)
-        url = await _upload_attachment(owner, repo, name, content_type, content)
-    except ValueError as exc:
-        logger.warning("PR attachment upload failed", extra={"error": str(exc)})
-        return _upload_failure(str(exc))
-    alt = re.sub(r"[\\\[\]\r\n]", " ", posixpath.splitext(name)[0])
-    markdown = url if content_type.startswith("video/") else f"![{alt}]({url})"
-    return {"success": True, "url": url, "markdown": markdown}

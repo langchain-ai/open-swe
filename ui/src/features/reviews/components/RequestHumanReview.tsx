@@ -46,10 +46,10 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (!profile.data?.human_review_requests) return null
-  const label = requestReview.isPending
-    ? "Requesting review…"
-    : requestReview.isSuccess
+  if (!profile.data?.human_review_requests || pr.reviewDecision === "approved")
+    return null
+  const label =
+    requestReview.isPending || requestReview.isSuccess
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"

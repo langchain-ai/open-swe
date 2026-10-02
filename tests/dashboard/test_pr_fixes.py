@@ -23,7 +23,7 @@ CAMEL_CASE_CONTEXT: dict[str, Any] = {
 }
 
 OPEN = pr_fixes.OpenThreadIntent(intent="open", title="Fix broken build")
-FIX = pr_fixes.FixIntent(intent="fix")
+FIX = pr_fixes.FixIntent(intent="fix", scope="checks")
 ADDRESS_COMMENTS = pr_fixes.AddressCommentsIntent(intent="address-comments")
 
 PR_URL = "https://github.com/acme/app/pull/12"
@@ -92,7 +92,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(pr_fixes, "_build_dashboard_configurable", AsyncMock(return_value={}))
     monkeypatch.setattr(
         pr_fixes,
-        "_create_dashboard_thread_record",
+        "create_dashboard_thread_record",
         AsyncMock(return_value={"thread_id": "new", "metadata": {}}),
     )
     threads["new"] = {"thread_id": "new", "metadata": {"source": "dashboard"}}
@@ -143,7 +143,7 @@ async def test_denied_repo_never_reads_or_starts_threads(setup):
     with pytest.raises(HTTPException):
         await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
     setup.client.threads.get.assert_not_awaited()
-    pr_fixes._create_dashboard_thread_record.assert_not_awaited()
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     pr_fixes.dispatch_agent_run.assert_not_awaited()
 
 
@@ -207,5 +207,5 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
         "acme", "app", 12, "alice", intent=OPEN
     ) == pr_fixes.PullRequestThreadRun(thread_id="slack-thread", already_running=False)
     pr_fixes.dispatch_agent_run.assert_not_awaited()
-    pr_fixes._create_dashboard_thread_record.assert_not_awaited()
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     setup.client.threads.update.assert_not_awaited()

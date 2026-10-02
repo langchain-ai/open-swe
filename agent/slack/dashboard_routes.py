@@ -1,8 +1,8 @@
 """Dashboard API for Slack account linking and the bot allowlist."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Path
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.slack.allowed_bots import (
@@ -14,10 +14,44 @@ from agent.slack.allowed_bots import (
     list_slack_bots,
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
+from agent.slack.client import get_slack_user_names, lookup_slack_thread_id
 from agent.slack.connect import router as connect_router
+from agent.slack.dm import CONCIERGE_TS, open_dm
+from agent.threads.summary import assert_thread_readable
+from agent.users import User
+from agent.utils.json_types import thread_metadata
+from agent.utils.thread_ops import langgraph_client
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
+
+
+@router.get("/slack/users/{user_id}/name")
+async def api_slack_user_name(
+    user_id: Annotated[str, Path(pattern=r"^[UW][A-Z0-9]{2,}$", max_length=32)],
+    _session: dict[str, object] = SESSION_DEP,
+) -> dict[str, str]:
+    names = await get_slack_user_names([user_id])
+    return {"name": names.get(user_id, user_id)}
+
+
+@router.get("/slack/concierge")
+async def api_concierge(
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str | None]:
+    user = await User.for_login("github", session["sub"])
+    if user is None or not user.typed_preferences.concierge_mode or not user.slack_user_id:
+        return {"thread_id": None, "channel_id": None}
+    channel_id = await open_dm(user.slack_user_id)
+    thread_id = (
+        await lookup_slack_thread_id(langgraph_client(), channel_id, CONCIERGE_TS)
+        if channel_id
+        else None
+    )
+    if thread_id:
+        thread = await langgraph_client().threads.get(thread_id)
+        assert_thread_readable(thread_metadata(thread), session["sub"], session.get("email"))
+    return {"thread_id": thread_id, "channel_id": channel_id}
 
 
 @router.get("/slack/bots")
@@ -30,12 +64,13 @@ async def api_list_slack_bots(
 @router.get("/slack/channels")
 async def api_list_slack_channels(
     session: dict[str, Any] = SESSION_DEP,
+    refresh: bool = False,
 ) -> SlackChannelDirectory:
     """Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.
 
     Private channels are listed for admins only.
     """
-    directory = await list_slack_channels()
+    directory = await list_slack_channels(refresh=refresh)
     if session_is_admin(session):
         return directory
     return directory.model_copy(

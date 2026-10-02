@@ -3,7 +3,8 @@ from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
 from agent.slack import http
-from tests.support.slack_api import slack_api_server
+from agent.slack.client import remove_slack_reaction
+from tests.support.slack_api import SlackAPI, slack_api_server
 
 
 async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
@@ -22,6 +23,13 @@ async def test_sdk_session_sends_messages_and_closes_on_rate_limit(monkeypatch):
             ("chat.postMessage", {"channel": "C1", "text": "Hello", "thread_ts": "1.0"})
         ]
         assert session.closed
+
+
+async def test_removing_an_absent_reaction_is_already_settled(slack_api: SlackAPI) -> None:
+    slack_api.respond({"ok": False, "error": "no_reaction"})
+    assert await remove_slack_reaction("C1", "1.0", "x")
+    slack_api.respond({"ok": False, "error": "missing_scope"})
+    assert not await remove_slack_reaction("C1", "1.0", "x")
 
 
 async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
@@ -65,8 +73,10 @@ _PUBLIC_CHANNEL = {
 }
 
 
-async def test_read_channel_tool_refuses_a_private_channel(slack_api):
+async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool_access):  # noqa: ANN001
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
+
+    grant_tool_access(private=True)
 
     slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
     result = await slack_read_channel_messages("C1")

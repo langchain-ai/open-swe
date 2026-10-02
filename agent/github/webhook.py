@@ -11,10 +11,12 @@ from pydantic import BaseModel, ValidationError
 
 from agent.baby_sit import handle_ci_webhook
 from agent.database import postgres
+from agent.expedited_review.reviews import REVIEW_BODY_PREFIX
 from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.human_review.lifecycle import close_for_pull_request
+from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import settle_pull_request, settle_repository
 from agent.input_messages import (
     PersonIdentity,
@@ -26,7 +28,12 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.prompts import load_prompt, prompt
-from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from agent.review.findings import (
+    FindingInteraction,
+    ReviewerPRMeta,
+    ReviewerSlackThread,
+    reviewer_thread_title,
+)
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
 from agent.slack.client import GitHubPrRef
@@ -40,10 +47,6 @@ from agent.thread_ids import (
 from agent.threads.creation import create_thread
 from agent.users import User
 from agent.webhooks import common
-
-
-def _reviewer_thread_title(pr_title: str, pr_number: int) -> str:
-    return f"Review: {pr_title} #{pr_number}" if pr_title else f"Review #{pr_number}"
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -300,7 +303,9 @@ async def trigger_pr_review_from_ref(
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_ref.number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_ref.number, "title": pr_title}),
     ):
         return {"success": False, "error": "Could not create reviewer thread"}
 
@@ -444,7 +449,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_number, "title": pr_title}),
     ):
         return
 
@@ -770,7 +777,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_number, "title": pr_title}),
     ):
         return
     try:
@@ -1071,6 +1080,18 @@ async def process_github_pr_comment(
         "line": event.get("line") or event.get("original_line"),
     }
     if not event_comment["created_at"] or not comment_id:
+        return
+    # The card's own vote already woke the agent and shows the approval.
+    if (
+        event_type == "pull_request_review"
+        and payload.get("action") == "submitted"
+        and str(event.get("state") or "").lower() == "approved"
+        and event_body.startswith(REVIEW_BODY_PREFIX)
+        and postgres.configured()
+        and await HumanReviewRequest.is_expedited_approver(
+            repo_config["owner"], repo_config["name"], pr_number, event_comment["author"]
+        )
+    ):
         return
     if common.thread_is_private(thread_metadata) and not common.thread_is_promptable(
         thread_metadata, event_comment["author"]

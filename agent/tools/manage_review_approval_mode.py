@@ -1,8 +1,8 @@
-"""Read or set a repository's approval mode on private admin surfaces."""
+"""Read approval modes privately or change them through authorized admin writes."""
 
 from typing import Literal
 
-from agent.credential_scope import private_credential_login
+from agent.audit_logs.tools import audit_tool
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.review.approvals import fetch_approvals_md
 from agent.review.styles import (
@@ -12,23 +12,27 @@ from agent.review.styles import (
     effective_approval_mode,
     normalize_repo_full_name,
 )
-from agent.tools.admin_gate import require_private_admin_surface
+from agent.tools.access import Policy, access, ack
+from agent.tools.admin_gate import configurable
+
+_READ = Policy(trusted="admin_surface", actor="admin")
+_WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "mode"))
 
 
+@audit_tool(skip_read=True)
+@access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_approval_mode(
     action: Literal["read", "set"],
     repository: str,
     mode: ApprovalMode | None = None,
 ) -> dict[str, object]:
     """Read or set whether reviews of a repository skip, dry-run, or submit approvals."""
-    if error := await require_private_admin_surface("manage approval modes"):
-        raise ValueError(error)
     if action == "read" and mode is not None:
         raise ValueError("Omit mode when reading")
     repository = normalize_repo_full_name(repository)
-    login = await private_credential_login()
+    login = configurable().github_login
     if not login:
-        raise ValueError("An authenticated private thread owner is required")
+        raise ValueError("An authenticated requester is required")
     token = await require_repo_access_for_user(login, repository)
     if action == "set":
         record = await REVIEW_STYLES.update_prompts(

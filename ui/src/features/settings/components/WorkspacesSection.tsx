@@ -5,14 +5,15 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  slackChannelHref,
   slackChannelLabel,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
+  githubRepoHref,
   WorkspaceEditor,
-  type ChipHref,
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import {
@@ -37,12 +38,14 @@ const REFRESH_LABEL: Record<WorkspaceRefreshStatus, string> = {
 // snapshot read differently to a person deciding whether to trust the image.
 function refreshLabel(
   status: WorkspaceRefreshStatus,
-  kind: WorkspaceOption["refresh_kind"]
+  kind: WorkspaceOption["refresh_kind"],
+  hasSnapshot: boolean
 ): string {
   if (status === "success" && kind === "update") return "Updated"
   if (status === "success" && kind === "full") return "Rebuilt"
   if (status === "refreshing" && kind === "update") return "Updating…"
-  if (status === "refreshing" && kind === "full") return "Rebuilding…"
+  if (status === "refreshing" && kind === "full")
+    return hasSnapshot ? "Rebuilding…" : "Building…"
   return REFRESH_LABEL[status]
 }
 
@@ -58,12 +61,6 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   const parsed = Date.parse(timestamp)
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
-
-// Repositories are stored as `owner/name`; anything else (an unlinked Slack
-// id, a future format) stays an inert chip.
-const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const githubRepoHref: ChipHref = (repo) =>
-  REPO_PATTERN.test(repo) ? `https://github.com/${repo}` : null
 
 const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
   running: "…",
@@ -138,14 +135,22 @@ function WorkspaceRow({
                 : undefined
             }
           >
-            {refreshLabel(status, workspace.refresh_kind)}
+            {refreshLabel(
+              status,
+              workspace.refresh_kind,
+              workspace.has_snapshot
+            )}
             {status !== "refreshing" && when ? ` ${when}` : ""}
           </span>
           {configure}
         </div>
       </div>
       <Chips values={workspace.repos} hrefFor={githubRepoHref} />
-      <Chips values={workspace.slack_channel_ids.map(channelLabel)} />
+      <Chips
+        values={workspace.slack_channel_ids}
+        labelFor={channelLabel}
+        hrefFor={slackChannelHref}
+      />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
@@ -204,11 +209,16 @@ export function WorkspacesSection({
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt
+      if (createDraft.setupScript.trim())
+        body.setup_script = createDraft.setupScript
+      if (createDraft.updateScript.trim())
+        body.update_script = createDraft.updateScript
       await api.createWorkspace(body)
       await qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setAdding(false)
       setCreateDraft(EMPTY_DRAFT)
     } catch (e) {
+      void qc.invalidateQueries({ queryKey: WORKSPACE_OPTIONS_KEY })
       setCreateError(
         e instanceof Error ? e.message : "Could not create the workspace"
       )

@@ -47,6 +47,22 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
     return [section(f"*Reviewers*\n{lines}")]
 
 
+def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
+    link = f"<{request.pull_request.url}|{_label(request)}>"
+    if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
+        return f":mag: *Review requested*  {link}"
+    return f":white_check_mark: *Approved by {_approvers(request, states)}*  {link}"
+
+
+def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
+    mentions = {r.github_login.lower(): r.slack_mention for r in request.reviewers}
+    return ", ".join(
+        mentions.get(login.lower(), f"@{login}")
+        for login, state in states.items()
+        if state == "APPROVED"
+    )
+
+
 def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
     pr = request.pull_request
     parts = [f"By {author}"]
@@ -91,10 +107,7 @@ def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    pr = request.pull_request
-    blocks: list[Block] = [
-        section(f":mag: *Review requested*  <{pr.url}|{_label(request)}>\n*{escape(title)}*"),
-    ]
+    blocks: list[Block] = [section(f"{_heading(request, review_states)}\n*{escape(title)}*")]
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
@@ -106,10 +119,12 @@ def open_card(
 
 
 def closed_card(
-    request: HumanReviewRequest, *, title: str, outcome: str
+    request: HumanReviewRequest, *, title: str, outcome: str, review_states: dict[str, str]
 ) -> tuple[str, list[Block]]:
     """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
+    if outcome == "merged" and (approvers := _approvers(request, review_states)):
+        outcome = f"merged — approved by {approvers}"
     return f"Review request: {outcome} — {pr.url}", [
         section(f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)}")
     ]

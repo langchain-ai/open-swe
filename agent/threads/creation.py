@@ -7,6 +7,9 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.utils.json_types import thread_metadata
 
+# Set when a person renames a thread, so system-generated titles stop replacing theirs.
+TITLE_LOCKED_KEY = "title_locked"
+
 
 def _require_title(title: str) -> str:
     if not title.strip():
@@ -31,11 +34,12 @@ async def create_thread(
 
 
 async def ensure_titled_thread(client: LangGraphClient, thread_id: str, *, title: str) -> None:
-    """Create a system-named thread if needed and keep its title current."""
+    """Create a system-named thread if needed and keep its title current, unless someone renamed it."""
     thread = await client.threads.create(
         thread_id=thread_id, if_exists="do_nothing", metadata={"title": _require_title(title)}
     )
-    if thread_metadata(thread).get("title") != title:
+    metadata = thread_metadata(thread)
+    if metadata.get(TITLE_LOCKED_KEY) is not True and metadata.get("title") != title:
         await client.threads.update(thread_id=thread_id, metadata={"title": title})
 
 

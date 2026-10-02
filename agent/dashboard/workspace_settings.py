@@ -12,9 +12,10 @@ import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from agent.audit_logs.context import bind_workspace
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
@@ -22,7 +23,6 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -80,6 +80,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     )
     fable_enabled: bool | None = Field(default=None, json_schema_extra={"agent_feature_flag": True})
     expedited_review_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     org_guidelines: str | None = None
@@ -258,9 +261,6 @@ def _normalize_stale_model_pair(
 ) -> tuple[str | None, str | None]:
     if model in DEPRECATED_MODEL_IDS:
         return None, None
-    canonical = canonical_model_pair(model, effort)
-    if canonical is not None:
-        return canonical
     return model, effort
 
 
@@ -321,6 +321,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "sandbox_openai_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -685,6 +686,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         return value if isinstance(value, bool) else False
 
     @property
+    def sandbox_openai_enabled(self) -> bool:
+        """Whether sandbox clients may use the experimental Responses API."""
+        return self.get("sandbox_openai_enabled") is True
+
+    @property
     def org_review_guidelines(self) -> str | None:
         """The reviewer guidelines supplement, if any."""
         value = self.get("org_guidelines")
@@ -741,9 +747,12 @@ async def api_get_workspace_settings(
 async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
     try:
-        return await upsert_workspace_overrides(await _existing_workspace(workspace), body)
+        slug = await _existing_workspace(workspace)
+        await bind_workspace(request, slug)
+        return await upsert_workspace_overrides(slug, body)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

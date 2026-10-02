@@ -1,3 +1,6 @@
+import asyncio
+import os
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,8 +9,29 @@ from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
 from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
+@pytest.fixture(autouse=True)
+def sandbox_client() -> Iterator[AsyncMock]:
+    client = AsyncMock()
+    with (
+        patch("agent.sandboxes.providers.langsmith.get_async_sandbox_client") as factory,
+        patch.dict(os.environ, {"SANDBOX_TYPE": "langsmith"}),
+    ):
+        factory.return_value.__aenter__ = AsyncMock(return_value=client)
+        yield client
+
+
 @pytest.mark.asyncio
-async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
+@pytest.mark.parametrize("stop_failure", [None, RuntimeError("stop unavailable"), TimeoutError()])
+async def test_recreate_sandbox_hands_off_after_metadata_persists(
+    sandbox_client: AsyncMock, stop_failure: Exception | None
+) -> None:
+    async def hanging_stop(_sandbox_id: str) -> None:
+        await asyncio.Event().wait()
+
+    sandbox_client.stop_sandbox.side_effect = (
+        hanging_stop if isinstance(stop_failure, TimeoutError) else stop_failure
+    )
+    timeout = asyncio.timeout
     thread_id = "thread-recreate"
     SANDBOX_BACKENDS.clear()
     old_sandbox = MagicMock(id="sandbox-old")
@@ -18,6 +42,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
         assert proxy.current is old_sandbox
 
     with (
+        patch("agent.sandboxes.lifecycle.asyncio.timeout", side_effect=lambda _: timeout(0.01)),
         patch(
             "agent.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
@@ -41,7 +66,15 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists() -> None:
             thread_id,
         )
 
-    assert result == ("sandbox-old", "sandbox-new")
+    expected_error = (
+        "Stopping the old sandbox timed out after 10 seconds"
+        if isinstance(stop_failure, TimeoutError)
+        else str(stop_failure)
+        if stop_failure is not None
+        else None
+    )
+    assert result == ("sandbox-old", "sandbox-new", expected_error)
+    sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
     create.assert_awaited_once_with(
         thread_id=thread_id,
         github_proxy_repositories=None,
@@ -83,7 +116,7 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
             thread_id, workspace_slug="langchainplus", source="base"
         )
 
-    assert result == ("sandbox-old", "sandbox-new")
+    assert result == ("sandbox-old", "sandbox-new", None)
     create.assert_awaited_once_with(
         thread_id=thread_id,
         github_proxy_repositories=None,

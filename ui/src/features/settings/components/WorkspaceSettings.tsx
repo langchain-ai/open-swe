@@ -15,6 +15,7 @@ import {
 
 import { SettingsSection } from "@/components/AppShell"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
+import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -40,9 +41,9 @@ import {
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
@@ -206,6 +207,7 @@ export function WorkspaceSettingsPanel({
     )
   }
 
+  const buildAction = record.data.snapshot_id ? "Rebuild" : "Build"
   const onSaved = (saved: WorkspaceRecord) => {
     const previousRepos = new Set(
       record.data.repos.map((repo) => repo.toLowerCase())
@@ -260,8 +262,8 @@ export function WorkspaceSettingsPanel({
                 className="size-4 shrink-0 animate-spin"
               />
               {record.data.refresh_status === "refreshing"
-                ? "Rebuilding sandbox image…"
-                : "Repositories saved. Sandbox image rebuild queued…"}{" "}
+                ? `${buildAction}ing sandbox image…`
+                : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
               Existing runs keep their current image.
             </p>
           ) : awaitingRepositoryRebuild(record.data) ? (
@@ -269,8 +271,9 @@ export function WorkspaceSettingsPanel({
               role="alert"
               className="min-w-48 flex-1 text-xs text-destructive"
             >
-              Repositories saved, but the image rebuild could not be confirmed.
-              Check the sandbox image status or retry Rebuild image.
+              Repositories saved, but the image {buildAction.toLowerCase()}{" "}
+              could not be confirmed. Check the sandbox image status or retry{" "}
+              {buildAction} image.
             </p>
           ) : repositoryRebuild?.slug === slug ? (
             <p
@@ -280,8 +283,8 @@ export function WorkspaceSettingsPanel({
               className="min-w-48 flex-1 text-xs text-muted-foreground"
             >
               {record.data.refresh_status === "failed"
-                ? `Image rebuild failed. ${record.data.refresh_error ?? "The previous image is still in use."}`
-                : "Sandbox image rebuilt with the saved repositories."}
+                ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
+                : "Sandbox image built with the saved repositories."}
             </p>
           ) : null
         }
@@ -292,6 +295,12 @@ export function WorkspaceSettingsPanel({
         onSaved={onSaved}
         onRebuildStarted={onRebuildStarted}
       />
+      <WorkspaceProxySection
+        key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
+        record={record.data}
+        canEdit={canEdit}
+        onSaved={onSaved}
+      />
       <ModelDefaultsSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
@@ -300,13 +309,13 @@ export function WorkspaceSettingsPanel({
       />
       <DefaultRepoSection
         scope={scope}
-        repositories={(repositories.data?.repositories ?? []).map(
-          (repo) => repo.full_name
-        )}
+        repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
+      {canEdit && (
+        <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
+      )}
       <LLMGatewaySection scope={scope} />
-      <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
@@ -314,8 +323,7 @@ export function WorkspaceSettingsPanel({
         <SettingsSection
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-        >
-          <div className="px-4 py-3.5">
+          action={
             <Button
               size="sm"
               variant="destructive"
@@ -324,8 +332,8 @@ export function WorkspaceSettingsPanel({
             >
               Delete
             </Button>
-          </div>
-        </SettingsSection>
+          }
+        />
       )}
       {canEdit && deleting && (
         <AlertDialog

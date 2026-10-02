@@ -23,6 +23,7 @@ export type RenderItem =
   | { type: "edit-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "connection-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
@@ -30,6 +31,7 @@ export type RenderItem =
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
+  "connection-item",
   "iframe-item",
 ])
 
@@ -49,6 +51,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
   items.forEach((item, index) => {
     if (
       item.type === "reply-item" ||
+      item.type === "connection-item" ||
       item.type === "iframe-item" ||
       index >= trailingReplyIndex
     ) {
@@ -282,6 +285,15 @@ export function buildRenderItems(
           key: `tool-${chunk.toolCallId}`,
           chunk,
         })
+      } else if (
+        chunk.toolKind === "service-connection" &&
+        chunk.input?.service === "notion"
+      ) {
+        items.push({
+          type: "connection-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
       } else if (isReplyTool(chunk)) {
         items.push({
           type: "reply-item",
@@ -324,11 +336,4 @@ export function buildRenderItems(
 
   flushGroups()
   return items
-}
-
-export function summarizeExploration(
-  chunks: Array<ToolExecutionChunk>
-): string {
-  const count = chunks.length
-  return `Explored ${count} file${count === 1 ? "" : "s"}`
 }

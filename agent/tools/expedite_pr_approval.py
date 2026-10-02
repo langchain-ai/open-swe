@@ -15,9 +15,20 @@ from agent.expedited_review.eligibility import (
 )
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
+from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
-from agent.human_review.lifecycle import post_card, remove_superseded_cards, reopen, retire
+from agent.human_review.lifecycle import (
+    broadcast_configured,
+    post_card,
+    prompt_author_ready,
+    refresh_card,
+    remove_superseded_cards,
+    reopen,
+    retire,
+    transition,
+)
 from agent.human_review.requests import HumanReviewRequest
+from agent.human_review.standard import summary_line
 from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
@@ -79,7 +90,10 @@ async def _post_root_message(
 
 
 async def expedite_pr_approval(
-    pr_url: str, action: Literal["start", "cancel"] = "start", channel: str = ""
+    pr_url: str,
+    action: Literal["start", "cancel"] = "start",
+    channel: str = "",
+    inline_summary: str = "",
 ) -> dict[str, Any]:
     """Implement the `expedite_pr_approval` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -156,28 +170,52 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
+    review_channel = (
+        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+    ).review_channel.strip()
+    broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
+    if review_channel and broadcast_target is None:
+        return _failure(
+            f"The configured review channel {review_channel!r} is unavailable to the bot. "
+            "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
+        )
+    broadcast_choice = (
+        [{"id": broadcast_target.id, "name": broadcast_target.name}]
+        if broadcast_target is not None and broadcast_target.name
+        else []
+    )
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     displaced: HumanReviewRequest | None = None
     if active is not None and active.kind != "expedited":
         displaced, active = active, None
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
-    if (
-        active is not None
-        and active.slack_message_ts
-        and fingerprint_matches(files, active.diff_fingerprint)
-    ):
+    if active is not None and fingerprint_matches(files, active.diff_fingerprint):
+        if active.awaiting_ready and not payload.draft:
+            updated = await transition(active.id, expected=("open",), awaiting_ready=False)
+            if updated is not None:
+                active = updated
+        if not active.awaiting_ready:
+            await refresh_card(active)
+            await broadcast_configured(active)
+        readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
+            "readiness_warning": readiness_warning,
             "approval_id": str(active.id),
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "approvers": active.approvers,
             "slack_channel_id": active.slack_channel_id,
-            "next": _next_step(
-                reused=True,
-                elsewhere=active.slack_channel_id != channel_id,
-                in_thread=False,
+            "next": readiness_warning
+            or (
+                "The full draft card is in the author's DM; no thread card is posted until ready."
+                if active.awaiting_ready
+                else _next_step(
+                    reused=True,
+                    elsewhere=active.slack_channel_id != channel_id,
+                    in_thread=False,
+                )
             ),
         }
     if active is not None:
@@ -214,11 +252,30 @@ async def expedite_pr_approval(
         head_sha=head_sha,
         kind="expedited",
         diff_fingerprint=verdict.fingerprint,
+        tldr=summary_line(inline_summary),
+        slack_channel_choices=broadcast_choice,
         awaiting_ready=payload.draft,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
         run_config=dispatch_run_config(cfg, thread_id, None),
     ).save()
+    if approval.awaiting_ready:
+        readiness_warning = await prompt_author_ready(approval)
+        if readiness_warning:
+            await _discard(approval)
+            if displaced is not None:
+                await reopen(displaced)
+            return _failure(readiness_warning)
+        await remove_superseded_cards(approval)
+        return {
+            "success": True,
+            "approval_id": str(approval.id),
+            "pr_url": pr_ref.url,
+            "head_sha": head_sha,
+            "slack_channel_id": channel_id,
+            "next": "The full draft card was sent only to the author by DM. The thread card "
+            "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
+        }
     try:
         message_ts, error = await post_card(approval, title=payload.title, files=files)
     except BaseException:
@@ -233,16 +290,20 @@ async def expedite_pr_approval(
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
+    await broadcast_configured(approval)
     await remove_superseded_cards(approval)
+    readiness_warning = await prompt_author_ready(approval)
     return {
         "success": True,
+        "readiness_warning": readiness_warning,
         "approval_id": str(approval.id),
         "pr_url": pr_ref.url,
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
         "slack_channel_id": channel_id,
-        "next": _next_step(
+        "next": readiness_warning
+        or _next_step(
             reused=False,
             elsewhere=False,
             in_thread=bool(own_thread) and (channel_id, thread_ts) == (own_channel, own_thread),

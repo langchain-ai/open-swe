@@ -57,7 +57,7 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
           path
           line
           originalLine
-          comments(first: 1) {
+          comments(first: 50) {
             nodes {
               author { login }
               body: bodyText
@@ -402,6 +402,17 @@ async def fetch_mergeability(
     )
 
 
+def _thread_reply(comment: dict[str, Any]) -> dict[str, Any]:
+    author = comment.get("author")
+    return {
+        "author": author.get("login")
+        if isinstance(author, dict) and isinstance(author.get("login"), str)
+        else None,
+        "body": comment.get("body") if isinstance(comment.get("body"), str) else "",
+        "url": comment.get("url") if isinstance(comment.get("url"), str) else None,
+    }
+
+
 async def fetch_unresolved_review_threads(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> list[dict[str, Any]] | None:
@@ -463,6 +474,11 @@ async def fetch_unresolved_review_threads(
                         if isinstance(line, int) and not isinstance(line, bool)
                         else None,
                         "url": comment.get("url") if isinstance(comment.get("url"), str) else None,
+                        "replies": [
+                            _thread_reply(reply)
+                            for reply in (nodes[1:] if isinstance(nodes, list) else [])
+                            if isinstance(reply, dict)
+                        ],
                     }
                 )
             page_info = threads.get("pageInfo")
@@ -812,7 +828,8 @@ async def load_open_pull_request(
     )
     base = pull.get("base")
     base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-    if base_ref is not None and result.merge_state == "blocked":
+    # A check gated on `needs:` has no run until its upstream jobs finish.
+    if base_ref is not None and result.merge_state == "blocked" and not pending:
         required = await read_required_checks(client, owner=owner, repo=name, branch=base_ref)
         if required is not None:
             result.missing_checks = unreported_required_checks(required, runs, statuses)

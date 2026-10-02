@@ -6,6 +6,7 @@ import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import { expiresInBrowser } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
@@ -14,7 +15,7 @@ import {
 import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
-import { refreshPullRequest } from "./lib/cache"
+import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { control } from "./lib/styles"
@@ -66,7 +67,9 @@ export function MyPullRequests({
   const [growth, setGrowth] = useState({ key: "", rows: chunkSize })
   // A merged or closed PR keeps its row until the next refresh: dropping it
   // immediately would pull every card below it up under the pointer.
-  const [settled, setSettled] = useState<Record<string, PullRequestOutcome>>({})
+  const [settled, setSettled] = useState<
+    Partial<Record<string, PullRequestOutcome>>
+  >({})
   const pages = query.data?.pages ?? []
   const latest = pages.at(-1)
   const rows = pages.flatMap((loaded) => loaded.pullRequests)
@@ -127,7 +130,7 @@ export function MyPullRequests({
     queries: reviewChunks.map((refs) => ({
       queryKey: ["my-pr-review-summaries", login, refs],
       queryFn: () => api.reviewSummaries(refs),
-      staleTime: Infinity,
+      ...expiresInBrowser,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       retry: false,
@@ -158,6 +161,14 @@ export function MyPullRequests({
     ? all.find((row) => pullRequestKey(row) === selected)
     : undefined
   const railed = Boolean(selectedRow)
+  const selectedIndex = visible.findIndex(
+    (row) => pullRequestKey(row) === selected
+  )
+  const nextRow = selectedIndex >= 0 ? visible[selectedIndex + 1] : undefined
+  useEffect(() => {
+    if (nextRow)
+      void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
+  }, [queryClient, nextRow])
 
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
@@ -168,7 +179,10 @@ export function MyPullRequests({
         outcome={settled[key]}
         compact={railed}
         selected={selected === key}
-        onSelect={() => onFiltersChange({ pr: key })}
+        onSelect={() => {
+          refreshPullRequest(queryClient, login, pr)
+          onFiltersChange({ pr: key })
+        }}
         review={
           summariesUnavailable ? null : (
             <PullRequestReview
@@ -379,6 +393,9 @@ export function MyPullRequests({
               login={login}
               outcome={settled[pullRequestKey(selectedRow)]}
               onClose={() => onFiltersChange({ pr: undefined })}
+              expandedFiles={filters.files}
+              scrollAnchor={filters.at}
+              onPositionChange={(changes) => onFiltersChange(changes, true)}
               onSettled={(outcome) =>
                 setSettled((previous) => ({
                   ...previous,

@@ -1,4 +1,4 @@
-"""Mark ready, Approve, Broadcast and Dismiss clicks on an expedited review card.
+"""Mark ready, Approve, Broadcast, Send and Dismiss clicks on an expedited review card.
 
 A voter is a person (``users`` row) reached through their Slack identity whose
 GitHub identity has write access to the repository. Only the author may mark a
@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from agent.dashboard.profiles import get_valid_access_token
+from agent.expedited_review.channels import sendable_channel, still_internal
 from agent.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
 from agent.expedited_review.reviews import github_token_hint, submit_approval
 from agent.github.ci import fetch_pr
@@ -21,6 +22,7 @@ from agent.github.pull_requests import PullRequestPayload
 from agent.human_review.clicks import answer_click
 from agent.human_review.lifecycle import (
     broadcast_card,
+    copy_card,
     dismiss_request,
     notify_agent,
     refresh_card,
@@ -41,7 +43,7 @@ from agent.users import User
 logger = logging.getLogger(__name__)
 
 VoteAction = Literal["approve", "ready"]
-CardAction = VoteAction | Literal["dismiss", "broadcast"]
+CardAction = VoteAction | Literal["dismiss", "broadcast", "send"]
 
 
 async def handle_vote(
@@ -172,11 +174,44 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
     """Anyone in the thread may send an open card to the channel."""
     if approval.state != "open" or approval.approved:
         return Outcome("This expedited review is no longer waiting for approval.")
-    if approval.slack_broadcast:
-        return Outcome("This expedited review is already in the channel.")
+    if approval.sent_elsewhere:
+        return Outcome("This expedited review was already sent to a channel.")
+    choices = approval.slack_channel_choices
+    if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
+        return await request_copy(approval, choices[0]["id"], None, configured=True)
     if not await broadcast_card(approval):
         return Outcome("Open SWE could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
+
+
+async def request_copy(
+    approval: HumanReviewRequest, channel_id: str, user: User | None, *, configured: bool = False
+) -> Outcome:
+    """Only someone with write access may show the diff to another channel's members."""
+    # A modal can be submitted long after it opened, past the click's own channel check.
+    if not await still_internal(approval.slack_channel_id):
+        return Outcome("This card's channel is shared outside the workspace, so it cannot be sent.")
+    if channel_id == approval.slack_channel_id:
+        return await request_broadcast(approval)
+    if approval.state != "open" or approval.approved:
+        return Outcome("This expedited review is no longer waiting for approval.")
+    if approval.sent_elsewhere:
+        return Outcome("This expedited review was already sent to a channel.")
+    if not configured:
+        sender = await resolve_writer(approval, user)
+        if isinstance(sender, Outcome):
+            return sender
+    channel = await sendable_channel(channel_id)
+    if channel is None:
+        return Outcome(
+            "Open SWE only sends expedited reviews to public channels that are not shared "
+            "outside the workspace."
+        )
+    if (problem := await copy_card(approval, channel)) is not None:
+        return Outcome(
+            f"Open SWE could not send this expedited review to <#{channel.id}>. {problem}"
+        )
+    return Outcome(f"Sent to <#{channel.id}>.")
 
 
 async def process_vote(
@@ -186,8 +221,12 @@ async def process_vote(
     person: PersonIdentity,
     channel_id: str,
     thread_ts: str,
+    target_channel: str = "",
 ) -> None:
-    """Background entry point for a Slack click; answers the clicker ephemerally."""
+    """Background entry point for a Slack click; answers the clicker ephemerally.
+
+    ``target_channel`` is the channel a ``send`` click picked.
+    """
     slack_user_id = split_person_id(person)[1]
 
     async def handle(approval: HumanReviewRequest) -> Outcome:
@@ -196,6 +235,8 @@ async def process_vote(
                 return await dismiss_request(approval, slack_user_id)
             case "broadcast":
                 return await request_broadcast(approval)
+            case "send":
+                return await request_copy(approval, target_channel, await User.for_person(person))
             case _:
                 return await handle_vote(
                     approval, decision=decision, user=await User.for_person(person)

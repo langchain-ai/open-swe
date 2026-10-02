@@ -139,6 +139,44 @@ def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username:
     return text
 
 
+_SLACK_USER_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+_SLACK_CHANNEL_MENTION_RE = re.compile(r"<#([CG][A-Z0-9]+)\|?>")
+
+
+def slack_mentioned_user_ids(text: str) -> list[str]:
+    """The user ids in bare `<@USER_ID>` mentions."""
+    return _SLACK_USER_MENTION_RE.findall(text)
+
+
+def slack_mentioned_channel_ids(text: str) -> list[str]:
+    """The channel ids in `<#CHANNEL_ID>` mentions that carry no name."""
+    return _SLACK_CHANNEL_MENTION_RE.findall(text)
+
+
+def _label_slack_mentions(
+    text: str, pattern: re.Pattern[str], sigil: str, names_by_id: Mapping[str, str]
+) -> str:
+    def label(match: re.Match[str]) -> str:
+        entity_id = match[1]
+        name = names_by_id.get(entity_id, "")
+        if not name or name == entity_id:
+            return match[0]
+        escaped = name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<{sigil}{entity_id}|{escaped}>"
+
+    return pattern.sub(label, text)
+
+
+def label_slack_user_mentions(text: str, user_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite bare `<@USER_ID>` mentions to Slack's labelled `<@USER_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_USER_MENTION_RE, "@", user_names_by_id)
+
+
+def label_slack_channel_mentions(text: str, channel_names_by_id: Mapping[str, str]) -> str:
+    """Rewrite unnamed `<#CHANNEL_ID>` mentions to Slack's labelled `<#CHANNEL_ID|name>` form."""
+    return _label_slack_mentions(text, _SLACK_CHANNEL_MENTION_RE, "#", channel_names_by_id)
+
+
 def convert_mentions_to_slack_format(text: str) -> str:
     """Convert @Name(USER_ID) patterns to Slack's <@USER_ID> mention format."""
     return re.sub(r"@[^()]+\(([A-Z0-9]+)\)", r"<@\1>", text)
@@ -349,10 +387,13 @@ def format_slack_messages_for_prompt(
     lines: list[str] = []
     for message in messages:
         forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
-        text = replace_bot_mention_with_username(
-            str(message.get("text", "")),
-            bot_user_id=bot_user_id,
-            bot_username=bot_username,
+        text = label_slack_user_mentions(
+            replace_bot_mention_with_username(
+                str(message.get("text", "")),
+                bot_user_id=bot_user_id,
+                bot_username=bot_username,
+            ),
+            user_names_by_id or {},
         ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
@@ -519,7 +560,8 @@ def format_slack_run_usage(usage: RunUsageSummary | None) -> str:
 
 _SESSION_COST_LABEL_RE = re.compile(
     r"(?: • )?(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?|calculating cost(?:\.\.\.)?)"
-    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\))?$"
+    r"(?: session cost)?(?: \((?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?)\)"
+    r"| • \+(?:<\$0\.01|\$[0-9]+(?:\.[0-9]+)?))?$"
 )
 _MAIN_AGENT_TOKEN_LABEL_RE = re.compile(r"(?: • )?[0-9]+(?:\.[0-9]+)?[KM]? main-agent tokens$")
 
@@ -547,7 +589,7 @@ def with_slack_session_cost(
 ) -> tuple[str, list[dict[str, Any]] | None]:
     """Replace cumulative and optional per-run costs in a live Slack footer."""
     label = format_slack_session_cost(cost)
-    if run_cost is not None:
+    if run_cost is not None and run_cost < cost:
         label += f" ({format_slack_session_cost(run_cost)})"
     updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
@@ -1330,6 +1372,22 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         return False
 
 
+async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+    """Remove the bot's reaction from a Slack message."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    try:
+        async with SlackClient.bot() as client:
+            await client.reactions_remove(channel=channel_id, timestamp=message_ts, name=emoji)
+        return True
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "no_reaction":
+            return True
+        logger.warning("Slack reaction removal failed", extra={"slack_error": error})
+        return False
+
+
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
     """Get Slack user details by user ID."""
     if not SLACK_BOT_TOKEN:
@@ -1364,8 +1422,13 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
-async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
-    """Fetch messages for a Slack thread, keeping the most recent window."""
+async def fetch_slack_thread_messages(
+    channel_id: str, thread_ts: str, *, complete: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch messages for a Slack thread, keeping the most recent window.
+
+    With ``complete``, a failed page raises instead of returning the pages fetched so far.
+    """
     if not SLACK_BOT_TOKEN:
         return []
 
@@ -1390,6 +1453,8 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
                 )
             except SLACK_REQUEST_ERRORS as exc:
                 logger.warning("Slack thread fetch failed", extra={"slack_error": slack_error(exc)})
+                if complete:
+                    raise
                 break
 
             batch = payload.get("messages", [])
@@ -2119,16 +2184,3 @@ async def lookup_slack_run_mapping(
         return None
     value = item.get("value")
     return value if isinstance(value, dict) else None
-
-
-async def lookup_run_id_for_slack_message(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    message_ts: str,
-) -> str | None:
-    """Look up the LangGraph run mapped to a specific Slack bot message."""
-    value = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
-    if not value:
-        return None
-    run_id = value.get("run_id")
-    return run_id if isinstance(run_id, str) and run_id else None

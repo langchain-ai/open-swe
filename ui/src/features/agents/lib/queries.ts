@@ -1092,6 +1092,20 @@ export function useDeleteAgentThread() {
   })
 }
 
+export function useShareThreadWithWorkspace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      agentsApi.shareThreadWithWorkspace(threadId),
+    meta: { errorTitle: "Couldn't share thread with workspace" },
+    onSuccess: (thread) => {
+      storeAgentThread(queryClient, thread)
+      invalidateAgentThreadLists(queryClient)
+    },
+  })
+}
+
 export function useContinueThreadPrivately() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()

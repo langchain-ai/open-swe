@@ -223,11 +223,16 @@ class SlackInputValue(SlackPayload):
     """One element's current value, as a view's or message's ``state.values`` carries it."""
 
     value: str | None = None
+    selected_option: SlackSelectedOption | None = None
     selected_options: list[SlackSelectedOption] = Field(default_factory=list)
+    selected_conversation: str | None = None
 
 
 class SlackViewState(SlackPayload):
     values: dict[str, dict[str, SlackInputValue]] = Field(default_factory=dict)
+
+    def input(self, block_id: str, action_id: str) -> SlackInputValue:
+        return (self.values.get(block_id) or {}).get(action_id) or SlackInputValue()
 
 
 class SlackView(SlackPayload):
@@ -363,20 +368,6 @@ class SlackChannelContext(SlackPayload):
         if self.description.strip():
             return self.description.strip()
         return "\n".join(value.strip() for value in (self.topic, self.purpose) if value.strip())
-
-    @property
-    def has_metadata(self) -> bool:
-        """Whether any name or description field carries something."""
-        return any(
-            value.strip()
-            for value in (
-                self.name,
-                self.name_normalized,
-                self.topic,
-                self.purpose,
-                self.description,
-            )
-        )
 
     @property
     def label(self) -> str:

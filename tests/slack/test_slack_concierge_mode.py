@@ -126,3 +126,26 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
     assert request.thread_ts == "1786573369.551099"
     assert request.concierge_mode is False
     assert request.treat_all_messages_as_mentions is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concierge_on", [True, False])
+async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
+    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
+) -> None:
+    from agent.slack import dm
+
+    monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
+    lookup = AsyncMock(return_value="concierge-thread")
+    monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(dm, "langgraph_client", lambda: object())
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+
+    await dm.note_for_concierge("U1", "D1", "a note")
+
+    if concierge_on:
+        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
+    else:
+        queue.assert_not_awaited()
