@@ -60,6 +60,14 @@ export function PullRequestsSection() {
     workspaceSettings.data?.effective.review_draft_prs ?? false
   const expeditedOn =
     workspaceSettings.data?.effective.expedited_review_enabled ?? false
+  const draftReviewItems: Array<{ value: DraftReviewChoice; label: string }> = [
+    {
+      value: "team_default",
+      label: `Use workspace default (currently: ${teamDefaultOn ? "On" : "Off"})`,
+    },
+    { value: "always_on", label: "Always review my drafts" },
+    { value: "always_off", label: "Never review my drafts" },
+  ]
 
   return (
     <SettingsSection
@@ -86,6 +94,7 @@ export function PullRequestsSection() {
         description="Whether Open SWE Review runs on pull requests you open in draft."
         control={
           <Select
+            items={draftReviewItems}
             value={toChoice(profile.data?.review_draft_prs)}
             onValueChange={(v) =>
               persist({ review_draft_prs: CHOICES[v as DraftReviewChoice] })
@@ -96,13 +105,11 @@ export function PullRequestsSection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="team_default">
-                {`Use workspace default (currently: ${
-                  teamDefaultOn ? "On" : "Off"
-                })`}
-              </SelectItem>
-              <SelectItem value="always_on">Always review my drafts</SelectItem>
-              <SelectItem value="always_off">Never review my drafts</SelectItem>
+              {draftReviewItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         }

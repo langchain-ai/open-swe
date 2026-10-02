@@ -965,7 +965,9 @@ async def _maybe_append_references(
             lines.append(plan_line)
         try:
             source_lines = await _build_source_reference_lines(cfg)
-            if source_lines and await _is_private_repo(client, token, owner, repo):
+            if source_lines and (
+                cfg.source == "slack" or await _is_private_repo(client, token, owner, repo)
+            ):
                 lines.extend(source_lines)
         except Exception:
             logger.debug("Failed to append source references to PR body", exc_info=True)

@@ -23,7 +23,7 @@ from agent.threads.access import (
     _readable_thread_metadata,
 )
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
-from agent.threads.creation import create_thread
+from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
@@ -481,7 +481,7 @@ async def rename_dashboard_thread(
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata_update = {"title": title, "title_seed": None}
+    metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001

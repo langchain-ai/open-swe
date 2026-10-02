@@ -38,6 +38,7 @@ interface Pending {
 function mockWorkspaceServer() {
   let stored: WorkspaceSettingsView = { effective: BASE, overrides: {} }
   const requests: Array<Pending> = []
+  vi.spyOn(api, "getInstanceSettings").mockResolvedValue(BASE)
   vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => stored)
   vi.spyOn(api, "saveWorkspaceSettings").mockImplementation(
     (_slug, overrides) =>
@@ -99,6 +100,56 @@ it("sends a second section's save after the first and keeps both patches", async
       overrides: { fable_enabled: true, pr_summaries: true },
     })
   )
+})
+
+it.each([
+  ["fable_enabled", false],
+  ["model_routing_enabled", null],
+] as const)(
+  "restores %s inheritance when a pending edit is reverted",
+  async (field, inherited) => {
+    const requests = mockWorkspaceServer()
+    vi.mocked(api.getInstanceSettings).mockResolvedValue({
+      ...BASE,
+      [field]: inherited,
+    })
+    const { result } = renderTwoSections(newClient())
+    await waitFor(() => expect(result.current.a.data).toBeDefined())
+
+    act(() => result.current.a.save({ [field]: true }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    act(() => result.current.b.save({ [field]: false }))
+    await waitFor(() => expect(result.current.a.inherits(field)).toBe(true))
+    expect(result.current.a.data?.[field]).toBe(false)
+
+    act(() => requests[0]!.resolve())
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[1]!.overrides).toEqual({})
+    act(() => requests[1]!.resolve())
+    await waitFor(() =>
+      expect(result.current.a.saved?.[field]).toBe(BASE[field])
+    )
+    expect(result.current.a.inherits(field)).toBe(true)
+  }
+)
+
+it("keeps the model override when only its effort differs from the instance", async () => {
+  const requests = mockWorkspaceServer()
+  vi.mocked(api.getInstanceSettings).mockResolvedValue({
+    ...BASE,
+    default_agent_model: "anthropic:claude-opus-5-5",
+    default_agent_reasoning_effort: "medium",
+  })
+  const { result } = renderTwoSections(newClient())
+  await waitFor(() => expect(result.current.a.data).toBeDefined())
+  const patch = {
+    default_agent_model: "anthropic:claude-opus-5-5",
+    default_agent_reasoning_effort: "high",
+  }
+  act(() => result.current.a.save(patch))
+  await waitFor(() => expect(requests).toHaveLength(1))
+  expect(requests[0]!.overrides).toEqual(patch)
+  act(() => requests[0]!.resolve())
 })
 
 it("drops only the failed patch and reports the failure", async () => {

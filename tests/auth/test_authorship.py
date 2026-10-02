@@ -8,15 +8,10 @@ from agent.github import app as github_app
 from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
-    OPEN_SWE_BOT_EMAIL,
-    OPEN_SWE_BOT_NAME,
-    add_bot_coauthor_trailer,
     resolve_participant_identities,
     resolve_public_github_profile,
     resolve_triggering_user_identity,
 )
-
-_BOT_TRAILER = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
 
 
 @pytest.mark.asyncio
@@ -52,11 +47,6 @@ async def test_participant_context_includes_slack_identity(
     )
     content = person_introduction(participant.as_person())["content"]
     assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
-
-
-def test_add_bot_coauthor_trailer_is_idempotent() -> None:
-    once = add_bot_coauthor_trailer("fix: thing")
-    assert add_bot_coauthor_trailer(once) == once
 
 
 async def test_participant_identity_ignores_users_table_email(
