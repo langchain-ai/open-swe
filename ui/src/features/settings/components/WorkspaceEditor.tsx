@@ -14,6 +14,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import { slackChannelHref } from "@/lib/slack-channels"
+
+const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+export const githubRepoHref: ChipHref = (repo) =>
+  REPO_PATTERN.test(repo) ? `https://github.com/${repo}` : null
 
 /** Turns a chip's value into a URL; a chip becomes a link when provided. */
 export type ChipHref = (value: string) => string | null
@@ -21,9 +26,11 @@ export type ChipHref = (value: string) => string | null
 export function Chips({
   values,
   hrefFor,
+  labelFor,
 }: {
   values: Array<string>
   hrefFor?: ChipHref
+  labelFor?: (value: string) => string
 }) {
   if (values.length === 0) return null
   return (
@@ -35,7 +42,7 @@ export function Chips({
         if (!href)
           return (
             <span key={value} className={className}>
-              {value}
+              {labelFor?.(value) ?? value}
             </span>
           )
         return (
@@ -46,7 +53,7 @@ export function Chips({
             rel="noopener noreferrer"
             className={`${className} hover:border-foreground/30 hover:text-foreground`}
           >
-            {value}
+            {labelFor?.(value) ?? value}
           </a>
         )
       })}
@@ -106,7 +113,14 @@ function SlackChannelRows({
           key={id}
           className="flex items-center justify-between gap-3 px-2.5 py-1.5"
         >
-          <span className="truncate text-xs">{channelLabel(id)}</span>
+          <a
+            href={slackChannelHref(id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="truncate text-xs hover:underline"
+          >
+            {channelLabel(id)}
+          </a>
           <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
             Kitchen
             <Switch
@@ -177,7 +191,7 @@ export function WorkspaceEditor({
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (
-            <Chips values={draft.repos} />
+            <Chips values={draft.repos} hrefFor={githubRepoHref} />
           ) : (
             <span className="text-xs text-muted-foreground">None yet</span>
           )}
