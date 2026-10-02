@@ -1,7 +1,6 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import {
-  AlarmIcon,
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   BookOpenTextIcon,
@@ -11,6 +10,7 @@ import {
   ChatCircleIcon,
   CheckCircleIcon,
   CircleNotchIcon,
+  ClockIcon,
   FolderIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -52,7 +52,7 @@ import {
   reviewPageRoute,
 } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
 
@@ -441,13 +441,12 @@ export function SidebarThreadRow({
             {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
           </>
         )}
-        {item.status !== "running" &&
-          (thread?.nextWakeupAt ?? 0) > Date.now() && (
-            <AlarmIcon
-              className="size-3.5 shrink-0 text-muted-foreground"
-              aria-label="Wakeup scheduled"
-            />
-          )}
+        {pendingWakeupAt(item) && (
+          <ClockIcon
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Wakeup scheduled"
+          />
+        )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
         ) : unread ? (
@@ -676,6 +675,12 @@ function SidebarSubagentRow({
   )
 }
 
+function pendingWakeupAt(item: SidebarThreadItem): number | null {
+  if (item.location !== "cloud" || item.status === "running") return null
+  const at = item.thread.nextWakeupAt
+  return at && at > Date.now() ? at : null
+}
+
 function ThreadHoverCard({
   item,
   live,
@@ -686,6 +691,7 @@ function ThreadHoverCard({
   const LocationIcon =
     item.location === "local" ? IoLaptopOutline : IoCloudOutline
   const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const wakeupAt = pendingWakeupAt(item)
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -711,6 +717,18 @@ function ThreadHoverCard({
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
           <FolderIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate text-[12px]">{item.repoLabel}</span>
+        </div>
+      )}
+      {wakeupAt && (
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <ClockIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate text-[12px]">
+            Wakes up {formatRelativeTime(wakeupAt)} ·{" "}
+            {new Date(wakeupAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </span>
         </div>
       )}
       {item.pr && (

@@ -8,7 +8,7 @@ import {
   useState,
 } from "react"
 import {
-  AlarmClock,
+  Clock,
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
@@ -125,7 +125,7 @@ function ScheduledWakeup({ at }: { at?: number | null }) {
       className="mb-2 flex w-fit items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground"
       title={`Scheduled for ${new Date(at).toLocaleString()}`}
     >
-      <AlarmClock className="size-3.5" />
+      <Clock className="size-3.5" />
       Agent wakes up {formatRelativeTime(at)}
     </div>
   )
