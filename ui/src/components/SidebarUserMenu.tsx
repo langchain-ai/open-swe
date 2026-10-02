@@ -159,7 +159,7 @@ export function SidebarUserMenu({
             </div>
           </div>
           <div className="my-1 h-px bg-border" />
-          {datadogInitialized && (
+          {user.is_admin && datadogInitialized && (
             <button
               type="button"
               role="menuitem"

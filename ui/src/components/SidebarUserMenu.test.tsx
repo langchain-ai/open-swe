@@ -33,7 +33,7 @@ vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ theme: "system", setTheme: mocks.setTheme }),
 }))
 
-function renderMenu() {
+function renderMenu(isAdmin = true) {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <SidebarUserMenu
@@ -41,7 +41,7 @@ function renderMenu() {
           login: "octocat",
           email: "octocat@example.com",
           avatar_url: null,
-          is_admin: false,
+          is_admin: isAdmin,
         }}
       />
     </QueryClientProvider>
@@ -110,6 +110,13 @@ describe("SidebarUserMenu", () => {
         name: "Couldn't copy Datadog link",
       })
     ).toBeTruthy()
+  })
+
+  it("hides the item from non-admins even when RUM initializes", () => {
+    mocks.datadogInitialized = true
+    renderMenu(false)
+
+    expect(screen.queryByRole("menuitem", { name: /Datadog link/ })).toBeNull()
   })
 
   it("hides the item before RUM initializes", () => {
