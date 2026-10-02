@@ -234,8 +234,8 @@ function EmptyState({
     <div className="flex flex-1 flex-col gap-4 p-4">
       <p className="text-[13px] text-foreground">
         {reviewed
-          ? "I've reviewed this PR. Ask me about the diff, the findings, or the surrounding code — I have read-only access to the repository."
-          : "This PR hasn't been reviewed yet. Ask me about the diff or the surrounding code — I have read-only access to the repository."}
+          ? "Chat with the main agent about this PR's diff, review findings, or surrounding code."
+          : "This PR hasn't been reviewed yet. Chat with the main agent about the diff or surrounding code."}
       </p>
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-muted-foreground">
