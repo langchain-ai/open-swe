@@ -2,11 +2,11 @@ import json
 import logging
 
 from langchain.agents.middleware import AgentState, before_model
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from agent.input_messages import input_message_text, message_sender_id
+from agent.input_messages import input_message_text, message_sender_id, system_input
 from agent.middleware.trace import scrub_middleware_inputs
 from agent.prompts import prompt
 from agent.slack.pr_links import linked_pull_request_urls
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @before_model
 async def pr_thread_reminder_before_model(
     state: AgentState, runtime: Runtime
-) -> dict[str, list[SystemMessage]] | None:
+) -> dict[str, list[HumanMessage]] | None:
     messages = state["messages"]
     human = next(
         (
@@ -71,13 +71,13 @@ async def pr_thread_reminder_before_model(
         return None
     if not targets:
         return None
-    return {
-        "messages": [
-            SystemMessage(
-                content=prompt(
-                    "runs/pr-thread-reminder", targets=json.dumps(targets, ensure_ascii=True)
-                ),
-                id=reminder_id,
-            )
-        ]
-    }
+    content = system_input(
+        prompt("runs/pr-thread-reminder", targets=json.dumps(targets, ensure_ascii=True)),
+        {
+            "sender_id": "system:pr-thread-reminder",
+            "surface": "automation",
+            "kind": "system",
+        },
+    )["content"]
+    assert isinstance(content, str)
+    return {"messages": [HumanMessage(content=content, id=reminder_id)]}
