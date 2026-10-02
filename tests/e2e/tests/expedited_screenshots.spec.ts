@@ -58,4 +58,8 @@ test("screenshots lead, Bob reviews the code before approving", async ({
         ?.approvers;
     })
     .toEqual(["bob"]);
+  await expect(dialog).not.toBeVisible();
+  await request.post("/control/reset");
+  const modal = await request.get("/mock/slack/modal?user=U_BOB");
+  expect(await modal.json()).toBeNull();
 });

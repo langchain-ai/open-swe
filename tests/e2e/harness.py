@@ -108,6 +108,7 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    SLACK_VIEWS.clear()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
