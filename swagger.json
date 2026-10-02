@@ -14667,6 +14667,44 @@
         ]
       }
     },
+    "/dashboard/api/slack/concierge": {
+      "get": {
+        "operationId": "api_concierge_dashboard_api_slack_concierge_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Concierge Dashboard Api Slack Concierge Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Concierge",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/desktop/exchange": {
       "post": {
         "description": "Finish a desktop Slack link with the app's own session.",
