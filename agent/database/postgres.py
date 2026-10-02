@@ -105,7 +105,7 @@ def _query_started(
 
 def _log_slow_query(conn: Connection, statement: str | None, failed: bool) -> None:
     started = conn.info.pop("slow_query_started", None)
-    threshold = ENV.POSTGRES_SLOW_QUERY_MS.get_int(500)
+    threshold = ENV.POSTGRES_SLOW_QUERY_MS.get_int(1000)
     if not isinstance(started, float) or threshold <= 0:
         return
     duration_ms = (perf_counter() - started) * 1000

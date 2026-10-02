@@ -349,7 +349,7 @@ ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="
 ENV.var(
     "POSTGRES_SLOW_QUERY_MS",
     "Log application queries at or above this duration in milliseconds; 0 disables.",
-    default="500",
+    default="1000",
 )
 ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
 ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
