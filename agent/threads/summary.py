@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.dashboard.options import SUPPORTED_MODEL_IDS
 from agent.github.pull_requests import PullRequest
 from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
@@ -86,9 +86,6 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
         model = metadata.get(key)
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model
-        canonical = canonical_model_pair(model)
-        if canonical is not None:
-            return canonical[0]
     return None
 
 

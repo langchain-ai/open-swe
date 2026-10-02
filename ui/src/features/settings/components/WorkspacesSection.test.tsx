@@ -267,6 +267,12 @@ describe("WorkspacesSection", () => {
 
     renderSection(true)
 
+    const channel = await screen.findByRole("link", { name: "#commits" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C0000000001"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
+
     fireEvent.click(
       await screen.findByRole("button", { name: "Add workspace" })
     )
@@ -306,6 +312,15 @@ describe("WorkspacesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
+    fireEvent.click(
+      screen.getByRole("combobox", { name: "Breakout destination" })
+    )
+    fireEvent.keyDown(
+      await screen.findByRole("option", { name: "#oss-help" }),
+      {
+        key: "Enter",
+      }
+    )
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled())
@@ -314,6 +329,7 @@ describe("WorkspacesSection", () => {
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
+      breakout_channel_id: "C0000000002",
     })
   })
 })

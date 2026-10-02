@@ -168,6 +168,7 @@ export interface SessionUser {
 /** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
 export interface BuildInfo {
   backend: {
+    environment?: string | null
     /** LangGraph Platform revision id — opaque, never a git SHA. */
     revision_id: string | null
     commit: string | null
@@ -194,6 +195,7 @@ export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
       : undefined
   return {
     backend: {
+      environment: typeof b.environment === "string" ? b.environment : null,
       revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
       commit: typeof b.commit === "string" ? b.commit : null,
       built_at: typeof b.built_at === "string" ? b.built_at : null,
@@ -228,6 +230,7 @@ export interface OptionsPayload {
 
 export interface Profile {
   experimental_assistant_ui?: boolean | null
+  experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -254,6 +257,7 @@ export interface Profile {
 
 export interface ProfileUpdate {
   experimental_assistant_ui?: boolean | null
+  experimental_background_callbacks?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null
@@ -690,6 +694,7 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   /** Bound channels where untagged messages start and continue threads. */
   kitchen_channel_ids: Array<string>
+  breakout_channel_id?: string | null
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -729,6 +734,7 @@ export interface WorkspaceCreate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
 }
@@ -749,6 +755,7 @@ export interface WorkspaceUpdate {
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
+  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -771,6 +778,7 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
+  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -1108,14 +1116,22 @@ export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput 
 }
 
 export interface ReviewDiffFile {
+  baseSha: string
+  headSha: string
   path: string
   previousPath: string | null
   status: "added" | "removed" | "modified" | "renamed"
   additions: number
   deletions: number
-  originalContent: string
-  modifiedContent: string
+  // A full per-file git patch. null when GitHub omits one (binary or very
+  // large files), which is what `unrenderable` reports.
+  patch: string | null
   unrenderable?: boolean
+}
+
+export interface ReviewFileContents {
+  originalContent: string | null
+  modifiedContent: string | null
 }
 
 export type PreviewFileStatus =
@@ -1614,8 +1630,10 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
-  adminListUsers: (page = 1, pageSize = 20) =>
-    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
+  adminListUsers: (page = 1, pageSize = 20, search = "") =>
+    request<AdminUsersPage>(
+      `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
+    ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   myPullRequests: (
@@ -1730,6 +1748,19 @@ export const api = {
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
     ),
+  getReviewFileContents: (
+    owner: string,
+    repo: string,
+    number: number,
+    path: string,
+    originalPath: string,
+    baseSha: string,
+    headSha: string
+  ) =>
+    request<ReviewFileContents>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/file-contents` +
+        `?path=${encodeURIComponent(path)}&original_path=${encodeURIComponent(originalPath)}&base_sha=${encodeURIComponent(baseSha)}&head_sha=${encodeURIComponent(headSha)}`
+    ),
   getReviewChat: (owner: string, repo: string, number: number) =>
     request<ReviewChatMeta>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
@@ -1841,10 +1872,23 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function connectService(provider: "slack" | "notion") {
+export function connectService(
+  provider: "slack" | "notion",
+  redirectTo?: string,
+  target: "_self" | "_blank" = "_self"
+) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)
+    const query =
+      provider === "notion" && redirectTo
+        ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+        : ""
+    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
+    if (target === "_blank") {
+      window.open(url, "_blank", "noopener,noreferrer")
+    } else {
+      window.location.assign(url)
+    }
   }
   return pending
 }

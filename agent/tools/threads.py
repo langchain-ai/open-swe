@@ -15,7 +15,7 @@ from langgraph.prebuilt import InjectedState
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import enforce_github_login_gate
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
@@ -827,14 +827,9 @@ def _message_args(
     if bool(model_id) != bool(effort):
         return _failure("model_id and effort must be provided together")
     if model_id and effort:
-        normalized = (
-            (model_id, effort)
-            if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort)
-            else canonical_model_pair(model_id, effort)
-        )
-        if normalized is None:
-            return _failure("model_id and effort are not a supported combination")
-        return normalized
+        if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort):
+            return model_id, effort
+        return _failure("model_id and effort are not a supported combination")
     return model_id, effort
 
 

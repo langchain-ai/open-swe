@@ -2,11 +2,23 @@ import { QuestionIcon } from "@phosphor-icons/react"
 
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import { slackChannelHref } from "@/lib/slack-channels"
+
+const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+export const githubRepoHref: ChipHref = (repo) =>
+  REPO_PATTERN.test(repo) ? `https://github.com/${repo}` : null
 
 /** Turns a chip's value into a URL; a chip becomes a link when provided. */
 export type ChipHref = (value: string) => string | null
@@ -14,9 +26,11 @@ export type ChipHref = (value: string) => string | null
 export function Chips({
   values,
   hrefFor,
+  labelFor,
 }: {
   values: Array<string>
   hrefFor?: ChipHref
+  labelFor?: (value: string) => string
 }) {
   if (values.length === 0) return null
   return (
@@ -28,7 +42,7 @@ export function Chips({
         if (!href)
           return (
             <span key={value} className={className}>
-              {value}
+              {labelFor?.(value) ?? value}
             </span>
           )
         return (
@@ -39,7 +53,7 @@ export function Chips({
             rel="noopener noreferrer"
             className={`${className} hover:border-foreground/30 hover:text-foreground`}
           >
-            {value}
+            {labelFor?.(value) ?? value}
           </a>
         )
       })}
@@ -52,6 +66,7 @@ export interface WorkspaceDraft {
   repos: Array<string>
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
+  breakoutChannelId: string | null
   prompt: string
   setupScript: string
   updateScript: string
@@ -63,6 +78,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
+    breakoutChannelId: workspace.breakout_channel_id ?? null,
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -74,6 +90,7 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   repos: [],
   slackChannelIds: [],
   kitchenChannelIds: [],
+  breakoutChannelId: null,
   prompt: "",
   setupScript: "",
   updateScript: "",
@@ -96,7 +113,14 @@ function SlackChannelRows({
           key={id}
           className="flex items-center justify-between gap-3 px-2.5 py-1.5"
         >
-          <span className="truncate text-xs">{channelLabel(id)}</span>
+          <a
+            href={slackChannelHref(id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="truncate text-xs hover:underline"
+          >
+            {channelLabel(id)}
+          </a>
           <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
             Kitchen
             <Switch
@@ -167,7 +191,7 @@ export function WorkspaceEditor({
           className="mt-1 flex flex-wrap items-center gap-2"
         >
           {draft.repos.length > 0 ? (
-            <Chips values={draft.repos} />
+            <Chips values={draft.repos} hrefFor={githubRepoHref} />
           ) : (
             <span className="text-xs text-muted-foreground">None yet</span>
           )}
@@ -222,12 +246,46 @@ export function WorkspaceEditor({
                 kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
                   slackChannelIds.includes(id)
                 ),
+                breakoutChannelId:
+                  draft.breakoutChannelId &&
+                  slackChannelIds.includes(draft.breakoutChannelId)
+                    ? draft.breakoutChannelId
+                    : null,
               })
             }
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}
           />
         </div>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div>Breakout destination</div>
+        <Select
+          value={draft.breakoutChannelId ?? ""}
+          onValueChange={(value) =>
+            onChange({ ...draft, breakoutChannelId: value || null })
+          }
+        >
+          <SelectTrigger aria-label="Breakout destination">
+            <SelectValue>
+              {draft.breakoutChannelId
+                ? channelLabel(draft.breakoutChannelId)
+                : "Current channel"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Current channel</SelectItem>
+            {draft.slackChannelIds.map((id) => (
+              <SelectItem key={id} value={id}>
+                {channelLabel(id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Send breakouts to a bound public channel, such as a kitchen channel.
+          An explicitly requested channel takes precedence.
+        </p>
       </div>
       <label className="block text-sm">
         Instructions
@@ -244,11 +302,11 @@ export function WorkspaceEditor({
             <div>Setup script (optional)</div>
             <p className="text-xs text-muted-foreground">
               Builds the image from the base snapshot immediately after creation
-              and nightly. Use OPENSWE_WORKSPACE_REPOS to preload bound
-              repositories. Without a setup script, no image is built.
+              and nightly. Without a setup script, no image is built.
             </p>
             <WorkspaceScriptEditor
               label="Setup script"
+              repos={draft.repos}
               value={draft.setupScript}
               onChange={(setupScript) => onChange({ ...draft, setupScript })}
               description="Edit the shell script, then create the workspace to save it and start building the image."
@@ -262,6 +320,7 @@ export function WorkspaceEditor({
             </p>
             <WorkspaceScriptEditor
               label="Update script"
+              repos={draft.repos}
               value={draft.updateScript}
               onChange={(updateScript) => onChange({ ...draft, updateScript })}
               description="Edit the shell script, then create the workspace to save it."

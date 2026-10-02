@@ -325,19 +325,6 @@ async def resolve_participant_identities(logins: Iterable[str]) -> list[Collabor
     ]
 
 
-def add_bot_coauthor_trailer(commit_message: str) -> str:
-    """Append the open-swe[bot] Co-authored-by trailer.
-
-    Commits are authored by the triggering user (via the repo-local git
-    identity); open-swe[bot] is credited as the collaborator.
-    """
-    normalized_message = commit_message.rstrip()
-    trailer = f"Co-authored-by: {OPEN_SWE_BOT_NAME} <{OPEN_SWE_BOT_EMAIL}>"
-    if trailer in normalized_message:
-        return normalized_message
-    return f"{normalized_message}\n\n{trailer}"
-
-
 def add_pr_collaboration_note(
     pr_body: str,
     identity: CollaboratorIdentity | None = None,

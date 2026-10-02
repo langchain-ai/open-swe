@@ -23,7 +23,6 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -262,9 +261,6 @@ def _normalize_stale_model_pair(
 ) -> tuple[str | None, str | None]:
     if model in DEPRECATED_MODEL_IDS:
         return None, None
-    canonical = canonical_model_pair(model, effort)
-    if canonical is not None:
-        return canonical
     return model, effort
 
 

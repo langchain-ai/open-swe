@@ -1,13 +1,4 @@
-import { useEffect, useRef } from "react"
-
 import { useIsHydrated } from "@/lib/hydration"
-
-export interface HotkeyOptions {
-  enabled?: boolean
-  preventDefault?: boolean
-  enableInFormFields?: boolean
-  ignoreRepeat?: boolean
-}
 
 interface ParsedCombo {
   key: string
@@ -173,49 +164,4 @@ export function shouldIgnoreHotkey(
     isHotkeySuppressed(event.target) ||
     (!enableInFormFields && isTypingContext(event.target))
   )
-}
-
-/**
- * Register a global keyboard shortcut. Use "mod" for the platform meta key
- * (Cmd on macOS, Ctrl elsewhere). Accepts one combo or several aliases.
- * Modifier combos also fire while typing in form fields; bare keys do not.
- */
-export function useHotkey(
-  combo: string | Array<string>,
-  handler: (event: KeyboardEvent) => void,
-  options: HotkeyOptions = {}
-) {
-  const {
-    enabled = true,
-    preventDefault = true,
-    enableInFormFields = false,
-    ignoreRepeat = true,
-  } = options
-  const handlerRef = useRef(handler)
-  useEffect(() => {
-    handlerRef.current = handler
-  }, [handler])
-
-  const comboKey = Array.isArray(combo) ? combo.join("\u0000") : combo
-
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined") return
-    const combos = comboKey.split("\u0000")
-    const typingSafe = combos.some(isTypingSafeShortcut)
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        shouldIgnoreHotkey(
-          event,
-          enableInFormFields || typingSafe,
-          ignoreRepeat
-        )
-      )
-        return
-      if (!combos.some((value) => eventMatchesShortcut(event, value))) return
-      if (preventDefault) event.preventDefault()
-      handlerRef.current(event)
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [enabled, preventDefault, enableInFormFields, ignoreRepeat, comboKey])
 }

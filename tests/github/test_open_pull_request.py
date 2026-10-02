@@ -441,7 +441,7 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
-def test_public_repo_appends_plan_but_not_slack_reference(
+def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
@@ -475,7 +475,35 @@ def test_public_repo_appends_plan_but_not_slack_reference(
 
     sent_body = client.post_calls[0]["json"]["body"]
     assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
-    assert "Slack thread" not in sent_body
+    assert "- Slack thread: https://slack.example/p1" in sent_body
+
+
+@pytest.mark.parametrize("source", ["linear", "github_issue"])
+@pytest.mark.parametrize("private", [False, True])
+def test_issue_references_require_private_repo(
+    monkeypatch: pytest.MonkeyPatch, source: str, private: bool
+) -> None:
+    _set_config(
+        monkeypatch,
+        {
+            "source": source,
+            "linear_issue": {"identifier": "ENG-123", "url": "https://linear.app/issue/ENG-123"},
+            "github_issue": {"number": 123, "url": "https://github.com/org/private/issues/123"},
+        },
+    )
+    _stub_token(monkeypatch)
+    _stub_plan(monkeypatch, None)
+    client = _RoutingClient(
+        post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": private})},
+    )
+    _install_client(monkeypatch, client)
+
+    _open_with_body("body")
+
+    sent_body = client.post_calls[0]["json"]["body"]
+    reference = "Linear ticket" if source == "linear" else "GitHub issue"
+    assert (reference in sent_body) is private
 
 
 def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch) -> None:

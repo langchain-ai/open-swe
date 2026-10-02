@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
 from agent.api.request_ids import add_request_ids
-from agent.api.tracing import add_trace_resource_names
+from agent.api.tracing import add_trace_resource_names, configure_datadog_environment
 from agent.audit_logs.middleware import AuditLogMiddleware
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
@@ -117,6 +117,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    configure_datadog_environment()
     app = FastAPI(lifespan=lifespan)
     allowed_origins = [
         origin.strip()
