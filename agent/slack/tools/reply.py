@@ -22,6 +22,7 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
@@ -283,6 +284,10 @@ async def _by_the_way_reply(
             "slack_error": slack_error,
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if cfg.slack_by_the_way_message_ts:
+        await remove_slack_reaction(
+            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
+        )
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}

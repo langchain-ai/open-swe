@@ -997,9 +997,26 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
-  | { intent: "fix"; context: OpenPullRequest | null }
+  | {
+      intent: "fix"
+      scope: PullRequestFixScope
+      context: OpenPullRequest | null
+    }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
+  | { intent: "comments"; comments: Array<AgentBatchComment> }
+
+/** One kind of PR problem a fix run handles; comments go through address-comments. */
+export type PullRequestFixScope = "conflicts" | "checks"
+
+export type AgentBatchComment =
+  | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
+  | { kind: "thread"; comment_url: string; instructions: string }
+
+export interface PostedReviewComment {
+  id: number
+  html_url: string
+}
 
 export interface ResolveReviewThreadsResult {
   resolved: Array<string>
@@ -1163,6 +1180,12 @@ export interface PreviewFile {
   deletions: number
 }
 
+export interface PreviewReply {
+  author: string | null
+  body: string
+  url: string | null
+}
+
 export interface PreviewThread {
   thread_id: string | null
   author: string | null
@@ -1170,6 +1193,7 @@ export interface PreviewThread {
   path: string
   line: number | null
   url: string | null
+  replies: Array<PreviewReply>
 }
 
 export interface PreviewCheck {
@@ -1248,6 +1272,17 @@ export interface ReviewerEvalConfig {
   severity_threshold: ReviewerEvalSeverity
 }
 
+export interface ReviewerEvalStartRequest {
+  dataset_name: string
+  experiment_prefix: string
+  max_concurrency: number
+  model_id: string
+  reasoning_effort: string
+  score_mode: ReviewerEvalScoreMode
+  severity_threshold: ReviewerEvalSeverity
+  limit: number | null
+}
+
 export interface ReviewerEvalProgress {
   completed: number
   total: number | null
@@ -1255,7 +1290,7 @@ export interface ReviewerEvalProgress {
 
 export interface ReviewerEvalStatus {
   name: string
-  status: "idle" | "running" | "completed" | "failed"
+  status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
   limit: number | null
@@ -1269,7 +1304,7 @@ export interface ReviewerEvalStatus {
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
-  github_run_url?: string | null
+  worker_id?: string | null
   trigger?: string | null
   updated_at: string
 }
@@ -1673,21 +1708,19 @@ export const api = {
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
+  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
+    pullRequestThread(pr.repo, pr.number, {
+      intent: "fix",
+      scope,
+      context: pr,
+    }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
-  addressPullRequestComment: (
+  sendCommentsToAgent: (
     repo: string,
     number: number,
-    commentUrl: string,
-    instructions: string
-  ) =>
-    pullRequestThread(repo, number, {
-      intent: "address-comment",
-      comment_url: commentUrl,
-      instructions,
-    }),
+    comments: Array<AgentBatchComment>
+  ) => pullRequestThread(repo, number, { intent: "comments", comments }),
   resolveReviewThreads: (
     repo: string,
     number: number,
@@ -1861,6 +1894,16 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
       { method: "POST", body: JSON.stringify(review) }
     ),
+  postReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    comment: ReviewCommentCreate
+  ) =>
+    request<PostedReviewComment>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
+    ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
@@ -1877,6 +1920,11 @@ export const api = {
       { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
+  startReviewerEval: (body: ReviewerEvalStartRequest) =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
