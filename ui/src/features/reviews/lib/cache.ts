@@ -25,16 +25,22 @@ export function refreshPullRequest(
   })
 }
 
-/** Matches every login's entry because the mark-ready button is not given one. */
+/**
+ * Matches every login's entry because the mark-ready button is not given one.
+ * Returns the undo, which puts the draft flag back.
+ */
 export function markPullRequestReady(
   queryClient: QueryClient,
   pr: PullRequestRef
-) {
-  queryClient.setQueriesData<OpenPullRequest | null>(
-    {
-      predicate: ({ queryKey: [scope, , repo, number] }) =>
-        scope === "my-pr-details" && repo === pr.repo && number === pr.number,
-    },
-    (old) => (old ? { ...old, draft: false } : old)
-  )
+): () => void {
+  const setDraft = (draft: boolean) =>
+    queryClient.setQueriesData<OpenPullRequest | null>(
+      {
+        predicate: ({ queryKey: [scope, , repo, number] }) =>
+          scope === "my-pr-details" && repo === pr.repo && number === pr.number,
+      },
+      (old) => (old ? { ...old, draft } : old)
+    )
+  setDraft(false)
+  return () => setDraft(true)
 }

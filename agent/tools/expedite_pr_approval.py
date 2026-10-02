@@ -18,6 +18,7 @@ from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
 from agent.human_review.lifecycle import (
+    broadcast_configured,
     post_card,
     prompt_author_ready,
     refresh_card,
@@ -180,9 +181,7 @@ async def expedite_pr_approval(
         )
     broadcast_choice = (
         [{"id": broadcast_target.id, "name": broadcast_target.name}]
-        if broadcast_target is not None
-        and broadcast_target.name
-        and broadcast_target.id != channel_id
+        if broadcast_target is not None and broadcast_target.name
         else []
     )
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
@@ -198,6 +197,7 @@ async def expedite_pr_approval(
                 active = updated
         if not active.awaiting_ready:
             await refresh_card(active)
+            await broadcast_configured(active)
         readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
@@ -290,6 +290,7 @@ async def expedite_pr_approval(
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
+    await broadcast_configured(approval)
     await remove_superseded_cards(approval)
     readiness_warning = await prompt_author_ready(approval)
     return {
