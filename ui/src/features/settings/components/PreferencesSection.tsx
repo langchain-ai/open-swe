@@ -244,26 +244,28 @@ export function PreferencesSection() {
           </Select>
         }
       />
-      <SettingsRow
-        label="Local tracing project"
-        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-        control={
-          <Input
-            className="w-56"
-            placeholder={
-              preferences.data?.default_local_tracing_project ??
-              "Shared cloud project"
-            }
-            defaultValue={preferences.data?.local_tracing_project ?? ""}
-            disabled={preferences.isLoading}
-            onBlur={(event) =>
-              savePreferences.mutate({
-                local_tracing_project: event.target.value.trim() || null,
-              })
-            }
-          />
-        }
-      />
+      {typeof window !== "undefined" && window.openSweDesktop && (
+        <SettingsRow
+          label="Local tracing project"
+          description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+          control={
+            <Input
+              className="w-56"
+              placeholder={
+                preferences.data?.default_local_tracing_project ??
+                "Shared cloud project"
+              }
+              defaultValue={preferences.data?.local_tracing_project ?? ""}
+              disabled={preferences.isLoading}
+              onBlur={(event) =>
+                savePreferences.mutate({
+                  local_tracing_project: event.target.value.trim() || null,
+                })
+              }
+            />
+          }
+        />
+      )}
       <SettingsRow
         label="Collapse subagent threads by default"
         description="Keep nested subagent threads folded in the sidebar until you expand them."

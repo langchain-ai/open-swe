@@ -97,6 +97,7 @@ describe("FableSection", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
+    vi.spyOn(api, "getInstanceSettings").mockResolvedValue(settings(false))
     vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () =>
       loaded(false)
     )
