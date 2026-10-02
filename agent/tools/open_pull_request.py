@@ -309,6 +309,33 @@ def _branch_failure_payload(
     )
 
 
+async def _revoked_token_payload(
+    *, author: str | None, token: str, owner: str, repo: str, head: str, base: str
+) -> dict[str, Any]:
+    from agent.dashboard.oauth import build_settings_url
+    from agent.dashboard.profiles import mark_access_token_revoked
+
+    if login := await pr_author_login(author):
+        await mark_access_token_revoked(login, token)
+    settings_url = build_settings_url()
+    return _failure_payload(
+        code="github_user_auth_revoked",
+        owner=owner,
+        repo=repo,
+        head=head,
+        base=base,
+        token_kind="user",
+        http_status=401,
+        reason="GitHub rejected the PR author's stored sign-in",
+        likely_cause=(
+            "their GitHub authorization was revoked. Ask them to sign in with GitHub again"
+            f"{f' at {settings_url}' if settings_url else ''}, then retry"
+        ),
+        branch_pushed=None,
+        failed_step="preflight_repo",
+    )
+
+
 async def _github_get(client: httpx2.AsyncClient, token: str, path: str) -> httpx2.Response:
     return await client.get(f"{GITHUB_API}{path}", headers=_auth_headers(token))
 
@@ -318,12 +345,17 @@ async def _preflight_pr_access(
     client: httpx2.AsyncClient,
     token: str,
     token_kind: str,
+    author: str | None,
     owner: str,
     repo: str,
     head: str,
     base: str,
 ) -> dict[str, Any] | None:
     repo_resp = await _github_get(client, token, f"/repos/{owner}/{repo}")
+    if repo_resp.status_code == 401 and token_kind == "user":
+        return await _revoked_token_payload(
+            author=author, token=token, owner=owner, repo=repo, head=head, base=base
+        )
     if repo_resp.status_code in {403, 404}:
         return _access_failure_payload(
             owner=owner,
@@ -1064,6 +1096,7 @@ async def _open_pull_request(
             client=client,
             token=token,
             token_kind=kind,
+            author=author,
             owner=owner,
             repo=repo,
             head=head,
