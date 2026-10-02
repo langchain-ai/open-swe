@@ -241,9 +241,7 @@ async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
     token = await repo_token(pr.owner, pr.repo)
     if (
         token is not None
-        and (
-            await RepoSettings.fetch(pr.owner, pr.repo, token=token, ref=approval.head_sha)
-        ).review_channel.strip()
+        and (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
     ):
         return []
     return approval.slack_channel_choices or await own_choices(approval)
@@ -347,9 +345,7 @@ async def broadcast_configured(approval: HumanReviewRequest) -> None:
     if token is None:
         logger.warning("Could not resolve expedited review broadcast channel without a token")
         return
-    configured = (
-        await RepoSettings.fetch(pr.owner, pr.repo, token=token, ref=approval.head_sha)
-    ).review_channel.strip()
+    configured = (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
     if not configured:
         return
     channel = await SlackChannel.resolve(configured)

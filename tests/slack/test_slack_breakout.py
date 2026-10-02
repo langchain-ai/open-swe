@@ -153,9 +153,9 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE>"
     )
     update.assert_awaited_once_with(
-        "C1",
+        expected,
         "200.0",
-        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE> "
+        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE> "
         "<https://dashboard.example/agents/new-thread|Open in Web>",
         unfurl_links=False,
         unfurl_media=False,
