@@ -132,6 +132,12 @@ async def test_rollout_webhook_rejects_when_no_repository_is_allowed(
 
 
 @pytest.mark.asyncio
+async def test_rollout_webhook_rejects_a_non_utf8_body(app: FastAPI) -> None:
+    response = await _post(app, b"\xff\xfe\xfa", _token())
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_rollout_webhook_rejects_an_empty_commit_list(app: FastAPI) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": []}).encode()
     response = await _post(app, body, _token())
