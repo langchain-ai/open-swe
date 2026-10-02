@@ -288,8 +288,8 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2].endswith("model-a • $12.50 • +$3.25")
-    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 • +$3.25")
+    assert args.args[2].endswith("model-a • $12.50 ($3.25)")
+    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 ($3.25)")
     assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
 
@@ -340,7 +340,7 @@ async def test_refresh_updates_compact_feedback_footer(monkeypatch: pytest.Monke
     )
     assert update.await_args is not None
     assert update.await_args.kwargs["blocks"][-1]["elements"][-1]["text"]["text"] == (
-        "↗ model-a • $0.42 • +<$0.01"
+        "↗ model-a • $0.42 (<$0.01)"
     )
 
 

@@ -40,6 +40,28 @@ async def test_sync_admins_matches_github_logins_and_identity_emails_and_demotes
     assert await User.sync_admins({"octocat", "ada@example.com", "bob@example.com"}) == 0
 
 
+async def test_user_search_filters_before_pagination_without_duplicate_identities() -> None:
+    await User.sign_in("github", "1", login="bob")
+    first = await User.sign_in("github", "2", login="ada", email="team@example.com")
+    await first.link("slack", "U_FIRST", login="team", email="team@example.com")
+    second = await User.sign_in("github", "3", login="carol", display_name="Team 100%_complete")
+
+    for offset, expected in enumerate((first, second)):
+        users, total = await User.page(offset=offset, limit=1, search=" TEAM ")
+        assert total == 2
+        assert [user.id for user in users] == [expected.id]
+
+    for search, expected in (
+        ("ADA", first),
+        ("EXAMPLE.COM", first),
+        ("u_first", first),
+        ("%_", second),
+    ):
+        users, total = await User.page(offset=0, limit=10, search=search)
+        assert total == 1
+        assert [user.id for user in users] == [expected.id]
+
+
 async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
     github_user = await User.sign_in("github", "1001", login="OctoCat")
     linked = await github_user.link("slack", "U0123", login="octo", team_id="T9")

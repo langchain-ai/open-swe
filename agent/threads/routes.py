@@ -41,7 +41,6 @@ from agent.threads.handlers import (
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
-    send_dashboard_message,
     share_thread_with_workspace,
 )
 from agent.threads.listing import (
@@ -63,7 +62,6 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
-    ThreadMessageBody,
     ThreadRenameBody,
     ThreadResolveBody,
 )
@@ -347,15 +345,6 @@ async def api_get_thread_pr_diff(
         session["sub"],
         email=session.get("email"),
     )
-
-
-@router.post("/threads/{thread_id}/messages")
-async def api_send_thread_message(
-    thread_id: str,
-    body: ThreadMessageBody,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
 
 
 @router.patch("/threads/{thread_id}")

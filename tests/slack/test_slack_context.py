@@ -1101,12 +1101,12 @@ def test_feedback_and_web_usage_share_one_actions_block() -> None:
     updated_text, updated_blocks = slack_utils.with_slack_session_cost(
         text, blocks, 0.42, run_cost=0.001
     )
-    assert updated_text.endswith("model-a • $0.42 • +<$0.01")
+    assert updated_text.endswith("model-a • $0.42 (<$0.01)")
     assert updated_blocks is not None
     assert [action["text"]["text"] for action in updated_blocks[-1]["elements"]] == [
         "👍",
         "👎",
-        "↗ model-a • $0.42 • +<$0.01",
+        "↗ model-a • $0.42 (<$0.01)",
     ]
     assert slack_utils.with_slack_session_cost(
         updated_text, updated_blocks, 0.42, run_cost=0.001

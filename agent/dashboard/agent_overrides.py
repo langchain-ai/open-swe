@@ -6,7 +6,6 @@ from typing import Any
 from agent.dashboard.options import (
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     model_supports_effort,
     provider_fallback_pair,
 )
@@ -145,11 +144,6 @@ async def resolve_agent_model_id(
             overridden_model, _ = normalize_profile_overrides(profile)
             if overridden_model:
                 model_id = overridden_model
-    if isinstance(per_thread_model_id, str):
-        if per_thread_model_id in SUPPORTED_MODEL_IDS:
-            model_id = per_thread_model_id
-        else:
-            canonical = canonical_model_pair(per_thread_model_id)
-            if canonical is not None:
-                model_id = canonical[0]
+    if isinstance(per_thread_model_id, str) and per_thread_model_id in SUPPORTED_MODEL_IDS:
+        model_id = per_thread_model_id
     return model_id

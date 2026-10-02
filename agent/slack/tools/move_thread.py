@@ -5,6 +5,9 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk.client import LangGraphClient
 
+from agent.run_config import RunConfig
+from agent.slack.breakout_destination import resolve_breakout_destination
+from agent.slack.channels import SlackChannel
 from agent.slack.client import get_active_slack_thread
 from agent.slack.move import move_slack_thread, rebind_slack_thread
 from agent.source_context import SlackThreadRef
@@ -89,8 +92,18 @@ async def slack_move_thread(
                 "retryable": True,
             }
 
-    target_channel = (channel_id or active_channel).strip()
+    destination = await resolve_breakout_destination(
+        active_channel, channel_id, workspace=RunConfig.from_runtime().workspace_slug
+    )
+    target_channel = destination.channel_id
     if not _CHANNEL_ID_RE.fullmatch(target_channel):
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
+    for candidate in dict.fromkeys((active_channel, target_channel)):
+        channel = await SlackChannel.load(candidate, use_cache=False)
+        if channel is None or not channel.public:
+            return {
+                "success": False,
+                "error": "Breakouts only work from and to public channels.",
+            }
 
     return await move_slack_thread(client, thread_id, active, target_channel, clean_message)
