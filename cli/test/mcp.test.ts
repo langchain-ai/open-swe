@@ -209,6 +209,22 @@ describe("exposed Python tools", () => {
     expect(JSON.parse(bodies[0] ?? "null")).toEqual({ action: "read" })
   })
 
+  test("keeps no-argument tools when another remote schema is unsupported", async () => {
+    const { client } = await connect((url) =>
+      url.pathname.endsWith("/cli/mcp/tools")
+        ? Response.json([
+            { ...schema, name: "no_args", parameters: { type: "object" } },
+            { ...schema, name: "bad_schema", parameters: { type: "array" } },
+          ])
+        : Response.json({ status: "success", content: "done" })
+    )
+    const catalog = await client.listTools()
+    expect(catalog.tools.map((tool) => tool.name)).toContain("no_args")
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain("bad_schema")
+    const result = await client.callTool({ name: "no_args", arguments: {} })
+    expect(result.isError).toBeFalsy()
+  })
+
   test("does not expose tools missing from the signed-in user's catalog", async () => {
     const { client } = await connect(() => Response.json([]))
     const catalog = await client.listTools()

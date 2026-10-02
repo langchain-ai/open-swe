@@ -145,11 +145,20 @@ export async function createMcpServer(
   const api = await client()
   const tools = await api.mcpTools().catch(rejectedSession(api))
   for (const tool of tools) {
+    let inputSchema
+    try {
+      inputSchema = mcpInputSchema(tool)
+    } catch (cause) {
+      process.stderr.write(
+        `oswe mcp: skipping ${tool.name}: ${String(cause)}\n`
+      )
+      continue
+    }
     server.registerTool(
       tool.name,
       {
         description: tool.description,
-        inputSchema: mcpInputSchema(tool),
+        inputSchema,
         annotations: { openWorldHint: true },
       },
       async (args) => {
