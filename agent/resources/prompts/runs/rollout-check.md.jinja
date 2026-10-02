@@ -5,7 +5,12 @@ Author: {{ author }}
 {% if page %}
 Page: {{ page }}
 Expected: {{ expected }}
-Call `rollout_page_check` with the https URL of that page on this environment. When the sandbox browser is available, the tool opens that URL. It does not log in. If the tool returns browser_unavailable, say the page check did not run. Do not invent what the page showed.
+{% if host %}
+Call `rollout_page_check` with the https URL of that page on {{ host }}.
+{% else %}
+Call `rollout_page_check` with the https URL of that page on this environment.
+{% endif %}
+When the sandbox browser is available, the tool opens that URL. It does not log in. If the tool returns browser_unavailable, say the page check did not run. Do not invent what the page showed.
 {% endif %}
 {% if metrics %}
 Metrics: {{ metrics }}

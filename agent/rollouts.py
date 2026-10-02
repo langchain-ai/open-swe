@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import ConflictError
@@ -41,6 +42,9 @@ _CRON_FIELD = re.compile(r"^[A-Za-z0-9*,/\-]+$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+_HOST_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+)
 _MAX_STAGES = 12
 _MAX_TARGETS = 20
 _MAX_TAGS = 20
@@ -74,6 +78,7 @@ class RolloutStage(BaseModel):
     name: str
     targets: list[str] = Field(default_factory=list)
     datadog_tags: list[str] = Field(default_factory=list)
+    host: str = ""
 
 
 class RolloutWatch(BaseModel):
@@ -191,6 +196,23 @@ def _tags(raw: object) -> list[str]:
     return tags
 
 
+def _host(raw: object) -> str:
+    """Hostname from a recorded UI host. Userinfo and non-https URLs are dropped."""
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    if not value or any(char in value for char in "\n\r"):
+        return ""
+    if "://" in value or "@" in value:
+        parsed = urlparse(value if "://" in value else f"https://{value}")
+        if parsed.scheme != "https" or parsed.port:
+            return ""
+        value = parsed.hostname or ""
+    if not _HOST_RE.fullmatch(value.lower()):
+        return ""
+    return value.lower()
+
+
 def _targets(raw: object) -> list[str]:
     if not isinstance(raw, list):
         return []
@@ -230,7 +252,12 @@ def normalize_stages(raw: object) -> list[RolloutStage]:
             continue
         seen.add(name)
         stages.append(
-            RolloutStage(name=name, targets=targets, datadog_tags=_tags(item.get("datadog_tags")))
+            RolloutStage(
+                name=name,
+                targets=targets,
+                datadog_tags=_tags(item.get("datadog_tags")),
+                host=_host(item.get("host")),
+            )
         )
     return stages
 
@@ -612,6 +639,7 @@ def _check_prompt(watch: RolloutWatch, stage: RolloutStage, *, last: bool) -> st
         expected=watch.expected,
         metrics=watch.metrics,
         datadog_tags=", ".join(stage.datadog_tags),
+        host=stage.host,
         last=last,
     )
 

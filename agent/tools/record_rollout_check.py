@@ -38,7 +38,7 @@ async def record_rollout_check(
         Field(
             description=(
                 "Deploy environments for this repository, earliest first. "
-                "Each object has name, targets, and datadog_tags."
+                "Each object has name, targets, datadog_tags, and host."
             )
         ),
     ] = None,

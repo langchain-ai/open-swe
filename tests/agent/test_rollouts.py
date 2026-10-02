@@ -105,8 +105,18 @@ def _targets(*, dev: bool, staging: bool) -> dict[str, Any]:
 
 def _plan() -> list[dict[str, Any]]:
     return [
-        {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev"]},
-        {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+        {
+            "name": "dev",
+            "targets": ["gcp-dev"],
+            "datadog_tags": ["env:dev"],
+            "host": "dev.example.test",
+        },
+        {
+            "name": "staging",
+            "targets": ["gcp-staging"],
+            "datadog_tags": ["env:staging"],
+            "host": "staging.example.test",
+        },
     ]
 
 
@@ -217,6 +227,7 @@ async def test_every_environment_waits_one_poll(
     assert dispatch.await_count == 2
     dev_reply = dispatch.await_args_list[0].args[1]
     assert "env:dev" in dev_reply
+    assert "dev.example.test" in dev_reply
     assert "gh pr comment" not in dev_reply
     assert "Do not query Datadog" not in dev_reply
     assert "slack_reply" in dev_reply
@@ -227,6 +238,7 @@ async def test_every_environment_waits_one_poll(
     assert "staging" in verdict
     assert "gh pr comment" in verdict
     assert "env:staging" in verdict
+    assert "staging.example.test" in verdict
     assert "env:prod" not in verdict
     assert "slack_reply" in verdict
     assert "langsmith-releases" not in verdict
@@ -393,6 +405,7 @@ async def test_start_from_merge_uses_the_merge_sha(client: _Client) -> None:
     assert [stage.name for stage in watch.stages] == ["dev", "staging"]
     assert watch.stages[0].targets == ["gcp-dev"]
     assert watch.stages[0].datadog_tags == ["env:dev"]
+    assert watch.stages[0].host == "dev.example.test"
     assert client.threads.updated[-1]["metadata"] == {"rollout_status": "watching"}
 
 
@@ -470,7 +483,12 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
 
     result = await record_tool.record_rollout_check(
         environments=[
-            {"name": "Dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev", "not a tag"]},
+            {
+                "name": "Dev",
+                "targets": ["gcp-dev"],
+                "datadog_tags": ["env:dev", "not a tag"],
+                "host": f"https://user:{secret}@dev.example.test/o/org",
+            },
             {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
             {"name": "skipped", "targets": []},
         ],
@@ -480,8 +498,18 @@ async def test_record_rollout_check_keeps_the_wake_context_and_drops_url_secrets
     )
 
     stored = [
-        {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev"]},
-        {"name": "staging", "targets": ["gcp-staging"], "datadog_tags": ["env:staging"]},
+        {
+            "name": "dev",
+            "targets": ["gcp-dev"],
+            "datadog_tags": ["env:dev"],
+            "host": "dev.example.test",
+        },
+        {
+            "name": "staging",
+            "targets": ["gcp-staging"],
+            "datadog_tags": ["env:staging"],
+            "host": "",
+        },
     ]
     assert result["environments"] == stored
     check = updates[0]["rollout_check"]
