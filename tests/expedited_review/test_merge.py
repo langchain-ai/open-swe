@@ -286,7 +286,7 @@ async def test_a_diff_grown_past_the_limit_discards_the_votes_and_their_reviews(
 ) -> None:
     approval = await _reviewed(await _approved(open_approval, "U_GRACE", "U_LINUS"), github)
     github.files = [
-        ChangedFile(filename="src/app.py", additions=40, patch="+" * 40),
+        ChangedFile(filename="src/app.py", additions=201, patch="+" * 201),
         _TEST,
     ]
     github.readiness = _readiness("def456")

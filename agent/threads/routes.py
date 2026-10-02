@@ -41,7 +41,7 @@ from agent.threads.handlers import (
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
-    send_dashboard_message,
+    share_thread_with_workspace,
 )
 from agent.threads.listing import (
     list_dashboard_pinned_threads,
@@ -62,7 +62,6 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
-    ThreadMessageBody,
     ThreadRenameBody,
     ThreadResolveBody,
 )
@@ -348,15 +347,6 @@ async def api_get_thread_pr_diff(
     )
 
 
-@router.post("/threads/{thread_id}/messages")
-async def api_send_thread_message(
-    thread_id: str,
-    body: ThreadMessageBody,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    return await send_dashboard_message(thread_id, session["sub"], body, email=session.get("email"))
-
-
 @router.patch("/threads/{thread_id}")
 async def api_rename_thread(
     thread_id: str,
@@ -369,6 +359,14 @@ async def api_rename_thread(
         title=body.title,
         email=session.get("email"),
     )
+
+
+@router.post("/threads/{thread_id}/share-to-workspace")
+async def api_share_thread_with_workspace(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.post("/threads/{thread_id}/continue-private")

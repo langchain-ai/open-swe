@@ -523,6 +523,27 @@ test.describe("Human review in Slack", () => {
     );
   });
 
+  test("approved pull requests do not offer Slack review requests", async ({
+    page,
+  }) => {
+    await loginAs(page, ALICE);
+    await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Already approved",
+      author: ALICE.login,
+      reviews: [{ author: BOB.login, state: "APPROVED" }],
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    const row = page
+      .getByRole("listitem")
+      .filter({ hasText: `Already approved` });
+    await expect(row).toBeVisible();
+    await expect(
+      row.getByRole("button", { name: "Request review in Slack" }),
+    ).toHaveCount(0);
+  });
+
   test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, tags and DMs them, and it merges on their approval", async ({
     page,
     request,

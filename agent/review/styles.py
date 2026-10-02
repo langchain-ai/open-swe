@@ -127,11 +127,6 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
             return existing
         return await self.put(full_name, ReviewStyle.seed(full_name, created_by))
 
-    async def set_custom_prompt(self, full_name: str, custom_prompt: str) -> ReviewStyle:
-        return await self.update_prompts(
-            full_name, ReviewStylePromptUpdate(custom_prompt=custom_prompt)
-        )
-
     async def update_prompts(self, full_name: str, update: ReviewStylePromptUpdate) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
         if update.custom_prompt is not None:

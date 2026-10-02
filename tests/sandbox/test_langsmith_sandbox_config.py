@@ -35,7 +35,7 @@ async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
     expected_mem_bytes: int | None,
 ) -> None:
     provider = MagicMock()
-    provider.get_or_create = AsyncMock(return_value=MagicMock())
+    provider.get_or_create = AsyncMock(return_value=AsyncMock())
     with (
         patch(
             "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",

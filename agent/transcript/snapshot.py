@@ -506,3 +506,30 @@ async def load_events(
             {"thread_id": thread_id, "after": after, "limit": limit},
         )
     return [StoredEvent.model_validate(dict(row)) for row in rows]
+
+
+async def load_head(thread_id: str, *, conn: AsyncConnection | None = None) -> int | None:
+    """The newest version in the thread's log, or ``None`` when untranscribed."""
+    async with reading(conn) as conn:
+        row = await _row(
+            conn,
+            "SELECT version FROM thread WHERE thread_id = :thread_id",
+            {"thread_id": thread_id},
+        )
+    return None if row is None else int(row["version"])
+
+
+async def load_run_start(
+    thread_id: str, run_id: str, *, conn: AsyncConnection | None = None
+) -> int | None:
+    """The version just before the first event recorded under ``run_id``."""
+    async with reading(conn) as conn:
+        row = await _row(
+            conn,
+            """
+            SELECT min(version) AS version FROM thread_event
+            WHERE thread_id = :thread_id AND run_id = :run_id
+            """,
+            {"thread_id": thread_id, "run_id": run_id},
+        )
+    return None if row is None or row["version"] is None else int(row["version"]) - 1

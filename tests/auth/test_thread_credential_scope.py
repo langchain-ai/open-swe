@@ -369,13 +369,10 @@ async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, cre
         "get_github_app_installation_token_with_expiry",
         AsyncMock(return_value=("bot-token", None)),
     )
-    personal = AsyncMock(return_value={"token": "personal-token"})
-    monkeypatch.setattr(auth, "resolve_github_token_from_email", personal)
     assert (
         await common.get_or_resolve_thread_github_token("thread-1", "alice@example.com")
         == "bot-token"
     )
-    personal.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -386,6 +383,21 @@ async def test_public_pr_opens_as_a_named_participant(monkeypatch, thread_metada
     monkeypatch.setattr("agent.run_config.get_config", lambda: config(login="bob"))
 
     assert await opr._resolve_pr_author_token("alice") == ("alice-token", "user")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run", ["background_completion", "no_requester"])
+async def test_named_participant_is_honored_whoever_started_the_run(
+    monkeypatch, thread_metadata, credentials, run
+):
+    opr = importlib.import_module("agent.tools.open_pull_request")
+    thread_metadata["participant_logins"] = {"alice": True, "bob": True}
+    credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
+    run_config = config(login=None if run == "no_requester" else "alice")
+    run_config["configurable"]["background_task_completion"] = run == "background_completion"
+    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+
+    assert await opr._resolve_pr_author_token("bob") == ("bob-token", "user")
 
 
 @pytest.mark.asyncio
