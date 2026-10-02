@@ -282,7 +282,13 @@ class HumanReviewRequest(Base):
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
-                        (cls.slack_channel_id == channel_id) & (cls.slack_message_ts == thread_ts),
+                        (cls.slack_channel_id == channel_id)
+                        & (
+                            func.coalesce(
+                                func.nullif(cls.slack_thread_ts, ""), cls.slack_message_ts
+                            )
+                            == thread_ts
+                        ),
                         (cls.slack_copy_channel_id == channel_id)
                         & (cls.slack_copy_ts == thread_ts),
                     ),
