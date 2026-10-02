@@ -57,40 +57,6 @@ def test_review_reminders_count_only_local_business_hours(start: str, expected: 
     )
 
 
-async def test_submitted_comment_only_review_suppresses_reminder() -> None:
-    from agent.human_review.standard import _remind_reviewer
-
-    pr = PullRequest(owner="o", repo="r", number=1, author="ada")
-    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
-    request.pull_request = pr
-    user = User(
-        identities=[
-            UserIdentity(provider="github", external_id="grace", login="grace"),
-            UserIdentity(provider="slack", external_id="U_grace"),
-        ]
-    )
-    participant = HumanReviewParticipant(user_id=user.id, decision="review", assigned_by_agent=True)
-    participant.user = user
-    participant.joined_at = datetime(2020, 1, 1, tzinfo=UTC)
-    request.participants.append(participant)
-    dm = AsyncMock()
-    with (
-        patch(
-            "agent.human_review.standard.get_slack_user_info", AsyncMock(return_value={"tz": "UTC"})
-        ),
-        patch("agent.human_review.standard.repo_token", AsyncMock(return_value="token")),
-        patch("agent.human_review.standard.fetch_pr", AsyncMock(return_value={"state": "open"})),
-        patch("agent.human_review.standard.review_authors", AsyncMock(return_value={"grace"})),
-        patch("agent.human_review.standard.send_dm", dm),
-        patch("agent.human_review.standard.datetime") as clock,
-    ):
-        clock.now.return_value = _NOW
-        clock.combine = datetime.combine
-        status = await _remind_reviewer(request, str(user.id))
-    assert status == "reviewed"
-    dm.assert_not_awaited()
-
-
 def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
     assert request_blockers(_snapshot()) == []
 

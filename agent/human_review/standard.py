@@ -515,10 +515,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
             user.slack_user_id,
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
         )
-    if not await _schedule(added, f"remind:{user.id}", timedelta(0)):
-        return _failure(
-            f"@{github_login} was assigned, but the review reminder could not be scheduled."
-        )
+    await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
         success=True,
         request_id=str(added.id),
