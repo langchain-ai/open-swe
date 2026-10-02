@@ -1,6 +1,9 @@
-import { ArrowUpRight, CircleAlert, LoaderCircle, Radar } from "lucide-react"
+import { ArrowUpRight, CircleAlert, Radar } from "lucide-react"
+import type * as React from "react"
 import type { ReactNode } from "react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
@@ -32,25 +35,23 @@ export function formatTime(value: Timestamp | null) {
   })
 }
 
+const statusVariants: Record<
+  string,
+  React.ComponentProps<typeof Badge>["variant"]
+> = {
+  pending: "info",
+  watching: "info",
+  investigating: "info",
+  needs_attention: "warning",
+  paused: "muted",
+  completed: "muted",
+}
+
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        {
-          "border-info/20 bg-info/5 text-info-foreground": [
-            "pending",
-            "watching",
-            "investigating",
-          ].includes(status),
-          "border-warning/20 bg-warning/5 text-warning-foreground":
-            status === "needs_attention",
-          "border-border bg-muted text-muted-foreground": [
-            "paused",
-            "completed",
-          ].includes(status),
-        }
-      )}
+    <Badge
+      variant={statusVariants[status] ?? "outline"}
+      className="gap-1.5 text-[11px]"
     >
       <span
         className={cn(
@@ -59,7 +60,7 @@ export function StatusBadge({ status }: { status: string }) {
         )}
       />
       {humanize(status)}
-    </span>
+    </Badge>
   )
 }
 
@@ -69,7 +70,7 @@ export function LoadingState() {
       role="status"
       className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
     >
-      <LoaderCircle className="size-4 animate-spin" />
+      <Spinner aria-hidden className="size-4" />
       Loading incidents…
     </div>
   )
