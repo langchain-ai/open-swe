@@ -792,10 +792,29 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             or row.run_config.get(marker)
         ):
             return "inactive"
+        waited_minutes = max(
+            0,
+            int(
+                (datetime.now(UTC) - (request.created_at or participant.joined_at)).total_seconds()
+                // 60
+            ),
+        )
+        days, minutes = divmod(waited_minutes, 1440)
+        hours, minutes = divmod(minutes, 60)
+        waited = (
+            ", ".join(
+                f"{value} {unit}{'s' if value != 1 else ''}"
+                for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
+                if value
+            )
+            or "less than a minute"
+        )
         sent = await send_dm(
             participant.user.slack_user_id,
             f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
-            f"*{escape(pr.title)}* two business hours ago. Please submit your review on GitHub.",
+            f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
+            f"has been waiting {waited} since the review request was opened. "
+            "Please submit your review on GitHub.",
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
