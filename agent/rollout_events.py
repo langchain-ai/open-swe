@@ -26,6 +26,7 @@ class RolloutAccepted(TypedDict):
     commits: int
 
 
+_AUDIENCE = "openswe-rollout"
 _MAX_COMMITS = 5000
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
@@ -70,20 +71,24 @@ def _workflow_allowed(workflow_ref: str, allowed: list[str]) -> bool:
     return False
 
 
+def _owner(repository: str) -> str:
+    return repository.split("/", 1)[0].strip().lower()
+
+
 async def _authorize(header: str) -> None:
-    repos = {repo.lower() for repo in ENV.ROLLOUT_OIDC_REPOS.get_list()}
-    if not repos:
-        logger.warning("ROLLOUT_OIDC_REPOS is not configured — rejecting rollout event")
+    orgs = {org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()}
+    if not orgs:
+        logger.warning("ALLOWED_GITHUB_ORGS is not configured — rejecting rollout event")
         raise HTTPException(status_code=401, detail="Invalid token")
     token = _bearer(header)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid token")
     try:
-        claims = await verify_github_oidc(token, expected_audience=ENV.ROLLOUT_OIDC_AUDIENCE.get())
+        claims = await verify_github_oidc(token, expected_audience=_AUDIENCE)
     except InvalidFederatedToken as exc:
         logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
         raise HTTPException(status_code=401, detail="Invalid token") from None
-    if claims.repository.lower() not in repos:
+    if _owner(claims.repository) not in orgs:
         logger.warning(
             "Rejected rollout event from an unlisted repository",
             extra={"rollout_repository": claims.repository},
