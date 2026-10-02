@@ -1874,7 +1874,7 @@ async def slack_views_open(request: Request) -> JSONResponse:
     body = await request.json()
     view = body["view"]
     SLACK_VIEWS[str(body["trigger_id"])] = view
-    return _ok({"view": {"id": "V_REVIEW", **view}})
+    return _ok({"view": {"id": str(body["trigger_id"]), **view}})
 
 
 @app.get("/mock/slack/modal")
@@ -1890,11 +1890,12 @@ async def slack_modal_submit(request: Request) -> JSONResponse:
     if view is None:
         raise HTTPException(404, "No open modal")
     response = await _deliver_slack_interaction(
-        {"type": "view_submission", "user": {"id": user}, "view": {"id": "V_REVIEW", **view}}
+        {"type": "view_submission", "user": {"id": user}, "view": {"id": user, **view}}
     )
     result = response.json()
     if result.get("response_action") == "update":
-        SLACK_VIEWS[user] = result["view"]
+        if SLACK_VIEWS.get(user) is view:
+            SLACK_VIEWS[user] = result["view"]
     elif result.get("response_action") != "errors":
         SLACK_VIEWS.pop(user, None)
     return JSONResponse(result, status_code=response.status_code)
@@ -1935,3 +1936,13 @@ async def control_expedited_card(request: Request) -> JSONResponse:
     )
     await approval.save()
     return _ok({"id": str(approval.id)})
+
+
+@app.post("/fake-slack/views.update")
+async def slack_views_update(request: Request) -> JSONResponse:
+    body = await request.json()
+    user = str(body["view_id"])
+    if user not in SLACK_VIEWS:
+        return JSONResponse({"ok": False, "error": "view_not_found"})
+    SLACK_VIEWS[user] = body["view"]
+    return _ok({"view": {"id": user, **body["view"]}})

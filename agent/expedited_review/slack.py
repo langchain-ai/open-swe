@@ -90,7 +90,7 @@ async def handle_button(
     target_channel = ""
     decision: CardAction
     if button.action == "review":
-        return await open_review(interaction, button.fingerprint)
+        return await open_review(interaction, button.fingerprint, background_tasks)
     if button.action == "approve":
         decision = "approve"
     elif button.action == "ready":
