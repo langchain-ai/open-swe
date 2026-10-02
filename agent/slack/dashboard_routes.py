@@ -14,8 +14,13 @@ from agent.slack.allowed_bots import (
     list_slack_bots,
 )
 from agent.slack.channel_options import SlackChannelDirectory, list_slack_channels
-from agent.slack.client import get_slack_user_names
+from agent.slack.client import get_slack_user_names, lookup_slack_thread_id
 from agent.slack.connect import router as connect_router
+from agent.slack.dm import CONCIERGE_TS, open_dm
+from agent.threads.summary import assert_thread_readable
+from agent.users import User
+from agent.utils.json_types import thread_metadata
+from agent.utils.thread_ops import langgraph_client
 
 router = APIRouter(tags=["slack"])
 router.include_router(connect_router)
@@ -28,6 +33,25 @@ async def api_slack_user_name(
 ) -> dict[str, str]:
     names = await get_slack_user_names([user_id])
     return {"name": names.get(user_id, user_id)}
+
+
+@router.get("/slack/concierge")
+async def api_concierge(
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str | None]:
+    user = await User.for_login("github", session["sub"])
+    if user is None or not user.typed_preferences.concierge_mode or not user.slack_user_id:
+        return {"thread_id": None, "channel_id": None}
+    channel_id = await open_dm(user.slack_user_id)
+    thread_id = (
+        await lookup_slack_thread_id(langgraph_client(), channel_id, CONCIERGE_TS)
+        if channel_id
+        else None
+    )
+    if thread_id:
+        thread = await langgraph_client().threads.get(thread_id)
+        assert_thread_readable(thread_metadata(thread), session["sub"], session.get("email"))
+    return {"thread_id": thread_id, "channel_id": channel_id}
 
 
 @router.get("/slack/bots")

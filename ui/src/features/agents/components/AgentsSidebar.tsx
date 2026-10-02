@@ -3,6 +3,7 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   CircleNotchIcon,
+  ChatCircleIcon,
   DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -18,11 +19,12 @@ import {
   StackIcon,
 } from "@phosphor-icons/react"
 import { Radar } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
-import type { SessionUser } from "@/lib/api"
+import { api, type SessionUser } from "@/lib/api"
+import { useProfile } from "@/lib/profile"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -203,6 +205,13 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const chat = useChatRoutes()
+  const profile = useProfile()
+  const concierge = useQuery({
+    queryKey: ["concierge", user?.login],
+    queryFn: api.concierge,
+    enabled: !localOnly && !!user && !!profile.data?.concierge_mode,
+    refetchInterval: 30_000,
+  })
   const {
     viewport: scrollViewport,
     edges: scrollEdges,
@@ -744,6 +753,33 @@ export function AgentsSidebar({
           <NotePencilIcon className="size-4" />
           New Thread
         </Link>
+        {!localOnly && profile.data?.concierge_mode && (
+          <a
+            href={
+              concierge.data?.thread_id
+                ? `${chat.home}/${concierge.data.thread_id}`
+                : concierge.data?.channel_id
+                  ? `slack://channel?id=${concierge.data.channel_id}`
+                  : undefined
+            }
+            onClick={layout.closeOnMobile}
+            aria-current={
+              !!concierge.data?.thread_id &&
+              activeThreadId === concierge.data.thread_id
+                ? "page"
+                : undefined
+            }
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover",
+              !!concierge.data?.thread_id &&
+                activeThreadId === concierge.data.thread_id &&
+                "bg-sidebar-row-active"
+            )}
+          >
+            <ChatCircleIcon className="size-4" />
+            Concierge
+          </a>
+        )}
       </div>
 
       <TooltipProvider delay={500} closeDelay={100}>

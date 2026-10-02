@@ -81,8 +81,6 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
         "get_active_slack_thread",
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
     )
-    thread_reply = AsyncMock()
-    monkeypatch.setattr(act_as_slack, "post_slack_thread_reply", thread_reply)
     ephemeral = AsyncMock()
     monkeypatch.setattr(act_as_slack, "post_slack_ephemeral_message", ephemeral)
     concierge = AsyncMock()
@@ -93,7 +91,6 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
     return SimpleNamespace(
         fingerprint=request.fingerprint,
         preferences=preferences,
-        thread_reply=thread_reply,
         ephemeral=ephemeral,
         concierge=concierge,
     )
@@ -112,7 +109,12 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
     await slack_routes.slack_interactivity(_request(action, stack.fingerprint), BackgroundTasks())
 
     assert await _status() == status
-    assert stack.thread_reply.await_args.args[:2] == ("C1", "1.0")
+    stack.ephemeral.assert_awaited_once_with(
+        "C1",
+        "U-ALICE",
+        f"`alice` {status} Open SWE opening PRs as them in this thread.",
+        thread_ts="1.0",
+    )
     user_id, channel_id, note = stack.concierge.await_args.args
     assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
     assert act_as_slack._LABELS[action] in note
@@ -122,6 +124,28 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
         )
     else:
         stack.preferences.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gave_up", [True, False])
+async def test_an_answer_after_the_tool_gave_up_wakes_the_thread(stack, monkeypatch, gave_up):
+    thread = await ThreadActAs.load("thread-1")
+    request = thread.requests[stack.fingerprint]
+    await thread.set_wake_on_answer(request, gave_up)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(act_as_slack, "dispatch_followup", dispatch)
+    monkeypatch.setattr(act_as_slack, "fetch_thread_metadata", AsyncMock(return_value={}))
+    tasks = BackgroundTasks()
+
+    await slack_routes.slack_interactivity(_request("approve", stack.fingerprint), tasks)
+    await tasks()
+
+    if gave_up:
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+        assert "alice approved" in dispatch.await_args.args[2]
+    else:
+        dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -150,5 +174,10 @@ async def test_a_second_click_cannot_reverse_a_denial(stack):
     )
 
     assert await _status() == "denied"
-    stack.ephemeral.assert_awaited_once()
+    assert stack.ephemeral.await_count == 2
+    assert stack.ephemeral.await_args.args == (
+        "D-ALICE",
+        "U-ALICE",
+        "You already answered this request; the first answer stands.",
+    )
     stack.preferences.assert_not_awaited()

@@ -60,7 +60,9 @@ it("reads the workspace's settings and writes only its own override", async () =
       return new Response(JSON.stringify(stored))
     }
     reads.push(url)
-    return new Response(JSON.stringify(stored))
+    return new Response(
+      JSON.stringify(url.endsWith("/api/settings") ? SETTINGS : stored)
+    )
   })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -72,9 +74,15 @@ it("reads the workspace's settings and writes only its own override", async () =
     </QueryClientProvider>
   )
 
-  await waitFor(() => expect(reads.length).toBeGreaterThan(0))
-  expect(reads.every((url) => url.includes("/workspaces/oss/settings"))).toBe(
-    true
+  await waitFor(() =>
+    expect(
+      reads.map((url) => new URL(url, "http://localhost").pathname)
+    ).toEqual(
+      expect.arrayContaining([
+        "/dashboard/api/settings",
+        "/dashboard/api/workspaces/oss/settings",
+      ])
+    )
   )
   await waitFor(() =>
     expect(

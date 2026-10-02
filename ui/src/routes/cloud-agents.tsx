@@ -35,6 +35,12 @@ export const Route = createFileRoute("/cloud-agents")({
   head: () => ({ meta: [{ title: pageTitle("Open SWE Agent") }] }),
 })
 
+const ROUTING_ITEMS = [
+  { value: "inherit", label: "Inherit org default" },
+  { value: "enabled", label: "Enabled" },
+  { value: "disabled", label: "Disabled" },
+]
+
 function CloudAgentsPage() {
   const session = useSession()
   const profile = useProfile()
@@ -54,6 +60,14 @@ function CloudAgentsPage() {
   const defaultModels = options.data?.models.filter(
     (model) => model.can_be_default !== false
   )
+  const modelItems = (defaultModels ?? []).map((model) => ({
+    value: model.id,
+    label: model.label,
+  }))
+  const subagentModelItems = [
+    { value: "inherit", label: "Inherit from main" },
+    ...modelItems,
+  ]
   const firstModel: ModelOption | undefined = defaultModels?.[0]
   const defaultAgentModel =
     options.data?.default_agent_model ?? firstModel?.id ?? ""
@@ -147,6 +161,7 @@ function CloudAgentsPage() {
             description="Automatically choose a model for each turn. Inherit uses the org-wide default; Enabled or Disabled overrides it."
             control={
               <Select
+                items={ROUTING_ITEMS}
                 value={
                   profile.data?.model_routing_enabled === true
                     ? "enabled"
@@ -166,9 +181,11 @@ function CloudAgentsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="inherit">Inherit org default</SelectItem>
-                  <SelectItem value="enabled">Enabled</SelectItem>
-                  <SelectItem value="disabled">Disabled</SelectItem>
+                  {ROUTING_ITEMS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             }
@@ -190,14 +207,18 @@ function CloudAgentsPage() {
             label="Default Model"
             description="Used when adaptive routing is off or no model is specified"
             control={
-              <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
+              <Select
+                items={modelItems}
+                value={modelId}
+                onValueChange={(v) => v && setModelId(v)}
+              >
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {defaultModels?.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label}
+                  {modelItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -227,6 +248,7 @@ function CloudAgentsPage() {
             description="Used for delegated tasks; inherit follows your default model and effort"
             control={
               <Select
+                items={subagentModelItems}
                 value={subagentModelId}
                 onValueChange={(v) => v && setSubagentModelId(v)}
               >
@@ -234,10 +256,9 @@ function CloudAgentsPage() {
                   <SelectValue placeholder="Pick a model" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="inherit">Inherit from main</SelectItem>
-                  {defaultModels?.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label}
+                  {subagentModelItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

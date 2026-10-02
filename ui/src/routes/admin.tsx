@@ -1,6 +1,5 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
@@ -11,6 +10,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "@/components/AppShell"
+import { TablePagination } from "@/components/TablePagination"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -33,7 +33,6 @@ import { MCPConnectionsSection } from "@/features/settings/components/MCPConnect
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "@/features/settings/components/WorkspaceSettingsSections"
@@ -87,7 +86,6 @@ function AdminPage() {
         repositories={repos.data?.repositories ?? []}
       />
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
-      <FableSection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
       <MCPConnectionsSection scope="instance" />
@@ -105,24 +103,6 @@ function AdminPage() {
       </div>
 
       <RunningAgentsSection />
-
-      <SettingsSection title="Evals">
-        <Link
-          to="/admin/evals"
-          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-        >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">
-              Reviewer eval
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Run the offline reviewer benchmark and watch its output stream
-              live.
-            </span>
-          </div>
-          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Link>
-      </SettingsSection>
 
       <UsersSection enabled={!!session.data.is_admin} />
     </AppShell>
@@ -397,19 +377,19 @@ function TriggerReviewSection() {
   )
 }
 
-const PAGE_SIZE = 20
-
-function UsersSection({ enabled }: { enabled: boolean }) {
+export function UsersSection({ enabled }: { enabled: boolean }) {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [search, setSearch] = useState("")
+  const query = search.trim()
 
   const users = useQuery({
-    queryKey: ["adminUsers", page],
-    queryFn: () => api.adminListUsers(page, PAGE_SIZE),
+    queryKey: ["adminUsers", page, pageSize, query],
+    queryFn: () => api.adminListUsers(page, pageSize, query),
     enabled,
   })
 
   const total = users.data?.total ?? 0
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const items = users.data?.items ?? []
 
   return (
@@ -418,11 +398,26 @@ function UsersSection({ enabled }: { enabled: boolean }) {
       description="Everyone who has signed in with GitHub, and the Slack account each has connected from their own settings."
     >
       <div className="flex flex-col gap-3 p-4">
+        <Input
+          aria-label="Search users"
+          placeholder="Search by name, GitHub login, email, or Slack ID…"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value)
+            setPage(1)
+          }}
+        />
         <div className="flex flex-col gap-0.5">
           {users.isLoading ? (
             <Skeleton className="h-32" />
+          ) : users.isError ? (
+            <p role="alert" className="text-xs text-destructive">
+              Could not load users. Please try again.
+            </p>
           ) : !items.length ? (
-            <p className="text-xs text-muted-foreground">No users yet.</p>
+            <p className="text-xs text-muted-foreground">
+              {query ? "No users match your search." : "No users yet."}
+            </p>
           ) : (
             items.map((user: AdminUser) => (
               <div
@@ -447,33 +442,18 @@ function UsersSection({ enabled }: { enabled: boolean }) {
             ))
           )}
         </div>
-
-        {total > PAGE_SIZE && (
-          <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
-            <span>
-              {total} user{total === 1 ? "" : "s"} · page {page} of {pageCount}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1 || users.isFetching}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                disabled={page >= pageCount || users.isFetching}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        disabled={users.isFetching}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
     </SettingsSection>
   )
 }

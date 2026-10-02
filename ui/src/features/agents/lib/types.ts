@@ -60,6 +60,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
+  | "service-connection"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -365,6 +366,9 @@ export interface AgentPullRequestHealth {
 export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
+
+/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
+export type ThreadFixScope = "conflicts" | "checks" | "comments"
 
 export interface AgentPullRequestContextResponse {
   context: {
