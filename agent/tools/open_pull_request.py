@@ -691,6 +691,7 @@ async def _record_pr_telemetry(
                 repo_private = base_repo["private"]
             pr_state = derive_pr_state(state=state, merged=merged, draft=is_draft)
             pr_title = details.get("title") or pr.get("title")
+            pr_body = details.get("body", pr.get("body"))
             pr_user = details.get("user") or pr.get("user")
             author = pr_user.get("login") if isinstance(pr_user, dict) else None
             author_id = pr_user.get("id") if isinstance(pr_user, dict) else None
@@ -766,6 +767,7 @@ async def _record_pr_telemetry(
                     number=pr_number,
                     state=pr_state,
                     title=pr_title if isinstance(pr_title, str) else "",
+                    body=pr_body if isinstance(pr_body, str) else "",
                     head_ref=head,
                     base_ref=base,
                     opening_base_sha=(
