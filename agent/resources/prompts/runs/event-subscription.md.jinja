@@ -3,6 +3,15 @@ A {{ summary.source }} `{{ summary.event_type }}{% if summary.action %}.{{ summa
 
 {{ details }}
 {% endif %}
+{% if summary.source == "slack" %}
+{% if summary.slack_message_ts %}
+
+Message ts: {{ summary.slack_message_ts }}
+{% endif %}
+{% if summary.slack_thread_ts %}
+Thread ts: {{ summary.slack_thread_ts }}
+{% endif %}
+{% endif %}
 {% if instructions %}
 
 When you subscribed you asked to be told:
@@ -14,4 +23,5 @@ This event came from your one-shot `listen_events` subscription `{{ subscription
 {% else %}
 This event came from your `listen_events` subscription `{{ subscription_id }}`. Cancel it with `listen_events(action="cancel", subscription_id="{{ subscription_id }}")` once you no longer need these events.
 {% endif %}
-Use the source's CLI or tools for anything the event does not include.
+If the event lacks a field your subscription instructions require, cancel the subscription with `listen_events(action="cancel", subscription_id="{{ subscription_id }}")` and tell the user once why. Do not silently end the turn and leave the subscription active.
+Use the source's CLI or tools for anything else the event does not include.

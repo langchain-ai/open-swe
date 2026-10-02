@@ -75,15 +75,25 @@ async def _github(event_type: str, payload: dict[str, JsonValue], delivery_id: s
     )
 
 
-async def _slack(channel: str, channel_type: str, delivery_id: str) -> None:
+async def _slack(
+    channel: str,
+    channel_type: str,
+    delivery_id: str,
+    *,
+    text: str = "hi",
+    ts: str = "",
+    thread_ts: str = "",
+) -> None:
     body = json.dumps(
         {
             "event": {
                 "type": "message",
                 "user": "U1",
-                "text": "hi",
+                "text": text,
                 "channel": channel,
                 "channel_type": channel_type,
+                "ts": ts,
+                "thread_ts": thread_ts,
             }
         }
     ).encode()
@@ -214,3 +224,32 @@ async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
     await _slack("COWN", "group", "s-own")
 
     assert [match.delivery_id for match in await _owed()] == ["s-public", "s-own"]
+
+
+async def test_slack_wake_includes_message_timestamps(
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+) -> None:
+    await _subscribe(workspace, sources=["slack"], event_types=["message"])
+
+    await _slack(
+        "CPUBLIC",
+        "channel",
+        "s-timestamps",
+        ts="1710000000.000100",
+        thread_ts="1710000000.000001",
+    )
+
+    (match,) = await _owed()
+    assert "Message ts: 1710000000.000100" in match.content
+    assert "Thread ts: 1710000000.000001" in match.content
+
+
+async def test_slack_wake_explains_empty_message_text(
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+) -> None:
+    await _subscribe(workspace, sources=["slack"], event_types=["message"])
+
+    await _slack("CPUBLIC", "channel", "s-blocks", text="")
+
+    (match,) = await _owed()
+    assert "(message has no plain text; it may use blocks or attachments)" in match.content

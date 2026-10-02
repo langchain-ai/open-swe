@@ -88,6 +88,8 @@ class _SlackMessage(BaseModel):
     text: JsonValue = ""
     channel: JsonValue = ""
     channel_type: JsonValue = ""
+    ts: JsonValue = ""
+    thread_ts: JsonValue = ""
 
     @property
     def user_id(self) -> str:
@@ -100,6 +102,14 @@ class _SlackMessage(BaseModel):
     @property
     def message_text(self) -> str:
         return self.text if isinstance(self.text, str) else ""
+
+    @property
+    def message_ts(self) -> str:
+        return self.ts if isinstance(self.ts, str) else ""
+
+    @property
+    def thread_message_ts(self) -> str:
+        return self.thread_ts if isinstance(self.thread_ts, str) else ""
 
 
 class _SlackDelivery(BaseModel):
@@ -140,6 +150,8 @@ class EventSummary(BaseModel):
     trusted: bool = False
     from_open_swe: bool = False
     slack_channel_id: str = ""
+    slack_message_ts: str = ""
+    slack_thread_ts: str = ""
     slack_public: bool = False
     pull_request_numbers: list[int] = []
 
@@ -220,10 +232,13 @@ class EventSummary(BaseModel):
             event_type=event.event_type,
             target=f"<#{message.channel_id}>" if message.channel_id else "",
             sender=f"<@{message.user_id}>" if message.user_id else "",
-            body=message.message_text,
+            body=message.message_text
+            or "(message has no plain text; it may use blocks or attachments)",
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,
             slack_channel_id=message.channel_id,
+            slack_message_ts=message.message_ts,
+            slack_thread_ts=message.thread_message_ts,
             slack_public=message.channel_type == "channel",
         )
 
