@@ -35,7 +35,7 @@ from agent.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
-from agent.slack.blocks import Block, block_payload, escape
+from agent.slack.blocks import Block, block_payload, context, escape
 from agent.slack.cards import repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -51,6 +51,17 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from agent.users import User
+from agent.utils.dashboard_links import dashboard_thread_url
+
+
+async def _origin_footer(request: HumanReviewRequest) -> list[Block]:
+    links = []
+    if url := dashboard_thread_url(request.thread_id):
+        links.append(f"<{url}|Web thread>")
+    if request.slack_location and (url := await get_slack_permalink(*request.slack_location)):
+        links.append(f"<{url}|Slack thread>")
+    return [context(" · ".join(links))] if links else []
+
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +214,9 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
                 "Could not deliver author-only ephemeral review card",
                 extra={"approval_id": str(approval.id)},
             )
-    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    dm_location = await send_dm_with_location(
+        author.slack_user_id, text, blocks=block_payload([*blocks, *await _origin_footer(approval)])
+    )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
@@ -274,6 +287,15 @@ async def _render_standard(
 
 
 async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
+) -> tuple[str, list[Block]]:
+    text, blocks = await _render(request, outcome, copy=copy)
+    if copy or dm:
+        blocks.extend(await _origin_footer(request))
+    return text, blocks
+
+
+async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
@@ -311,7 +333,7 @@ async def render(
 async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> None:
     if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
         return
-    text, blocks = await render(request, outcome)
+    text, blocks = await render(request, outcome, dm=True)
     ok, error = await update_slack_message(
         request.slack_dm_channel_id, request.slack_dm_message_ts, text, blocks=block_payload(blocks)
     )
