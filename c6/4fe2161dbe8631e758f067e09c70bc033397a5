@@ -1,0 +1,36 @@
+agent/tools/record_rollout_check.py
+  s_8c15db54e0c42b::t_b0efc75c58a58b 65
+  s_8c15db54e0c42b::t_efa2a4b1360c34 6
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_f6a4a9639a545c 394
+  s_8c15db54e0c42b::t_6fbef7a406cd6b 66
+  s_8c15db54e0c42b::t_cdbb422d0a04f5 247-295
+  s_8c15db54e0c42b::t_c5af8284af0d63 84-86
+agent/rollouts.py
+  s_8c15db54e0c42b::t_0fd51ebb092234 409
+  s_8c15db54e0c42b::t_c139401b4576ec 352
+  s_8c15db54e0c42b::t_097ffe1a789749 134-139,143-147
+  s_8c15db54e0c42b::t_427b917193a917 359-360,363
+  s_8c15db54e0c42b::t_db320a6f6e9fc4 560-562
+  s_8c15db54e0c42b::t_37c271971fad8e 86
+  s_8c15db54e0c42b::t_ef39eed4c87a77 304-336
+  s_8c15db54e0c42b::t_a1aee5210a74b8 456
+  s_8c15db54e0c42b::t_a34498a11f0bf0 391
+  s_8c15db54e0c42b::t_05c99f68458ba9 471-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c64fe2161dbe8631e758f067e09c70bc033397a5",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

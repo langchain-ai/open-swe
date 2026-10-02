@@ -1,0 +1,27 @@
+agent/tools/rollout_page_check.py
+  s_8c15db54e0c42b::t_3551b1c677dde2 4-6
+  s_8c15db54e0c42b::t_ce99fa67c1cd10 27
+agent/resources/prompts/tools/record_rollout_check.md
+  s_8c15db54e0c42b::t_8786164ae99e62 1
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_6d55c2b2217cde 325
+  s_8c15db54e0c42b::t_e4336b15cc45c8 339,341
+agent/resources/prompts/tools/rollout_page_check.md
+  s_8c15db54e0c42b::t_e0a0d52ffd773a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d5444c2670e00a1a42d56c7fa859821e6cef29b",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
