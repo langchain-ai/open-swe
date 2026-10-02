@@ -368,6 +368,224 @@
         "title": "AssessmentFeedback",
         "type": "object"
       },
+      "AuditLog": {
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "enrichments": {
+            "$ref": "#/components/schemas/AuditLogEnrichments"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "operation_name": {
+            "maxLength": 128,
+            "title": "Operation Name",
+            "type": "string"
+          },
+          "operation_succeeded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Succeeded"
+          },
+          "request_time": {
+            "format": "date-time",
+            "title": "Request Time",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "operation_name"
+        ],
+        "title": "AuditLog",
+        "type": "object"
+      },
+      "AuditLogEnrichments": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "person",
+                  "api_key",
+                  "github_actions",
+                  "agent"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Kind"
+          },
+          "actor_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Login"
+          },
+          "delegated_from_sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delegated From Sandbox Id"
+          },
+          "request_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Method"
+          },
+          "request_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Path"
+          },
+          "resource_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resource Ids",
+            "type": "array"
+          },
+          "response_status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Status Code"
+          },
+          "source": {
+            "default": "http",
+            "enum": [
+              "http",
+              "tool"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          }
+        },
+        "title": "AuditLogEnrichments",
+        "type": "object"
+      },
+      "AuditLogsPage": {
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditLog"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "cursor"
+        ],
+        "title": "AuditLogsPage",
+        "type": "object"
+      },
       "BlockSuggestionResponse": {
         "properties": {
           "options": {
@@ -1086,48 +1304,6 @@
           "input"
         ],
         "title": "CustomToolCallItem",
-        "type": "object"
-      },
-      "DashboardImageBody": {
-        "properties": {
-          "base64": {
-            "minLength": 1,
-            "title": "Base64",
-            "type": "string"
-          },
-          "fileName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filename"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kind"
-          },
-          "mimeType": {
-            "minLength": 1,
-            "title": "Mimetype",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base64",
-          "mimeType"
-        ],
-        "title": "DashboardImageBody",
         "type": "object"
       },
       "DesktopConnectExchange": {
@@ -2533,6 +2709,33 @@
           }
         },
         "title": "OutputTokensDetails",
+        "type": "object"
+      },
+      "PageView": {
+        "properties": {
+          "page_name": {
+            "enum": [
+              "agents",
+              "review",
+              "usage",
+              "settings",
+              "workspaces",
+              "integrations",
+              "admin",
+              "assistant",
+              "incidents",
+              "cloud-agents",
+              "feature-flags",
+              "other"
+            ],
+            "title": "Page Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_name"
+        ],
+        "title": "PageView",
         "type": "object"
       },
       "PendingReview": {
@@ -4790,6 +4993,19 @@
         "title": "SubmittedReview",
         "type": "object"
       },
+      "TelemetryConfig": {
+        "properties": {
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment"
+        ],
+        "title": "TelemetryConfig",
+        "type": "object"
+      },
       "TextAnchor": {
         "properties": {
           "context_after": {
@@ -4881,59 +5097,6 @@
           "status"
         ],
         "title": "ThreadFeedbackResponse",
-        "type": "object"
-      },
-      "ThreadMessageBody": {
-        "properties": {
-          "client_message_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Message Id"
-          },
-          "content": {
-            "default": "",
-            "maxLength": 20000,
-            "title": "Content",
-            "type": "string"
-          },
-          "effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effort"
-          },
-          "images": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardImageBody"
-            },
-            "title": "Images",
-            "type": "array"
-          },
-          "model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Id"
-          }
-        },
-        "title": "ThreadMessageBody",
         "type": "object"
       },
       "ThreadRenameBody": {
@@ -6880,6 +7043,16 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7269,6 +7442,28 @@
         ]
       }
     },
+    "/dashboard/api/analytics/config": {
+      "get": {
+        "operationId": "api_telemetry_config_dashboard_api_analytics_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Telemetry Config",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
     "/dashboard/api/analytics/outbox-status": {
       "get": {
         "operationId": "api_analytics_outbox_status_dashboard_api_analytics_outbox_status_get",
@@ -7292,6 +7487,46 @@
           }
         ],
         "summary": "Api Analytics Outbox Status",
+        "tags": [
+          "dashboard",
+          "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/analytics/page": {
+      "post": {
+        "operationId": "api_page_view_dashboard_api_analytics_page_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Page View",
         "tags": [
           "dashboard",
           "analytics"
@@ -7400,6 +7635,161 @@
         "tags": [
           "dashboard",
           "analytics"
+        ]
+      }
+    },
+    "/dashboard/api/audit-logs": {
+      "get": {
+        "operationId": "api_list_audit_logs_dashboard_api_audit_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start Time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End Time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogsPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Audit Logs",
+        "tags": [
+          "dashboard",
+          "audit-logs"
         ]
       }
     },
@@ -9386,6 +9776,22 @@
       "get": {
         "operationId": "notion_login_dashboard_api_notion_login_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
           {
             "in": "query",
             "name": "desktop_handoff",
@@ -14634,6 +15040,44 @@
         ]
       }
     },
+    "/dashboard/api/slack/concierge": {
+      "get": {
+        "operationId": "api_concierge_dashboard_api_slack_concierge_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Api Concierge Dashboard Api Slack Concierge Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Concierge",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/desktop/exchange": {
       "post": {
         "description": "Finish a desktop Slack link with the app's own session.",
@@ -15990,66 +16434,6 @@
           }
         ],
         "summary": "Api Thread History",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/messages": {
-      "post": {
-        "operationId": "api_send_thread_message_dashboard_api_threads__thread_id__messages_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadMessageBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Send Thread Message Dashboard Api Threads  Thread Id  Messages Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Send Thread Message",
         "tags": [
           "dashboard",
           "threads"

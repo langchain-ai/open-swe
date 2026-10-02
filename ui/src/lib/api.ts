@@ -168,6 +168,7 @@ export interface SessionUser {
 /** Identifiers an artifact discovered about itself; `null` means unavailable, never assumed. */
 export interface BuildInfo {
   backend: {
+    environment?: string | null
     /** LangGraph Platform revision id — opaque, never a git SHA. */
     revision_id: string | null
     commit: string | null
@@ -194,6 +195,7 @@ export function normalizeBuildInfo(raw: unknown): BuildInfo | null {
       : undefined
   return {
     backend: {
+      environment: typeof b.environment === "string" ? b.environment : null,
       revision_id: typeof b.revision_id === "string" ? b.revision_id : null,
       commit: typeof b.commit === "string" ? b.commit : null,
       built_at: typeof b.built_at === "string" ? b.built_at : null,
@@ -1291,11 +1293,20 @@ function pullRequestThread(
 }
 
 export const api = {
+  recordPageView: (page_name: string) =>
+    request<void>("/analytics/page", {
+      method: "POST",
+      body: JSON.stringify({ page_name }),
+    }),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
     request<OptionsPayload>(
       `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
+  concierge: () =>
+    request<{ thread_id: string | null; channel_id: string | null }>(
+      "/slack/concierge"
     ),
   profile: () => request<Profile>("/profile"),
   dismissSlackOnboarding: () =>
@@ -1624,8 +1635,10 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
-  adminListUsers: (page = 1, pageSize = 20) =>
-    request<AdminUsersPage>(`/admin/users?page=${page}&page_size=${pageSize}`),
+  adminListUsers: (page = 1, pageSize = 20, search = "") =>
+    request<AdminUsersPage>(
+      `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
+    ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   myPullRequests: (
@@ -1864,10 +1877,23 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-export function connectService(provider: "slack" | "notion") {
+export function connectService(
+  provider: "slack" | "notion",
+  redirectTo?: string,
+  target: "_self" | "_blank" = "_self"
+) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    window.location.assign(`${API_BASE}/dashboard/api/${provider}/login`)
+    const query =
+      provider === "notion" && redirectTo
+        ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+        : ""
+    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
+    if (target === "_blank") {
+      window.open(url, "_blank", "noopener,noreferrer")
+    } else {
+      window.location.assign(url)
+    }
   }
   return pending
 }

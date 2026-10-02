@@ -37,6 +37,7 @@ class WorkspaceRow(Base):
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
+    breakout_channel_id: Mapped[str | None] = mapped_column(default=None)
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     vcpus: Mapped[int | None] = mapped_column(default=None)
     fs_capacity_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)

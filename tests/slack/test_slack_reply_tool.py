@@ -30,6 +30,105 @@ def _config() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("breakout", [False, True])
+async def test_kickoff_stays_until_a_subsequent_reply_posts(
+    monkeypatch: pytest.MonkeyPatch,
+    breakout: bool,
+) -> None:
+    from tests.slack.test_slack_thread_mapping import _Client
+
+    client = _Client()
+    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "thread-one",
+                "source": "slack",
+                "slack_kickoff_eligible": True,
+                "slack_breakout": breakout,
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    posts = iter([("1.1", None), (None, "rate_limited"), ("1.2", None), ("1.3", None)])
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", AsyncMock(side_effect=posts))
+    deleted = AsyncMock()
+
+    @asynccontextmanager
+    async def bot():
+        yield type("Slack", (), {"chat_delete": deleted})()
+
+    monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
+    assert await slack_reply_tool.slack_reply("Investigating", "progress") == {
+        "success": True,
+        "message_ts": "1.1",
+    }
+    assert await slack_reply_tool.slack_reply("Update", "final") == {
+        "success": False,
+        "error": "rate_limited",
+        "slack_error": "rate_limited",
+        "message_chars": 6,
+        "hint": slack_reply_tool._slack_reply_failure_hint("rate_limited"),
+    }
+    deleted.assert_not_awaited()
+    assert await slack_reply_tool.slack_reply("Update", "progress") == {
+        "success": True,
+        "message_ts": "1.2",
+    }
+    assert await slack_reply_tool.slack_reply("Done", "final") == {
+        "success": True,
+        "message_ts": "1.3",
+    }
+    if breakout:
+        deleted.assert_not_awaited()
+    else:
+        deleted.assert_awaited_once_with(channel="C1", ts="1.1")
+
+
+async def test_kickoff_delete_failure_does_not_interrupt_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.slack.test_slack_thread_mapping import _Client
+
+    client = _Client()
+    await client.store.put_item(("slack_kickoff", "C1"), "1.0", {"kickoff_ts": "1.1"})
+    monkeypatch.setattr(slack_reply_tool, "get_langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        slack_reply_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "thread_id": "thread-one",
+                "source": "slack",
+                "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        slack_reply_tool, "_post_and_store_mapping", AsyncMock(return_value=("1.2", None))
+    )
+
+    deleted = AsyncMock(side_effect=[TimeoutError("failed"), None])
+
+    @asynccontextmanager
+    async def bot():
+        yield type("Slack", (), {"chat_delete": deleted})()
+
+    monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
+    posted = {"success": True, "message_ts": "1.2"}
+    assert await slack_reply_tool.slack_reply("Update", "final") == posted
+    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
+        "kickoff_ts": "1.1"
+    }
+    assert await slack_reply_tool.slack_reply("Another update", "final") == posted
+    assert deleted.await_count == 2
+    assert (await client.store.get_item(("slack_kickoff", "C1"), "1.0"))["value"] == {
+        "removed": True
+    }
+
+
 async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

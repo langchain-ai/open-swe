@@ -255,7 +255,7 @@ test.describe("thread pull requests", () => {
 
   // Public and private need separate runs: the PR body is written at
   // open_pull_request time, so the repo's visibility has to be set before it.
-  test("keeps the originating Slack thread out of public PR bodies", async ({
+  test("includes the originating Slack thread in public PR bodies", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -263,7 +263,7 @@ test.describe("thread pull requests", () => {
 
     await openThreadActionsMenu(page);
     await expect(page.getByText("Open in Slack")).toBeVisible();
-    await expect.poll(() => latestPrBody(page)).not.toContain("Slack thread");
+    await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
   test("exposes the originating Slack thread for private repos", async ({
