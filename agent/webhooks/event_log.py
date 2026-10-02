@@ -14,6 +14,8 @@ from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
 from agent.database import configured, transaction
+from agent.slack.payloads import SlackEventEnvelope
+from agent.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,23 @@ class EventRefs(BaseModel):
             if delivery.sender and delivery.sender.id
             else "",
             pull_request_number=number,
+        )
+
+    @classmethod
+    def slack(cls, envelope: SlackEventEnvelope) -> Self:
+        event = envelope.event
+        if event is None:
+            return cls()
+        message = event.message if event.subtype == "message_changed" else event
+        refs = event_pull_requests(envelope)
+        ref = refs[0] if len(refs) == 1 else None
+        return cls(
+            github_repository=f"{ref.owner}/{ref.repo}" if ref else "",
+            pull_request_number=ref.number if ref else None,
+            slack_user_id=message.user
+            if message and isinstance(message.user, str)
+            else event.resolve_user_id(),
+            slack_channel_id=event.resolve_channel_id(),
         )
 
     @classmethod

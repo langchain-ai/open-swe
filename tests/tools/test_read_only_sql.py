@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +13,19 @@ sql_tool = import_module("agent.tools.read_only_sql")
 
 
 def _config(**configurable: object) -> dict[str, dict[str, object]]:
-    return {"configurable": configurable}
+    return {"configurable": {"thread_id": "t-1", **configurable}}
+
+
+@pytest.fixture(autouse=True)
+def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = SimpleNamespace(
+        threads=SimpleNamespace(
+            get=AsyncMock(
+                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
+            )
+        )
+    )
+    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
 
 
 @pytest.mark.asyncio

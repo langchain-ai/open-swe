@@ -288,14 +288,6 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
     return None
 
 
-def is_deprecated_model(model_id: object) -> bool:
-    return isinstance(model_id, str) and model_id in DEPRECATED_MODEL_IDS
-
-
-def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
-    return None
-
-
 def normalize_model_choice(model_id: object, effort: object) -> tuple[str | None, str | None]:
     if (
         not isinstance(model_id, str)
