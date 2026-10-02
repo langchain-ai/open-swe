@@ -29,7 +29,12 @@ from agent.input_messages import (
     system_introduction,
 )
 from agent.prompts import load_prompt, prompt
-from agent.review.findings import FindingInteraction, ReviewerPRMeta, ReviewerSlackThread
+from agent.review.findings import (
+    FindingInteraction,
+    ReviewerPRMeta,
+    ReviewerSlackThread,
+    reviewer_thread_title,
+)
 from agent.review.walkthrough import Walkthrough
 from agent.run_config import Repo
 from agent.slack.client import GitHubPrRef
@@ -43,10 +48,6 @@ from agent.thread_ids import (
 from agent.threads.creation import create_thread
 from agent.users import User
 from agent.webhooks import common
-
-
-def _reviewer_thread_title(pr_title: str, pr_number: int) -> str:
-    return f"Review: {pr_title} #{pr_number}" if pr_title else f"Review #{pr_number}"
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -303,7 +304,9 @@ async def trigger_pr_review_from_ref(
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_ref.number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_ref.number, "title": pr_title}),
     ):
         return {"success": False, "error": "Could not create reviewer thread"}
 
@@ -447,7 +450,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_number, "title": pr_title}),
     ):
         return
 
@@ -773,7 +778,9 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
 
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
-        thread_id, langgraph_client, title=_reviewer_thread_title(pr_title, pr_number)
+        thread_id,
+        langgraph_client,
+        title=reviewer_thread_title({"number": pr_number, "title": pr_title}),
     ):
         return
     try:

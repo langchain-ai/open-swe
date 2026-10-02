@@ -65,6 +65,7 @@ export function AppShell({
 }
 
 interface SettingsSectionProps {
+  id?: string
   title: ReactNode
   description?: string
   action?: ReactNode
@@ -73,13 +74,14 @@ interface SettingsSectionProps {
 
 /** A titled group of rows rendered as a single card. */
 export function SettingsSection({
+  id,
   title,
   description,
   action,
   children,
 }: SettingsSectionProps) {
   return (
-    <section className="space-y-3">
+    <section id={id} className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-sm font-medium text-foreground">{title}</h2>

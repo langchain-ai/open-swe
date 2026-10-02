@@ -1,4 +1,4 @@
-import { getSingularPatch, parseDiffFromFile } from "@pierre/diffs"
+import { getSingularPatch } from "@pierre/diffs"
 import type { FileDiffMetadata, Hunk } from "@pierre/diffs"
 
 import type {
@@ -67,10 +67,8 @@ export function walkthroughFileDiff(
   lines: ReviewWalkthroughFile
 ): FileDiffMetadata | null {
   if (lines.added.length === 0 && lines.deleted.length === 0) return null
-  const full = parseDiffFromFile(
-    { name: file.path, contents: file.originalContent },
-    { name: file.path, contents: file.modifiedContent }
-  )
+  if (!file.patch) return null
+  const full = getSingularPatch(file.patch)
   const kept = full.hunks.filter(
     (hunk) =>
       overlaps(hunk.additionStart, hunk.additionCount, lines.added) ||

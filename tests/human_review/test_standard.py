@@ -5,13 +5,18 @@ import httpx2
 import pytest
 
 from agent.expedited_review.readiness import PullRequestSnapshot
+from agent.github.pull_requests import PullRequest
 from agent.github.repo_files import RepoSettings
+from agent.human_review.lifecycle import _render_standard
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
     merge_wait,
     request_blockers,
     summary_line,
 )
+from agent.slack.blocks import block_payload
+from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
 
@@ -94,6 +99,37 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
     assert merge_wait([], _NOW, {"hopper": "APPROVED"}, _NOW) is None
 
 
+@pytest.mark.parametrize(
+    "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
+)
+async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | None) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    for login in ("grace", "linus"):
+        user = User(
+            identities=[
+                UserIdentity(provider="github", external_id=login, login=login),
+                UserIdentity(provider="slack", external_id=f"U_{login}"),
+            ]
+        )
+        participant = HumanReviewParticipant(user_id=user.id, decision="review")
+        participant.user = user
+        request.participants.append(participant)
+    with patch("agent.human_review.lifecycle.review_standings", AsyncMock(return_value=states)):
+        text, blocks = await _render_standard(request, "merged", "token")
+    payload = block_payload(blocks)
+    assert payload is not None
+    rendered = str(payload)
+    for message in (text, rendered):
+        assert "merged" in message
+        if states:
+            assert "approved by <@U_grace>, @hopper" in message
+        else:
+            assert "approved by" not in message
+        assert "linus" not in message
+
+
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
     assert summary_line("<!-- template -->\nFixes the\nretry loop.\n") == "Fixes the retry loop."
 
@@ -106,6 +142,35 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
     assert len(line) <= SUMMARY_MAX_CHARS
     assert description.startswith(kept)
     assert description[len(kept)] in {" ", ","}
+
+
+@pytest.mark.parametrize(
+    ("states", "collapsed"),
+    [
+        ({"grace": "APPROVED"}, True),
+        ({}, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+    ],
+)
+async def test_approved_card_collapses_without_closing_the_request(
+    states: dict[str, str], collapsed: bool
+) -> None:
+    from agent.github.pull_requests import PullRequest
+    from agent.human_review.lifecycle import _render_standard
+    from agent.human_review.requests import HumanReviewRequest
+
+    pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    with (
+        patch("agent.human_review.lifecycle.review_standings", AsyncMock(return_value=states)),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+    ):
+        text, blocks = await _render_standard(request, None, "token")
+    assert ("Review request: approved" in text) is collapsed
+    assert (len(blocks) == 1) is collapsed
+    assert request.state == "open"
 
 
 def _github(status: int, text: str = "") -> AsyncMock:

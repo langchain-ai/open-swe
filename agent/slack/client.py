@@ -590,7 +590,7 @@ def with_slack_session_cost(
     """Replace cumulative and optional per-run costs in a live Slack footer."""
     label = format_slack_session_cost(cost)
     if run_cost is not None and run_cost < cost:
-        label += f" • +{format_slack_session_cost(run_cost)}"
+        label += f" ({format_slack_session_cost(run_cost)})"
     updated_text = _replace_slack_session_cost(text, label, require_web_link=True)
     if blocks is None:
         return updated_text, None
@@ -1369,6 +1369,22 @@ async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eye
         if error == "already_reacted":
             return True
         logger.warning("Slack reaction failed", extra={"slack_error": error})
+        return False
+
+
+async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) -> bool:
+    """Remove the bot's reaction from a Slack message."""
+    if not SLACK_BOT_TOKEN:
+        return False
+    try:
+        async with SlackClient.bot() as client:
+            await client.reactions_remove(channel=channel_id, timestamp=message_ts, name=emoji)
+        return True
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        if error == "no_reaction":
+            return True
+        logger.warning("Slack reaction removal failed", extra={"slack_error": error})
         return False
 
 
@@ -2168,16 +2184,3 @@ async def lookup_slack_run_mapping(
         return None
     value = item.get("value")
     return value if isinstance(value, dict) else None
-
-
-async def lookup_run_id_for_slack_message(
-    langgraph_client: LangGraphClient,
-    channel_id: str,
-    message_ts: str,
-) -> str | None:
-    """Look up the LangGraph run mapped to a specific Slack bot message."""
-    value = await lookup_slack_run_mapping(langgraph_client, channel_id, message_ts)
-    if not value:
-        return None
-    run_id = value.get("run_id")
-    return run_id if isinstance(run_id, str) and run_id else None

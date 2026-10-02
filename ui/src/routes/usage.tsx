@@ -28,6 +28,7 @@ import type {
   UsageLeaderboardRow,
   UsageLeaderboardSort,
 } from "@/lib/api"
+import { TablePagination } from "@/components/TablePagination"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -61,8 +62,6 @@ export const Route = createFileRoute("/usage")({
   component: UsagePage,
 })
 
-const PAGE_SIZES = [10, 25, 50, 100] as const
-
 interface SortableColumn<Key extends string> {
   key: Key
   label: string
@@ -89,6 +88,10 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "30d": "Last 30 days",
   all: "All time",
 }
+const PERIOD_ITEMS = Object.entries(PERIOD_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
 
 function UsagePage() {
   const session = useSession()
@@ -149,6 +152,7 @@ export function UsageDateRange({
         Date range
       </label>
       <Select
+        items={PERIOD_ITEMS}
         value={activePeriod}
         onValueChange={(value) =>
           onPeriodChange(value as UsageLeaderboardPeriod)
@@ -158,7 +162,7 @@ export function UsageDateRange({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {Object.entries(PERIOD_LABELS).map(([value, label]) => (
+          {PERIOD_ITEMS.map(({ value, label }) => (
             <SelectItem key={value} value={value}>
               {label}
             </SelectItem>
@@ -1460,74 +1464,6 @@ function UsageTable({
         onPageChange={onPageChange}
         onPageSizeChange={onPageSizeChange}
       />
-    </div>
-  )
-}
-
-function TablePagination({
-  page,
-  pageSize,
-  total,
-  disabled = false,
-  onPageChange,
-  onPageSizeChange,
-}: {
-  page: number
-  pageSize: number
-  total: number
-  disabled?: boolean
-  onPageChange: (page: number) => void
-  onPageSizeChange: (pageSize: number) => void
-}) {
-  if (total <= 10) return null
-
-  const pageCount = Math.max(1, Math.ceil(total / pageSize))
-  const start = total ? (page - 1) * pageSize + 1 : 0
-  const end = Math.min(page * pageSize, total)
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-      <span>
-        {formatNumber(start)}–{formatNumber(end)} of {formatNumber(total)}
-      </span>
-      <div className="flex items-center gap-2">
-        <span>Rows per page</span>
-        <Select
-          disabled={disabled}
-          value={String(pageSize)}
-          onValueChange={(value) => onPageSizeChange(Number(value))}
-        >
-          <SelectTrigger aria-label="Rows per page" className="w-20">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZES.map((size) => (
-              <SelectItem key={size} value={String(size)}>
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled || page === 1}
-          onClick={() => onPageChange(page - 1)}
-        >
-          Previous
-        </Button>
-        <span>
-          Page {page} of {pageCount}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled || page >= pageCount}
-          onClick={() => onPageChange(page + 1)}
-        >
-          Next
-        </Button>
-      </div>
     </div>
   )
 }

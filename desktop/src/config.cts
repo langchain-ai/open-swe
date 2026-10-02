@@ -148,6 +148,22 @@ function localCallbackUrl(navigationUrl, backendUrl) {
   }
 }
 
+function desktopDeepLinkUrl(value, backendUrl) {
+  try {
+    const target = new URL(value);
+    const backend = new URL(backendUrl);
+    if (
+      target.protocol !== "https:" ||
+      target.origin !== backend.origin ||
+      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
+    )
+      return null;
+    return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 function appRedirectUrl(location) {
   const target = new URL(location, APP_URL);
   return `${APP_URL}${target.pathname.replace(/^\//, "")}${target.search}${target.hash}`;
@@ -174,6 +190,7 @@ module.exports = {
   connectLoginUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   resolveAppRuntime,
   backendRequestUrl,
   isAppLoginUrl,

@@ -37,8 +37,6 @@ from agent.store import (
     get_value,
     now_iso,
     put_value,
-    search_all_values,
-    search_values,
 )
 from agent.users import User, UserPreferences, UserPreferencesPatch
 
@@ -66,6 +64,9 @@ class ProfileUpdate(BaseModel):
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
@@ -152,18 +153,6 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
-async def resolve_oauth_login(login: str) -> str | None:
-    """Recover the stored OAuth key when older thread metadata lost its casing."""
-    if await get_oauth_token_record(login):
-        return login
-    matches = {
-        candidate
-        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
-        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
-
-
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
     """Write the user's editable settings.
 
@@ -202,6 +191,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "experimental_background_callbacks": (
+            update.experimental_background_callbacks
+            if update.experimental_background_callbacks is not None
+            else existing.get("experimental_background_callbacks")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -403,10 +397,6 @@ async def has_access_token_record(login: str) -> bool:
     but won't decrypt / was revoked), so callers can prompt accurately.
     """
     return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
-
-
-async def list_profiles() -> list[dict[str, Any]]:
-    return await search_values(PROFILES_NAMESPACE, limit=1000)
 
 
 router = APIRouter(tags=["profiles"])
