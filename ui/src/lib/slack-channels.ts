@@ -7,6 +7,9 @@ export const slackChannelDirectoryKey = ["slackChannels"] as const
 
 export const SLACK_CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
+export const slackChannelHref = (id: string): string =>
+  `https://slack.com/app_redirect?channel=${encodeURIComponent(id)}`
+
 /** The channels the bot can see; a directory to browse, refreshed on its own. */
 export function useSlackChannelDirectory(enabled: boolean) {
   const queryClient = useQueryClient()

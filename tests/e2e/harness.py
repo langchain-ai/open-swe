@@ -111,8 +111,20 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    await _cancel_inflight_runs()
     await _reset_durable_pr_state()
     return JSONResponse({"ok": True})
+
+
+async def _cancel_inflight_runs() -> None:
+    """Stop runs an earlier spec left going; the single dev worker would queue the next spec's run behind them."""
+    client = get_client(url=BASE_URL)
+    # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
+    for thread in await client.threads.search(status="busy", limit=1000):
+        thread_id = thread["thread_id"]
+        for status in ("pending", "running"):
+            for run in await client.runs.list(thread_id, status=status, limit=100):
+                await client.runs.cancel(thread_id, run["run_id"], wait=True)
 
 
 @app.post("/control/reset-default-workspace")

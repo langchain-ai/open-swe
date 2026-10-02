@@ -41,7 +41,7 @@ from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
-from deepagents.middleware.filesystem import FilesystemState
+from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -76,12 +76,12 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     ModelOption,
     available_requested_models,
-    canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
+from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
@@ -169,6 +169,7 @@ from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
+from agent.threads.blobs import blob_namespace
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -212,6 +213,7 @@ from agent.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
+    request_service_connection,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -220,6 +222,7 @@ from agent.tools import (
     schedule_thread_wakeup,
     slack_add_reaction,
     slack_attach_html,
+    slack_list_channel_members,
     slack_list_channels,
     slack_move_thread,
     slack_no_reply_needed,
@@ -237,7 +240,6 @@ from agent.tools import (
 from agent.tools.access import permitted, resolve_access
 from agent.tools.admin_gate import (
     actor_has_admin_context,
-    actor_is_admin,
     participant_is_admin,
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
@@ -283,6 +285,7 @@ DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
+BLOBS_ROUTE = "/blobs/"
 BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
@@ -601,6 +604,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "request_service_connection",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -682,10 +686,6 @@ def workspace_slug(cfg: RunConfig) -> str | None:
     return cfg.workspace_slug
 
 
-async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    return await actor_is_admin(RunConfig.from_config(config), login=profile_login)
-
-
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
@@ -725,8 +725,15 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
 async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
         return []
+    try:
+        status = (await get_notion_status(profile_login))["notion"]
+    except Exception:
+        logger.warning("Could not read Notion connection status", exc_info=True)
+        return []
+    if not status.get("connected"):
+        return []
     return await _cached_tool_loader(
-        f"tools:notion:{profile_login}",
+        f"tools:notion:{profile_login}:{status.get('updated_at')}",
         300,
         lambda: load_notion_tools(profile_login),
     )
@@ -964,6 +971,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     outputs={
                         "requested_model": decision.requested_model,
                         "classifier": vars(decision.classifier),
+                        "requested_effort": decision.requested_effort,
+                        "effort_classifier": vars(decision.effort_classifier),
                         "outcome": decision.outcome,
                         "reason": decision.reason,
                         "pin_persisted": decision.pin_persisted,
@@ -984,6 +993,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             client=client,
         )
         requested_model: str | None = None
+        requested_effort: str | None = None
         if self._requested_models is not None and self._model_selection is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
@@ -992,6 +1002,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
                     decision=decision.classifier,
+                    effort_decision=decision.effort_classifier,
                     slack_event_ts=(
                         handoff_config.slack_thread.triggering_event_ts
                         if handoff_config.slack_thread is not None
@@ -1006,6 +1017,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "low_confidence"
                 if handoff is not None:
                     requested_model = handoff.requested_model
+                    requested_effort = handoff.requested_effort
+                    decision.requested_effort = requested_effort
                     decision.requested_model = requested_model
                     if handoff.unavailable_model or (
                         requested_model and requested_model not in self._requested_models
@@ -1014,6 +1027,27 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         decision.reason = "model_unavailable"
                         raise ValueError(
                             "The requested runtime model is unavailable; select an available model."
+                        )
+                if handoff is not None and handoff.unavailable_effort:
+                    decision.outcome = "unavailable_request"
+                    decision.reason = "effort_unavailable"
+                    raise ValueError("The requested reasoning effort is unavailable.")
+                if requested_effort is not None:
+                    requested_model = requested_model or self._model_id
+                    decision.requested_model = requested_model
+                    option = self._requested_models.get(requested_model)
+                    if option is None:
+                        decision.outcome = "unavailable_request"
+                        decision.reason = "model_unavailable"
+                        raise ValueError(
+                            "Choose an available runtime model to set its reasoning effort."
+                        )
+                    if requested_effort not in option["efforts"]:
+                        decision.outcome = "incompatible_request"
+                        decision.reason = "effort_unsupported"
+                        raise ValueError(
+                            f"The requested reasoning effort {requested_effort!r} is not supported "
+                            f"by {option['label']}; choose from {', '.join(option['efforts'])}."
                         )
                 settings["model_handoff_complete"] = True
                 settings["requested_model"] = requested_model
@@ -1033,7 +1067,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         )
                     settings.update(
                         model_id=requested_model,
-                        effort=option["default_effort"],
+                        effort=requested_effort or option["default_effort"],
                         model_routing_enabled=False,
                     )
                 try:
@@ -1053,8 +1087,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 decision.pin_persisted = bool(requested_model)
             if requested_model:
                 option = self._requested_models[requested_model]
+                requested_effort = settings.get("effort") or option["default_effort"]
+                decision.requested_effort = requested_effort
                 try:
-                    self._model_selection.use_requested_model(requested_model)
+                    self._model_selection.use_requested_model(requested_model, requested_effort)
                 except Exception:
                     decision.outcome = "selection_failure"
                     decision.reason = "model_initialization_failed"
@@ -1063,7 +1099,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
                 self._model_id = requested_model
-                self._effort = option["default_effort"]
+                self._effort = requested_effort
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
@@ -1251,6 +1287,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
+            "requested_effort": requested_effort,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
@@ -1447,13 +1484,16 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
+    # Auto never falls back outside its tiers: an uncertain route uses Fast.
+    if adaptive_model_routing and not slack_ask_mode:
+        if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
+            subagent_model_id, subagent_effort = routing_defaults["fast"]
+        model_id, profile_effort = routing_defaults["fast"]
+
     # Capability fallbacks can temporarily replace a pinned text-only model.
     image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
-    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
-    if canonical_per_thread is not None:
-        per_thread_model, per_thread_effort = canonical_per_thread
     if (
         (
             not thread_settings.get("requested_model")
@@ -1611,6 +1651,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
+        slack_list_channel_members,
         slack_list_channels,
         slack_move_thread,
         slack_no_reply_needed,
@@ -1651,6 +1692,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
+        request_service_connection,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
@@ -1660,6 +1702,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
+        slack_list_channel_members,
         slack_list_channels,
         slack_move_thread,
         slack_no_reply_needed,
@@ -1716,7 +1759,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     static_tools = apply_tool_descriptions(
         static_tools,
-        {"expose_port": {"jwks_url": service_identity_jwks_url()}},
+        {
+            "expose_port": {
+                "jwks_url": service_identity_jwks_url(),
+                "port": "<port>",
+            }
+        },
     )
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
@@ -1782,6 +1830,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 )
             )
             skill_sources.insert(0, USER_SKILLS_ROUTE)
+        # Offloaded images live in the store so they can be read without the sandbox.
+        skill_routes[BLOBS_ROUTE] = StoreBackend(
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+        )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
@@ -1823,13 +1875,17 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     configurable["image_model_fallback_enabled"] = image_fallback is not None
 
-    def requested_model_factory(requested_model: str) -> BaseChatModel:
+    def requested_model_factory(
+        requested_model: str, requested_effort: str | None
+    ) -> BaseChatModel:
         option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
         model = _make_model_or_defer(
             requested_model,
             use_gateway=use_gateway,
             **provider_model_kwargs(
-                requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
+                requested_model,
+                requested_effort or option["default_effort"],
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
             ),
         )
         if image_fallback is not None and not option["supports_images"]:
@@ -1909,6 +1965,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             middleware=cast(
                 list[AgentMiddleware[Any, Any, Any]],
                 [
+                    FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True
                     ),
