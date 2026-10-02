@@ -523,6 +523,7 @@ async def upsert_agent_thread_metadata(
     source_context: SourceContext | None = None,
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
+    slack_display_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
@@ -599,6 +600,18 @@ async def upsert_agent_thread_metadata(
     if sender_login:
         metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
             existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
+        )
+    if slack_display_user_ids:
+        stored_slack_ids = existing_meta.get("participant_slack_ids")
+        metadata["participant_slack_ids"] = sorted(
+            {
+                *(
+                    value
+                    for value in (stored_slack_ids if isinstance(stored_slack_ids, list) else [])
+                    if isinstance(value, str) and value
+                ),
+                *slack_display_user_ids,
+            }
         )
     # Slack human senders with linked Open SWE accounts join the thread as
     # participants on every event, so later conversations credit everyone.

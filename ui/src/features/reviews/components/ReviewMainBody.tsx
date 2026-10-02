@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { UserAvatar } from "@/components/UserAvatar"
 import {
   Fragment,
   createContext,
@@ -2817,15 +2818,7 @@ function InlineComment({
     >
       <div className="overflow-hidden rounded-md border border-border bg-card">
         <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          {comment.author_avatar_url ? (
-            <img
-              src={comment.author_avatar_url}
-              alt=""
-              className="size-4 shrink-0 rounded-full"
-            />
-          ) : (
-            <span className="size-4 shrink-0 rounded-full bg-muted" />
-          )}
+          <UserAvatar login={comment.author} className="size-4" />
           <span className="font-medium">{comment.author}</span>
           {comment.line !== null && (
             <span className="font-mono text-muted-foreground">
@@ -3516,15 +3509,7 @@ function PeopleSection({
               key={person.login}
               className="flex items-center gap-2 text-[11px]"
             >
-              {person.avatar_url ? (
-                <img
-                  src={person.avatar_url}
-                  alt=""
-                  className="size-4 rounded-full"
-                />
-              ) : (
-                <span className="size-4 rounded-full bg-muted" />
-              )}
+              <UserAvatar login={person.login} className="size-4" />
               {person.login}
             </div>
           ))}

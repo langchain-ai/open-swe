@@ -1177,6 +1177,19 @@ async def _process_slack_mention_impl(
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
         slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
+        slack_display_user_ids=sorted(
+            {
+                *([user_id] if allowed_bot is None else []),
+                *(
+                    str(message["user"])
+                    for message in context_messages
+                    if not slack_utils.slack_message_bot_id(message)
+                    and isinstance(message.get("user"), str)
+                    and message["user"]
+                ),
+            }
+            - {bot_user_id}
+        ),
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",

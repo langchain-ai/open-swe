@@ -1297,6 +1297,10 @@ function pullRequestThread(
 }
 
 export const api = {
+  userAvatar: (login: string) =>
+    request<{ avatar_url: string }>(
+      `/users/${encodeURIComponent(login)}/avatar`
+    ),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>

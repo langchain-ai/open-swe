@@ -46,6 +46,7 @@ from agent.dashboard.user_preferences import get_user_preferences
 from agent.database import postgres
 from agent.slack.oauth import slack_base_url, slack_oauth_configured
 from agent.users import User
+from agent.users.avatars import avatar_for_login
 from agent.utils.build_info import build_info
 from agent.utils.dashboard_links import dashboard_api_base_url
 
@@ -251,7 +252,7 @@ async def me(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
+        "avatar_url": await avatar_for_login(session["sub"]) or None,
         "user_id": session.get("user_id") or (str(user.id) if user else None),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),

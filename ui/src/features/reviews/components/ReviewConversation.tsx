@@ -11,7 +11,7 @@ import { useCallback, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/UserAvatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -79,13 +79,7 @@ export function reviewConversationQueryKey(
 }
 
 function AuthorAvatar({ author }: { author: ConversationAuthor | null }) {
-  const login = author?.login ?? "ghost"
-  return (
-    <Avatar size="sm" className="mt-0.5">
-      {author ? <AvatarImage src={author.avatar_url} alt={login} /> : null}
-      <AvatarFallback>{login.slice(0, 2).toUpperCase()}</AvatarFallback>
-    </Avatar>
-  )
+  return <UserAvatar login={author?.login} size="sm" className="mt-0.5" />
 }
 
 function Timestamp({ value, href }: { value: string; href: string }) {
