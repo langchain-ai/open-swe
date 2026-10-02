@@ -1046,6 +1046,31 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+@app.get("/fake-gh/user/installations")
+async def gh_user_installations() -> JSONResponse:
+    return JSONResponse(
+        {
+            "total_count": 1,
+            "installations": [{"id": 42, "account": {"login": "fakeorg", "type": "Organization"}}],
+        }
+    )
+
+
+@app.get("/fake-gh/user/installations/{installation_id}/repositories")
+async def gh_user_installation_repositories(installation_id: int) -> JSONResponse:
+    if installation_id != 42:
+        raise HTTPException(404, "No such installation")
+    return JSONResponse(
+        {
+            "total_count": 2,
+            "repositories": [
+                {"full_name": "fakeorg/demo", "private": False, "archived": False},
+                {"full_name": "anotherorg/companion", "private": False, "archived": False},
+            ],
+        }
+    )
+
+
 @app.get("/fake-gh/installation/repositories")
 async def gh_installation_repositories() -> JSONResponse:
     return JSONResponse(
@@ -1703,6 +1728,7 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
+                    **({"bot_id": m["bot_id"], "subtype": "bot_message"} if m["is_bot"] else {}),
                 }
                 for m in msgs
             ]
@@ -1720,6 +1746,11 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
                     "user": message["user"],
                     "text": message["text"],
                     "ts": message["ts"],
+                    **(
+                        {"bot_id": message["bot_id"], "subtype": "bot_message"}
+                        if message["is_bot"]
+                        else {}
+                    ),
                 }
                 for message in reversed(fakes.slack_messages(channel))
             ]

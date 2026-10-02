@@ -19,17 +19,19 @@ from agent.prompts import prompt
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     acknowledge_slack_command,
+    add_slack_reaction,
     clear_slack_command_message,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_ephemeral_message,
+    remove_slack_reaction,
     replace_slack_command_message,
     strip_bot_mention,
 )
 from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.slack.thinking import settle_slack_thread_status
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
@@ -164,6 +166,9 @@ async def _budgeted_transcript(messages: list[SlackMessage]) -> str:
 
 async def _settle_thinking_status(request: SlackAskRequest) -> None:
     if request.by_the_way:
+        await remove_slack_reaction(
+            request.channel_id, request.message_ts, "hourglass_flowing_sand"
+        )
         await settle_slack_thread_status(request.channel_id, request.reply_thread_ts)
 
 
@@ -208,13 +213,13 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
     if request.response_url:
         await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
     if request.by_the_way:
+        await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
         if not request.question:
             await _refuse(request, _BY_THE_WAY_USAGE)
             return
         if len(request.question) > MAX_QUESTION_CHARS:
             await _refuse(request, _BY_THE_WAY_TOO_LONG)
             return
-        await restore_slack_thinking_status(request.channel_id, request.reply_thread_ts)
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
     if not channel_context.allows_operations:
         await _refuse(request, _CHANNEL_REFUSAL)
@@ -286,6 +291,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "slack_ask": True,
         "slack_ask_response_url": request.response_url,
         "slack_by_the_way_thread_ts": request.reply_thread_ts,
+        "slack_by_the_way_message_ts": request.message_ts,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,

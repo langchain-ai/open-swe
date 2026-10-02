@@ -11,7 +11,6 @@ from agent.credential_scope import (
     pr_author_login,
     private_credential_login,
 )
-from agent.slack import breakout_destination
 from agent.slack.channels import SlackChannel
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
@@ -32,7 +31,6 @@ def _channel(*, private: bool) -> SlackChannel | None:
 @pytest.fixture(autouse=True)
 def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=False)))
-    monkeypatch.setattr(breakout_destination.WORKSPACES, "get", AsyncMock(return_value=None))
 
 
 @pytest.mark.parametrize("private_source", [True, False])
@@ -117,18 +115,13 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("configured", "explicit", "target"),
-    [(None, None, "C1"), ("C2", None, "C2"), ("C2", "C3", "C3")],
+    ("explicit", "target"),
+    [(None, "C1"), ("C3", "C3")],
 )
 async def test_slack_start_new_thread_success(
-    monkeypatch: pytest.MonkeyPatch, configured: str | None, explicit: str | None, target: str
+    monkeypatch: pytest.MonkeyPatch, explicit: str | None, target: str
 ) -> None:
     permalink = None
-    monkeypatch.setattr(
-        breakout_destination.WORKSPACES,
-        "get",
-        AsyncMock(return_value=SimpleNamespace(breakout_channel_id=configured)),
-    )
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
 
@@ -264,7 +257,8 @@ async def test_slack_start_new_thread_success(
     get_permalink.assert_awaited_once_with(target, new_ts)
     assert captured["top_level_post"]["channel_id"] == target
     assert captured["top_level_post"]["text"] == (
-        "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>"
+        "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1> "
+        f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)

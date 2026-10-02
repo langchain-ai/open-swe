@@ -35,11 +35,12 @@ from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
 from agent.human_review.lifecycle import (
     mark_approved,
+    mark_closed,
     mark_merged,
     notify_agent,
     post_standard_card,
     refresh_card,
-    retire,
+    release_picks,
     update_blocked_reactions,
 )
 from agent.human_review.merging import merge_pull_request
@@ -230,6 +231,7 @@ async def record_pull_request(
     details = PullRequestPayload.model_validate(payload)
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
     pull_request.title = details.title
+    pull_request.body = details.body or ""
     pull_request.head_ref = details.head_ref
     pull_request.base_ref = details.base_ref
     pull_request.author = details.author
@@ -432,8 +434,31 @@ def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str
     return f"{who}, Open SWE picked you to review {label}.", False
 
 
+async def _github_approvers(request: HumanReviewRequest) -> list[str]:
+    """Who has approved the pull request on GitHub; empty when GitHub cannot be read."""
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return []
+    async with github_client(token=token) as client:
+        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
+    if states is None:
+        logger.warning(
+            "Could not read reviews before picking a reviewer",
+            extra={"request_id": str(request.id)},
+        )
+        return []
+    return [login for login, state in states.items() if state == "APPROVED"]
+
+
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
+    if approvers := await _github_approvers(request):
+        names = ", ".join(f"@{login}" for login in approvers)
+        return _failure(
+            f"{names} already approved this pull request on GitHub, so it needs no reviewer. "
+            "Do not pick anyone."
+        )
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
@@ -568,13 +593,21 @@ async def settle(request: HumanReviewRequest) -> bool:
         await mark_merged(request)
         return True
     if snapshot.state != "open":
-        await retire(request, "cancelled", "the pull request was closed")
+        await mark_closed(request)
         return True
     await update_blocked_reactions(request, snapshot)
     async with github_client(token=token) as client:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
         return False
+    if approvers := [login for login, state in states.items() if state == "APPROVED"]:
+        picked = len(request.reviewers)
+        request = await release_picks(
+            request, ", ".join(f"@{login}" for login in approvers) + " approved it"
+        )
+        # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
+        if request.kind == "standard" and len(request.reviewers) < picked:
+            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
         return True
@@ -677,6 +710,10 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
+        if request.kind == "standard" and await _github_approvers(request):
+            # Re-checked later in case the approval is dismissed while the request stays open.
+            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
+            return {"status": "approved"}
         return {"status": "woken" if await start_auto_assign(request) else "not_woken"}
     if step == "auto_merge":
         await settle(request)

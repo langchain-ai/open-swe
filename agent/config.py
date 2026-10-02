@@ -341,10 +341,16 @@ ENV.var(
     "OPENSWE_ENV",
     "Deployment environment; `preview` lets startup drop superseded migration revisions.",
 )
-ENV.var("ANALYTICS_ENVIRONMENT", "Analytics producer environment.", default="production")
+ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
+ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")
+ENV.var(
+    "POSTGRES_SLOW_QUERY_MS",
+    "Log application queries at or above this duration in milliseconds; 0 disables.",
+    default="1000",
+)
 ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
 ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
 ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")

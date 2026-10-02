@@ -2,11 +2,15 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
 import pytest
 
-from agent.github import pull_requests
-from agent.github.pull_requests import PullRequest
+from agent.github import pull_request_dashboard_routes, pull_requests, routes
+from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.github.repositories import Repository
+from agent.webhooks import common
+from scripts import sync_pull_request_descriptions
+from tests.conftest import post_signed_github_webhook
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -29,13 +33,29 @@ def _client_returning(*pages: list[dict[str, object]]) -> MagicMock:
 
 async def test_linking_never_overwrites_what_save_wrote() -> None:
     await PullRequest(
-        owner="lc", repo="repo", number=7, state="merged", title="Add widget", author="ada"
+        owner="lc",
+        repo="repo",
+        number=7,
+        state="merged",
+        title="Add widget",
+        body="Widget description",
+        author="ada",
     ).save()
     linked = await _pr().link_thread("fixer")
     reviewed = await _pr().link_review(reviewer_thread_id="rev", github_review_id=11)
 
-    assert (linked.state, linked.title, linked.author) == ("merged", "Add widget", "ada")
-    assert (reviewed.state, reviewed.title, reviewed.author) == ("merged", "Add widget", "ada")
+    assert (linked.state, linked.title, linked.author, linked.body) == (
+        "merged",
+        "Add widget",
+        "ada",
+        "Widget description",
+    )
+    assert (reviewed.state, reviewed.title, reviewed.author, reviewed.body) == (
+        "merged",
+        "Add widget",
+        "ada",
+        "Widget description",
+    )
 
 
 async def test_save_from_a_later_event_updates_github_fields_but_keeps_resolves_thread() -> None:
@@ -194,3 +214,110 @@ async def test_failed_legacy_scan_is_retried_on_the_next_read(
     assert await (await PullRequest.load("lc", "repo", 7)).linked_threads() == []
 
     assert client.threads.search.await_count > searches
+
+
+async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await PullRequest(owner="lc", repo="private", number=1, title="Widgets").save()
+    await PullRequest(owner="lc", repo="repo", number=2, title="Widgets").save()
+    body_match = await PullRequest(
+        owner="lc", repo="repo", number=3, title="Improve rendering", body="Renders widgets"
+    ).save()
+    monkeypatch.setattr(
+        pull_request_dashboard_routes,
+        "accessible_repo_full_names",
+        AsyncMock(return_value={"lc/repo"}),
+    )
+    page = await pull_request_dashboard_routes.api_search_pull_requests(
+        "widget", limit=1, offset=0, session={"sub": "ada"}
+    )
+    assert [row.number for row in page.pull_requests] == [2]
+    assert page.has_more
+    next_page = await pull_request_dashboard_routes.api_search_pull_requests(
+        "widget", limit=1, offset=1, session={"sub": "ada"}
+    )
+    assert [row.number for row in next_page.pull_requests] == [3]
+    assert next_page.pull_requests[0].body == "Renders widgets"
+    assert not next_page.has_more
+
+    body_match.body = ""
+    await body_match.save()
+    assert [row.number for row in await PullRequest.search("widget", repositories=["LC/REPO"])] == [
+        2
+    ]
+    assert await PullRequest.search("widget", repositories=[]) == []
+    assert await PullRequest.search("   ", repositories=["lc/repo"]) == []
+
+
+@pytest.mark.parametrize("action", ["opened", "edited"])
+async def test_webhooks_sync_descriptions_without_auto_review(
+    action: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, body="Old description").save()
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "description-sync-secret")
+    monkeypatch.setattr(common, "get_client", lambda **kwargs: _client_returning())
+    monkeypatch.setattr(routes, "repo_is_routable", AsyncMock(return_value=True))
+    monkeypatch.setattr(common, "is_repo_auto_review_enabled", AsyncMock(return_value=False))
+    monkeypatch.setattr(common, "update_agent_pr_usage_from_webhook", AsyncMock())
+    payload = {
+        "action": action,
+        "repository": {"owner": {"login": "lc"}, "name": "repo", "full_name": "lc/repo"},
+        "pull_request": {"number": 7, "title": "Retitled widgets", "body": "New description"},
+    }
+    response = await post_signed_github_webhook(
+        "pull_request", payload, secret="description-sync-secret"
+    )
+    assert response.status_code == 200
+    saved = await PullRequest.get("lc", "repo", 7)
+    assert saved is not None and (saved.title, saved.body) == (
+        "Retitled widgets",
+        "New description",
+    )
+    event = PullRequestEvent.model_validate(
+        {**payload, "pull_request": {"number": 7, "title": "Retitled widgets", "body": None}}
+    )
+    cleared = event.to_pull_request()
+    assert cleared is not None
+    assert (await cleared.save()).body == ""
+
+
+async def test_description_backfill_preserves_lifecycle_and_concurrent_edits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
+    await PullRequest(owner="lc", repo="repo", number=8).save()
+    monkeypatch.setattr(
+        sync_pull_request_descriptions,
+        "get_github_app_installation_id_for_repo",
+        AsyncMock(return_value=123),
+    )
+    monkeypatch.setattr(
+        sync_pull_request_descriptions,
+        "get_github_app_installation_token",
+        AsyncMock(return_value="token"),
+    )
+    monkeypatch.setattr(sync_pull_request_descriptions.postgres, "close", AsyncMock())
+
+    async def github_response(client: object, method: str, url: str) -> httpx2.Response:
+        number = int(url.rsplit("/", 1)[-1])
+        if number == 8:
+            await PullRequest(owner="lc", repo="repo", number=8, body="Webhook edit").save()
+        return httpx2.Response(
+            200,
+            json={"number": number, "title": "Searchable widgets", "body": "Render widgets"},
+            request=httpx2.Request(method, url),
+        )
+
+    monkeypatch.setattr(sync_pull_request_descriptions, "github_request", github_response)
+    assert await sync_pull_request_descriptions.sync() == 0
+    saved = await PullRequest.get("lc", "repo", 7)
+    assert saved is not None
+    assert (saved.title, saved.body, saved.state) == (
+        "Searchable widgets",
+        "Render widgets",
+        "merged",
+    )
+    newer = await PullRequest.get("lc", "repo", 8)
+    assert newer is not None and newer.body == "Webhook edit"

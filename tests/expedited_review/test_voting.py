@@ -450,3 +450,25 @@ async def test_only_one_open_approval_per_pull_request(open_approval: OpenApprov
     with pytest.raises(IntegrityError):
         await duplicate.save()
     assert await HumanReviewRequest.active_for("lc", "repo", 7) is not None
+
+
+async def test_broadcast_to_configured_review_channel(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval()
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        assert row is not None
+        row.slack_channel_choices = [{"id": "C_REVIEW", "name": "review"}]
+    approval = await _stored(approval)
+    monkeypatch.setattr(voting, "still_internal", AsyncMock(return_value=True))
+    monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
+    monkeypatch.setattr(lifecycle, "render", AsyncMock(return_value=("card", [])))
+    monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
+
+    sent = await voting.request_broadcast(approval)
+    assert sent.message == "Sent to <#C_OTHER>."
+    stored = await _stored(approval)
+    assert stored.slack_channel_id == "C1"
+    assert stored.slack_copy_channel_id == "C_OTHER"
+    assert stored.slack_copy_ts == "9.0"
+    assert stored.slack_broadcast is False

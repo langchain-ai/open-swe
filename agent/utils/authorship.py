@@ -95,6 +95,7 @@ class ThreadParticipant:
     email: str = ""
     timezone: str = ""
     linked: bool = False
+    slack_user_id: str = ""
 
     def as_person(self) -> PersonIdentity:
         """This person as the single context block the model is given for them."""
@@ -105,6 +106,8 @@ class ThreadParticipant:
             person["github_login"] = self.identity.github_login
             person["commit_name"] = self.identity.commit_name
             person["commit_email"] = self.identity.commit_email
+        if self.slack_user_id:
+            person["slack_user_id"] = self.slack_user_id
         if self.email:
             person["email"] = self.email
         if self.timezone:
