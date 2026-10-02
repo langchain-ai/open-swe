@@ -171,7 +171,7 @@ async def expedite_pr_approval(
 
     payload = PullRequestPayload.model_validate(pr)
     review_channel = (
-        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+        await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
     ).review_channel.strip()
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:
