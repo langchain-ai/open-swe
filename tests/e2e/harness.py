@@ -532,6 +532,9 @@ async def control_repo_file(request: Request) -> JSONResponse:
     if not isinstance(files, dict) or not files:
         raise HTTPException(400, "files must map paths to contents")
     fakes.commit_to_base(owner, name, {str(path): str(text) for path, text in files.items()})
+    from langgraph_api.cache import cache_set
+
+    await cache_set(f"__lg_swr__:repo-settings:{owner}/{name}".lower(), None)
     return JSONResponse({"ok": True})
 
 
