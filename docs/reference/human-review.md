@@ -25,6 +25,27 @@ falling back to the default branch when the head has no settings file. The
 `request_human_review` tool accepts a `channel` that overrides it or stands in when
 the repository sets none.
 
+For monorepos, add ordered path rules:
+
+```json
+{
+  "reviewChannel": "#eng-reviews",
+  "reviewChannelRules": [
+    { "paths": ["ui/*", "desktop/*"], "channel": "#frontend-reviews" },
+    { "paths": ["agent/*"], "channel": "#backend-reviews" }
+  ]
+}
+```
+
+Patterns match case-sensitive repository-relative paths; `*` includes nested
+paths. The first matching rule assigns each changed file to a channel, and
+unmatched files count toward `reviewChannel` when configured. A channel with
+more than half of all changed files wins; otherwise one represented channel is
+chosen uniformly at random. Files count equally, including tests. The selected
+channel gets one canonical request, which stays there once posted. Explicit
+channel overrides still take precedence. Expedited cards use the same routing
+for their broadcast destination.
+
 ## Requesting
 
 - Asking is a per-person feature flag, **Request human reviews in Slack** on the
