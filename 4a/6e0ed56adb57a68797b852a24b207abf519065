@@ -1,0 +1,33 @@
+agent/resources/prompts/runs/rollout-check.md.jinja
+  s_8c15db54e0c42b::t_68aaa22d83304a 32,36
+agent/resources/prompts/runs/rollout-expired.md.jinja
+  s_8c15db54e0c42b::t_a35cf796072d83 2
+agent/resources/prompts/runs/rollout-dev.md.jinja
+  s_8c15db54e0c42b::t_d2ead525cb8662 2
+agent/webhooks/common.py
+  s_8c15db54e0c42b::t_3443099e2dcd66 1485-1490
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_3eeda70c0891ee 157-161
+  s_8c15db54e0c42b::t_45e9132cbc51d2 171-172
+  s_8c15db54e0c42b::t_77664ba189055f 173-180,332
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_3e86cddf1f5f58 174-246
+agent/tools/record_rollout_check.py
+  s_8c15db54e0c42b::t_34a62d414b72c4 62-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a6e0ed56adb57a68797b852a24b207abf519065",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
