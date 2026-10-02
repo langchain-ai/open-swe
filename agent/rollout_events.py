@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from agent.config import ENV
 from agent.federation.github_oidc import InvalidFederatedToken
 from agent.federation.github_oidc import verify as verify_github_oidc
-from agent.rollouts import apply_rollout_event
+from agent.rollouts import RolloutBusy, apply_rollout_event
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,10 @@ async def _authorize(header: str) -> None:
 
 async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccepted:
     """Run matching watches, then acknowledge the deploy."""
-    await apply_rollout_event(target, commits)
+    try:
+        await apply_rollout_event(target, commits)
+    except RolloutBusy:
+        raise HTTPException(status_code=503, detail="Rollout watch is busy") from None
     logger.info(
         "Accepted rollout deploy",
         extra={"rollout_target": target, "rollout_commits": len(commits)},

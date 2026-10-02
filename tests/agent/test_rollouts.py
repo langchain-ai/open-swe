@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import json
 import shlex
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
@@ -258,6 +259,69 @@ async def test_a_stage_waits_until_every_target_has_deployed(
     assert "env:prod" in dispatch.await_args.args[1]
     watch = await rollouts.WATCHES.get("acme/repo#7")
     assert watch is not None and watch.active is False
+
+
+async def test_a_briefly_locked_watch_still_records_the_deploy(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await rollouts.start_watch(
+        thread_id="thread-1",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        sha=SHA,
+        author="octocat",
+        stages=_plan(),
+        page="",
+        expected="",
+        metrics="",
+        resolves_thread=False,
+        run_config={"workspace": "oss"},
+        source_context={},
+    )
+    monkeypatch.setattr(rollouts, "_LOCK_PAUSE_SECONDS", 0.05)
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
+
+    async def hold() -> None:
+        async with rollouts._watch_lock("acme/repo#7"):
+            await asyncio.sleep(0.12)
+
+    held = asyncio.create_task(hold())
+    await asyncio.sleep(0.02)
+    await rollouts.apply_rollout_event("gcp-dev", [SHA])
+    await held
+    assert dispatch.await_count == 1
+
+
+async def test_a_watch_that_stays_locked_is_not_treated_as_delivered(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await rollouts.start_watch(
+        thread_id="thread-1",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        sha=SHA,
+        author="octocat",
+        stages=_plan(),
+        page="",
+        expected="",
+        metrics="",
+        resolves_thread=False,
+        run_config={"workspace": "oss"},
+        source_context={},
+    )
+    monkeypatch.setattr(rollouts, "_LOCK_ATTEMPTS", 2)
+    monkeypatch.setattr(rollouts, "_LOCK_PAUSE_SECONDS", 0)
+
+    @asynccontextmanager
+    async def never(_key: str):
+        yield False
+
+    monkeypatch.setattr(rollouts, "_watch_lock", never)
+    with pytest.raises(rollouts.RolloutBusy):
+        await rollouts.apply_rollout_event("gcp-dev", [SHA])
 
 
 async def test_an_unrelated_commit_does_not_run_the_check(

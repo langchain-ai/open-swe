@@ -8,6 +8,7 @@ environment has reported the merge SHA. A scheduler cron on
 sandbox browser and does not log in.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -46,6 +47,12 @@ _HOST_RE = re.compile(
 _MAX_STAGES = 12
 _MAX_TARGETS = 20
 _MAX_TAGS = 20
+_LOCK_ATTEMPTS = 20
+_LOCK_PAUSE_SECONDS = 0.5
+
+
+class RolloutBusy(Exception):
+    """The watch lock stayed held for the whole wait."""
 
 
 @asynccontextmanager
@@ -659,20 +666,27 @@ async def _advance(watch: RolloutWatch, *, dirty: bool) -> str:
 
 
 async def _record_arrival(key: str, target: str) -> str:
-    async with _watch_lock(key) as acquired:
-        if not acquired:
-            return "locked"
-        watch = await WATCHES.get(key)
-        if watch is None or not watch.active:
-            return "inactive"
-        if _expired(watch):
-            return await _expire(watch)
-        if target not in _stage_targets(watch):
-            return "ignored"
-        dirty = target not in watch.arrived
-        if dirty:
-            watch.arrived.append(target)
-        return await _advance(watch, dirty=dirty)
+    for attempt in range(_LOCK_ATTEMPTS):
+        async with _watch_lock(key) as acquired:
+            if acquired:
+                return await _record_locked(key, target)
+        if attempt + 1 < _LOCK_ATTEMPTS:
+            await asyncio.sleep(_LOCK_PAUSE_SECONDS)
+    return "locked"
+
+
+async def _record_locked(key: str, target: str) -> str:
+    watch = await WATCHES.get(key)
+    if watch is None or not watch.active:
+        return "inactive"
+    if _expired(watch):
+        return await _expire(watch)
+    if target not in _stage_targets(watch):
+        return "ignored"
+    dirty = target not in watch.arrived
+    if dirty:
+        watch.arrived.append(target)
+    return await _advance(watch, dirty=dirty)
 
 
 async def apply_rollout_event(target: str, commits: list[str]) -> None:
@@ -685,7 +699,8 @@ async def apply_rollout_event(target: str, commits: list[str]) -> None:
             continue
         if name not in _stage_targets(watch):
             continue
-        await _record_arrival(watch.key, name)
+        if await _record_arrival(watch.key, name) == "locked":
+            raise RolloutBusy(watch.key)
 
 
 async def evaluate_rollout(key: str) -> str:
