@@ -1088,48 +1088,6 @@
         "title": "CustomToolCallItem",
         "type": "object"
       },
-      "DashboardImageBody": {
-        "properties": {
-          "base64": {
-            "minLength": 1,
-            "title": "Base64",
-            "type": "string"
-          },
-          "fileName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Filename"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kind"
-          },
-          "mimeType": {
-            "minLength": 1,
-            "title": "Mimetype",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base64",
-          "mimeType"
-        ],
-        "title": "DashboardImageBody",
-        "type": "object"
-      },
       "DesktopConnectExchange": {
         "description": "Body of a desktop connect handoff redemption.",
         "properties": {
@@ -4894,59 +4852,6 @@
         "title": "ThreadFeedbackResponse",
         "type": "object"
       },
-      "ThreadMessageBody": {
-        "properties": {
-          "client_message_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Message Id"
-          },
-          "content": {
-            "default": "",
-            "maxLength": 20000,
-            "title": "Content",
-            "type": "string"
-          },
-          "effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effort"
-          },
-          "images": {
-            "items": {
-              "$ref": "#/components/schemas/DashboardImageBody"
-            },
-            "title": "Images",
-            "type": "array"
-          },
-          "model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Id"
-          }
-        },
-        "title": "ThreadMessageBody",
-        "type": "object"
-      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -5537,6 +5442,17 @@
             ],
             "title": "Base Snapshot Id"
           },
+          "breakout_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Breakout Channel Id"
+          },
           "create_params": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -5843,6 +5759,17 @@
               }
             ],
             "title": "Base Snapshot Id"
+          },
+          "breakout_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Breakout Channel Id"
           },
           "create_params": {
             "additionalProperties": {
@@ -6403,6 +6330,17 @@
             ],
             "title": "Base Snapshot Id"
           },
+          "breakout_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Breakout Channel Id"
+          },
           "create_params": {
             "anyOf": [
               {
@@ -6890,6 +6828,16 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Search",
+              "type": "string"
             }
           }
         ],
@@ -9397,6 +9345,22 @@
       "get": {
         "operationId": "notion_login_dashboard_api_notion_login_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
           {
             "in": "query",
             "name": "desktop_handoff",
@@ -16001,66 +15965,6 @@
           }
         ],
         "summary": "Api Thread History",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/messages": {
-      "post": {
-        "operationId": "api_send_thread_message_dashboard_api_threads__thread_id__messages_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadMessageBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Send Thread Message Dashboard Api Threads  Thread Id  Messages Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Send Thread Message",
         "tags": [
           "dashboard",
           "threads"

@@ -83,6 +83,14 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
   const settings = useScopedSettings(scope)
   const mode = gatewayMode(settings.data?.gateway_enabled)
   const scoped = scope.kind === "workspace"
+  const modes = [
+    {
+      value: "inherit",
+      label: scoped ? "Inherit instance setting" : "Inherit deployment default",
+    },
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" },
+  ] satisfies Array<{ value: GatewayMode; label: string }>
 
   return (
     <SettingsSection
@@ -101,6 +109,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
           }
           control={
             <Select
+              items={modes}
               value={mode}
               onValueChange={(next) => {
                 const value = gatewayModeValue(next as GatewayMode)
@@ -113,13 +122,11 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="inherit">
-                  {scoped
-                    ? "Inherit instance setting"
-                    : "Inherit deployment default"}
-                </SelectItem>
-                <SelectItem value="enabled">Enabled</SelectItem>
-                <SelectItem value="disabled">Disabled</SelectItem>
+                {modes.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           }
@@ -411,6 +418,10 @@ function ModelPairControl({
   inheritLabel,
   onInherit,
 }: ModelPairControlProps) {
+  const modelItems = [
+    ...(inheritLabel ? [{ value: INHERIT_VALUE, label: inheritLabel }] : []),
+    ...models.map((m) => ({ value: m.id, label: m.label })),
+  ]
   const inheritFallback = inheritLabel ? INHERIT_VALUE : ""
   const [localModel, setLocalModel] = useState<string>(model ?? inheritFallback)
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
@@ -452,6 +463,7 @@ function ModelPairControl({
   return (
     <div className="flex items-center gap-2">
       <Select
+        items={modelItems}
         value={localModel}
         onValueChange={handleModelChange}
         disabled={disabled}
@@ -460,12 +472,9 @@ function ModelPairControl({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {inheritLabel && (
-            <SelectItem value={INHERIT_VALUE}>{inheritLabel}</SelectItem>
-          )}
-          {models.map((m) => (
-            <SelectItem key={m.id} value={m.id}>
-              {m.label}
+          {modelItems.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
             </SelectItem>
           ))}
         </SelectContent>

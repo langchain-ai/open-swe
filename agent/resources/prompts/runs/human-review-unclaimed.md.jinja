@@ -5,4 +5,4 @@
 3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
 4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. It tags them {% if posted %}in a reply to the Slack post{% else %}on the review card{% endif %} and messages them directly.
 
-If `assign_human_reviewer` refuses someone, pick the next best candidate. Do not post anything else in Slack and do not change the pull request.
+If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request is already approved: then stop. Do not post anything else in Slack and do not change the pull request.
