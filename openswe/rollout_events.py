@@ -64,11 +64,7 @@ def _bearer(header: str) -> str:
 
 def _workflow_allowed(workflow_ref: str, allowed: list[str]) -> bool:
     path = workflow_ref.split("@", 1)[0]
-    for workflow in allowed:
-        needle = workflow.strip().lstrip("/")
-        if needle and (path == needle or path.endswith("/" + needle)):
-            return True
-    return False
+    return any(path == workflow.strip().lstrip("/") for workflow in allowed)
 
 
 def _owner(repository: str) -> str:

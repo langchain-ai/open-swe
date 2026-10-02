@@ -13,8 +13,8 @@ from openswe.rollout_events import router
 
 _PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _REPO = "langchain-ai/langchainplus"
-_DEV = ".github/workflows/deploy_build_push_migrate_dev.yaml"
-_PROD = ".github/workflows/deploy_tag_migrate_prod.yaml"
+_DEV = f"{_REPO}/.github/workflows/deploy_build_push_migrate_dev.yaml"
+_PROD = f"{_REPO}/.github/workflows/deploy_tag_migrate_prod.yaml"
 _WORKFLOWS = f"{_DEV},{_PROD}"
 _AUDIENCE = "openswe-rollout"
 
@@ -36,7 +36,7 @@ def _token(**overrides: object) -> str:
         "aud": _AUDIENCE,
         "sub": f"repo:{_REPO}:ref:refs/heads/main",
         "repository": _REPO,
-        "workflow_ref": f"{_REPO}/{_DEV}@refs/heads/main",
+        "workflow_ref": f"{_DEV}@refs/heads/main",
         "iat": now,
         "exp": now + 300,
     }
@@ -97,9 +97,23 @@ async def test_rollout_webhook_rejects_a_different_workflow(app: FastAPI) -> Non
 
 
 @pytest.mark.asyncio
+async def test_rollout_webhook_rejects_the_same_filename_in_another_repository(
+    app: FastAPI,
+) -> None:
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+    other = "langchain-ai/scratch/.github/workflows/deploy_build_push_migrate_dev.yaml"
+    response = await _post(
+        app,
+        body,
+        _token(repository="langchain-ai/scratch", workflow_ref=f"{other}@refs/heads/main"),
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_rollout_webhook_accepts_each_listed_workflow(app: FastAPI) -> None:
     body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
-    response = await _post(app, body, _token(workflow_ref=f"{_REPO}/{_PROD}@refs/heads/main"))
+    response = await _post(app, body, _token(workflow_ref=f"{_PROD}@refs/heads/main"))
     assert response.status_code == 200
 
 

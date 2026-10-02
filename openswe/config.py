@@ -245,7 +245,8 @@ ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run n
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
     "ROLLOUT_OIDC_WORKFLOWS",
-    "Comma-separated workflow paths allowed to send deployment events, matched against workflow_ref.",
+    "Comma-separated owner/repo workflow paths allowed to send deployment events. "
+    "Each entry is matched exactly against workflow_ref.",
 )
 ENV.var(
     "GITHUB_OIDC_AUDIENCE",
