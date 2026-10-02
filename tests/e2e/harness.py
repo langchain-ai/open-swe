@@ -1673,6 +1673,7 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
+                    **({"bot_id": m["bot_id"], "subtype": "bot_message"} if m["is_bot"] else {}),
                 }
                 for m in msgs
             ]
@@ -1690,6 +1691,11 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
                     "user": message["user"],
                     "text": message["text"],
                     "ts": message["ts"],
+                    **(
+                        {"bot_id": message["bot_id"], "subtype": "bot_message"}
+                        if message["is_bot"]
+                        else {}
+                    ),
                 }
                 for message in reversed(fakes.slack_messages(channel))
             ]
