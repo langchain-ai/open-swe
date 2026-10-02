@@ -18,7 +18,7 @@ import {
 } from "@/lib/api"
 
 import { SlackIntegrationSection, UsersSection } from "./admin"
-import { FableSection } from "@/features/settings/components/WorkspaceSettingsSections"
+import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
 
@@ -136,15 +136,14 @@ describe("UsersSection", () => {
   })
 })
 
-describe("FableSection", () => {
-  const settings = (fable_enabled: boolean): WorkspaceSettings => ({
-    review_draft_prs: false,
+describe("ReviewSettings", () => {
+  const settings = (review_draft_prs: boolean): WorkspaceSettings => ({
     pr_summaries: false,
     review_trace_links: false,
-    fable_enabled,
+    review_draft_prs,
   })
-  const loaded = (fable_enabled: boolean): WorkspaceSettingsView => ({
-    effective: settings(fable_enabled),
+  const loaded = (review_draft_prs: boolean): WorkspaceSettingsView => ({
+    effective: settings(review_draft_prs),
     overrides: {},
   })
 
@@ -169,13 +168,15 @@ describe("FableSection", () => {
       )
     const section = (slug: string) => (
       <QueryClientProvider client={qc}>
-        <FableSection scope={{ kind: "workspace", slug }} />
+        <ReviewSettings scope={{ kind: "workspace", slug }} canEdit />
       </QueryClientProvider>
     )
 
     const view = render(section("alpha"))
-    // The section renders a single switch, disabled until the settings load.
-    const toggle = await within(view.container).findByRole("switch")
+    const row = (
+      await within(view.container).findByText("Review Draft PRs")
+    ).closest("label")!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => {
       expect(toggle.hasAttribute("disabled")).toBe(false)
       expect(toggle.hasAttribute("data-disabled")).toBe(false)
@@ -183,13 +184,13 @@ describe("FableSection", () => {
     })
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("alpha", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("alpha", { review_draft_prs: true })
     )
 
     view.rerender(section("beta"))
     const saved: WorkspaceSettingsView = {
       effective: settings(true),
-      overrides: { fable_enabled: true },
+      overrides: { review_draft_prs: true },
     }
     finishSave(saved)
 

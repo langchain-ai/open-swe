@@ -15,6 +15,7 @@ from agent.expedited_review.eligibility import (
 )
 from agent.github.ci import fetch_pr
 from agent.github.pull_requests import PullRequest, PullRequestPayload
+from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
 from agent.human_review.lifecycle import (
     post_card,
@@ -26,6 +27,7 @@ from agent.human_review.lifecycle import (
     transition,
 )
 from agent.human_review.requests import HumanReviewRequest
+from agent.human_review.standard import summary_line
 from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import escape
@@ -87,7 +89,10 @@ async def _post_root_message(
 
 
 async def expedite_pr_approval(
-    pr_url: str, action: Literal["start", "cancel"] = "start", channel: str = ""
+    pr_url: str,
+    action: Literal["start", "cancel"] = "start",
+    channel: str = "",
+    inline_summary: str = "",
 ) -> dict[str, Any]:
     """Implement the `expedite_pr_approval` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -164,6 +169,22 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
+    review_channel = (
+        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+    ).review_channel.strip()
+    broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
+    if review_channel and broadcast_target is None:
+        return _failure(
+            f"The configured review channel {review_channel!r} is unavailable to the bot. "
+            "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
+        )
+    broadcast_choice = (
+        [{"id": broadcast_target.id, "name": broadcast_target.name}]
+        if broadcast_target is not None
+        and broadcast_target.name
+        and broadcast_target.id != channel_id
+        else []
+    )
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     displaced: HumanReviewRequest | None = None
     if active is not None and active.kind != "expedited":
@@ -231,6 +252,8 @@ async def expedite_pr_approval(
         head_sha=head_sha,
         kind="expedited",
         diff_fingerprint=verdict.fingerprint,
+        tldr=summary_line(inline_summary),
+        slack_channel_choices=broadcast_choice,
         awaiting_ready=payload.draft,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,

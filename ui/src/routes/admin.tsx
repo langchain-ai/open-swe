@@ -34,7 +34,6 @@ import { MCPConnectionsSection } from "@/features/settings/components/MCPConnect
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "@/features/settings/components/WorkspaceSettingsSections"
@@ -88,7 +87,6 @@ function AdminPage() {
         repositories={repos.data?.repositories ?? []}
       />
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
-      <FableSection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
       <MCPConnectionsSection scope="instance" />
