@@ -134,13 +134,13 @@ test("groups file reads and edits with expandable original calls", async ({
     const group = summary.locator(
       "xpath=ancestor::*[@data-transcript-disclosure][1]",
     );
-    const calls = group
+    const callButtons = group
       .locator("[data-transcript-disclosure] > button")
       .filter({ hasText: name });
-    await expect(calls).toHaveCount(count);
+    await expect(callButtons).toHaveCount(count);
     await expect(group.getByText(result, { exact: true })).toBeHidden();
     await summary.click();
-    await calls.first().click();
+    await callButtons.first().click();
     await expect(group.getByText(result, { exact: true })).toBeVisible();
     await summary.click();
     await expect(group.getByText(result, { exact: true })).toBeHidden();
