@@ -296,7 +296,7 @@ async def render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
 ) -> tuple[str, list[Block]]:
     text, blocks = await _render(request, outcome, copy=copy)
-    if copy or dm or (request.kind == "standard" and not request.slack_broadcast):
+    if copy or dm or (request.kind == "standard" and not request.slack_thread_ts):
         blocks.extend(await origin_footer(request.thread_id))
     return text, blocks
 
