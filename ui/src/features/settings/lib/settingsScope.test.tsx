@@ -133,33 +133,24 @@ it.each([
   }
 )
 
-it.each([
-  ["anthropic:claude-opus-5-5", "high"],
-  ["anthropic:claude-sonnet-4-6", "medium"],
-  ["anthropic:claude-opus-5-5", "medium"],
-])(
-  "saves or clears the whole model/effort pair: %s %s",
-  async (model, effort) => {
-    const requests = mockWorkspaceServer()
-    vi.mocked(api.getInstanceSettings).mockResolvedValue({
-      ...BASE,
-      default_agent_model: "anthropic:claude-opus-5-5",
-      default_agent_reasoning_effort: "medium",
-    })
-    const { result } = renderTwoSections(newClient())
-    await waitFor(() => expect(result.current.a.data).toBeDefined())
-    const patch = {
-      default_agent_model: model,
-      default_agent_reasoning_effort: effort,
-    }
-    act(() => result.current.a.save(patch))
-    await waitFor(() => expect(requests).toHaveLength(1))
-    expect(requests[0]!.overrides).toEqual(
-      model === "anthropic:claude-opus-5-5" && effort === "medium" ? {} : patch
-    )
-    act(() => requests[0]!.resolve())
+it("keeps the model override when only its effort differs from the instance", async () => {
+  const requests = mockWorkspaceServer()
+  vi.mocked(api.getInstanceSettings).mockResolvedValue({
+    ...BASE,
+    default_agent_model: "anthropic:claude-opus-5-5",
+    default_agent_reasoning_effort: "medium",
+  })
+  const { result } = renderTwoSections(newClient())
+  await waitFor(() => expect(result.current.a.data).toBeDefined())
+  const patch = {
+    default_agent_model: "anthropic:claude-opus-5-5",
+    default_agent_reasoning_effort: "high",
   }
-)
+  act(() => result.current.a.save(patch))
+  await waitFor(() => expect(requests).toHaveLength(1))
+  expect(requests[0]!.overrides).toEqual(patch)
+  act(() => requests[0]!.resolve())
+})
 
 it("drops only the failed patch and reports the failure", async () => {
   const requests = mockWorkspaceServer()

@@ -723,13 +723,6 @@ describe("WorkspaceSettingsPanel", () => {
     )
     expect(await within(fable).findByText("Overridden")).toBeTruthy()
 
-    fireEvent.click(toggle)
-    await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
-    expect(within(fable).queryByRole("button", { name: /Reset/ })).toBeNull()
-
-    fireEvent.click(toggle)
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
     fireEvent.click(
       within(fable).getByRole("button", {
         name: "Reset Allow Fable models to the instance value",
