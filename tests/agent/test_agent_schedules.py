@@ -3,6 +3,7 @@ from typing import Any, Literal
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
 
+import httpx
 import httpx2
 import pytest
 from fastapi import HTTPException
@@ -83,8 +84,8 @@ class _FakeThreads:
     async def create(self, **kwargs: Any) -> None:
         thread_id = kwargs.get("thread_id")
         if kwargs.get("if_exists") == "raise" and thread_id in self.ids:
-            request = httpx2.Request("POST", "http://test/threads")
-            response = httpx2.Response(409, request=request)
+            request = httpx.Request("POST", "http://test/threads")
+            response = httpx.Response(409, request=request)
             raise ConflictError("Thread already exists", response=response, body=None)
         if isinstance(thread_id, str):
             self.ids.add(thread_id)
@@ -659,6 +660,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     await schedules.launch_scheduled_agent_run(record["id"])
     run_config = fake_client.runs.created[0]["config"]
     monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: fake_client)
 
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None

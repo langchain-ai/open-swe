@@ -44,7 +44,6 @@ import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
@@ -317,7 +316,6 @@ export function WorkspaceSettingsPanel({
         <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
       )}
       <LLMGatewaySection scope={scope} />
-      <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />

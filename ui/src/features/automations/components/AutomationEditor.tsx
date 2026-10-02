@@ -42,6 +42,19 @@ import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
+const TRIGGER_ITEMS: Array<{ value: AutomationTrigger; label: string }> = [
+  { value: "schedule", label: "Schedule" },
+  { value: "github_issue_opened", label: "GitHub issue opened" },
+]
+
+const NOTIFICATION_ITEMS: Array<{
+  value: SlackNotificationMode
+  label: string
+}> = [
+  { value: "always", label: "Every run" },
+  { value: "on_action", label: "Only when action is taken" },
+]
+
 interface AutomationEditorProps {
   mode: "create" | "edit"
   schedule?: AgentSchedule
@@ -327,6 +340,7 @@ export function AutomationEditor({
         <SectionLabel>Triggers</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-1.5">
           <Select
+            items={TRIGGER_ITEMS}
             value={trigger}
             onValueChange={(value) =>
               value && setTrigger(value as AutomationTrigger)
@@ -337,10 +351,11 @@ export function AutomationEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="schedule">Schedule</SelectItem>
-              <SelectItem value="github_issue_opened">
-                GitHub issue opened
-              </SelectItem>
+              {TRIGGER_ITEMS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {trigger === "schedule" && cron && (
@@ -399,6 +414,7 @@ export function AutomationEditor({
               Notify channel
             </span>
             <Select
+              items={NOTIFICATION_ITEMS}
               value={slackNotificationMode}
               onValueChange={(value) =>
                 value && setSlackNotificationMode(value)
@@ -409,10 +425,11 @@ export function AutomationEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="always">Every run</SelectItem>
-                <SelectItem value="on_action">
-                  Only when action is taken
-                </SelectItem>
+                {NOTIFICATION_ITEMS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

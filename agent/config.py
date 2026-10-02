@@ -168,11 +168,6 @@ ENV.var(
     aliases=("LANGCHAIN_PROJECT",),
 )
 ENV.var(
-    "LANGSMITH_HOST_API_URL",
-    "LangGraph Platform control-plane API, used by the legacy LangSmith-brokered GitHub auth.",
-    default="https://api.host.langchain.com",
-)
-ENV.var(
     "TYPESAFE_API_KEY",
     "TypeSafe key for direct Jev model routing when available.",
     secret=True,
@@ -251,9 +246,6 @@ ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", s
 ENV.var(
     "GITHUB_OIDC_AUDIENCE",
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
-)
-ENV.var(
-    "GITHUB_OAUTH_PROVIDER_ID", "LangSmith OAuth provider id for the legacy brokered GitHub auth."
 )
 ENV.var(
     "X_SERVICE_AUTH_JWT_SECRET",
