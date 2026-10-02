@@ -132,7 +132,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
     monkeypatch.setattr(
-        prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+        prs, "fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
     monkeypatch.setattr(prs, "read_required_checks", rules)

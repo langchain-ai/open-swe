@@ -26,6 +26,7 @@ from agent.expedited_review.readiness import (
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_status import fetch_review_state
 from agent.github.pull_requests import PullRequestPayload
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
@@ -239,11 +240,17 @@ async def _render_standard(
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
     states: dict[str, str] = {}
+    reviews_complete = False
     if token is not None and outcome in (None, "merged"):
         async with github_client(token=token) as client:
             states = (
                 await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
             )
+            if outcome is None:
+                review_state = await fetch_review_state(client, pr.owner, pr.repo, pr.number)
+                reviews_complete = (
+                    review_state.unresolved_threads is not None and not review_state.review_required
+                )
     if outcome is not None:
         return standard_card.closed_card(
             request, title=pr.title, outcome=outcome, review_states=states
@@ -251,7 +258,8 @@ async def _render_standard(
     from agent.human_review.standard import merge_wait
 
     if (
-        "CHANGES_REQUESTED" not in states.values()
+        reviews_complete
+        and "CHANGES_REQUESTED" not in states.values()
         and merge_wait(
             [reviewer.github_login for reviewer in request.reviewers],
             request.created_at,

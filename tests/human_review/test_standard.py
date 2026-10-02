@@ -145,16 +145,19 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
 
 
 @pytest.mark.parametrize(
-    ("states", "collapsed"),
+    ("states", "review_required", "unresolved_threads", "collapsed"),
     [
-        ({"grace": "APPROVED"}, True),
-        ({}, False),
-        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+        ({"grace": "APPROVED"}, False, 0, True),
+        ({"grace": "APPROVED"}, True, 0, False),
+        ({"grace": "APPROVED"}, False, None, False),
+        ({}, False, 0, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False, 0, False),
     ],
 )
 async def test_approved_card_collapses_without_closing_the_request(
-    states: dict[str, str], collapsed: bool
+    states: dict[str, str], review_required: bool, unresolved_threads: int | None, collapsed: bool
 ) -> None:
+    from agent.github.pull_request_status import ReviewState
     from agent.github.pull_requests import PullRequest
     from agent.human_review.lifecycle import _render_standard
     from agent.human_review.requests import HumanReviewRequest
@@ -165,6 +168,10 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.requested_by = None
     with (
         patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
+        patch(
+            "agent.human_review.lifecycle.fetch_review_state",
+            AsyncMock(return_value=ReviewState(unresolved_threads, review_required)),
+        ),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
     ):
         text, blocks = await _render_standard(request, None, "token")

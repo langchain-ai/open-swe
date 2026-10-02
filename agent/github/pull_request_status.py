@@ -491,7 +491,7 @@ class ReviewState:
     review_required: bool = False
 
 
-async def _fetch_review_state(
+async def fetch_review_state(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> ReviewState:
     """Read a pull request's review requirement and its unresolved review threads."""
@@ -776,7 +776,7 @@ async def load_open_pull_request(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
         _fetch_review_decision(client, owner, name, number),
-        _fetch_review_state(client, owner, name, number),
+        fetch_review_state(client, owner, name, number),
     )
     result.review_decision = decision
     result.review_required = review_state.review_required
