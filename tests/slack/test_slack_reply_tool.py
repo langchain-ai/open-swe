@@ -225,17 +225,20 @@ async def test_only_final_reply_has_feedback_for_its_run(
     }
     assert post.await_args is not None
     blocks = post.await_args.kwargs["blocks"]
-    feedback = [block for block in blocks if block.get("block_id") == "open_swe_reply_feedback"]
+    feedback = [block for block in blocks if block["type"] == "context_actions"]
     if response_type == "progress":
         assert feedback == []
     else:
-        element = feedback[0]["elements"][0]
-        assert feedback[0]["type"] == "context_actions"
-        buttons = [element["positive_button"], element["negative_button"]]
-        assert [json.loads(button["value"]) for button in buttons] == [
-            {"run_id": "run-1", "rating": "up"},
-            {"run_id": "run-1", "rating": "down"},
-        ]
+        buttons = feedback[0]["elements"][0]
+        assert buttons["type"] == "feedback_buttons"
+        assert json.loads(buttons["positive_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "up",
+        }
+        assert json.loads(buttons["negative_button"]["value"]) == {
+            "run_id": "run-1",
+            "rating": "down",
+        }
     assert blocks[0] == {"type": "markdown", "text": "Answer"}
     if options:
         assert blocks[1]["type"] == "actions"
@@ -256,7 +259,7 @@ async def test_long_reply_retains_all_text_alongside_feedback(
     blocks = post.await_args.kwargs["blocks"]
     assert "".join(block["text"]["text"] for block in blocks[:-1]) == "x" * 12001
     assert all(len(block["text"]["text"]) <= 3000 for block in blocks[:-1])
-    assert blocks[-1]["block_id"] == "open_swe_reply_feedback"
+    assert blocks[-1]["type"] == "context_actions"
 
 
 async def test_slack_reply_keeps_code_highlighted_over_native_limit(

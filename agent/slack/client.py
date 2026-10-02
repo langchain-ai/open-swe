@@ -540,6 +540,7 @@ def _safe_model_label(model: str) -> str:
     return sanitized.rsplit("/", 1)[-1][:48].strip("-")
 
 
+SLACK_COST_PENDING_LABEL = "calculating cost..."
 _PENDING_COST_LABEL_RE = re.compile(r"(?: • )?calculating cost(?:\.\.\.)?$")
 
 
@@ -658,23 +659,75 @@ def with_slack_session_cost(
     return updated_text, updated_blocks
 
 
-def without_slack_pending_session_cost(
+def with_slack_pending_session_cost(
     text: str,
     blocks: list[dict[str, Any]] | None,
+    *,
+    clear: bool = False,
 ) -> tuple[str, list[dict[str, Any]] | None]:
-    """Remove legacy pending labels without showing a new cost placeholder."""
-    updated_text = _PENDING_COST_LABEL_RE.sub("", text)
+    """Append the pending cost label to a live Slack footer awaiting its cost."""
+    if clear:
+        updated_text = _PENDING_COST_LABEL_RE.sub("", text)
+        updated_blocks = copy.deepcopy(blocks)
+        for block in updated_blocks or []:
+            if block.get("type") == "context":
+                values = [block.get("text"), *(block.get("elements") or [])]
+            elif block.get("type") == "actions":
+                values = [
+                    element.get("text")
+                    for element in block.get("elements", [])
+                    if isinstance(element, dict) and element.get("action_id") == "open_swe_web_link"
+                ]
+            else:
+                continue
+            for value in values:
+                if isinstance(value, dict) and isinstance(value.get("text"), str):
+                    if _PENDING_COST_LABEL_RE.fullmatch(value["text"]):
+                        value["text"] = "Cost unavailable"
+                    else:
+                        value["text"] = _PENDING_COST_LABEL_RE.sub("", value["text"])
+        return updated_text, updated_blocks
+    if _PENDING_COST_LABEL_RE.search(text) or SLACK_WEB_LINK_FOOTER_LABEL not in text:
+        return text, blocks
+    updated_text = f"{text} • {SLACK_COST_PENDING_LABEL}"
+    if blocks is None:
+        return updated_text, None
     updated_blocks = copy.deepcopy(blocks)
-    for block in updated_blocks or []:
+    for block in updated_blocks:
+        if block.get("type") == "actions":
+            for element in block.get("elements", []):
+                if isinstance(element, dict) and element.get("action_id") == "open_swe_web_link":
+                    button_text = element.get("text")
+                    if isinstance(button_text, dict) and isinstance(button_text.get("text"), str):
+                        current = _SESSION_COST_LABEL_RE.sub("", button_text["text"])
+                        budget = 72 - len(SLACK_COST_PENDING_LABEL)
+                        button_text["text"] = f"{current[:budget]} • {SLACK_COST_PENDING_LABEL}"
+                        return updated_text, updated_blocks
         if block.get("type") != "context":
             continue
-        values = [block.get("text"), *(block.get("elements") or [])]
+        if block.get("block_id") != "open_swe_usage_footer" and not _block_contains_text(
+            block, SLACK_WEB_LINK_FOOTER_LABEL
+        ):
+            continue
+        values: list[dict[str, Any]] = []
+        block_text = block.get("text")
+        if isinstance(block_text, dict):
+            values.append(block_text)
+        elements = block.get("elements")
+        if isinstance(elements, list):
+            values.extend(item for item in elements if isinstance(item, dict))
         for value in values:
-            if isinstance(value, dict) and isinstance(value.get("text"), str):
-                if _PENDING_COST_LABEL_RE.fullmatch(value["text"]):
-                    value["text"] = "Cost unavailable"
-                else:
-                    value["text"] = _PENDING_COST_LABEL_RE.sub("", value["text"])
+            value_text = value.get("text")
+            if isinstance(value_text, str) and not _PENDING_COST_LABEL_RE.search(value_text):
+                value["text"] = f"{value_text} • {SLACK_COST_PENDING_LABEL}"
+                return updated_text, updated_blocks
+    updated_blocks.append(
+        {
+            "type": "context",
+            "block_id": "open_swe_usage_footer",
+            "elements": [{"type": "mrkdwn", "text": SLACK_COST_PENDING_LABEL}],
+        }
+    )
     return updated_text, updated_blocks
 
 

@@ -961,122 +961,53 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     assert run_create["kwargs"]["multitask_strategy"] == "enqueue"
 
 
-def test_format_slack_web_link_footer_omits_unavailable_cost() -> None:
-    usage = RunUsageSummary(models=("model-a", "model-b"), total_tokens=12_345)
-
-    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
-    footer_without_usage = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1")
-
-    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a + model-b"
-    assert footer_without_usage == "<https://app.example/agents/t1|Open in Web>"
-
-
-def test_format_slack_web_link_footer_prefers_session_cost() -> None:
-    usage = RunUsageSummary(
-        models=("model-a",), total_tokens=12_345, session_cost_usd=0.42, reasoning_effort="high"
-    )
-
-    footer = slack_utils.format_slack_web_link_footer("https://app.example/agents/t1", usage)
-
-    assert footer == "<https://app.example/agents/t1|Open in Web> • model-a (high) • $0.42"
-
-
-def test_format_slack_run_usage_shortens_model_paths() -> None:
-    usage = RunUsageSummary(
-        models=("accounts/fireworks/models/glm-5p3-flash", "openai:gpt-5.6-sol"),
-        total_tokens=12_345,
-    )
-
-    footer = slack_utils.format_slack_run_usage(usage)
-
-    assert footer == "glm-5p3-flash + openai:gpt-5.6-sol"
-
-
-def test_with_slack_session_cost_preserves_blocks_and_is_idempotent() -> None:
-    text = "Done <https://app.example/agents/t1|Open in Web> • model-a • 110 main-agent tokens"
-    blocks = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
-        {"type": "actions", "elements": [{"type": "button", "action_id": "approve"}]},
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        "<https://app.example/agents/t1|Open in Web> • model-a • "
-                        "110 main-agent tokens"
-                    ),
-                }
-            ],
-        },
-    ]
-
-    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
-    repeated = slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42)
-
-    assert repeated == (updated_text, updated_blocks)
-    assert updated_text.endswith("model-a • $0.42")
-    assert "main-agent tokens" not in updated_text
-    assert updated_blocks is not None
-    assert updated_blocks[1] == blocks[1]
-    assert updated_blocks[2]["elements"][0]["text"].endswith("model-a • $0.42")
-    assert "main-agent tokens" not in updated_blocks[2]["elements"][0]["text"]
-
-
-@pytest.mark.parametrize("label", ["calculating cost", "calculating cost..."])
-def test_with_slack_session_cost_replaces_usage_only_pending_footer(label: str) -> None:
-    text = f"Done <https://app.example/agents/t1|Open in Web> • {label}"
-    blocks = [
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "Done <https://app.example/agents/t1|Open in Web>",
-            },
-        },
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f"model-a • {label}"}],
-        },
-    ]
-
-    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
-
-    assert updated_text.endswith("Open in Web> • $0.42")
-    assert updated_blocks is not None
-    assert updated_blocks[0] == blocks[0]
-    assert updated_blocks[1]["elements"][0]["text"] == "model-a • $0.42"
-
-    cleared_text, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
-    assert cleared_text == "Done <https://app.example/agents/t1|Open in Web>"
-    assert cleared_blocks[1]["elements"][0]["text"] == "model-a"
-    blocks[1]["elements"][0]["text"] = label
-    _, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
-    assert cleared_blocks[1]["elements"][0]["text"] == "Cost unavailable"
-
-
-@pytest.mark.parametrize("linked_in_body", [False, True])
-def test_deferred_cost_updates_footer_without_placeholder(linked_in_body: bool) -> None:
+@pytest.mark.parametrize(
+    ("run_cost", "expected_cost"),
+    [(0.42, "$0.42"), (0.001, "$0.42 (<$0.01)")],
+)
+def test_pending_cost_marks_latest_reply_until_cost_arrives(
+    run_cost: float, expected_cost: str
+) -> None:
     url = "https://app.example/agents/t1"
-    body = f"Done <{url}|Open in Web>" if linked_in_body else "Done"
     usage = RunUsageSummary(models=("model-a",), total_tokens=123)
     blocks = slack_utils._with_slack_web_link_context_block(
-        body, [{"type": "section", "text": {"type": "mrkdwn", "text": body}}], url, usage
+        "Done", [{"type": "section", "text": {"type": "mrkdwn", "text": "Done"}}], url, usage
     )
-    text = slack_utils.append_slack_web_link_footer(body, url, usage)
+    text = slack_utils.append_slack_web_link_footer("Done", url, usage)
     assert "calculating cost" not in text
-    updated_text, updated_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
-    assert updated_text.endswith("model-a • $0.42")
-    assert updated_blocks is not None
-    assert updated_blocks[0] == blocks[0]
-    assert updated_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42")
-    assert slack_utils.with_slack_session_cost(updated_text, updated_blocks, 0.42) == (
-        updated_text,
-        updated_blocks,
+
+    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
+    assert pending_text.endswith("model-a • calculating cost...")
+    assert pending_blocks is not None
+    assert pending_blocks[-1]["elements"][0]["text"].endswith("model-a • calculating cost...")
+
+    # Idempotent while awaiting cost, and the refresh swaps the label for the cost.
+    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
+        pending_text,
+        pending_blocks,
+    )
+    final_text, final_blocks = slack_utils.with_slack_session_cost(
+        pending_text, pending_blocks, 0.42, run_cost=run_cost
+    )
+    assert final_text.endswith(f"model-a • {expected_cost}")
+    assert final_blocks is not None
+    assert final_blocks[-1]["elements"][0]["text"].endswith(f"model-a • {expected_cost}")
+    assert slack_utils.with_slack_session_cost(
+        final_text, final_blocks, 0.42, run_cost=run_cost
+    ) == (
+        final_text,
+        final_blocks,
+    )
+
+    # Messages without a web footer (e.g. interim acknowledgements) stay untouched.
+    assert slack_utils.with_slack_pending_session_cost("Working on it", None) == (
+        "Working on it",
+        None,
     )
 
 
 def test_native_feedback_keeps_web_button_and_deferred_cost() -> None:
+    from agent.slack.blocks import block_payload
     from agent.slack.run_feedback import feedback_block
 
     url = "https://app.example/agents/t1"
@@ -1085,7 +1016,7 @@ def test_native_feedback_keeps_web_button_and_deferred_cost() -> None:
         "Done",
         [
             {"type": "section", "text": {"type": "mrkdwn", "text": "Done"}},
-            feedback_block("run-1"),
+            *block_payload([feedback_block("run-1")]),
         ],
         url,
         usage,
@@ -1098,8 +1029,20 @@ def test_native_feedback_keeps_web_button_and_deferred_cost() -> None:
     assert actions[-1]["accessibility_label"] == "Open in Web"
 
     text = slack_utils.append_slack_web_link_footer("Done", url, usage)
+    pending_text, pending_blocks = slack_utils.with_slack_pending_session_cost(text, blocks)
+    assert pending_blocks is not None
+    assert len(pending_blocks) == len(blocks)
+    assert pending_blocks[-2] == blocks[-2]
+    assert pending_blocks[-1]["elements"][0]["text"]["text"] == "↗ model-a • calculating cost..."
+    assert slack_utils.with_slack_pending_session_cost(pending_text, pending_blocks) == (
+        pending_text,
+        pending_blocks,
+    )
+    assert slack_utils.with_slack_pending_session_cost(
+        pending_text, pending_blocks, clear=True
+    ) == (text, blocks)
     updated_text, updated_blocks = slack_utils.with_slack_session_cost(
-        text, blocks, 0.42, run_cost=0.001
+        pending_text, pending_blocks, 0.42, run_cost=0.001
     )
     assert updated_text.endswith("model-a • $0.42 (<$0.01)")
     assert updated_blocks is not None
@@ -1110,19 +1053,3 @@ def test_native_feedback_keeps_web_button_and_deferred_cost() -> None:
     assert slack_utils.with_slack_session_cost(
         updated_text, updated_blocks, 0.42, run_cost=0.001
     ) == (updated_text, updated_blocks)
-
-
-@pytest.mark.parametrize("usage", [None, RunUsageSummary(models=(), total_tokens=123)])
-def test_cost_enrichment_without_model_metadata(usage: RunUsageSummary | None) -> None:
-    url = "https://app.example/agents/t1"
-    text = f"Done <{url}|Open in Web>"
-    blocks = slack_utils._with_slack_web_link_context_block(
-        text, [{"type": "section", "text": {"type": "mrkdwn", "text": text}}], url, usage
-    )
-    final_text, final_blocks = slack_utils.with_slack_session_cost(text, blocks, 0.42)
-    assert final_text.endswith("$0.42")
-    assert final_blocks[-1]["elements"][0]["text"] == "$0.42"
-    assert final_blocks[0] == blocks[0]
-    cleared_text, cleared_blocks = slack_utils.without_slack_pending_session_cost(text, blocks)
-    assert "calculating cost" not in cleared_text
-    assert "calculating cost" not in str(cleared_blocks)

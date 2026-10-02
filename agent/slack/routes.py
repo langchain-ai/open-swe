@@ -823,13 +823,13 @@ async def slack_interactivity(
     ):
         return await expedited_review.handle_channel_select(interaction)
     if interaction.type == "block_actions":
+        if any(action.action_id == "open_swe_web_link" for action in interaction.actions):
+            return {}
         feedback_action = next(
             (action for action in interaction.actions if action.action_id in FEEDBACK_ACTIONS), None
         )
         if feedback_action is not None:
             background_tasks.add_task(process_feedback, interaction, feedback_action)
-            return {}
-        if any(action.action_id == "open_swe_web_link" for action in interaction.actions):
             return {}
 
     if interaction.type == "block_suggestion" and interaction.container.type == "code_channel_view":

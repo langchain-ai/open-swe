@@ -138,10 +138,14 @@ async def test_failed_export_is_logged_without_recording_submission(
 
 
 @pytest.mark.parametrize("signed", [True, False])
+@pytest.mark.parametrize("legacy", [False, True])
 async def test_webhook_acknowledges_feedback_without_starting_agent(
-    monkeypatch: pytest.MonkeyPatch, signed: bool
+    monkeypatch: pytest.MonkeyPatch, signed: bool, legacy: bool
 ) -> None:
-    body = urlencode({"payload": interaction().model_dump_json()}).encode()
+    payload = interaction()
+    if legacy:
+        payload.actions[0].action_id = "open_swe_run_feedback_up"
+    body = urlencode({"payload": payload.model_dump_json()}).encode()
 
     async def receive() -> dict[str, object]:
         return {"type": "http.request", "body": body}
@@ -161,7 +165,7 @@ async def test_webhook_acknowledges_feedback_without_starting_agent(
     assert await routes.slack_interactivity(request, tasks) == {}
     process.assert_not_awaited()
     await tasks()
-    process.assert_awaited_once_with(interaction(), interaction().actions[0])
+    process.assert_awaited_once_with(payload, payload.actions[0])
 
 
 async def test_web_link_button_is_acknowledged_without_starting_agent(
