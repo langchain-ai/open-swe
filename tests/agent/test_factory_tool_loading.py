@@ -191,9 +191,16 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     monkeypatch.setattr(
         server, "_cached_profile", AsyncMock(return_value={"experimental_mcp_ptc": True})
     )
-    code_mode, ordinary = await server._mcp_code_mode("thread", tools, local_run=False)
+    code_mode, ordinary = await server._mcp_code_mode(
+        "thread", tools, local_run=False, additional_tools=["http_request", "read_file", "task"]
+    )
     assert code_mode is not None
-    assert filter_tools_for_ptc([], tools[:1], self_tool_name="eval") == tools[:1]
+    http_tool = StructuredTool.from_function(
+        coroutine=invoke, name="http_request", description="HTTP"
+    )
+    file_tool = StructuredTool.from_function(coroutine=invoke, name="read_file", description="Read")
+    exposed = filter_tools_for_ptc([http_tool, file_tool], code_mode._ptc, self_tool_name="eval")
+    assert exposed == [tools[0], http_tool]
     assert list(ordinary) == tools[1:]
     dynamic = server._integration_middleware(ordinary, [], set())
     full = server._integration_middleware(tools, [], set())

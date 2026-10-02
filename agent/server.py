@@ -753,9 +753,13 @@ async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[A
 
 
 async def _mcp_code_mode(
-    thread_id: str, tools: Sequence[BaseTool], *, local_run: bool
+    thread_id: str,
+    tools: Sequence[BaseTool],
+    *,
+    local_run: bool,
+    additional_tools: Sequence[str | BaseTool] = (),
 ) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
-    if local_run or not tools:
+    if local_run or not (tools or additional_tools):
         return None, tools
     import langgraph_sdk
 
@@ -765,6 +769,12 @@ async def _mcp_code_mode(
     if not profile or profile.get("experimental_mcp_ptc") is not True:
         return None, tools
     ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    ptc_tools.extend(
+        tool
+        for tool in additional_tools
+        if (tool if isinstance(tool, str) else tool.name) not in DEEP_AGENT_TOOL_NAMES
+        and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
+    )
     if not ptc_tools:
         return None, tools
     ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
@@ -1822,7 +1832,20 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
-    mcp_ptc, ordinary_mcp_tools = await _mcp_code_mode(thread_id, mcp_tools, local_run=local_run)
+    mcp_ptc, ordinary_mcp_tools = await _mcp_code_mode(
+        thread_id,
+        [tool for tool in mcp_tools if tool.name not in excluded_tools],
+        local_run=local_run,
+        additional_tools=[
+            *[
+                _registered_tool_name(tool)
+                for tool in main_tools
+                if _registered_tool_name(tool) not in excluded_tools
+            ],
+            *[tool for tool in notion_tools if tool.name not in excluded_tools],
+            *[name for name in client_tool_names if name not in excluded_tools],
+        ],
+    )
     integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
     full_dynamic_tools = _integration_middleware(
         mcp_tools, notion_tools, integration_reserved_names
