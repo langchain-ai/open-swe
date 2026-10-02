@@ -237,7 +237,7 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     logins = sorted((owned.keys() | touched.keys()) - {(pr.author or "").lower()})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
     taken = {participant.user_id for participant in request.participants}
-    missed = await Point.missed_pick_ids(request.id)
+    missed = await Point.missed_pick_user_ids(request.id)
     people = {
         login: user
         for login, user in zip(logins, users, strict=True)
@@ -245,7 +245,7 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
         and not _is_bot(login)
         and not request.is_author(user.id, login)
         and user.id not in taken
-        and user.github_id not in missed
+        and user.id not in missed
     }
     if not people:
         logger.info("No Open SWE user owns or recently changed these files", extra=extra)

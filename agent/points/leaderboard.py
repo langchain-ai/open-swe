@@ -2,9 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import DateTime, bindparam, text
+from sqlalchemy import DateTime, Uuid, bindparam, text
 
 from agent.database import postgres
 
@@ -38,55 +39,64 @@ class Leaderboard(BaseModel):
     current_user: LeaderboardRow | None
 
 
-# Only people with an Open SWE account appear; points earned before they sign up still count.
 _STANDINGS_SQL = text(
     """
-WITH scored AS (
-    SELECT u.id AS user_id,
-        max(u.display_name) AS display_name,
-        max(ui.login) AS login,
-        sum(p.delta) AS points,
-        count(*) FILTER (WHERE p.reason = 'reviewed') AS reviewed,
-        count(*) FILTER (WHERE p.reason = 'pick_expired') AS missed_picks
-    FROM point p
-    JOIN user_identity ui ON ui.provider = 'github' AND ui.external_id = p.github_id::text
-    JOIN users u ON u.id = ui.user_id
-    WHERE :start IS NULL OR p.created_at >= :start
-    GROUP BY u.id
+WITH totals AS (
+    SELECT user_id,
+        sum(delta) AS points,
+        count(*) FILTER (WHERE reason = 'reviewed') AS reviewed,
+        count(*) FILTER (WHERE reason = 'pick_expired') AS missed_picks
+    FROM point
+    WHERE :start IS NULL OR created_at >= :start
+    GROUP BY user_id
+), scored AS (
+    SELECT t.*, u.display_name, u.avatar_url,
+        COALESCE((
+            SELECT ui.login FROM user_identity ui
+            WHERE ui.user_id = u.id AND ui.provider = 'github'
+            ORDER BY ui.last_seen_at DESC LIMIT 1
+        ), '') AS login
+    FROM totals t
+    JOIN users u ON u.id = t.user_id
 ), ranked AS (
     SELECT *,
-        COALESCE(NULLIF(display_name, ''), login) AS name,
-        lower(login) = :current_login AS is_current,
+        COALESCE(NULLIF(display_name, ''), NULLIF(login, ''), 'Open SWE user') AS name,
+        COALESCE(user_id = :current_user_id, false) AS is_current,
         row_number() OVER (
             ORDER BY points DESC, reviewed DESC,
                 lower(COALESCE(NULLIF(display_name, ''), login)), user_id
         ) AS rank
     FROM scored
 )
-SELECT rank, name, login, points, reviewed, missed_picks, is_current
+SELECT rank, name, login, avatar_url, points, reviewed, missed_picks, is_current
 FROM ranked
 WHERE rank <= :limit OR is_current
 ORDER BY rank
 """
-).bindparams(bindparam("start", type_=DateTime(timezone=True)))
+).bindparams(
+    bindparam("start", type_=DateTime(timezone=True)),
+    bindparam("current_user_id", type_=Uuid()),
+)
 
 
 class _Standing(BaseModel):
     rank: int
     name: str
     login: str
+    avatar_url: str
     points: int
     reviewed: int
     missed_picks: int
     is_current: bool
 
     def row(self, *, admin: bool) -> LeaderboardRow:
+        github_avatar = f"https://github.com/{self.login}.png?size=80" if self.login else None
         return LeaderboardRow(
             rank=self.rank,
             user=LeaderboardUser(
                 name=self.name,
-                github_login=self.login if admin or self.is_current else None,
-                avatar_url=f"https://github.com/{self.login}.png?size=80",
+                github_login=(self.login or None) if admin or self.is_current else None,
+                avatar_url=self.avatar_url or github_avatar,
             ),
             points=self.points,
             reviewed=self.reviewed,
@@ -96,7 +106,7 @@ class _Standing(BaseModel):
 
 
 async def standings(
-    period: LeaderboardPeriod, *, limit: int, current_login: str, admin: bool
+    period: LeaderboardPeriod, *, limit: int, current_user_id: UUID | None, admin: bool
 ) -> Leaderboard:
     """The top ``limit`` people by points in ``period``, plus the viewer's own standing."""
     window = _PERIODS[period]
@@ -105,7 +115,7 @@ async def standings(
             _STANDINGS_SQL,
             {
                 "start": datetime.now(UTC) - window if window is not None else None,
-                "current_login": current_login.strip().lower(),
+                "current_user_id": current_user_id,
                 "limit": limit,
             },
         )

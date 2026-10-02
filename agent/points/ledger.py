@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, select
+from sqlalchemy import ForeignKey, Text, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,8 +29,7 @@ POINTS: dict[PointReason, int] = {
 class Point(Base):
     __tablename__ = "point"
 
-    github_id: Mapped[int] = mapped_column(BigInteger)
-    github_login: Mapped[str]
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     delta: Mapped[int]
     reason: Mapped[PointReason] = mapped_column(Text)
     repository_key: Mapped[str | None] = mapped_column(default=None)
@@ -45,8 +44,7 @@ class Point(Base):
     async def award(
         cls,
         *,
-        github_id: int,
-        github_login: str,
+        user_id: UUID,
         reason: PointReason,
         repository_key: str | None = None,
         pr_number: int | None = None,
@@ -58,8 +56,7 @@ class Point(Base):
             insert(cls)
             .values(
                 id=uuid7(),
-                github_id=github_id,
-                github_login=github_login,
+                user_id=user_id,
                 delta=delta,
                 reason=reason,
                 repository_key=repository_key.lower() if repository_key else None,
@@ -75,7 +72,7 @@ class Point(Base):
             logger.info(
                 "Recorded points",
                 extra={
-                    "github_login": github_login,
+                    "user_id": str(user_id),
                     "point_reason": reason,
                     "delta": delta,
                     "repository": repository_key or "",
@@ -85,11 +82,11 @@ class Point(Base):
         return recorded
 
     @classmethod
-    async def missed_pick_ids(cls, request_id: UUID) -> set[int]:
-        """GitHub ids of everyone a review request rotated away from for not accepting."""
+    async def missed_pick_user_ids(cls, request_id: UUID) -> set[UUID]:
+        """Everyone a review request rotated away from for not accepting."""
         async with postgres.session() as session:
             rows = await session.scalars(
-                select(cls.github_id).where(
+                select(cls.user_id).where(
                     cls.request_id == request_id, cls.reason == "pick_expired"
                 )
             )

@@ -1,4 +1,4 @@
-"""Points earned on GitHub: a human's first review of someone else's pull request."""
+"""Points earned on GitHub: an Open SWE user's first review of someone else's pull request."""
 
 import logging
 
@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agent.database import postgres
 from agent.points.ledger import Point
+from agent.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,15 @@ async def award_review(payload: dict[str, object]) -> None:
         return
     if author is not None and author.id == reviewer.id:
         return
+    user = await User.for_identity("github", str(reviewer.id))
+    if user is None:
+        logger.info(
+            "No points for a review by someone without an Open SWE account",
+            extra={"github_login": reviewer.login, "pr_number": event.pull_request.number},
+        )
+        return
     await Point.award(
-        github_id=reviewer.id,
-        github_login=reviewer.login,
+        user_id=user.id,
         reason="reviewed",
         repository_key=f"{event.repository.owner.login}/{event.repository.name}",
         pr_number=event.pull_request.number,

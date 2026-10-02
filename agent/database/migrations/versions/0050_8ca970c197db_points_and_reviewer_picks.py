@@ -13,8 +13,7 @@ def upgrade() -> None:
         """
         CREATE TABLE point (
             id uuid PRIMARY KEY,
-            github_id bigint NOT NULL,
-            github_login text NOT NULL,
+            user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
             delta integer NOT NULL CHECK (delta <> 0),
             reason text NOT NULL,
             repository_key text,
@@ -25,17 +24,18 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX point_created_at ON point (created_at)")
+    op.execute("CREATE INDEX point_user_id ON point (user_id)")
     op.execute(
         """
         CREATE UNIQUE INDEX point_one_review_per_pull_request
-            ON point (github_id, repository_key, pr_number)
+            ON point (user_id, repository_key, pr_number)
             WHERE reason = 'reviewed'
         """
     )
     op.execute(
         """
         CREATE UNIQUE INDEX point_one_per_missed_pick
-            ON point (github_id, request_id)
+            ON point (user_id, request_id)
             WHERE reason = 'pick_expired'
         """
     )

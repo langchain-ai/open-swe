@@ -491,7 +491,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
-    if user.github_id in await Point.missed_pick_ids(request.id):
+    if user.id in await Point.missed_pick_user_ids(request.id):
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
@@ -811,15 +811,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         f"{_MISSED_PICK_COST}.",
     )
     for pick in dropped:
-        if (github_id := pick.user.github_id) is None:
-            logger.warning(
-                "A missed pick has no GitHub id to take points from",
-                extra={"request_id": str(request.id), "github_login": pick.github_login},
-            )
-            continue
         await Point.award(
-            github_id=github_id,
-            github_login=pick.github_login,
+            user_id=pick.user_id,
             reason="pick_expired",
             repository_key=f"{pr.owner}/{pr.repo}",
             pr_number=pr.number,
