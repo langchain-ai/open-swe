@@ -1,6 +1,7 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import {
+  AlarmIcon,
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   BookOpenTextIcon,
@@ -440,6 +441,13 @@ export function SidebarThreadRow({
             {item.pr && <PullRequestIcon state={item.pr.state} live={live} />}
           </>
         )}
+        {item.status !== "running" &&
+          (thread?.nextWakeupAt ?? 0) > Date.now() && (
+            <AlarmIcon
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-label="Wakeup scheduled"
+            />
+          )}
         {item.status === "running" ? (
           <RunningIndicator label="Thread running" />
         ) : unread ? (
