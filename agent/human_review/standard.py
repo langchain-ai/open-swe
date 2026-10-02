@@ -29,6 +29,7 @@ from agent.expedited_review.readiness import (
     latest_review_states,
 )
 from agent.github.ci import fetch_pr
+from agent.github.codeowners import codeowners_for_pull_request
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
@@ -660,6 +661,12 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
     pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    owners = (
+        await codeowners_for_pull_request(pr.owner, pr.repo, pr.number, token)
+        if token is not None
+        else set()
+    )
     text = prompt(
         "runs/human-review-unclaimed",
         pr_url=pr.url,
@@ -667,6 +674,7 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
         author=pr.author,
         posted=not request.has_card,
         asked=asked,
+        owners=sorted(owners),
     )
     if request.thread_id:
         return await notify_agent(request, text)

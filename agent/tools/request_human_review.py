@@ -1,5 +1,6 @@
 """Tools that ask people in Slack to review a pull request, assign a reviewer, or dismiss the ask."""
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from langgraph.config import get_config
 
 from agent.dashboard import repo_access
+from agent.github.codeowners import login_is_codeowner
 from agent.github.token import resolve_github_token
 from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
@@ -16,6 +18,8 @@ from agent.slack.cards import run_slack_location
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.tools.manage_baby_sit import dispatch_run_config
 from agent.users import User
+
+logger = logging.getLogger(__name__)
 
 
 def _failure(error: str) -> dict[str, Any]:
@@ -117,7 +121,26 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    result = await assign(request, github_login.strip().lstrip("@"), reason)
+    login = github_login.strip().lstrip("@")
+    try:
+        config = get_config()
+        token, _ = await resolve_github_token(
+            config if isinstance(config, Mapping) else {}, thread_id
+        )
+        is_owner, owners, lookup_failed = await login_is_codeowner(
+            pr_ref.owner, pr_ref.repo, pr_ref.number, login, token
+        )
+    except Exception:
+        logger.warning(
+            "Could not verify CODEOWNERS before assigning reviewer",
+            extra={"repository": f"{pr_ref.owner}/{pr_ref.repo}", "pull_request": pr_ref.number},
+            exc_info=True,
+        )
+        is_owner, owners, lookup_failed = True, set(), True
+    if owners and not is_owner and not lookup_failed:
+        listed = ", ".join(sorted(owners))
+        return _failure(f"{login} is not a CODEOWNERS owner; choose one of: {listed}.")
+    result = await assign(request, login, reason)
     if not result.success:
         return _failure(result.error)
     return {
