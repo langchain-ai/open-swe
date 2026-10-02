@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from agent.mcp import MCPConnection, runtime
 from agent.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
+from agent.tools.access import Access
 
 
 @pytest.mark.asyncio
@@ -38,6 +39,10 @@ async def test_invoke_rechecks_admin_and_runs_private_admin_tool(
         await cli_mcp_invoke("manage_feature_flags", arguments, {"sub": "user"})
     assert exc.value.status_code == 404
 
+    monkeypatch.setattr(
+        "agent.tools.access.resolve_access",
+        AsyncMock(return_value=Access(admin=True, admin_thread=True, admin_surface=True)),
+    )
     get_settings = AsyncMock(return_value={"example": True})
     monkeypatch.setattr("agent.tools.manage_feature_flags.get_instance_settings", get_settings)
     result = await cli_mcp_invoke("manage_feature_flags", arguments, {"sub": "admin"})
