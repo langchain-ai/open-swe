@@ -1308,6 +1308,20 @@ async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
     )
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/commits")
+async def gh_list_commits(
+    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH
+) -> JSONResponse:
+    """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
+    logins = {user["email"]: user["login"] for user in TEST_USERS}
+    return JSONResponse(
+        [
+            {"author": {"login": logins[email], "type": "User"} if email in logins else None}
+            for email in fakes.commit_author_emails(owner, repo, path, sha)
+        ]
+    )
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")
 async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
     content = fakes.file_at_ref(owner, repo, path, ref)
