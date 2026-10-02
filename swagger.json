@@ -4522,6 +4522,77 @@
         "title": "ReviewSummaryRef",
         "type": "object"
       },
+      "ReviewerEvalStart": {
+        "properties": {
+          "dataset_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "experiment_prefix": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Experiment Prefix",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "max_concurrency": {
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "title": "Reasoning Effort",
+            "type": "string"
+          },
+          "score_mode": {
+            "enum": [
+              "all_findings",
+              "surfaced_findings"
+            ],
+            "title": "Score Mode",
+            "type": "string"
+          },
+          "severity_threshold": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity Threshold",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "experiment_prefix",
+          "max_concurrency",
+          "model_id",
+          "reasoning_effort",
+          "score_mode",
+          "severity_threshold"
+        ],
+        "title": "ReviewerEvalStart",
+        "type": "object"
+      },
       "Role": {
         "enum": [
           "user",
@@ -6938,7 +7009,7 @@
     },
     "/dashboard/api/admin/evals/reviewer": {
       "get": {
-        "description": "Read-only status for the reviewer eval (triggered from the GitHub Action).",
+        "description": "Status of the latest reviewer eval.",
         "operationId": "admin_get_reviewer_eval_dashboard_api_admin_evals_reviewer_get",
         "responses": {
           "200": {
@@ -6960,6 +7031,54 @@
           }
         ],
         "summary": "Admin Get Reviewer Eval",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "post": {
+        "description": "Launch the reviewer eval in a LangSmith sandbox with the given run config.",
+        "operationId": "admin_start_reviewer_eval_dashboard_api_admin_evals_reviewer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerEvalStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Start Reviewer Eval Dashboard Api Admin Evals Reviewer Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Admin Start Reviewer Eval",
         "tags": [
           "dashboard",
           "review"
