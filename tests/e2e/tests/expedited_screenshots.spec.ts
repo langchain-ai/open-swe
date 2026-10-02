@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test("screenshots lead, Bob reviews the code before approving", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   await request.post("/control/reset");
   await request.post("/control/login", { data: { login: "bob" } });
   await request.post("/control/collaborator-permission", {
@@ -44,12 +44,12 @@ test("screenshots lead, Bob reviews the code before approving", async ({
   await expect(
     card.getByRole("button", { name: "Approve", exact: true }),
   ).toHaveCount(0);
-  await card.screenshot({ path: "/root/.open-swe/artifacts/after.png" });
+  await card.screenshot({ path: testInfo.outputPath("after.png") });
   await card.getByRole("button", { name: "Review files" }).click();
   const dialog = page.locator("#review-modal");
   await expect(dialog).toContainText("greet.py");
   await expect(dialog).toContainText("Hello");
-  await dialog.screenshot({ path: "/root/.open-swe/artifacts/code.png" });
+  await dialog.screenshot({ path: testInfo.outputPath("code.png") });
   await dialog.getByRole("button", { name: "Approve", exact: true }).click();
   await expect
     .poll(async () => {
