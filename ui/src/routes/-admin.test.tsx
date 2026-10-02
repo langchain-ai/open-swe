@@ -17,7 +17,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 
-import { SlackIntegrationSection } from "./admin"
+import { SlackIntegrationSection, UsersSection } from "./admin"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
@@ -74,6 +74,65 @@ describe("SlackIntegrationSection", () => {
     expect(
       JSON.parse(writeText.mock.calls[1]![0]).features.code_channels.enabled
     ).toBe(true)
+  })
+})
+
+describe("UsersSection", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("resets pagination when searching or changing page size", async () => {
+    const people = Array.from({ length: 30 }, (_, index) => ({
+      user_id: String(index),
+      github_login: `user-${index}`,
+      display_name: "",
+      email: `user-${index}@example.com`,
+      slack_user_id: null,
+      is_admin: false,
+    }))
+    vi.spyOn(api, "adminListUsers").mockImplementation(
+      async (page = 1, pageSize = 20, search = "") => {
+        const matches = people.filter((user) =>
+          user.github_login.includes(search)
+        )
+        return {
+          items: matches.slice((page - 1) * pageSize, page * pageSize),
+          total: matches.length,
+          page,
+          page_size: pageSize,
+        }
+      }
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <UsersSection enabled />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 3")).toBeTruthy()
+    fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }))
+    fireEvent.keyDown(await screen.findByRole("option", { name: "25" }), {
+      key: "Enter",
+    })
+    expect(await screen.findByText("1–25 of 30")).toBeTruthy()
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+      target: { value: "user-24" },
+    })
+    expect(await screen.findByText("user-24")).toBeTruthy()
+    expect(screen.queryByText("user-25")).toBeNull()
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+      target: { value: "nobody" },
+    })
+    expect(await screen.findByText("No users match your search.")).toBeTruthy()
+    client.clear()
   })
 })
 
