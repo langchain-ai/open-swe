@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { api, connectService } from "@/lib/api"
 import type { LangSmithCredentialStatus, LangSmithRegion } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
+import { StatusPill } from "./StatusPill"
 
 export function LangSmithConnection() {
   const qc = useQueryClient()
@@ -83,9 +84,7 @@ export function LangSmithConnection() {
         }
         control={
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              {connected ? "Connected" : "Not connected"}
-            </span>
+            <StatusPill connected={connected} />
             <Button
               size="sm"
               variant={connected ? "outline" : "default"}
