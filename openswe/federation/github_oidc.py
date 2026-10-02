@@ -94,19 +94,25 @@ def _verify(token: str, expected_audience: str) -> GitHubActionsClaims:
     return GitHubActionsClaims.model_validate(claims)
 
 
-async def verify(token: str, *, expected_audience: str | None = None) -> GitHubActionsClaims:
+async def verify(token: str) -> GitHubActionsClaims:
     """The workflow behind ``token``, or raise.
 
-    ``expected_audience`` overrides the deployment's federated audience so a
-    token minted for one listener cannot be replayed against another. Runs in a
-    thread because fetching and caching GitHub's keys is synchronous I/O inside
-    PyJWT.
+    Runs in a thread because fetching and caching GitHub's keys is synchronous
+    I/O inside PyJWT.
     """
-    expected = audience() if expected_audience is None else expected_audience.strip()
+    expected = audience()
     if not expected:
         raise InvalidFederatedToken(
             "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or DASHBOARD_BASE_URL"
         )
+    return await verify_audience(token, expected)
+
+
+async def verify_audience(token: str, expected_audience: str) -> GitHubActionsClaims:
+    """The workflow behind ``token`` when it was minted for ``expected_audience``."""
+    expected = expected_audience.strip()
+    if not expected:
+        raise InvalidFederatedToken("federated tokens need an audience")
     try:
         claims = await asyncio.to_thread(_verify, token, expected)
     except jwt.PyJWTError as exc:
