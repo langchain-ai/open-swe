@@ -1,11 +1,14 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import BackgroundTasks
 
 from agent.slack import forms
-from agent.slack.payloads import SlackChannelContext, SlackViewSubmission
+from agent.slack.payloads import (
+    SlackChannelContext,
+    SlackViewSubmission,
+)
 
 
 def _record() -> forms.FormRecord:
@@ -58,6 +61,9 @@ async def test_submission_ack_and_dispatch(monkeypatch: pytest.MonkeyPatch) -> N
     )
     monkeypatch.setattr(forms.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1"))
     monkeypatch.setattr(forms.common, "get_slack_repo_config", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        forms, "langgraph_client", lambda: MagicMock(threads=MagicMock(create=AsyncMock()))
+    )
     process = AsyncMock()
     monkeypatch.setattr(forms.webhook, "process_slack_mention", process)
     tasks = BackgroundTasks()
@@ -82,6 +88,9 @@ async def test_rejects_wrong_user_and_invalid_selection(monkeypatch: pytest.Monk
         forms.common, "resolve_slack_channel_context", AsyncMock(return_value=context)
     )
     monkeypatch.setattr(forms.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1"))
+    monkeypatch.setattr(
+        forms, "langgraph_client", lambda: MagicMock(threads=MagicMock(create=AsyncMock()))
+    )
     process = AsyncMock()
     monkeypatch.setattr(forms.webhook, "process_slack_mention", process)
     await forms._dispatch(_submission(user="U2"))

@@ -905,6 +905,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-active",
         ),
     ),
+    "code_channel_form": (
+        _tool_step(
+            "Opening a form in the code-channel session.",
+            "slack_open_modal",
+            {"title": "Review items", "items": [{"label": "First item", "comment": True}]},
+            "call-code-channel-form",
+        ),
+        StepSpec(content="Waiting for the code-channel form submission."),
+    ),
     "code_channel_followup": (
         _tool_step(
             "Replying to the unmentioned code-channel follow-up.",
@@ -1278,6 +1287,7 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
+    ScriptRule("code_channel_form", lambda ctx: "E2E_SLACK_FORM_CODE" in ctx.last_text),
     ScriptRule(
         "code_channel_followup",
         lambda ctx: "E2E_CODE_CHANNEL_FOLLOWUP" in ctx.last_text,

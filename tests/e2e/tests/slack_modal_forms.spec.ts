@@ -104,6 +104,63 @@ async function state(
 }
 
 test.describe("Slack modal intake forms", () => {
+  test("a button posted in a code channel opens against the channel session", async ({
+    request,
+  }) => {
+    expect((await request.post("/control/reset")).ok()).toBeTruthy();
+    const created = await request.post(
+      "/fake-slack/agents.conversations.create",
+      {
+        data: { title: "Form code channel", session_id: "form-session" },
+      },
+    );
+    const channel = ((await created.json()) as { channel: { id: string } })
+      .channel.id;
+    const sent = await request.post("/mock/slack/send", {
+      data: {
+        channel,
+        text: "E2E_SLACK_FORM_CODE ask me to choose items",
+        mention_bot: false,
+      },
+    });
+    const opened = (await sent.json()) as {
+      thread_ts: string;
+      thread_id: string;
+      webhook: { status: string };
+    };
+    expect(opened.webhook.status).toBe("accepted");
+    expect(opened.thread_ts).toBe("0");
+    let message: FormMessage | undefined;
+    await expect
+      .poll(
+        async () => {
+          const response = await request.get(
+            `/mock/slack/messages?channel=${channel}`,
+          );
+          const messages = (await response.json()) as FormMessage[];
+          message = messages.find((entry) =>
+            entry.text.startsWith("Review items"),
+          );
+          return message;
+        },
+        { timeout: 60_000 },
+      )
+      .toBeTruthy();
+    const action = message!.blocks
+      .flatMap((block) => block.elements ?? [])
+      .find((element) => element.action_id === "open_swe_form_open");
+    expect(action).toBeTruthy();
+    const clicked = await request.post("/mock/slack/action", {
+      data: {
+        message_ts: message!.ts,
+        thread_ts: message!.thread_ts,
+        action,
+        user: "U_ALICE",
+      },
+    });
+    expect(await clicked.json()).toEqual({});
+    expect(await views(request)).toHaveLength(1);
+  });
   test("the tool posts a button, click opens a modal, and submission becomes an attributed turn", async ({
     request,
   }) => {
@@ -145,6 +202,30 @@ test.describe("Slack modal intake forms", () => {
     expect(transcript.split(`user:${sender}`).length).toBeGreaterThanOrEqual(3);
     expect(await state(request, form.thread_id)).toContain("First item");
     expect(await state(request, form.thread_id)).not.toContain("- Second item");
+    const countSubmissions = async () =>
+      (await state(request, form.thread_id)).split(
+        "Form submitted: Review items",
+      ).length;
+    const beforeRetry = await countSubmissions();
+    expect(
+      (
+        await request.post("/mock/slack/submit", {
+          data: { view, user: "U_ALICE" },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    expect(await countSubmissions()).toBe(beforeRetry);
+    expect(await click(request, form)).toEqual({});
+    const reopened = (await views(request))[1].view;
+    const anotherView = { ...reopened, id: "V3", state: view.state };
+    expect(
+      (
+        await request.post("/mock/slack/submit", {
+          data: { view: anotherView, user: "U_ALICE" },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    expect(await countSubmissions()).toBe(beforeRetry);
   });
 
   test("a different submitter, malformed selection, and unknown form do not dispatch", async ({

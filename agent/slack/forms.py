@@ -3,9 +3,10 @@
 import json
 import logging
 from time import time_ns
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import BackgroundTasks
+from langgraph_sdk.errors import ConflictError
 from pydantic import BaseModel, Field
 
 from agent.slack import webhook
@@ -20,6 +21,7 @@ from agent.slack.blocks import (
     view_payload,
 )
 from agent.slack.client import open_slack_modal, post_slack_thread_reply_with_ts
+from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel
 from agent.slack.dm import CONCIERGE_TS, is_dm_channel
 from agent.slack.payloads import (
     SlackBlockAction,
@@ -82,17 +84,18 @@ async def handle_button(
     context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
     if not context.allows_operations or not interaction.trigger_id:
         return ignored("Form unavailable")
-    thread_ts = (
-        CONCIERGE_TS
-        if is_dm_channel(context) and await User.concierge_mode_for_slack(interaction.user.id)
-        else interaction.thread_ts
-    )
+    thread_ts = interaction.thread_ts
+    if await is_code_channel(channel_id):
+        thread_ts = CODE_CHANNEL_SESSION_TS
+    elif is_dm_channel(context) and await User.concierge_mode_for_slack(interaction.user.id):
+        thread_ts = CONCIERGE_TS
     if (
         thread_ts != record.thread_ts
         or await common.lookup_slack_thread_id(langgraph_client(), channel_id, thread_ts)
         != record.thread_id
     ):
         return ignored("Form thread unavailable")
+
     blocks = [
         checkboxes(
             block_id="choices",
@@ -183,6 +186,14 @@ async def _dispatch(payload: SlackViewSubmission) -> None:
         channel_context=context,
         thread_id=record.thread_id,
     )
+    claim_id = str(uuid5(NAMESPACE_URL, f"open-swe:slack-form:{channel_id}:{record.id}"))
+    try:
+        await langgraph_client().threads.create(thread_id=claim_id, if_exists="raise")
+    except ConflictError:
+        return
+    except Exception:
+        logger.exception("Could not claim Slack form submission", extra={"channel_id": channel_id})
+        return
     timestamp = time_ns()
     event_ts = f"{timestamp // 1_000_000_000}.{timestamp % 1_000_000_000:09d}"
     await webhook.process_slack_mention(
