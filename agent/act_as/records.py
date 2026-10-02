@@ -44,6 +44,7 @@ class ActAsRequest(BaseModel):
     title: str = ""
     requested_at: str = ""
     notified: bool = False
+    wake_on_answer: bool = False
 
     @staticmethod
     def fingerprint_for(thread_id: str, login: str) -> str:
@@ -118,6 +119,10 @@ class ThreadActAs:
 
     async def mark_notified(self, request: ActAsRequest) -> None:
         request.notified = True
+        await self._update({_REQUEST_PREFIX + request.fingerprint: request.model_dump()})
+
+    async def set_wake_on_answer(self, request: ActAsRequest, wake: bool) -> None:
+        request.wake_on_answer = wake
         await self._update({_REQUEST_PREFIX + request.fingerprint: request.model_dump()})
 
     async def decide(self, request: ActAsRequest, *, approved: bool, always_allow: bool) -> bool:

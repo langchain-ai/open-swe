@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { getDatadogSessionLink, initializeDatadogRum } from "./datadog"
 import type { RumInitConfiguration } from "@datadog/browser-rum"
@@ -17,6 +17,34 @@ function rumLoader(rum = rumClient()) {
 }
 
 describe("initializeDatadogRum", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ environment: "staging" }))
+    )
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("does not mislabel telemetry when backend configuration is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 503 }))
+    )
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { load } = rumLoader()
+    await initializeDatadogRum(
+      {
+        VITE_DATADOG_APPLICATION_ID: "app-id",
+        VITE_DATADOG_CLIENT_TOKEN: "client-token",
+      },
+      load
+    )
+    expect(load).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it("does nothing without both public identifiers", () => {
     const { load } = rumLoader()
 
@@ -30,7 +58,8 @@ describe("initializeDatadogRum", () => {
 
     await initializeDatadogRum(
       {
-        MODE: "staging",
+        MODE: "production",
+        VITE_DATADOG_ENV: "outdated-build-environment",
         VITE_DATADOG_APPLICATION_ID: " app-id ",
         VITE_DATADOG_CLIENT_TOKEN: " client-token ",
         VITE_DATADOG_SITE: "datadoghq.eu",

@@ -197,19 +197,22 @@ test.describe("my pull requests", () => {
     await expectStatus(card(page, broken), "Failing");
     await expectStatus(card(page, ok), "Approved");
 
+    const fixButtons = (pr: SeededPullRequest) =>
+      card(page, pr).getByRole("button", { name: /^Fix (conflicts|checks)$/ });
     const fix = card(page, broken).getByRole("button", {
-      name: "Fix",
+      name: "Fix checks",
       exact: true,
     });
     await expect(fix).toBeEnabled();
+    await expect(fixButtons(broken)).toHaveCount(1);
     await expect(
-      card(page, conflict).getByRole("button", { name: "Fix", exact: true }),
+      card(page, conflict).getByRole("button", {
+        name: "Fix conflicts",
+        exact: true,
+      }),
     ).toBeEnabled();
-    // Exact, like the assertions above: the title is a button that opens the
-    // preview, and "Nothing to fix" would match a substring search for "Fix".
-    await expect(
-      card(page, ok).getByRole("button", { name: "Fix", exact: true }),
-    ).toHaveCount(0);
+    await expect(fixButtons(conflict)).toHaveCount(1);
+    await expect(fixButtons(ok)).toHaveCount(0);
 
     // The fix opens a thread and dispatches a real run, so wait on the
     // response: a rejected one names the reason instead of timing out on the
@@ -224,7 +227,7 @@ test.describe("my pull requests", () => {
     const response = await dispatched;
     expect(response.status(), await response.text()).toBe(200);
     await expect(
-      page.getByText(`Fix queued for ${COMPANION}#${broken.number}`),
+      page.getByText(`Check fix queued for ${COMPANION}#${broken.number}`),
     ).toBeVisible();
   });
 

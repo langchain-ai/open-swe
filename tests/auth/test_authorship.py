@@ -14,6 +14,41 @@ from agent.utils.authorship import (
 )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])
+async def test_participant_context_includes_slack_identity(
+    monkeypatch: pytest.MonkeyPatch, source_slack_id: str
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from agent.input_messages import person_introduction
+    from agent.server import _thread_participant
+    from agent.users.models import UserIdentity
+
+    user = User(
+        display_name="Mason",
+        identities=[UserIdentity(provider="slack", external_id="U_LINKED")],
+    )
+    monkeypatch.setattr("agent.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr("agent.server.load_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr("agent.server.participant_is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "agent.server._resolve_user_custom_instructions", AsyncMock(return_value="")
+    )
+    participant = await _thread_participant(
+        authorship.CollaboratorIdentity(
+            display_name="Mason",
+            commit_name="Mason",
+            commit_email="mason@example.com",
+            github_login="mason",
+        ),
+        {},
+        slack_user_id=source_slack_id,
+    )
+    content = person_introduction(participant.as_person())["content"]
+    assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
+
+
 async def test_participant_identity_ignores_users_table_email(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
