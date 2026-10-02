@@ -325,6 +325,21 @@ ENV.var(
     "Client name registered with the Notion MCP OAuth server.",
     default="Open SWE",
 )
+ENV.var(
+    "LANGSMITH_CONNECTION_URL",
+    "LangSmith API origin people connect their own accounts to (Sign in with LangSmith).",
+    default="https://api.smith.langchain.com",
+)
+ENV.var(
+    "LANGSMITH_OAUTH_CLIENT_ID",
+    "Public OAuth application registered in the LangSmith organization (Settings > OAuth "
+    "applications) for personal LangSmith connections. Unset hides the connection.",
+)
+ENV.var(
+    "LMT_TENANT_ID",
+    "LangSmith workspace whose Managed Tools servers people with a LangSmith connection may "
+    "enable. Unset disables personal managed tools.",
+)
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
 

@@ -30,6 +30,7 @@ import {
 import { dashboardApiBase } from "@/lib/api-base"
 import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
+import { PersonalManagedToolsSection } from "@/features/settings/components/PersonalManagedToolsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import {
@@ -89,6 +90,7 @@ function AdminPage() {
       <LLMGatewaySection scope={INSTANCE_SCOPE} />
       <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
       <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+      <PersonalManagedToolsSection scope={INSTANCE_SCOPE} />
       <MCPConnectionsSection scope="instance" />
 
       <SlackIntegrationSection

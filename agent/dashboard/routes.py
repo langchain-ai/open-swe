@@ -8,6 +8,7 @@ from agent.bridge.routes import router as bridge_router
 from agent.dashboard.agent_instructions import router as agent_instructions_router
 from agent.dashboard.auth_routes import router as auth_router
 from agent.dashboard.client_errors import router as client_errors_router
+from agent.dashboard.langsmith_routes import router as langsmith_router
 from agent.dashboard.notion_routes import router as notion_router
 from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.options_routes import router as options_router
@@ -46,6 +47,7 @@ router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)
 router.include_router(notion_router)
+router.include_router(langsmith_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)
 router.include_router(mcp_router)

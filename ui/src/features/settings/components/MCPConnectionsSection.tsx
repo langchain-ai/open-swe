@@ -5,12 +5,14 @@ import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 import { SettingsSection } from "@/components/AppShell"
 import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { MCPImport } from "./MCPImport"
 import type { ImportedMCP } from "./MCPImport"
 import { MCPOAuthFields } from "./MCPOAuthFields"
+import { ManagedMCPPicker, ManagedMCPRows, useManagedMCPs } from "./ManagedMCPs"
 
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
@@ -76,7 +78,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     user: {
       title: "Personal MCPs",
       description:
-        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them. With LangSmith connected, you can also add servers from LangSmith Managed Tools, which keeps the provider tokens in LangSmith.",
       queryKey: ["myMCPs"],
       list: api.getMyMCPs,
       save: api.saveMyMCP,
@@ -125,6 +127,8 @@ export function MCPConnectionsSection({
   const [error, setError] = useState<string | null>(null)
   const [toolsExpanded, setToolsExpanded] = useState(true)
   const [importing, setImporting] = useState(false)
+  const [pickingManaged, setPickingManaged] = useState(false)
+  const managed = useManagedMCPs(scope === "user")
   const [pendingImports, setPendingImports] = useState<ImportedMCP[]>([])
   const toolsId = useId()
   const editorId = useId()
@@ -866,6 +870,7 @@ export function MCPConnectionsSection({
             </section>
           )
         })}
+        {scope === "user" && <ManagedMCPRows />}
         {importing ? (
           <MCPImport
             onImport={([first, ...rest]) => {
@@ -876,15 +881,39 @@ export function MCPConnectionsSection({
             }}
             onCancel={() => setImporting(false)}
           />
+        ) : pickingManaged ? (
+          <ManagedMCPPicker onClose={() => setPickingManaged(false)} />
         ) : !draft ? (
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              disabled={connections.isPending || connections.isError}
-              onClick={() => edit()}
-            >
-              Add MCP server
-            </Button>
+            {scope === "user" && managed.data?.configured ? (
+              <Menu>
+                <MenuTrigger
+                  render={<Button size="sm" />}
+                  disabled={connections.isPending || connections.isError}
+                >
+                  Add MCP server
+                </MenuTrigger>
+                <MenuPopup align="start" side="bottom" className="min-w-56">
+                  <MenuItem onClick={() => edit()}>Custom MCP server</MenuItem>
+                  <MenuItem
+                    onClick={() => {
+                      setPickingManaged(true)
+                      setError(null)
+                    }}
+                  >
+                    LangSmith Managed Tool
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            ) : (
+              <Button
+                size="sm"
+                disabled={connections.isPending || connections.isError}
+                onClick={() => edit()}
+              >
+                Add MCP server
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

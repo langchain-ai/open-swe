@@ -1772,6 +1772,161 @@
         "title": "MCPToolDescription",
         "type": "object"
       },
+      "ManagedConnectResponse": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "connected"
+        ],
+        "title": "ManagedConnectResponse",
+        "type": "object"
+      },
+      "ManagedSelection": {
+        "description": "A server one user turned on for their private runs, with the tools they allowed.",
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          },
+          "server_id": {
+            "title": "Server Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "upstream_url": {
+            "title": "Upstream Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "name",
+          "upstream_url",
+          "revision",
+          "updated_at"
+        ],
+        "title": "ManagedSelection",
+        "type": "object"
+      },
+      "ManagedSelectionUpdate": {
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Tools",
+            "type": "array"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "ManagedSelectionUpdate",
+        "type": "object"
+      },
+      "ManagedServer": {
+        "description": "One workspace-registered LMT server as the dashboard shows it.",
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "upstream_url": {
+            "title": "Upstream Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "upstream_url",
+          "kind",
+          "connected"
+        ],
+        "title": "ManagedServer",
+        "type": "object"
+      },
+      "ManagedToolsView": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedSelection"
+            },
+            "title": "Selections",
+            "type": "array"
+          },
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedServer"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "configured",
+          "servers",
+          "selections"
+        ],
+        "title": "ManagedToolsView",
+        "type": "object"
+      },
       "MarkReadyAction": {
         "properties": {
           "action": {
@@ -4551,6 +4706,14 @@
         "title": "ScheduleUpdateBody",
         "type": "object"
       },
+      "ServerKind": {
+        "enum": [
+          "oauth",
+          "secret",
+          "none"
+        ],
+        "type": "string"
+      },
       "SkillCreate": {
         "properties": {
           "description": {
@@ -6231,6 +6394,18 @@
               }
             ],
             "title": "Org Guidelines"
+          },
+          "personal_managed_tools_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personal Managed Tools Enabled"
           },
           "pr_summaries": {
             "agent_feature_flag": true,
@@ -8395,6 +8570,148 @@
         ]
       }
     },
+    "/dashboard/api/langsmith/callback": {
+      "get": {
+        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_description",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Description"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Langsmith Callback",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/login": {
+      "get": {
+        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Langsmith Login",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -8897,6 +9214,62 @@
         ]
       }
     },
+    "/dashboard/api/my-credentials/langsmith": {
+      "delete": {
+        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Disconnect My Langsmith",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      },
+      "get": {
+        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get My Langsmith Status",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
     "/dashboard/api/my-credentials/notion": {
       "delete": {
         "operationId": "disconnect_my_notion_dashboard_api_my_credentials_notion_delete",
@@ -8950,6 +9323,265 @@
         "tags": [
           "dashboard",
           "notion"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-mcps": {
+      "get": {
+        "operationId": "api_list_my_managed_mcps_dashboard_api_my_managed_mcps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List My Managed Mcps",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-mcps/{server_id}": {
+      "delete": {
+        "operationId": "api_delete_my_managed_mcp_dashboard_api_my_managed_mcps__server_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete My Managed Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_my_managed_mcp_dashboard_api_my_managed_mcps__server_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedSelectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedSelection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save My Managed Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-mcps/{server_id}/connect": {
+      "post": {
+        "operationId": "api_connect_my_managed_mcp_dashboard_api_my_managed_mcps__server_id__connect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Connect My Managed Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-mcps/{server_id}/credential": {
+      "delete": {
+        "operationId": "api_disconnect_my_managed_mcp_dashboard_api_my_managed_mcps__server_id__credential_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Disconnect My Managed Mcp",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-mcps/{server_id}/discover": {
+      "post": {
+        "operationId": "api_discover_my_managed_mcp_dashboard_api_my_managed_mcps__server_id__discover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MCPToolDescription"
+                  },
+                  "title": "Response Api Discover My Managed Mcp Dashboard Api My Managed Mcps  Server Id  Discover Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Discover My Managed Mcp",
+        "tags": [
+          "dashboard"
         ]
       }
     },

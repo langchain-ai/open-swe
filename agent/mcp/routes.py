@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.mcp.instance import (
@@ -12,6 +13,22 @@ from agent.mcp.instance import (
     get_instance_mcp,
     list_instance_mcps,
     save_instance_mcp,
+)
+from agent.mcp.managed import (
+    LangSmithNotConnected,
+    ManagedConnectRequired,
+    ManagedSelection,
+    ManagedSelectionUpdate,
+    ManagedServer,
+    ManagedToolsError,
+    connect_url,
+    delete_managed_selection,
+    disconnect_managed_server,
+    discover_managed_tools,
+    list_managed_selections,
+    list_managed_servers,
+    managed_tools_configured,
+    save_managed_selection,
 )
 from agent.mcp.models import (
     MCPConnection,
@@ -195,7 +212,96 @@ async def api_discover_my_mcp(
         raise HTTPException(400, str(exc)) from None
 
 
+class ManagedToolsView(BaseModel):
+    configured: bool
+    langsmith_connected: bool = False
+    servers: list[ManagedServer]
+    selections: list[ManagedSelection]
+
+
+class ManagedConnectResponse(BaseModel):
+    connected: bool
+    url: str | None = None
+
+
+managed_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@managed_mcp_router.get("/my-managed-mcps", response_model=ManagedToolsView)
+async def api_list_my_managed_mcps(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
+    if not managed_tools_configured():
+        return ManagedToolsView(configured=False, servers=[], selections=[])
+    selections = await list_managed_selections(session["sub"])
+    try:
+        servers = await list_managed_servers(session["sub"])
+    except LangSmithNotConnected:
+        return ManagedToolsView(configured=True, servers=[], selections=selections)
+    except ManagedToolsError as exc:
+        raise HTTPException(502, str(exc)) from None
+    return ManagedToolsView(
+        configured=True, langsmith_connected=True, servers=servers, selections=selections
+    )
+
+
+@managed_mcp_router.put("/my-managed-mcps/{server_id}", response_model=ManagedSelection)
+async def api_save_my_managed_mcp(
+    server_id: str,
+    update: ManagedSelectionUpdate,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ManagedSelection:
+    try:
+        return await save_managed_selection(session["sub"], server_id, update)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@managed_mcp_router.delete("/my-managed-mcps/{server_id}", status_code=204)
+async def api_delete_my_managed_mcp(server_id: str, session: dict[str, Any] = SESSION_DEP) -> None:
+    try:
+        await delete_managed_selection(session["sub"], server_id)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@managed_mcp_router.post(
+    "/my-managed-mcps/{server_id}/connect", response_model=ManagedConnectResponse
+)
+async def api_connect_my_managed_mcp(
+    server_id: str, session: dict[str, Any] = SESSION_DEP
+) -> ManagedConnectResponse:
+    try:
+        url = await connect_url(session["sub"], server_id)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return ManagedConnectResponse(connected=url is None, url=url)
+
+
+@managed_mcp_router.delete("/my-managed-mcps/{server_id}/credential", status_code=204)
+async def api_disconnect_my_managed_mcp(
+    server_id: str, session: dict[str, Any] = SESSION_DEP
+) -> None:
+    try:
+        await disconnect_managed_server(session["sub"], server_id)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@managed_mcp_router.post(
+    "/my-managed-mcps/{server_id}/discover", response_model=list[MCPToolDescription]
+)
+async def api_discover_my_managed_mcp(
+    server_id: str, session: dict[str, Any] = SESSION_DEP
+) -> list[dict[str, str]]:
+    try:
+        return await discover_managed_tools(session["sub"], server_id)
+    except ManagedConnectRequired as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 router = APIRouter()
 router.include_router(instance_mcp_router)
 router.include_router(workspace_mcp_router)
 router.include_router(user_mcp_router)
+router.include_router(managed_mcp_router)
