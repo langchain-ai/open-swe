@@ -37,7 +37,7 @@ async def test_configured_channel_hides_send_controls(monkeypatch: pytest.Monkey
     approval.pull_request = pr
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     settings = RepoSettings(review_channel="C2")
-    monkeypatch.setattr(RepoSettings, "fetch", AsyncMock(return_value=settings))
+    monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=settings))
 
     assert await lifecycle._channel_choices(approval) == []
     settings.review_channel = ""
