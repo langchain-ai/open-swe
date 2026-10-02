@@ -3,6 +3,13 @@ import { QuestionIcon } from "@phosphor-icons/react"
 import { Badge } from "@/components/ui/badge"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
@@ -54,6 +61,7 @@ export interface WorkspaceDraft {
   repos: Array<string>
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
+  breakoutChannelId: string | null
   prompt: string
   setupScript: string
   updateScript: string
@@ -65,6 +73,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
+    breakoutChannelId: workspace.breakout_channel_id ?? null,
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -76,6 +85,7 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   repos: [],
   slackChannelIds: [],
   kitchenChannelIds: [],
+  breakoutChannelId: null,
   prompt: "",
   setupScript: "",
   updateScript: "",
@@ -224,12 +234,46 @@ export function WorkspaceEditor({
                 kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
                   slackChannelIds.includes(id)
                 ),
+                breakoutChannelId:
+                  draft.breakoutChannelId &&
+                  slackChannelIds.includes(draft.breakoutChannelId)
+                    ? draft.breakoutChannelId
+                    : null,
               })
             }
             workspaceSlug={workspaceSlug}
             workspaces={workspaces}
           />
         </div>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div>Breakout destination</div>
+        <Select
+          value={draft.breakoutChannelId ?? ""}
+          onValueChange={(value) =>
+            onChange({ ...draft, breakoutChannelId: value || null })
+          }
+        >
+          <SelectTrigger aria-label="Breakout destination">
+            <SelectValue>
+              {draft.breakoutChannelId
+                ? channelLabel(draft.breakoutChannelId)
+                : "Current channel"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Current channel</SelectItem>
+            {draft.slackChannelIds.map((id) => (
+              <SelectItem key={id} value={id}>
+                {channelLabel(id)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Send breakouts to a bound public channel, such as a kitchen channel.
+          An explicitly requested channel takes precedence.
+        </p>
       </div>
       <label className="block text-sm">
         Instructions

@@ -23,7 +23,11 @@ export function VersionMismatchBanner() {
       <span className="truncate">
         Frontend version differs from the deployed backend.
       </span>
-      <Link to="/my-settings" className="shrink-0 underline underline-offset-2">
+      <Link
+        to="/my-settings"
+        hash="about"
+        className="shrink-0 underline underline-offset-2"
+      >
         Details
       </Link>
       <button
