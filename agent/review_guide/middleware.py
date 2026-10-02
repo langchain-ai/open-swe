@@ -9,9 +9,14 @@ walkthrough stands. Every model call gets the walkthrough's rules.
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Annotated, Any, NotRequired
 
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+    OmitFromOutput,
+)
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
@@ -33,17 +38,27 @@ from agent.utils.dashboard_links import dashboard_thread_url
 logger = logging.getLogger(__name__)
 
 
-class ReviewGuideMiddleware(OpenSWEMiddleware):
+class ReviewGuideState(AgentState):
+    # Checkpointed, so a run resumed after its before-agent step still has the rules.
+    review_guide_rules: NotRequired[Annotated[str, OmitFromOutput]]
+
+
+class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
+    state_schema = ReviewGuideState
+
     def __init__(self, *, thread_id: str, approve_ts: str) -> None:
         super().__init__()
         self._thread_id = thread_id
         self._approve_ts = approve_ts
-        self._rules = ""
 
-    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
+    async def abefore_agent(
+        self,
+        state: ReviewGuideState,  # noqa: ARG002
+        runtime: Runtime,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
         session = await ReviewGuideSession.get(self._thread_id)
         if session is None or session.closed:
-            return None
+            return {"review_guide_rules": ""}
         pr = session.pull_request
         head = await fetch_head(pr.owner, pr.repo, pr.number)
         if head is None:
@@ -51,7 +66,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
         backend = get_cached_sandbox_backend(self._thread_id)
         repo_dir = await guide_repo_dir(backend, pr.repo)
         author = session.mode == "author"
-        self._rules = prompt(
+        rules = prompt(
             "review-guide/main",
             pr_number=pr.number,
             repo_full_name=pr.repo_full_name,
@@ -121,6 +136,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
         )
         status = walk.status(walk.unseen(changes, await session.seen_lines()))
         return {
+            "review_guide_rules": rules,
             "messages": [
                 HumanMessage(
                     content=prompt(
@@ -132,7 +148,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
                         status=status.model_dump(),
                     )
                 )
-            ]
+            ],
         }
 
     async def awrap_model_call(
@@ -140,8 +156,9 @@ class ReviewGuideMiddleware(OpenSWEMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        if self._rules:
+        rules = request.state.get("review_guide_rules")
+        if isinstance(rules, str) and rules:
             existing = request.system_message.text if request.system_message is not None else ""
-            content = f"{existing}\n\n{self._rules}" if existing else self._rules
+            content = f"{existing}\n\n{rules}" if existing else rules
             request = request.override(system_message=SystemMessage(content=content))
         return await handler(request)
