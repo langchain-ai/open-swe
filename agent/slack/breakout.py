@@ -169,9 +169,10 @@ async def _start(
             await _tell_sender(request, "Private threads cannot be broken out to another channel.")
             return
     heading = f"`/breakout`: {_title(instruction)}"
+    root_text = await _root_text(request, heading)
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
-        await _root_text(request, heading),
+        root_text,
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -201,6 +202,7 @@ async def _start(
                 "text": instruction,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
+                "breakout_root_suffix": root_text[len(heading) :],
                 "prior_message_text": prior_text,
                 **(
                     {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}

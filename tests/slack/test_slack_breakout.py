@@ -154,6 +154,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         instruction,
         "100.0",
     )
+    assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
 
 
