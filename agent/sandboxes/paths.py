@@ -11,7 +11,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
-_PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox")
+_PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox", "_backend")
+WORKSPACE_DIR = "/workspace"
 
 
 async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
@@ -21,6 +22,20 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
 
     work_dir = await resolve_sandbox_work_dir(sandbox_backend)
     return posixpath.join(work_dir, repo_name)
+
+
+async def resolve_checkout_dir(
+    sandbox_backend: SandboxBackendProtocol, work_dir: str, repo_name: str
+) -> str:
+    """``<work_dir>/<repo>``, or a ``$HOME/<repo>`` checkout made before the /workspace move."""
+    repo_dir = posixpath.join(work_dir, repo_name)
+    name = shlex.quote(posixpath.basename(repo_name))
+    result = await sandbox_backend.aexecute(
+        f"test -e {shlex.quote(repo_dir)}/.git || "
+        f'{{ test -e "$HOME"/{name}/.git && printf %s "$HOME"/{name}; }}'
+    )
+    legacy = _normalize_path(result.output) if result.exit_code == 0 else None
+    return legacy or repo_dir
 
 
 async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> str:

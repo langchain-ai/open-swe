@@ -1,11 +1,25 @@
 """Name APM spans after the route that handled the request."""
 
 import logging
+import os
 
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from agent.config import ENV
+
 logger = logging.getLogger(__name__)
+
+
+def configure_datadog_environment() -> None:
+    if environment := ENV.OPENSWE_ENV.optional():
+        os.environ["DD_ENV"] = environment
+        try:
+            from ddtrace import config
+        except ImportError:
+            logger.debug("Datadog tracing is unavailable", exc_info=True)
+        else:
+            config.env = environment
 
 
 def _rename_root_span(resource: str) -> None:

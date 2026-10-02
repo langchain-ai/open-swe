@@ -55,7 +55,7 @@ Two consequences:
 - The script must describe the **whole** build from base, even for a fork. By hand you only did the delta on top of the parent; the nightly does not start from the parent.
 - Leaving it off is allowed. The workspace then has no nightly check and keeps whatever image was last published.
 
-Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the preferred repos listed in `OPENSWE_WORKSPACE_REPOS` (runs clone any other repository on demand); install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
+Write it non-interactive and safe to re-run: start with `set -euo pipefail`; clone the preferred repos listed in `OPENSWE_WORKSPACE_REPOS` into `/workspace/<repo>`, where runs expect every checkout (runs clone any other repository on demand); install `rg`, `gh`, toolchains, dependencies; warm caches. Never write a secret to disk — the proxy injects git auth per run.
 
 ## `update_script` — keeping a live image fresh
 

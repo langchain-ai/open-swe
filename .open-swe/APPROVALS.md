@@ -8,10 +8,17 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
    or loosening what a test checks.
 3. **Small, low-risk code changes.** Roughly 50 changed lines or fewer, in one feature
    area, with tests for any behavior change. For example: UI copy or styling fixes,
-   log or error message fixes, type-only changes, lint fixes, or removing dead code.
+   log or error message fixes, type-only changes, lint fixes, or removing dead code
+   that no supported user flow can reach.
 
 Always require human review when a pull request touches:
 
+- removal or restriction of existing user-facing functionality, including hiding
+  support or diagnostic tools, gating an existing feature to admins, or making a
+  supported user flow less accessible. Small diffs, passing tests, and no findings
+  do not make these changes low-risk. The PR description must explain why the
+  functionality is being removed or restricted; a rationale does not waive human
+  review;
 - authentication, sessions, permissions, credentials, or tokens (for example
   `agent/dashboard/oauth.py`, `agent/dashboard/repo_access.py`, `agent/api_keys/`,
   `agent/github/`);

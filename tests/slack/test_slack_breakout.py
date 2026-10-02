@@ -6,6 +6,8 @@ import pytest
 from agent.slack import breakout
 from agent.slack.channels import SlackChannel
 from agent.slack.request import SlackRequest
+from agent.users import User
+from agent.workspaces import routing
 
 Command = breakout.BreakoutCommand
 
@@ -27,6 +29,11 @@ def _channel(channel_id: str, *, private: bool) -> SlackChannel | None:
 def public_channels(monkeypatch):
     load = AsyncMock(side_effect=lambda channel_id, **_: _channel(channel_id, private=False))
     monkeypatch.setattr(SlackChannel, "load", load)
+    monkeypatch.setattr(
+        breakout.common, "get_thread_workspace", AsyncMock(return_value="engineering")
+    )
+    monkeypatch.setattr(breakout.common, "thread_exists", AsyncMock(return_value=False))
+    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="alice"))
     return load
 
 
@@ -74,7 +81,17 @@ def test_breakout_command_requires_position_after_mention(text, expected):
 
 
 @pytest.mark.asyncio
-async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypatch):
+@pytest.mark.parametrize(
+    ("explicit", "expected", "email_only"),
+    [
+        ("", "C1", False),
+        ("C3", "C3", False),
+        ("", "C1", True),
+    ],
+)
+async def test_breakout_with_text_starts_new_thread_with_old_transcript(
+    monkeypatch, explicit, expected, email_only
+):
     posted = _patch_slack(monkeypatch)
     root = AsyncMock(return_value=("200.0", None))
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
@@ -85,18 +102,56 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(monkeypa
     mention = AsyncMock()
     monkeypatch.setattr(breakout.service, "process_slack_mention", mention)
 
-    await breakout.process_slack_breakout(_request(), Command("fix it"), None)
+    request = _request()
+    instruction = "workspace:other fix it"
+    if email_only:
+        request = request.model_copy(update={"thread_id": None})
+        instruction = "fix it"
+        monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
+        monkeypatch.setattr(
+            breakout.common,
+            "get_slack_user_info",
+            AsyncMock(return_value={"profile": {"email": "alice@example.com"}}),
+        )
+        monkeypatch.setattr(
+            User,
+            "login_for_email",
+            AsyncMock(side_effect=lambda email: "alice" if email == "alice@example.com" else None),
+        )
+        monkeypatch.setattr(
+            routing.WORKSPACES, "owner_of_slack_channel", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            routing.WORKSPACES,
+            "slug_exists",
+            AsyncMock(side_effect=lambda slug: slug == "engineering"),
+        )
+        monkeypatch.setattr(
+            routing,
+            "get_user_preferences",
+            AsyncMock(
+                side_effect=lambda login: (
+                    {"default_workspace": "engineering"} if login == "alice" else {}
+                )
+            ),
+        )
+    monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
+    await breakout.process_slack_breakout(request, Command(instruction, channel_id=explicit), None)
 
+    assert mention.await_args is not None
+    assert mention.await_args.kwargs["inherited_workspace"] == (None if explicit else "engineering")
+    assert root.await_args is not None
+    assert root.await_args.args[0] == expected
     assert root.await_args.args[1] == (
-        "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE>"
+        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE>"
     )
     posted.source_line.assert_awaited_once_with("C1", "105.0")
-    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", "C1", "200.0")
+    posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")
     sent = mention.await_args.args[0]
     assert (sent.thread_ts, sent.thread_id, sent.text, sent.context_thread_ts) == (
         "200.0",
         "new-thread",
-        "fix it",
+        instruction,
         "100.0",
     )
     posted.ephemeral.assert_not_awaited()

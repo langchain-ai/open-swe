@@ -6,11 +6,6 @@ export function notificationsSupported(): boolean {
   return typeof window !== "undefined" && "Notification" in window
 }
 
-export function getNotificationPermission(): NotificationPermission | null {
-  if (!notificationsSupported()) return null
-  return Notification.permission
-}
-
 export function notificationsEnabled(): boolean {
   if (!notificationsSupported()) return false
   if (Notification.permission !== "granted") return false
