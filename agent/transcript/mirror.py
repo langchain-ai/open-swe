@@ -36,6 +36,7 @@ MIRRORED_KEYS: frozenset[str] = frozenset(
         "unlisted",
         # Served by the snapshot's ``ThreadView``.
         "title",
+        "title_locked",
     }
 )
 """The LangGraph metadata keys the transcript read path depends on."""

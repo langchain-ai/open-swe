@@ -549,12 +549,14 @@ def test_existing_pr_does_not_record_later_run_as_opening(
 
 
 @pytest.mark.parametrize(
-    "retitle_thread,record_opening", [(True, True), (False, True), (True, False)]
+    "retitle_thread,record_opening,manual_title",
+    [(True, True, False), (False, True, False), (True, False, False), (True, True, True)],
 )
 async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
     retitle_thread: bool,
     record_opening: bool,
+    manual_title: bool,
 ) -> None:
     _set_config(
         monkeypatch,
@@ -570,11 +572,11 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
     monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
-    langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
+    langgraph.threads.get = AsyncMock(
+        return_value={"metadata": {"title": "My thread", "title_locked": manual_title}}
+    )
     langgraph.threads.update = AsyncMock()
     monkeypatch.setattr(opr, "get_client", lambda: langgraph)
-    mirror_metadata = AsyncMock()
-    monkeypatch.setattr(opr, "mirror_thread_metadata", mirror_metadata)
     details = {
         "html_url": "https://github.com/langchain-ai/open-swe/pull/3",
         "number": 3,
@@ -600,13 +602,13 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
 
     assert langgraph.threads.update.await_args is not None
     metadata = langgraph.threads.update.await_args.kwargs["metadata"]
-    if retitle_thread and record_opening:
+    assert metadata["pr_title"] == "feat: x"
+    assert metadata["pr_number"] == 3
+    if retitle_thread and record_opening and not manual_title:
         assert metadata["title"] == "feat: x"
         assert metadata["title_seed"] is None
-        mirror_metadata.assert_awaited_once_with("t1", {"title": "feat: x", "title_seed": None})
     else:
         assert "title" not in metadata
-        mirror_metadata.assert_not_awaited()
 
 
 def test_updating_pr_preserves_original_feedback_run() -> None:
