@@ -12,13 +12,19 @@ import asyncio
 import logging
 from typing import Literal, TypedDict
 
+from langgraph_sdk import get_client
+
 from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
 from agent.prompts import prompt
 from agent.slack.blocks import block_payload, escape
 from agent.slack.cards import origin_footer
-from agent.slack.client import post_slack_top_level_message_with_ts
+from agent.slack.client import (
+    get_active_slack_thread,
+    get_slack_permalink,
+    post_slack_top_level_message_with_ts,
+)
 from agent.slack.dm import note_for_concierge, open_dm
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -103,6 +109,15 @@ async def require_consent(
 
 async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) -> bool:
     thread_url = dashboard_thread_url(thread_id)
+    slack_thread = await get_active_slack_thread(get_client(), thread_id)
+    if slack_thread:
+        permalink = slack_thread.get("permalink")
+        if not isinstance(permalink, str) or not permalink.strip():
+            channel_id, thread_ts = slack_thread.get("channel_id"), slack_thread.get("thread_ts")
+            if isinstance(channel_id, str) and isinstance(thread_ts, str):
+                permalink = await get_slack_permalink(channel_id, thread_ts)
+        if isinstance(permalink, str) and permalink.strip():
+            thread_url = permalink.strip()
     thread_link = f"<{thread_url}|this thread>" if thread_url else "a shared thread"
     repo = escape(f"{request.owner}/{request.repo}")
     message = (

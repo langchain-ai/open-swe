@@ -13,7 +13,6 @@ from agent.slack.cards import origin_footer
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
-    post_slack_thread_reply,
     update_slack_message,
 )
 from agent.slack.dm import note_for_concierge
@@ -114,11 +113,11 @@ async def handle_button(
     source_ts = (source or {}).get("thread_ts")
     if isinstance(source_channel, str) and isinstance(source_ts, str):
         verdict = "approved" if approved else "denied"
-        await post_slack_thread_reply(
+        await post_slack_ephemeral_message(
             source_channel,
-            source_ts,
+            user_id,
             f"`{request.login}` {verdict} Open SWE opening PRs as them in this thread.",
-            agent_thread_id=button.thread_id,
+            thread_ts=source_ts,
         )
     return accepted("act-as request decided")
 

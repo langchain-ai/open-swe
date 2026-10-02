@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import breakout, breakout_destination
+from agent.slack import breakout
 from agent.slack.channels import SlackChannel
 from agent.slack.request import SlackRequest
 from agent.users import User
@@ -34,7 +34,6 @@ def public_channels(monkeypatch):
     )
     monkeypatch.setattr(breakout.common, "thread_exists", AsyncMock(return_value=False))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="alice"))
-    monkeypatch.setattr(breakout_destination.WORKSPACES, "get", AsyncMock(return_value=None))
     return load
 
 
@@ -83,16 +82,15 @@ def test_breakout_command_requires_position_after_mention(text, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("configured", "explicit", "expected", "email_only"),
+    ("explicit", "expected", "email_only"),
     [
-        (None, "", "C1", False),
-        ("C2", "", "C2", False),
-        ("C2", "C3", "C3", False),
-        ("C2", "", "C2", True),
+        ("", "C1", False),
+        ("C3", "C3", False),
+        ("", "C1", True),
     ],
 )
 async def test_breakout_with_text_starts_new_thread_with_old_transcript(
-    monkeypatch, configured, explicit, expected, email_only
+    monkeypatch, explicit, expected, email_only
 ):
     posted = _patch_slack(monkeypatch)
     root = AsyncMock(return_value=("200.0", None))
@@ -137,15 +135,6 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
                 )
             ),
         )
-    monkeypatch.setattr(
-        breakout_destination.WORKSPACES,
-        "get",
-        AsyncMock(
-            side_effect=lambda slug: (
-                SimpleNamespace(breakout_channel_id=configured) if slug == "engineering" else None
-            )
-        ),
-    )
     monkeypatch.setattr(breakout.common, "get_slack_repo_config", AsyncMock(return_value=None))
     await breakout.process_slack_breakout(request, Command(instruction, channel_id=explicit), None)
 
