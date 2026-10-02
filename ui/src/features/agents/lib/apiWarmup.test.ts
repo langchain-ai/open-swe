@@ -34,11 +34,13 @@ function stubFetch() {
 async function recordedSidebarUrl({
   includeAutomations = false,
   includeResolved = false,
+  hideSlackWithoutCodeChanges = true,
   repoMode = true,
   sort = "created",
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
+  hideSlackWithoutCodeChanges?: boolean
   repoMode?: boolean
   sort?: ChatSort
 } = {}): Promise<string> {
@@ -49,6 +51,7 @@ async function recordedSidebarUrl({
         repoMode,
         includeAutomations,
         includeResolved,
+        hideSlackWithoutCodeChanges,
         sort,
       }),
       limit: SIDEBAR_PAGE_SIZE,
@@ -142,6 +145,11 @@ describe("apiWarmupScript", () => {
   // a mismatch would silently fetch the sidebar twice.
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
+    {
+      name: "Slack code filter disabled",
+      expected: { hideSlackWithoutCodeChanges: false },
+      prefs: { filters: { hideSlackWithoutCodeChanges: false } },
+    },
     {
       name: "automations included",
       expected: { includeAutomations: true },

@@ -35,8 +35,11 @@ import { optimisticUpdate } from "@/lib/optimistic"
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
-    ["agent-threads", "lists", "repos", params] as const,
+  repos: (params: {
+    includeResolved: boolean
+    includeAutomations: boolean
+    hideSlackWithoutCodeChanges: boolean
+  }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -600,13 +603,19 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
 export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
+  hideSlackWithoutCodeChanges = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
+  hideSlackWithoutCodeChanges?: boolean
   includeResolved?: boolean
   enabled?: boolean
 }) {
-  const params = { includeAutomations, includeResolved }
+  const params = {
+    includeAutomations,
+    includeResolved,
+    hideSlackWithoutCodeChanges,
+  }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.repos(params),
@@ -671,10 +680,12 @@ export function sidebarRecentsParams({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  hideSlackWithoutCodeChanges = true,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
+  hideSlackWithoutCodeChanges?: boolean
   includeResolved?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
@@ -682,6 +693,7 @@ export function sidebarRecentsParams({
     ...sidebarPageParams({ includeAutomations, includeResolved }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
+    hideSlackWithoutCodeChanges,
   }
 }
 
@@ -689,11 +701,13 @@ export function useSidebarRecents({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  hideSlackWithoutCodeChanges = true,
   sort = "created",
   enabled = true,
 }: {
   repoMode: boolean
   includeAutomations?: boolean
+  hideSlackWithoutCodeChanges?: boolean
   includeResolved?: boolean
   sort?: ChatSort
   enabled?: boolean
@@ -703,6 +717,7 @@ export function useSidebarRecents({
       repoMode,
       includeAutomations,
       includeResolved,
+      hideSlackWithoutCodeChanges,
       sort,
     }),
     enabled
@@ -713,11 +728,13 @@ export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  hideSlackWithoutCodeChanges = true,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
+  hideSlackWithoutCodeChanges?: boolean
   includeResolved?: boolean
   sort?: ChatSort
   enabled?: boolean
@@ -727,6 +744,7 @@ export function useSidebarRepoThreads({
       ...sidebarPageParams({ includeAutomations, includeResolved }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
+      hideSlackWithoutCodeChanges,
     },
     enabled && Boolean(repoFullName)
   )

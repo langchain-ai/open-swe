@@ -79,6 +79,10 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeAutomations === "boolean"
         ? raw.includeAutomations
         : DEFAULT_SIDEBAR_FILTERS.includeAutomations,
+    hideSlackWithoutCodeChanges:
+      typeof raw.hideSlackWithoutCodeChanges === "boolean"
+        ? raw.hideSlackWithoutCodeChanges
+        : DEFAULT_SIDEBAR_FILTERS.hideSlackWithoutCodeChanges,
     includeResolved:
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved

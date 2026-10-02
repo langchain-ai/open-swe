@@ -15499,6 +15499,16 @@
               "title": "Sort By",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "hide_slack_without_code_changes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Slack Without Code Changes",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -15641,6 +15651,16 @@
             "schema": {
               "default": false,
               "title": "Include Automations",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hide_slack_without_code_changes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hide Slack Without Code Changes",
               "type": "boolean"
             }
           },
