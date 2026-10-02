@@ -11,7 +11,10 @@ Rebind this thread to a fresh sandbox.
   for an empty or clean sandbox.
 
 Either way the new sandbox has none of the thread's current files or worktree
-state. The old sandbox is not deleted, but it becomes inaccessible from this
-thread after the handoff.
+state. First it attempts to stop the old sandbox, waiting at most 10 seconds;
+stop failure does not prevent creating the new sandbox. The old sandbox is not
+deleted, but it becomes inaccessible from this thread after the handoff.
 
-Returns ``success``, ``old_sandbox_id``, and ``new_sandbox_id`` on success.
+Returns ``success``, ``old_sandbox_id``, ``new_sandbox_id``,
+``old_sandbox_stopped``, and ``old_sandbox_stop_error`` on success. Report the
+stop outcome to the user, including any failure, alongside the recreation result.
