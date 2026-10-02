@@ -122,6 +122,13 @@ test.describe("my pull requests", () => {
     await openMine(page);
     await expect(card(page, mine)).toBeVisible();
     await page.getByRole("button", { name: "To Review", exact: true }).click();
+    await expect(
+      page.getByText("No Open SWE assignments. You’re all caught up."),
+    ).toBeVisible();
+    await expect(card(page, assigned)).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Show my GitHub review requests" })
+      .click();
     await expect(card(page, assigned)).toBeVisible();
     await expect(card(page, mine)).toHaveCount(0);
     await expect(card(page, unassigned)).toHaveCount(0);
@@ -147,7 +154,7 @@ test.describe("my pull requests", () => {
     expect(closed.ok()).toBeTruthy();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      page.getByText("No pending review requests. You’re all caught up."),
+      page.getByText("No pending GitHub review requests."),
     ).toBeVisible();
   });
 

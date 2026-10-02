@@ -100,9 +100,15 @@ function ReviewsPage() {
               />
             ) : (
               <OpenPullRequests
-                key={tab}
+                key={`${tab}-${Boolean(filters.github)}`}
                 login={session.data.login}
-                scope={tab === "mine" ? "mine" : "review-requested"}
+                scope={
+                  tab === "mine"
+                    ? "mine"
+                    : filters.github
+                      ? "review-requested"
+                      : "review-assigned"
+                }
                 filters={filters}
                 onFiltersChange={changeFilters}
               />

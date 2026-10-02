@@ -9,7 +9,7 @@ export function useOpenPullRequests(
   repo: string[],
   sort: ReviewSort,
   direction: "asc" | "desc",
-  scope: "mine" | "review-requested"
+  scope: "mine" | "review-assigned" | "review-requested"
 ) {
   return useInfiniteQuery({
     queryKey: ["open-pull-requests", login, scope, repo, sort, direction],
