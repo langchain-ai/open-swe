@@ -49,7 +49,7 @@ ACTIVE_STATUSES: frozenset[str] = frozenset({"starting", "running"})
 # A launched sandbox clones and syncs before the harness writes its first heartbeat.
 STARTING_STALE_SECONDS = 15 * 60
 EVAL_TIMEOUT_SECONDS = 8 * 60 * 60
-DELETE_AFTER_STOP_SECONDS = 24 * 60 * 60
+DELETE_AFTER_STOP_SECONDS = 7 * 24 * 60 * 60
 REPO_URL = "https://github.com/langchain-ai/open-swe"
 KEY_PLACEHOLDER = "sandbox-proxy-injected"
 LOG_PATH = "/root/reviewer-eval.log"
@@ -170,13 +170,19 @@ async def get_reviewer_eval_status() -> dict[str, Any]:
         return record
     if _is_heartbeat_fresh(record):
         return record
+    return await _fail(record, _stale_error(record))
+
+
+def _stale_error(record: dict[str, Any]) -> str:
+    if record.get("status") == "starting":
+        return f"Eval never reported in; see {LOG_PATH} in sandbox {record.get('worker_id')}."
+    return "Eval process is no longer tracked (eval sandbox stopped?)."
+
+
+async def _fail(record: dict[str, Any], error: str) -> dict[str, Any]:
+    finished = record.get("finished_at") or now_iso()
     return await _put_record(
-        {
-            **record,
-            "status": "failed",
-            "finished_at": record.get("finished_at") or now_iso(),
-            "error": "Eval process is no longer tracked (eval sandbox stopped?).",
-        }
+        {**record, "status": "failed", "finished_at": finished, "error": error}
     )
 
 
@@ -214,7 +220,7 @@ def _sandbox_command(ref: str, args: list[str], stop_url: str) -> str:
 
 
 async def _launch_sandbox(
-    config: ReviewerEvalConfig, limit: int | None, created_by: str | None
+    config: ReviewerEvalConfig, limit: int | None, created_by: str | None, ref: str
 ) -> str:
     """Run the harness detached in a sandbox that stops itself when the eval exits.
 
@@ -248,26 +254,31 @@ async def _launch_sandbox(
             run_config={"env_vars": env},
             timeout=180,
         )
-        ref = backend_build_info()["commit"] or "main"
         stop_url = f"{endpoint}/v2/sandboxes/boxes/{sandbox.name}/stop"
-        await sandbox.run(
-            _sandbox_command(ref, _harness_args(config, limit), stop_url),
-            timeout=EVAL_TIMEOUT_SECONDS + 3600,
-            idle_timeout=-1,
-            wait=False,
-        )
+        try:
+            await sandbox.run(
+                _sandbox_command(ref, _harness_args(config, limit), stop_url),
+                timeout=EVAL_TIMEOUT_SECONDS + 3600,
+                idle_timeout=-1,
+                wait=False,
+            )
+        except Exception:
+            await client.delete_sandbox(sandbox.name)
+            raise
     return sandbox.name
 
 
 async def start_reviewer_eval(
     config: ReviewerEvalConfig, limit: int | None, created_by: str | None
 ) -> dict[str, Any]:
-    """Launch a reviewer eval in a sandbox; raises ``RuntimeError`` if one is active."""
+    """Launch a reviewer eval in a sandbox; raises ``RuntimeError`` if one can't start."""
     if (await get_reviewer_eval_status()).get("status") in ACTIVE_STATUSES:
         raise RuntimeError("a reviewer eval is already running")
-    sandbox_name = await _launch_sandbox(config, limit, created_by)
+    ref = backend_build_info()["commit"]
+    if not ref:
+        raise RuntimeError("the deployment's commit is unknown, so the eval can't match its code")
     started = now_iso()
-    return await _put_record(
+    record = await _put_record(
         {
             **_idle_record(),
             "status": "starting",
@@ -277,8 +288,13 @@ async def start_reviewer_eval(
             "config_snapshot": config,
             "started_at": started,
             "created_by": created_by,
-            "worker_id": sandbox_name,
             "heartbeat": started,
             "trigger": "sandbox",
         }
     )
+    try:
+        sandbox_name = await _launch_sandbox(config, limit, created_by, ref)
+    except Exception as exc:
+        await _fail(record, f"Couldn't launch the eval sandbox: {exc}")
+        raise
+    return await _put_record({**record, "worker_id": sandbox_name})

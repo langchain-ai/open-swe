@@ -335,7 +335,7 @@ function StatusLine({
 function ReviewerEvalLogs() {
   const status = useReviewerEvalStatus()
   const logTail = status.data?.log_tail ?? null
-  const running = status.data?.status === "running"
+  const running = isActive(status.data)
 
   const scrollRef = useRef<HTMLPreElement>(null)
   const [follow, setFollow] = useState(true)
