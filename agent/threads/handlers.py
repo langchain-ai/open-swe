@@ -198,6 +198,9 @@ async def get_dashboard_thread(
 async def send_dashboard_message(
     thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
 ) -> dict[str, Any]:
+    from agent.tasks import assert_user_entry
+
+    await assert_user_entry(thread_id)
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)

@@ -137,6 +137,7 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.task_authority import TaskAuthorityMiddleware
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -246,6 +247,13 @@ from agent.tools.admin_gate import (
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.tools.task_threads import (
+    configure_task,
+    control_worker,
+    message_task_thread,
+    spawn_worker,
+    task_status,
+)
 from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
@@ -1691,6 +1699,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
+        configure_task,
+        task_status,
+        spawn_worker,
+        message_task_thread,
+        control_worker,
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
@@ -2012,6 +2025,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),
                     ),
+                    TaskAuthorityMiddleware(client_tool_names=client_tool_names),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),
                     *(

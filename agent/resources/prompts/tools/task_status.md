@@ -1,0 +1,1 @@
+Read the current task's acceptance criteria, completion assessment, permanent delegation state, and worker memberships. Includes reserved worker IDs whose initial dispatch failed, so the coordinator can recover them with control_worker retry. Does not wait for workers or mark the task complete.

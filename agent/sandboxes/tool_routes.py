@@ -102,6 +102,16 @@ async def invoke_tool(
 ) -> ToolResult:
     from agent.sandboxes.tool_runtime import load_tool_surface
 
+    if tool_name in {
+        "spawn_worker",
+        "start_thread",
+        "task",
+        "request_pr_review",
+        "slack_start_new_thread",
+    }:
+        raise HTTPException(
+            403, "Use native thread tools for delegation, not the shared sandbox proxy"
+        )
     surface, config, state = await load_tool_surface(access.thread_id)
     try:
         result = await surface.invoke(access.thread_id, config, state, tool_name, arguments.root)

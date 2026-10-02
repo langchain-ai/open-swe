@@ -61,7 +61,7 @@ class EventMatch(Base):
 
     thread_id: Mapped[str]
     subscription_id: Mapped[UUID]
-    source: Mapped[WebhookSource] = mapped_column(Text)
+    source: Mapped[WebhookSource | Literal["task"]] = mapped_column(Text)
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
@@ -72,7 +72,9 @@ class EventMatch(Base):
     async def record(self, session: AsyncSession) -> bool:
         """Save in ``session``; ``False`` when the thread already owes or holds this delivery."""
         cls = type(self)
-        await session.execute(delete(cls).where(cls.matched_at < func.now() - _RETAINED))
+        await session.execute(
+            delete(cls).where(cls.source != "task", cls.matched_at < func.now() - _RETAINED)
+        )
         recorded = await session.scalar(
             insert(cls)
             .values(
@@ -99,7 +101,10 @@ class EventMatch(Base):
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
-                .where(cls.thread_id == thread_id, cls.matched_at >= func.now() - _RETAINED)
+                .where(
+                    cls.thread_id == thread_id,
+                    (cls.source == "task") | (cls.matched_at >= func.now() - _RETAINED),
+                )
                 .order_by(cls.matched_at, cls.id)
             )
             return [row for row in rows if str(row.id) not in delivered]
@@ -114,7 +119,7 @@ class EventMatch(Base):
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "surface": "automation" if match.source == "task" else match.source,
                     "kind": "system",
                     "data": {"event_match": str(match.id)},
                 },

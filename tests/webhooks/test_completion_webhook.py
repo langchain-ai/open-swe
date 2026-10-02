@@ -196,6 +196,31 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_worker_completion_only_notifies_coordinator(monkeypatch, status):
+    from agent.tools import task_threads
+
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(task_threads, "worker_finished", notify)
+    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", AsyncMock())
+    monkeypatch.setattr(completion, "_settle_transcript_turn", AsyncMock())
+    pickup = AsyncMock()
+    feedback = AsyncMock()
+    failure = AsyncMock()
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
+    monkeypatch.setattr(completion, "_handle_successful_run", feedback)
+    monkeypatch.setattr(completion, "_post_failure_reply", failure)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", AsyncMock())
+    result = await completion.handle_run_completion(
+        {"thread_id": "worker", "run_id": "run-1", "status": status}
+    )
+    assert result["status"] == "ok"
+    notify.assert_awaited_once_with("worker", "run-1", status)
+    pickup.assert_not_awaited()
+    feedback.assert_not_awaited()
+    failure.assert_not_awaited()
+
+
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     # No secret configured: fail closed (reject everything).
     monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)

@@ -1,0 +1,1 @@
+Persist this task's acceptance criteria. Only its permanent coordinator may change them or mark the task completed. Set completed=true only after evaluating worker results against every criterion and provide the assessment. Completion does not cancel workers or restore implementation permission after delegation.
