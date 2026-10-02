@@ -28,6 +28,18 @@ test.describe("Slack run usage footer", () => {
     await expect(reply).not.toContainText("calculating cost");
     await expect(reply).not.toContainText("$");
     await expect(
+      reply.getByRole("button", {
+        name: "Rate this reply helpful",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      reply.getByRole("button", {
+        name: "Rate this reply not helpful",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
       reply.getByRole("button", { name: "Open in Web" }),
     ).toHaveCount(1);
   });

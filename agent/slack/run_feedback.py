@@ -5,7 +5,7 @@ import logging
 from typing import Literal
 
 from agent.analytics.feedback import record_feedback_submission
-from agent.slack.blocks import ActionsBlock, plain_text
+from agent.slack.blocks import ContextActionsBlock, plain_text
 from agent.slack.channels import SlackChannel
 from agent.slack.client import lookup_slack_run_mapping, slack_thread_mutation_lock
 from agent.slack.payloads import SlackBlockAction, SlackInteraction, SlackPayload, parse_json_object
@@ -26,25 +26,25 @@ class RunFeedbackValue(SlackPayload):
     rating: Literal["up", "down"]
 
 
-def feedback_block(run_id: str) -> ActionsBlock:
+def feedback_block(run_id: str) -> ContextActionsBlock:
     return {
-        "type": "actions",
+        "type": "context_actions",
         "block_id": "open_swe_reply_feedback",
         "elements": [
             {
-                "type": "button",
-                "action_id": "open_swe_run_feedback_up",
-                "text": plain_text("👍"),
-                "accessibility_label": "Rate this reply helpful",
-                "value": json.dumps({"run_id": run_id, "rating": "up"}),
-            },
-            {
-                "type": "button",
-                "action_id": "open_swe_run_feedback_down",
-                "text": plain_text("👎"),
-                "accessibility_label": "Rate this reply not helpful",
-                "value": json.dumps({"run_id": run_id, "rating": "down"}),
-            },
+                "type": "feedback_buttons",
+                "action_id": "open_swe_run_feedback",
+                "positive_button": {
+                    "text": plain_text("Helpful"),
+                    "value": json.dumps({"run_id": run_id, "rating": "up"}),
+                    "accessibility_label": "Rate this reply helpful",
+                },
+                "negative_button": {
+                    "text": plain_text("Not helpful"),
+                    "value": json.dumps({"run_id": run_id, "rating": "down"}),
+                    "accessibility_label": "Rate this reply not helpful",
+                },
+            }
         ],
     }
 

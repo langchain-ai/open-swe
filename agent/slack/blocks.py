@@ -150,6 +150,7 @@ class FeedbackButtons(TypedDict):
 class ContextActionsBlock(TypedDict):
     type: Literal["context_actions"]
     elements: list[FeedbackButtons]
+    block_id: NotRequired[str]
 
 
 class PlainTextInput(TypedDict):

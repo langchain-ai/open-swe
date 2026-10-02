@@ -1076,7 +1076,7 @@ def test_deferred_cost_updates_footer_without_placeholder(linked_in_body: bool) 
     )
 
 
-def test_feedback_and_web_usage_share_one_actions_block() -> None:
+def test_native_feedback_keeps_web_button_and_deferred_cost() -> None:
     from agent.slack.run_feedback import feedback_block
 
     url = "https://app.example/agents/t1"
@@ -1091,9 +1091,9 @@ def test_feedback_and_web_usage_share_one_actions_block() -> None:
         usage,
     )
     assert blocks is not None
-    assert [block["type"] for block in blocks] == ["section", "actions"]
+    assert [block["type"] for block in blocks] == ["section", "context_actions", "actions"]
     actions = blocks[-1]["elements"]
-    assert [action["text"]["text"] for action in actions] == ["👍", "👎", "↗ model-a"]
+    assert [action["text"]["text"] for action in actions] == ["↗ model-a"]
     assert actions[-1]["url"] == url
     assert actions[-1]["accessibility_label"] == "Open in Web"
 
@@ -1103,9 +1103,8 @@ def test_feedback_and_web_usage_share_one_actions_block() -> None:
     )
     assert updated_text.endswith("model-a • $0.42 (<$0.01)")
     assert updated_blocks is not None
+    assert updated_blocks[-2] == blocks[-2]
     assert [action["text"]["text"] for action in updated_blocks[-1]["elements"]] == [
-        "👍",
-        "👎",
         "↗ model-a • $0.42 (<$0.01)",
     ]
     assert slack_utils.with_slack_session_cost(

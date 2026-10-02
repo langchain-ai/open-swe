@@ -37,6 +37,7 @@
       .block-image { display: block; max-width: 100%; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
       .actions button { margin: 8px 6px 0 0; border: 1px solid #bbb; border-radius: 5px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
       .actions button.primary { background: #007a5a; color: #fff; border-color: #007a5a; }
+      .context-actions button { border: 0; padding: 4px; background: transparent; color: #616061; font-size: 18px; }
       .composer-wrap { padding: 10px 22px 20px; }
       .compose { display: flex; gap: 8px; border: 1px solid #8d8d8d; border-radius: 9px; padding: 8px; box-shadow: 0 1px 1px rgba(0,0,0,.04); }
       .compose select { border: 0; background: #f4f4f4; border-radius: 5px; padding: 7px; }
@@ -163,6 +164,26 @@
                 element.textContent = context.text;
                 body.appendChild(element);
               }
+            }
+            if (block.type === "context_actions") {
+              const actions = document.createElement("div");
+              actions.className = "context-actions";
+              for (const action of block.elements || []) {
+                if (action.type !== "feedback_buttons") continue;
+                for (const [selection, path] of [
+                  [action.positive_button, "M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z M7 10v12"],
+                  [action.negative_button, "M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z M17 14V2"],
+                ]) {
+                  const button = document.createElement("button");
+                  button.type = "button";
+                  button.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}" /></svg>`;
+                  button.setAttribute("aria-label", selection.accessibility_label || selection.text.text);
+                  button.title = selection.text.text;
+                  button.addEventListener("click", () => sendAction(message, { ...action, value: selection.value }, button));
+                  actions.appendChild(button);
+                }
+              }
+              body.appendChild(actions);
             }
             if (block.type === "actions") {
               const actions = document.createElement("div");

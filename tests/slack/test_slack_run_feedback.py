@@ -22,12 +22,8 @@ def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:
             "message": {"ts": "2.0", "thread_ts": "1.0"},
             "actions": [
                 {
-                    "action_id": (
-                        "open_swe_run_feedback_up"
-                        if rating == "up"
-                        else "open_swe_run_feedback_down"
-                    ),
-                    "type": "button",
+                    "action_id": "open_swe_run_feedback",
+                    "type": "feedback_buttons",
                     "value": json.dumps({"run_id": "run-1", "rating": rating}),
                 }
             ],
@@ -67,9 +63,14 @@ async def test_mismatched_button_and_rating_is_ignored(saved_feedback: AsyncMock
     saved_feedback.assert_not_awaited()
 
 
-async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback: AsyncMock) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_rerating_updates_same_feedback_on_exact_reply_run(
+    saved_feedback: AsyncMock, legacy: bool
+) -> None:
     for rating in ("up", "down", "down"):
         payload = interaction(rating)
+        if legacy:
+            payload.actions[0].action_id = f"open_swe_run_feedback_{rating}"
         await run_feedback.process_feedback(payload, payload.actions[0])
 
     assert [call.args for call in saved_feedback.await_args_list] == [

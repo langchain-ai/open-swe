@@ -229,8 +229,9 @@ async def test_only_final_reply_has_feedback_for_its_run(
     if response_type == "progress":
         assert feedback == []
     else:
-        buttons = feedback[0]["elements"]
-        assert [button["type"] for button in buttons] == ["button", "button"]
+        element = feedback[0]["elements"][0]
+        assert feedback[0]["type"] == "context_actions"
+        buttons = [element["positive_button"], element["negative_button"]]
         assert [json.loads(button["value"]) for button in buttons] == [
             {"run_id": "run-1", "rating": "up"},
             {"run_id": "run-1", "rating": "down"},

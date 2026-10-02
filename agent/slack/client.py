@@ -627,7 +627,10 @@ def with_slack_session_cost(
         )
     else:
         for block in updated_blocks:
-            if block.get("type") != "actions" or block.get("block_id") != "open_swe_reply_feedback":
+            if block.get("type") != "actions" or block.get("block_id") not in {
+                "open_swe_reply_feedback",
+                "open_swe_usage_footer",
+            }:
                 continue
             for element in block.get("elements", []):
                 if isinstance(element, dict) and element.get("action_id") == "open_swe_web_link":
@@ -746,7 +749,8 @@ def _with_slack_web_link_context_block(
         (
             block
             for block in updated_blocks
-            if block.get("type") == "actions" and block.get("block_id") == "open_swe_reply_feedback"
+            if block.get("type") in {"actions", "context_actions"}
+            and block.get("block_id") == "open_swe_reply_feedback"
         ),
         None,
     )
@@ -761,6 +765,9 @@ def _with_slack_web_link_context_block(
         label = f"↗ {model_text[:60]}".rstrip()
         if cost_text:
             label = f"{label} • {cost_text}"
+        if feedback["type"] == "context_actions":
+            feedback = {"type": "actions", "block_id": "open_swe_usage_footer", "elements": []}
+            updated_blocks.append(feedback)
         feedback["elements"].append(
             {
                 "type": "button",
