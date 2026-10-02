@@ -87,6 +87,7 @@ async def dispatch_followup(
     *,
     github_login: str | None,
     user_email: str | None = None,
+    multitask_strategy: str = "interrupt",
 ) -> Run:
     """Continue the existing thread with the decision as a new instruction run."""
     configurable: dict[str, Any] = {
@@ -108,4 +109,5 @@ async def dispatch_followup(
         configurable,
         source=configurable["source"],
         thread_title=None,
+        multitask_strategy=multitask_strategy,
     )
