@@ -1,22 +1,17 @@
 """Session-scoped catalog and invocation of opted-in agent tools for the CLI MCP server."""
 
 from importlib import import_module
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.config import var_child_runnable_config
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
 
 from agent.dashboard.deps import SESSION_DEP, session_is_admin
-from agent.mcp.instance import instance_mcp_source
-from agent.mcp.runtime import load_mcp_tools
-from agent.mcp.user import user_mcp_source
-from agent.mcp.workspace import workspace_mcp_source
-from agent.sandboxes.tool_runtime import tool_parameters
-from agent.tools.mcp_exposure import EXPOSED_TOOLS, Access
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
+
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
+Access = Literal["session", "admin"]
 
 router = APIRouter(tags=["cli-mcp-tools"])
 _json = TypeAdapter(JsonValue)
@@ -46,6 +41,10 @@ class CLIResult(BaseModel):
 
 
 def _tools() -> dict[str, tuple[BaseTool, Access]]:
+    from langchain_core.tools import StructuredTool
+
+    from agent.tools.mcp_exposure import EXPOSED_TOOLS
+
     for module in _TOOL_MODULES:
         import_module(module)
     return {
@@ -60,6 +59,12 @@ def _tools() -> dict[str, tuple[BaseTool, Access]]:
 
 
 async def _available(session: dict[str, object]) -> dict[str, tuple[BaseTool, Access]]:
+    from agent.mcp.instance import instance_mcp_source
+    from agent.mcp.runtime import load_mcp_tools
+    from agent.mcp.user import user_mcp_source
+    from agent.mcp.workspace import workspace_mcp_source
+    from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
+
     admin = session_is_admin(session)
     tools = {
         name: (tool, access)
@@ -77,6 +82,8 @@ async def _available(session: dict[str, object]) -> dict[str, tuple[BaseTool, Ac
 
 @router.get("/cli/mcp/tools", response_model=list[CLITool])
 async def cli_mcp_tools(session: dict[str, object] = SESSION_DEP) -> list[CLITool]:
+    from agent.sandboxes.tool_runtime import tool_parameters
+
     return [
         CLITool(
             name=name, description=tool.description, parameters=tool_parameters(tool), access=access
@@ -89,6 +96,9 @@ async def cli_mcp_tools(session: dict[str, object] = SESSION_DEP) -> list[CLIToo
 async def cli_mcp_invoke(
     name: str, arguments: CLIArguments, session: dict[str, object] = SESSION_DEP
 ) -> CLIResult:
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.config import var_child_runnable_config
+
     entry = (await _available(session)).get(name)
     if entry is None:
         raise HTTPException(404, "Tool is unavailable")

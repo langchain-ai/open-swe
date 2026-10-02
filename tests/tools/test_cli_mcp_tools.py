@@ -9,7 +9,6 @@ from mcp.types import Tool
 from pydantic import ValidationError
 
 from agent.mcp import MCPConnection, runtime
-from agent.mcp import cli_tools as cli_mcp
 from agent.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
 
 
@@ -90,16 +89,15 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
         return runtime.MCPSource(namespace, list_connections, get_connection)
 
     monkeypatch.setattr(
-        cli_mcp, "instance_mcp_source", lambda: source(("instance_mcps",), instance)
+        "agent.mcp.instance.instance_mcp_source",
+        lambda: source(("instance_mcps",), instance),
     )
     monkeypatch.setattr(
-        cli_mcp,
-        "workspace_mcp_source",
+        "agent.mcp.workspace.workspace_mcp_source",
         lambda workspace: source(("workspace_mcps", workspace), {}),
     )
     monkeypatch.setattr(
-        cli_mcp,
-        "user_mcp_source",
+        "agent.mcp.user.user_mcp_source",
         lambda login: source(("user_mcps", login), personal if login == "alice" else {}),
     )
 
