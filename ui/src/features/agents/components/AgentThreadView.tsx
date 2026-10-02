@@ -63,7 +63,13 @@ import type {
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
-import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
+import {
+  localThreadKeys,
+  runsOnAMac,
+  useLocalRepoRefs,
+  useLocalThread,
+  useLocalThreadPr,
+} from "@/features/agents/lib/desktopLocal"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -140,6 +146,39 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     const result = await refetchLocalBridge({ throwOnError: true })
     if (result.isError) throw result.error
   }, [localThread, refetchLocalBridge])
+  // A "This Mac" thread works in a checkout other threads on this machine may
+  // share, so its branch and worktree are shown, and switched, from here.
+  const localRefsQuery = useLocalRepoRefs(localThread?.cwd)
+  const localRepoRefs = localRefsQuery.data
+  const refetchLocalRepoRefs = localRefsQuery.refetch
+  const localWorktreePath = localThread?.worktreePath ?? null
+  const localBranch = localThread
+    ? (localRepoRefs.find((candidate) =>
+        localWorktreePath
+          ? candidate.worktreePath === localWorktreePath
+          : candidate.current
+      )?.name ?? null)
+    : null
+  const localPr = useLocalThreadPr(thread.id, Boolean(localThread)).data ?? null
+  const queryClient = useQueryClient()
+  const selectLocalBranch = useCallback(
+    async (branch: string) => {
+      try {
+        await window.openSweDesktop?.setLocalBranch({
+          threadId: thread.id,
+          branch,
+        })
+      } catch (error) {
+        reportError({ title: "Couldn't switch the thread's branch", error })
+      }
+      void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+      void queryClient.invalidateQueries({
+        queryKey: localThreadKeys.pr(thread.id),
+      })
+      await refetchLocalRepoRefs()
+    },
+    [queryClient, refetchLocalRepoRefs, thread.id]
+  )
   const bridgeError = localBridge.error
     ? localBridge.error instanceof Error
       ? localBridge.error.message
@@ -253,7 +292,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const queuedImages = (entry: QueuedTurn) =>
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
-  const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
@@ -769,7 +807,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
               <ThreadPullRequests
-                pullRequests={thread.pullRequests ?? []}
+                pullRequests={
+                  // A local branch's PR may come from `gh`, which the thread
+                  // record never hears about.
+                  thread.pullRequests?.length
+                    ? thread.pullRequests
+                    : localPr
+                      ? [localPr]
+                      : []
+                }
                 health={pullRequestHealth}
                 healthUnavailable={pullRequestStatus.isError}
                 onFix={fixPullRequest}
@@ -802,6 +848,22 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onSelectionChange={handleSelectionChange}
                 mentionPaths={mentionPaths}
                 skills={skills.data}
+                {...(localThread
+                  ? {
+                      runTarget: "local" as const,
+                      selectedLocalRepoPath: localThread.cwd,
+                      localRepoBranches: localRepoRefs,
+                      selectedLocalRepoBranch: localBranch,
+                      onRefreshLocalRepoBranch: () =>
+                        void refetchLocalRepoRefs(),
+                      onSelectLocalRepoBranch: (branch: string) =>
+                        void selectLocalBranch(branch),
+                      localWorkspaceMode: localWorktreePath
+                        ? ("worktree" as const)
+                        : ("local" as const),
+                      localWorktreeLabel: "Worktree",
+                    }
+                  : {})}
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,

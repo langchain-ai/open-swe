@@ -126,11 +126,12 @@ export function useLocalThreadPrDiff(
 }
 
 /** The checked-out branch's pull request, for the composer PR link. */
-export function useLocalThreadPr(threadId: string) {
+export function useLocalThreadPr(threadId: string, enabled = true) {
   return useQuery({
     queryKey: localThreadKeys.pr(threadId),
     queryFn: async () =>
       (await window.openSweDesktop?.getLocalPr(threadId)) ?? null,
+    enabled,
     staleTime: 30_000,
     refetchOnWindowFocus: "always",
   })
