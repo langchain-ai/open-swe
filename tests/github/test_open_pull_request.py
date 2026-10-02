@@ -624,3 +624,22 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
     result = opr._upsert_pull_request([original], updated)
     assert result[0]["slack_feedback"] == original["slack_feedback"]
     assert result[0]["state"] == "open"
+
+
+def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+    from cryptography.fernet import Fernet
+
+    from agent.dashboard import profiles
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
+    _stub_token(monkeypatch)
+    monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="johannes117"))
+    asyncio.run(profiles.upsert_access_token("johannes117", "j@x.dev", "tok"))
+    _install_client(monkeypatch, _FakeClient(post=_FakeResponse(201), get=_FakeResponse(401)))
+
+    result = _open()
+
+    assert "sign in with GitHub again" in result["error"]
+    assert asyncio.run(profiles.get_valid_access_token("johannes117")) is None
+    assert asyncio.run(profiles.has_access_token_record("johannes117")) is True
