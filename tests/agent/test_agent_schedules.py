@@ -874,6 +874,7 @@ async def test_launch_conditional_slack_schedule_starts_silently(
         "mode": "on_action",
         "schedule_id": "sched_1",
         "schedule_name": "Dependency check",
+        "slack_user_id": "",
     }
     prompt = ElementTree.fromstring(run["input"]["messages"][-1]["content"])
     assert "notify_automation_channel" in (prompt.text or "")

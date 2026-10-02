@@ -91,6 +91,7 @@ class AutomationSlackNotification(BaseModel):
     mode: str = ""
     schedule_id: str = ""
     schedule_name: str | None = None
+    slack_user_id: str = ""
 
 
 class RunConfig(BaseModel):
