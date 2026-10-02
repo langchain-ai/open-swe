@@ -113,6 +113,10 @@ async def control_reset() -> JSONResponse:
     LAST_SLACK_EVENT["payload"] = None
     await _cancel_inflight_runs()
     await _reset_durable_pr_state()
+    from langgraph_api.cache import cache_set
+
+    for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
+        await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
 
 
