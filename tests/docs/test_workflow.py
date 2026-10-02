@@ -225,6 +225,7 @@ async def test_concurrent_webhook_and_coding_hook_create_one_run(
         )
     ) == ["dispatched", "unchanged"]
     dispatch.assert_awaited_once()
+    assert dispatch.await_args is not None
     args, kwargs = dispatch.await_args
     assert args[0] == reviewer_thread_id("org", "app", 12)
     assert kwargs["assistant_id"] == "reviewer"

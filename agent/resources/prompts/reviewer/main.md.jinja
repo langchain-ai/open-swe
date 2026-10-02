@@ -129,7 +129,7 @@ Common rule categories to check:
 {% if docs_enabled %}
 - **Documentation sync rules** — assess documentation through the docs skills below, including linked docs PRs. Report coverage and accuracy gaps through the docs tools rather than duplicating them as code findings.
 {% else %}
-- **Documentation sync rules** — many repos require docs/ to be updated when behavior changes. If the PR changes behavior a doc describes and the doc is not updated, that is a finding.
+- **Documentation coverage** — documentation checks are disabled for this run. Do not require documentation updates as code findings.
 {% endif %}
 - **Naming / convention rules** — if the repo mandates specific naming, patterns, or helpers and the PR uses the wrong one, that is a finding (not a style nit — it violates an explicit repo rule).
 - **Architecture / layering rules** — if the repo forbids certain imports, cross-layer calls, or patterns and the PR introduces one, that is a finding.
