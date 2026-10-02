@@ -1792,9 +1792,20 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
+    from langchain_quickjs import CodeInterpreterMiddleware
+
+    mcp_ptc: CodeInterpreterMiddleware | None = None
+    if not local_run and mcp_tools:
+        thread = await client.threads.get(thread_id=thread_id)
+        launcher_login = thread_metadata(thread).get("owner_login")
+        launcher_profile = (
+            await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
+        )
+        if launcher_profile and launcher_profile.get("experimental_mcp_ptc") is True:
+            mcp_ptc = CodeInterpreterMiddleware(ptc=mcp_tools, subagents=False, mode="turn")
     dynamic_tool_middleware: DynamicToolMiddleware | None = None
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "MCPs": mcp_tools,
+        "MCPs": [] if mcp_ptc is not None else mcp_tools,
         "Notion": notion_tools,
     }
     if integration_tool_groups:
@@ -1946,7 +1957,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     subagent_model,
                     tools=[tool for tool in static_tools if tool is not save_user_settings],
                     workspace_skills=workspace_skills,
-                    dynamic_tools=dynamic_tool_middleware,
+                    dynamic_tools=(
+                        DynamicToolMiddleware(
+                            {"MCPs": mcp_tools, "Notion": notion_tools},
+                            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+                        )
+                        if mcp_ptc is not None
+                        else dynamic_tool_middleware
+                    ),
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
@@ -1956,6 +1974,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         check_message_queue_before_model.name,
                         deliver_event_matches_before_model.name,
                         model_selection.name,
+                        *([mcp_ptc.name] if mcp_ptc is not None else []),
                     ),
                 ),
             ],
@@ -2047,6 +2066,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                    *([mcp_ptc] if mcp_ptc is not None else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),
