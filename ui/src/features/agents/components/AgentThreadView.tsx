@@ -20,6 +20,7 @@ import type {
   AgentThread,
   ImageChunk,
   Message,
+  ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
@@ -378,11 +379,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     thread.pendingMessages,
   ])
   const fixPullRequest = useCallback(
-    async (pullRequest: AgentPullRequest) => {
+    async (pullRequest: AgentPullRequest, scope: ThreadFixScope) => {
       const result = await agentsApi.getThreadPullRequestContext(
         thread.id,
         pullRequest.repoFullName,
-        pullRequest.number
+        pullRequest.number,
+        scope
       )
       await submitMessage(result.prompt, [])
     },

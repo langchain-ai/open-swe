@@ -23,7 +23,7 @@ CAMEL_CASE_CONTEXT: dict[str, Any] = {
 }
 
 OPEN = pr_fixes.OpenThreadIntent(intent="open", title="Fix broken build")
-FIX = pr_fixes.FixIntent(intent="fix")
+FIX = pr_fixes.FixIntent(intent="fix", scope="checks")
 ADDRESS_COMMENTS = pr_fixes.AddressCommentsIntent(intent="address-comments")
 
 PR_URL = "https://github.com/acme/app/pull/12"
