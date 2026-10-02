@@ -108,6 +108,7 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    SLACK_VIEWS.clear()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -622,6 +623,7 @@ async def _deliver_github_event(
 
 
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
+    await _seed_test_user_mappings()
     raw = urlencode({"payload": json.dumps(payload)}).encode()
     req_ts = str(int(time.time()))
     base = f"v0:{req_ts}:{raw.decode()}".encode()
@@ -1925,6 +1927,7 @@ async def control_expedited_card(request: Request) -> JSONResponse:
     approval = await HumanReviewRequest(
         pull_request_id=pr.id,
         kind="expedited",
+        screenshot_body=pull["body"],
         head_sha=pull["head_sha"],
         diff_fingerprint=diff_fingerprint(files),
         slack_channel_id=DEMO_CHANNEL,

@@ -3,6 +3,7 @@
 import json
 
 from agent.expedited_review.eligibility import ChangedFile, needs_modal
+from agent.expedited_review.screenshots import screenshots
 from agent.human_review.requests import ChannelChoice, HumanReviewRequest
 from agent.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
@@ -181,6 +182,16 @@ def _voting_diff(
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
         return []
+    evidence = screenshots(approval.screenshot_body)
+    if evidence:
+        return [
+            section(
+                "*Visual change* · Screenshots supplied by the author; inspect the code before approving."
+            ),
+            *evidence,
+            context(f"{len(files)} files · Code diff available in Review files."),
+            divider(),
+        ]
     if needs_modal(files):
         return [
             context(f"{len(files)} files · Review each file in the modal before approving."),
@@ -242,7 +253,7 @@ def open_card(
             approval,
             author,
             [] if thread_url is not None else choices or [],
-            paginated=needs_modal(files),
+            paginated=needs_modal(files) or bool(screenshots(approval.screenshot_body)),
         ),
     ]
     text = f"Expedited review requested for {pr.url}"

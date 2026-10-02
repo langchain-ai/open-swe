@@ -251,6 +251,7 @@ async def expedite_pr_approval(
         thread_id=thread_id,
         head_sha=head_sha,
         kind="expedited",
+        screenshot_body=pr.get("body") or "",
         diff_fingerprint=verdict.fingerprint,
         tldr=summary_line(inline_summary),
         slack_channel_choices=broadcast_choice,
