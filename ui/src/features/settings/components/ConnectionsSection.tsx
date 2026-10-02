@@ -5,23 +5,16 @@ import { SiNotion } from "react-icons/si"
 
 import type { NotionCredentialStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-        connected
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
-      )}
-    >
+    <Badge variant={connected ? "success" : "muted"}>
       {connected ? "Connected" : "Not connected"}
-    </span>
+    </Badge>
   )
 }
 

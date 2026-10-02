@@ -771,7 +771,7 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(trigger)
 
     // Core prefers acme/api, and OSS can still default to it.
-    const option = await screen.findByRole("button", {
+    const option = await screen.findByRole("option", {
       name: /acme\/api\s*Private/,
     })
     expect(option.closest("section")).toBeNull()
@@ -779,7 +779,7 @@ describe("WorkspaceSettingsPanel", () => {
     expect(screen.queryByText("acme/legacy")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
     expect(
-      screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })
+      screen.getByRole("option", { name: /acme\/legacy\s*Public\s*archive/ })
     ).toBeTruthy()
   })
 
