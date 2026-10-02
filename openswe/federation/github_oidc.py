@@ -44,8 +44,6 @@ class GitHubActionsClaims(BaseModel):
     repository_visibility: str = ""
     ref: str = ""
     workflow_ref: str = ""
-    # Set when the job that requested the token is a reusable workflow.
-    job_workflow_ref: str = ""
     run_id: str = ""
 
     @property

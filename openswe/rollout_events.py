@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from openswe.config import ENV
-from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
+from openswe.federation.github_oidc import InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 
 logger = logging.getLogger(__name__)
@@ -54,11 +54,11 @@ def _bearer(header: str) -> str:
     return token.strip()
 
 
-def _workflow_matches(claims: GitHubActionsClaims, workflow: str) -> bool:
-    needle = workflow.strip().lstrip("/")
-    for ref in (claims.job_workflow_ref, claims.workflow_ref):
-        path = ref.split("@", 1)[0]
-        if path == needle or path.endswith("/" + needle):
+def _workflow_allowed(workflow_ref: str, allowed: list[str]) -> bool:
+    path = workflow_ref.split("@", 1)[0]
+    for workflow in allowed:
+        needle = workflow.strip().lstrip("/")
+        if needle and (path == needle or path.endswith("/" + needle)):
             return True
     return False
 
@@ -79,12 +79,12 @@ async def _authorize(header: str) -> None:
     if claims.repository.lower() not in repos:
         logger.warning("Rejected rollout event from repository %s", claims.repository)
         raise HTTPException(status_code=401, detail="Invalid token")
-    workflow = ENV.ROLLOUT_OIDC_WORKFLOW.get()
-    if workflow and not _workflow_matches(claims, workflow):
-        logger.warning(
-            "Rejected rollout event from workflow %s",
-            claims.job_workflow_ref or claims.workflow_ref,
-        )
+    workflows = ENV.ROLLOUT_OIDC_WORKFLOWS.get_list()
+    if not workflows:
+        logger.warning("ROLLOUT_OIDC_WORKFLOWS is not configured — rejecting rollout event")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if not _workflow_allowed(claims.workflow_ref, workflows):
+        logger.warning("Rejected rollout event from workflow %s", claims.workflow_ref)
         raise HTTPException(status_code=401, detail="Invalid token")
 
 

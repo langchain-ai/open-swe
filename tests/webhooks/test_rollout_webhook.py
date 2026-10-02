@@ -13,7 +13,9 @@ from openswe.rollout_events import router
 
 _PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _REPO = "langchain-ai/langchainplus"
-_WORKFLOW = ".github/workflows/notify_rollout.yaml"
+_DEV = ".github/workflows/deploy_build_push_migrate_dev.yaml"
+_PROD = ".github/workflows/deploy_tag_migrate_prod.yaml"
+_WORKFLOWS = f"{_DEV},{_PROD}"
 _AUDIENCE = "openswe-rollout"
 
 
@@ -34,7 +36,7 @@ def _token(**overrides: object) -> str:
         "aud": _AUDIENCE,
         "sub": f"repo:{_REPO}:ref:refs/heads/main",
         "repository": _REPO,
-        "job_workflow_ref": f"{_REPO}/{_WORKFLOW}@refs/heads/main",
+        "workflow_ref": f"{_REPO}/{_DEV}@refs/heads/main",
         "iat": now,
         "exp": now + 300,
     }
@@ -46,7 +48,7 @@ def _token(**overrides: object) -> str:
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("ROLLOUT_OIDC_REPOS", _REPO)
-    monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOW", _WORKFLOW)
+    monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOWS", _WORKFLOWS)
     monkeypatch.setenv("ROLLOUT_OIDC_AUDIENCE", _AUDIENCE)
     monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
@@ -90,8 +92,29 @@ async def test_rollout_webhook_rejects_a_different_workflow(app: FastAPI) -> Non
     response = await _post(
         app,
         body,
-        _token(job_workflow_ref=f"{_REPO}/.github/workflows/other.yaml@refs/heads/main"),
+        _token(workflow_ref=f"{_REPO}/.github/workflows/other.yaml@refs/heads/main"),
     )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_accepts_each_listed_workflow(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
+    response = await _post(app, body, _token(workflow_ref=f"{_REPO}/{_PROD}@refs/heads/main"))
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_rejects_when_no_workflow_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ROLLOUT_OIDC_REPOS", _REPO)
+    monkeypatch.delenv("ROLLOUT_OIDC_WORKFLOWS", raising=False)
+    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
+    api = FastAPI()
+    api.include_router(router)
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+    response = await _post(api, body, _token())
     assert response.status_code == 401
 
 

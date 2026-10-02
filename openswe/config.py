@@ -253,9 +253,8 @@ ENV.var(
     "Comma-separated owner/repo pairs allowed to send deployment events.",
 )
 ENV.var(
-    "ROLLOUT_OIDC_WORKFLOW",
-    "Workflow path a deployment event must come from. "
-    "Empty accepts any workflow in an allowed repository.",
+    "ROLLOUT_OIDC_WORKFLOWS",
+    "Comma-separated workflow paths allowed to send deployment events, matched against workflow_ref.",
 )
 ENV.var(
     "GITHUB_OIDC_AUDIENCE",
