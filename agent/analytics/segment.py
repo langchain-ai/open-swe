@@ -7,6 +7,7 @@ from langgraph.config import get_config
 
 from agent.config import ENV
 from agent.run_config import RunConfig
+from agent.users import User
 from agent.webhooks.event_log import LoggedEvent
 
 logger = logging.getLogger(__name__)
@@ -24,14 +25,22 @@ async def record_usage(
     if not key or not login:
         return
     try:
+        user = await User.for_login("github", login)
+        if user is None:
+            logger.warning("Segment usage identity could not be resolved")
+            return
+        user_id = str(user.id)
         async with httpx.AsyncClient(
             base_url="https://api.segment.io/v1/", auth=(key, ""), timeout=2.0
         ) as client:
-            identity = {"userId": login, "traits": {"email": email, "product": "open-swe"}}
+            identity = {
+                "userId": user_id,
+                "traits": {"email": email, "github_login": login, "product": "open-swe"},
+            }
             response = await client.post("identify", json=identity)
             response.raise_for_status()
             payload: dict[str, object] = {
-                "userId": login,
+                "userId": user_id,
                 "properties": {
                     **properties,
                     "product": "open-swe",

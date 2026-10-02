@@ -54,9 +54,33 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert "private content" not in json.dumps(requests)
     assert requests[0]["properties"]["action"] == "created"
     assert requests[0]["properties"]["environment"] == "staging"
+    user_id = uuid4()
+    from agent.users import User
+
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
+    await segment.record_webhook(event.model_copy(update={"user_id": user_id}))
+    for event_type in ("page", "track"):
+        await segment.record_usage(
+            login="alice",
+            email="alice@example.com",
+            event_type=event_type,
+            name="usage",
+            properties={},
+        )
+    assert {request["userId"] for request in requests[1:]} == {str(user_id)}
+    assert requests[2]["traits"]["github_login"] == "alice"
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
+    await segment.record_usage(
+        login="unknown",
+        email=None,
+        event_type="page",
+        name="usage",
+        properties={},
+    )
+    assert len(requests) == 6
     monkeypatch.delenv("SEGMENT_WRITE_KEY")
     await segment.record_webhook(event)
-    assert len(requests) == 1
+    assert len(requests) == 6
 
 
 async def _partitions() -> set[str]:
