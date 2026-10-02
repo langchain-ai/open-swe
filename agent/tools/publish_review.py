@@ -284,15 +284,16 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     thread_id = get_thread_id_from_runtime()
-    dry_run = True
-    if assessment is not None:
-        # The policy was read at the base commit when the run started; the mode is
-        # read now so an admin switching a repository off or to dry run wins mid-review.
-        policy = state.get("review_approval_policy") if state else None
-        mode = await approval_mode_for(owner, repo)
-        if not policy or mode == "off":
-            assessment = None
-        dry_run = mode != "approve"
+    policy = state.get("review_approval_policy") if state else None
+    mode = await approval_mode_for(owner, repo) if policy else "off"
+    dry_run = mode != "approve"
+    if mode == "off":
+        assessment = None
+    elif assessment is None:
+        return {
+            "success": False,
+            "error": "The review outcome is missing the required approval assessment. Nothing was published.",
+        }
     # The run config's head_sha is frozen at run creation; a push that arrived
     # mid-run updated the live head in thread metadata. Prefer that so the
     # review anchors to (and last_reviewed_sha advances to) the commit actually
@@ -361,27 +362,17 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
 
-    # With nothing new to surface, skip the "no issues found" summary if Open
-    # SWE has already reviewed this PR — the user already saw the previous
-    # result, and posting another summary on every push is noise. We can't rely
-    # on the static re_review flag alone: a push that lands mid-run is delivered
-    # as a queued message into the still-running first-review run, whose
-    # configurable still says re_review=False, so that path would post a
-    # duplicate "No issues found". Key off the actual PR state (an existing Open
-    # SWE review summary) instead. Still resolve threads for findings that just
-    # moved to resolved, and advance last_reviewed_sha so subsequent pushes
-    # don't redo the same diff.
-    if (
-        assessment is None
-        and not inline_comments
-        and await _open_swe_already_reviewed(
-            thread_id=thread_id,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            token=token,
-            is_re_review=is_re_review,
-        )
+    existing_findings_count = sum(
+        1 for f in findings if f.get("status", "open") == "open" and comment_ids_for_finding(f)
+    )
+    if not inline_comments and await _open_swe_already_reviewed(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+        is_re_review=is_re_review,
+        head_sha=head_sha if assessment is not None else None,
     ):
         resolved_thread_count = await _resolve_threads_for_resolved_findings(
             owner=owner,
@@ -391,7 +382,7 @@ async def _publish_review_async(
             findings=findings,
         )
         await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
-            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=existing_findings_count
         )
         await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
         await _record_reviewer_usage(
@@ -403,7 +394,7 @@ async def _publish_review_async(
             findings=await list_findings_async(thread_id),
         )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-        conclusion, check_title, check_summary = review_check_conclusion(0)
+        conclusion, check_title, check_summary = review_check_conclusion(existing_findings_count)
         await settle_review_check_run(
             thread_id=thread_id,
             owner=owner,
@@ -438,6 +429,7 @@ async def _publish_review_async(
             trace_url=review_trace_url,
             ui_url=review_ui_url,
             additional_findings_count=additional_findings_count,
+            existing_findings_count=existing_findings_count,
             assessment=assessment,
             approved=approved,
             dry_run=dry_run,
@@ -486,6 +478,9 @@ async def _publish_review_async(
                 trace_url=review_trace_url,
                 ui_url=review_ui_url,
                 additional_findings_count=additional_findings_count,
+                existing_findings_count=existing_findings_count,
+                assessment=assessment,
+                dry_run=dry_run,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,
@@ -501,6 +496,7 @@ async def _publish_review_async(
                 inline_comments = retry_inline
                 eligible_with_payload = valid_with_payload
                 unresolvable_findings = dropped_ids
+                approved = False
             else:
                 retry_error = (
                     retry_response.get("_error", "unknown error")
@@ -544,7 +540,7 @@ async def _publish_review_async(
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
 
-    if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
+    if assessment is not None and isinstance(review_id, int):
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
         try:
             if langgraph_run_id is None:
@@ -630,7 +626,7 @@ async def _publish_review_async(
             reviewer_thread_id=thread_id,
             github_review_id=review_id if isinstance(review_id, int) else None,
             head_sha=head_sha,
-            finding_count=len(inline_comments),
+            finding_count=len(inline_comments) + existing_findings_count,
         )
     except Exception:
         if assessment is None:
@@ -654,7 +650,7 @@ async def _publish_review_async(
             repo=repo,
             pr_number=pr_number,
             review_id=review_id,
-            surfaced_count=len(inline_comments),
+            surfaced_count=len(inline_comments) + existing_findings_count,
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
@@ -667,7 +663,9 @@ async def _publish_review_async(
         findings=await list_findings_async(thread_id),
     )
     await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
-    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    conclusion, check_title, check_summary = review_check_conclusion(
+        len(inline_comments) + existing_findings_count
+    )
     await settle_review_check_run(
         thread_id=thread_id,
         owner=owner,
@@ -702,28 +700,18 @@ async def _open_swe_already_reviewed(
     pr_number: int,
     token: str,
     is_re_review: bool,
+    head_sha: str | None = None,
 ) -> bool:
-    """Decide whether to suppress a duplicate empty "no issues found" summary.
-
-    Suppress only when we are *certain* a prior Open SWE review exists, so a
-    transient GitHub failure never causes a double-post:
-
-    - ``is_re_review`` is a durable signal (the dispatching webhook set it from
-      the persisted ``last_reviewed_sha``), so trust it outright.
-    - Otherwise consult durable reviewer state (``last_reviewed_sha`` on thread
-      metadata): a non-empty value means this thread already published once.
-    - Only as a last resort hit the GitHub reviews API. That call is tri-state:
-      ``True``/``False`` are authoritative, but ``None`` means "unknown"
-      (pagination or the request failed). On ``None`` we do NOT suppress — a
-      possible duplicate summary is better than silently swallowing the only
-      review the user will ever see, and re-posting is the safe failure mode.
-    """
-    if is_re_review:
+    """Suppress an empty outcome already published, scoped to its commit when assessed."""
+    if is_re_review and head_sha is None:
         return True
     metadata = await get_thread_metadata(thread_id)
-    if get_thread_last_reviewed_sha(metadata):
+    last_reviewed_sha = get_thread_last_reviewed_sha(metadata)
+    if last_reviewed_sha and (head_sha is None or last_reviewed_sha == head_sha):
         return True
-    exists = await open_swe_review_exists(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    exists = await open_swe_review_exists(
+        owner=owner, repo=repo, pr_number=pr_number, token=token, head_sha=head_sha
+    )
     return exists is True
 
 

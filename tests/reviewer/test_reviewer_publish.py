@@ -228,6 +228,35 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     assert err != "Failed to POST PR review"
 
 
+async def test_existing_review_matches_the_assessed_commit_across_pages() -> None:
+    from agent.review.publish import open_swe_review_exists
+
+    first_page = MagicMock()
+    first_page.json.return_value = [
+        {"body": "<!-- open-swe-reviewer pr=7 -->", "commit_id": "a" * 40}
+    ] * 100
+    second_page = MagicMock()
+    second_page.json.return_value = [
+        {"body": "<!-- open-swe-reviewer pr=7 -->", "commit_id": "b" * 40}
+    ]
+    with patch(
+        "agent.review.publish.github_request",
+        AsyncMock(side_effect=[first_page, second_page, first_page, second_page]),
+    ):
+        assert (
+            await open_swe_review_exists(
+                owner="o", repo="r", pr_number=7, token="t", head_sha="b" * 40
+            )
+            is True
+        )
+        assert (
+            await open_swe_review_exists(
+                owner="o", repo="r", pr_number=7, token="t", head_sha="c" * 40
+            )
+            is False
+        )
+
+
 @pytest.mark.asyncio
 async def test_publish_review_skips_findings_already_published() -> None:
     """Re-runs must not re-post findings that already carry a review comment id."""
@@ -277,6 +306,82 @@ async def test_publish_review_skips_findings_already_published() -> None:
     assert paths == {"b.py"}
 
 
+@pytest.mark.parametrize(
+    ("run_id", "head_sha", "expected_reviews"),
+    [("run-1", "a" * 40, 1), ("run-2", "a" * 40, 1), ("run-1", "b" * 40, 2)],
+)
+async def test_review_outcome_deduplicates_same_head_but_reports_outstanding_findings(
+    run_id: str,
+    head_sha: str,
+    expected_reviews: int,
+) -> None:
+    from agent.tools.publish_review import _publish_review_async
+
+    findings = [_f(id="f_one")]
+    metadata: dict[str, object] = {}
+
+    async def save_metadata(
+        thread_id: str, *, extra: dict[str, object] | None = None, last_reviewed_sha: str = ""
+    ) -> None:
+        metadata.update(extra or {})
+        if last_reviewed_sha:
+            metadata["last_reviewed_sha"] = last_reviewed_sha
+
+    with (
+        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("agent.tools.publish_review.get_thread_metadata", AsyncMock(return_value=metadata)),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", save_metadata),
+        patch("agent.tools.publish_review.approval_mode_for", AsyncMock(return_value="approve")),
+        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch("agent.tools.publish_review._store_thread_ids_on_findings", AsyncMock()),
+        patch(
+            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            AsyncMock(return_value=0),
+        ),
+        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
+        patch(
+            "agent.tools.publish_review.post_pull_request_review",
+            AsyncMock(return_value={"id": 999}),
+        ) as post,
+    ):
+
+        async def publish(run_id: str, head_sha: str) -> dict[str, object]:
+            return await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha=head_sha,
+                token="t",
+                severity_threshold="medium",
+                is_re_review=False,
+                langgraph_run_id=run_id,
+                assessment=_assessment(head_sha),
+                state={"review_approval_policy": "Docs only"},
+            )
+
+        first = await publish("run-1", "a" * 40)
+        assert first["surfaced_count"] == 1
+        findings[0]["github_review_comment_ids"] = [42]
+        second = await publish(run_id, head_sha)
+
+    assert second["success"] is True
+    assert post.await_count == expected_reviews
+    for call in post.await_args_list:
+        assert call.kwargs["event"] == "COMMENT"
+        assert "Needs human review" in call.kwargs["body"]
+        assert "No issues found" not in call.kwargs["body"]
+    if expected_reviews == 1:
+        assert second["skipped_empty_re_review"] is True
+    else:
+        assert post.await_args is not None
+        assert "1 previously reported finding remains unresolved" in post.await_args.kwargs["body"]
+    assert settle.await_args is not None
+    assert "1 potential issue" in settle.await_args.kwargs["summary"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("assessment_mode", [None, "dry_run", "approve"])
 async def test_published_review_registry_failure_does_not_complete_or_invite_duplicate(
@@ -286,7 +391,8 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
 
     with (
         patch(
-            "agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=assessment_mode)
+            "agent.tools.publish_review.approval_mode_for",
+            AsyncMock(return_value=assessment_mode or "off"),
         ),
         patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -352,13 +458,11 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
         settle.assert_not_awaited()
         notify.assert_not_awaited()
 
-        if assessment_mode:
-            return
         result = await publish()
         assert result["success"] is True
         assert result["skipped_empty_re_review"] is True
         post.assert_awaited_once()
-        metadata.assert_awaited_once_with("tid", last_reviewed_sha="a" * 40)
+        metadata.assert_any_await("tid", last_reviewed_sha="a" * 40)
         settle.assert_awaited_once()
 
 
@@ -869,13 +973,16 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
 
     assert post_review.await_count == 2
     assert "Risk: 1/5" in post_review.await_args_list[0].kwargs["body"]
-    assert "Risk:" not in post_review.await_args_list[1].kwargs["body"]
+    assert "Risk: 1/5" in post_review.await_args_list[1].kwargs["body"]
     # Retry must contain only the in-diff finding.
     retry_inline = post_review.await_args_list[1].kwargs["inline_comments"]
     assert {c["path"] for c in retry_inline} == {"in_diff.py"}
     assert result["success"] is True
     assert result["review_id"] == 7777
-    assert await ASSESSMENTS.get("7777") is None
+    saved = await ASSESSMENTS.get("7777")
+    assert saved is not None
+    assert saved.decision == "needs_human_review"
+    assert saved.approved is False
     assert result["surfaced_count"] == 1
     assert result["unresolvable_findings"] == ["f_bad"]
     assert "update_finding" in result["hint"]
@@ -1036,21 +1143,34 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,current_head,include_assessment,expected_event,has_assessment",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", True, True, "COMMENT", False),
+        ("Docs only", "off", True, True, "COMMENT", False),
+        ("Docs only", "off", True, False, "COMMENT", False),
+        ("Docs only", "dry_run", True, False, None, False),
+        ("Docs only", "approve", True, False, None, False),
+        ("Docs only", "dry_run", True, True, "COMMENT", True),
+        ("Docs only", "approve", False, True, "COMMENT", True),
+        ("Docs only", "approve", True, True, "APPROVE", True),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=[
+        "no-policy",
+        "switched-off",
+        "switched-off-without-assessment",
+        "incomplete-dry-run",
+        "incomplete-approval",
+        "dry-run",
+        "head-moved",
+        "approve",
+    ],
 )
 async def test_publication_respects_the_base_policy_and_current_mode(
     prepared_policy: str | None,
     mode: str,
     current_head: bool,
-    expected_event: str,
+    include_assessment: bool,
+    expected_event: str | None,
     has_assessment: bool,
 ) -> None:
     from agent.tools.publish_review import _publish_review_async
@@ -1072,9 +1192,9 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             "agent.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
         patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
-        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1084,9 +1204,17 @@ async def test_publication_respects_the_base_policy_and_current_mode(
             token="t",
             severity_threshold="medium",
             is_re_review=False,
-            assessment=_assessment(),
+            assessment=_assessment() if include_assessment else None,
             state={"review_approval_policy": prepared_policy},
         )
+    if expected_event is None:
+        assert result["success"] is False
+        assert "Nothing was published" in result["error"]
+        post.assert_not_awaited()
+        metadata.assert_not_awaited()
+        settle.assert_not_awaited()
+        assert await ASSESSMENTS.get("77") is None
+        return
     assert result["success"] is True
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event

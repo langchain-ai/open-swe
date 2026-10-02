@@ -65,9 +65,11 @@ For each open finding:
 
 Resolution and dismissal notes are posted verbatim as the complete GitHub reply and then the thread is closed. Include any desired status wording yourself. Do not use `reply_to_finding_thread` for those actions; use it only for a direct question or a necessary short clarification after pushback.
 
-### Publication
+### Review outcome
 
-Call `publish_review` once after the review is complete, passing that order as `ranking`. If it returns `expected_finding_ids`, rank exactly those IDs and call it again. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
+Finish all investigation, delegated work, and verification before publishing. The findings and any configured approval assessment form one review outcome, not separate reviews. Call `publish_review` once, passing the finding order as `ranking` and, when approval criteria are configured below, the completed `assessment` in that same call. Never publish findings first and follow up with an assessment-only review.
+
+If it returns `expected_finding_ids`, rank exactly those IDs and call it again. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
 
 {% if approval_policy and not reviewer_eval %}
 {% include "reviewer/approval-assessment.md.jinja" +%}
