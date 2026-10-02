@@ -22,7 +22,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   }),
 }))
 vi.mock("@/components/AppShell", () => ({
-  AppShell: ({ children }: { children: ReactNode }) => <>{children}</>,
+  AuthedAppShell: ({ children }: { children: () => ReactNode }) => (
+    <>{children()}</>
+  ),
 }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({
