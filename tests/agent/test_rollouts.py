@@ -1,4 +1,4 @@
-"""Rollout watches poll locate_commit and wake the merged thread only on a change."""
+"""A deploy event runs the recorded check as soon as that environment is healthy."""
 
 import asyncio
 import importlib
@@ -35,11 +35,11 @@ class _Store:
     async def delete_item(self, _namespace, key: str) -> None:
         self.values.pop(key, None)
 
-    async def search_items(self, _namespace, *, filter, limit: int, offset: int):
+    async def search_items(self, _namespace, *, filter=None, limit: int, offset: int):
         matches = [
             {"value": value}
             for value in self.values.values()
-            if all(value.get(field) == expected for field, expected in filter.items())
+            if all(value.get(field) == expected for field, expected in (filter or {}).items())
         ]
         return {"items": matches[offset : offset + limit]}
 
@@ -93,16 +93,6 @@ class _Client:
         self.threads = _Threads()
 
 
-def _targets(*, dev: bool, staging: bool) -> dict[str, Any]:
-    return {
-        "targets": [
-            {"id": "gcp-dev", "label": "GCP Dev", "contains": dev, "error": ""},
-            {"id": "gcp-staging", "label": "GCP Staging", "contains": staging, "error": ""},
-            {"id": "aws-self-hosted", "label": "AWS Self-Hosted", "contains": True, "error": ""},
-        ]
-    }
-
-
 def _plan() -> list[dict[str, Any]]:
     return [
         {
@@ -122,7 +112,6 @@ def _plan() -> list[dict[str, Any]]:
 
 def _configure_rollout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ROLLOUT_REPOS", "langchain-ai/langchainplus")
-    monkeypatch.setenv("ROLLOUT_LOCATE_TOOL", "releases.locate_commit")
 
 
 @pytest.fixture
@@ -134,7 +123,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> _Client:
     return fake
 
 
-def test_envs_ready_waits_for_every_recorded_target() -> None:
+def test_normalize_stages_drops_an_environment_without_targets() -> None:
     stages = rollouts.normalize_stages(
         [
             {"name": "dev", "targets": ["gcp-dev"], "datadog_tags": ["env:dev", "not a tag"]},
@@ -149,23 +138,7 @@ def test_envs_ready_waits_for_every_recorded_target() -> None:
     )
     assert [stage.name for stage in stages] == ["dev", "staging", "prod"]
     assert stages[0].datadog_tags == ["env:dev"]
-    targets: list[dict[str, Any]] = [
-        {"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""},
-        {"id": "gcp-staging", "label": "GCP Staging", "contains": False, "error": ""},
-        {"id": "gcp-us-prod", "label": "GCP US Prod", "contains": True, "error": ""},
-        {"id": "gcp-eu-prod", "label": "GCP EU Prod", "contains": True, "error": "unavailable"},
-        {"id": "self-hosted-main", "label": "Self-hosted main", "contains": True, "error": ""},
-    ]
-    assert rollouts.envs_ready(targets, stages) == {"dev"}
-
-    targets[3] = {**targets[3], "error": ""}
-    targets.extend(
-        [
-            {"id": "gcp-apac-prod", "label": "GCP APAC Prod", "contains": True, "error": ""},
-            {"id": "aws-us-prod", "label": "AWS US Prod", "contains": True, "error": ""},
-        ]
-    )
-    assert rollouts.envs_ready(targets, stages) == {"dev", "prod"}
+    assert stages[2].targets == ["gcp-us-prod", "gcp-eu-prod", "gcp-apac-prod", "aws-us-prod"]
 
 
 def test_watch_schedule_and_age_read_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +167,7 @@ def test_rollout_repos_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     assert not rollouts.rollout_repo_allowed("langchain-ai", "open-swe")
 
 
-async def test_every_environment_waits_one_poll(
+async def test_a_deploy_event_runs_that_environment_immediately(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await rollouts.start_watch(
@@ -214,16 +187,15 @@ async def test_every_environment_waits_one_poll(
     )
     assert client.crons.created[0]["schedule"] == "*/15 * * * *"
     assert client.crons.created[0]["input"] == {"task": "rollout", "watch_key": "acme/repo#7"}
-    monkeypatch.setattr(
-        rollouts, "locate_commit", AsyncMock(return_value=_targets(dev=True, staging=True))
-    )
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
 
-    assert await rollouts.evaluate_rollout("acme/repo#7") == "waiting"
-    assert dispatch.await_count == 0
+    await rollouts.apply_rollout_event("gcp-dev", [SHA])
+    assert dispatch.await_count == 1
+    await rollouts.apply_rollout_event("gcp-dev", [SHA])
+    assert dispatch.await_count == 1
 
-    assert await rollouts.evaluate_rollout("acme/repo#7") == "done"
+    await rollouts.apply_rollout_event("gcp-staging", [SHA])
     assert dispatch.await_count == 2
     dev_reply = dispatch.await_args_list[0].args[1]
     assert "env:dev" in dev_reply
@@ -248,7 +220,71 @@ async def test_every_environment_waits_one_poll(
     assert client.threads.updated[-1]["metadata"]["rollout_status"] == "done"
 
 
-async def test_expired_watch_does_not_query_locate(
+async def test_a_stage_waits_until_every_target_has_deployed(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await rollouts.start_watch(
+        thread_id="thread-1",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        sha=SHA,
+        author="octocat",
+        stages=[
+            {
+                "name": "prod",
+                "targets": ["gcp-us-prod", "gcp-eu-prod"],
+                "datadog_tags": ["env:prod"],
+                "host": "prod.example.test",
+            }
+        ],
+        page="",
+        expected="",
+        metrics="p95 latency",
+        resolves_thread=False,
+        run_config={"workspace": "oss"},
+        source_context={},
+    )
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
+
+    await rollouts.apply_rollout_event("gcp-us-prod", [SHA])
+    assert dispatch.await_count == 0
+    watch = await rollouts.WATCHES.get("acme/repo#7")
+    assert watch is not None and watch.active is True
+
+    await rollouts.apply_rollout_event("gcp-eu-prod", [SHA])
+    assert dispatch.await_count == 1
+    assert "env:prod" in dispatch.await_args.args[1]
+    watch = await rollouts.WATCHES.get("acme/repo#7")
+    assert watch is not None and watch.active is False
+
+
+async def test_an_unrelated_commit_does_not_run_the_check(
+    client: _Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await rollouts.start_watch(
+        thread_id="thread-1",
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        sha=SHA,
+        author="octocat",
+        stages=_plan(),
+        page="",
+        expected="",
+        metrics="",
+        resolves_thread=False,
+        run_config={"workspace": "oss"},
+        source_context={},
+    )
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
+    await rollouts.apply_rollout_event("gcp-dev", ["b" * 40])
+    assert dispatch.await_count == 0
+
+
+async def test_expired_watch_reports_what_is_still_waiting(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await rollouts.start_watch(
@@ -271,49 +307,12 @@ async def test_expired_watch_does_not_query_locate(
     watch.created_at = (datetime.now(UTC) - timedelta(days=8)).isoformat()
     await rollouts.WATCHES.save(watch)
 
-    async def fail_locate(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("locate should not run after the watch expires")
-
-    monkeypatch.setattr(rollouts, "locate_commit", fail_locate)
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
 
     assert await rollouts.evaluate_rollout("acme/repo#7") == "expired"
     assert "7 days" in dispatch.await_args.args[1]
     assert client.crons.deleted == ["cron-1"]
-
-
-async def test_locate_commit_accepts_a_json_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _Tool:
-        metadata = {"mcp_tool_name": "releases.locate_commit"}
-
-        async def ainvoke(self, arguments: dict[str, str]) -> str:
-            assert arguments == {"commit": SHA}
-            return json.dumps(
-                {"targets": [{"id": "gcp-dev", "label": "GCP Dev", "contains": True, "error": ""}]}
-            )
-
-    monkeypatch.setenv("ROLLOUT_LOCATE_TOOL", "releases.locate_commit")
-    monkeypatch.setattr(rollouts, "instance_mcp_source", lambda: object())
-    monkeypatch.setattr(rollouts, "workspace_mcp_source", lambda _workspace: object())
-    monkeypatch.setattr(rollouts, "load_mcp_tools", AsyncMock(return_value=[_Tool()]))
-
-    report = await rollouts.locate_commit("oss", SHA)
-
-    assert report is not None
-    assert report["targets"][0]["contains"] is True
-
-
-async def test_locate_commit_skips_when_the_tool_is_not_configured(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ROLLOUT_LOCATE_TOOL", raising=False)
-
-    async def fail_load(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise AssertionError("locate should not load tools when no tool is configured")
-
-    monkeypatch.setattr(rollouts, "load_mcp_tools", fail_load)
-    assert await rollouts.locate_commit("oss", SHA) is None
 
 
 def test_done_status_does_not_cover_a_newer_check() -> None:
@@ -353,18 +352,15 @@ async def test_older_watch_finishes_without_closing_a_newer_check(
         check_id="older",
     )
     client.threads.records["thread-1"] = {"metadata": {"rollout_check": {"check_id": "newer"}}}
-    monkeypatch.setattr(
-        rollouts, "locate_commit", AsyncMock(return_value=_targets(dev=True, staging=True))
-    )
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(rollouts, "dispatch_agent_run", dispatch)
 
-    assert await rollouts.evaluate_rollout("acme/repo#7") == "waiting"
-    assert dispatch.await_count == 0
+    await rollouts.apply_rollout_event("gcp-dev", [SHA])
+    assert dispatch.await_count == 1
     watch = await rollouts.WATCHES.get("acme/repo#7")
     assert watch is not None and watch.active is True
 
-    assert await rollouts.evaluate_rollout("acme/repo#7") == "done"
+    await rollouts.apply_rollout_event("gcp-staging", [SHA])
     assert dispatch.await_count == 2
     assert all(item["metadata"].get("rollout_status") != "done" for item in client.threads.updated)
     assert all("resolved" not in item["metadata"] for item in client.threads.updated)

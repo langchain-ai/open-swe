@@ -1,10 +1,11 @@
 """Durable watch for a merged OpenSWE pull request.
 
-A scheduler cron polls the configured locate tool on ``ROLLOUT_WATCH_SCHEDULE``
-(every 15 minutes by default). The implementing thread records which environments
-to watch. The thread is resumed when a recorded environment newly contains the
-merge SHA. Each environment waits one quiet poll, then runs the same check.
-``rollout_page_check`` opens the page in the sandbox browser and does not log in.
+A deployment event names the target that finished syncing and the commits it
+contains. The thread is resumed as soon as every target in a recorded
+environment has reported the merge SHA. A scheduler cron on
+``ROLLOUT_WATCH_SCHEDULE`` only retires a watch that outlives
+``ROLLOUT_MAX_WATCH_AGE_DAYS``. ``rollout_page_check`` opens the page in the
+sandbox browser and does not log in.
 """
 
 import json
@@ -22,9 +23,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
-from agent.mcp.instance import instance_mcp_source
-from agent.mcp.runtime import load_mcp_tools
-from agent.mcp.workspace import workspace_mcp_source
 from agent.prompts import prompt
 from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
@@ -101,7 +99,7 @@ class RolloutWatch(BaseModel):
     workspace: str = ""
     run_config: dict[str, Any] = Field(default_factory=dict)
     source_context: dict[str, Any] = Field(default_factory=dict)
-    seen: list[str] = Field(default_factory=list)
+    arrived: list[str] = Field(default_factory=list)
     dispatched: list[str] = Field(default_factory=list)
     check_id: str = ""
     cron_id: str | None = None
@@ -268,24 +266,18 @@ def _as_stages(raw: object) -> list[RolloutStage]:
     return normalize_stages(raw)
 
 
-def envs_ready(targets: list[Any], stages: list[RolloutStage]) -> set[str]:
-    """Recorded environments whose every target contains the commit and has no error."""
-    rows: dict[str, Mapping[str, Any]] = {}
-    for target in targets:
-        if not isinstance(target, Mapping):
-            continue
-        target_id = _name(str(target.get("id") or ""))
-        if target_id:
-            rows[target_id] = target
-    ready: set[str] = set()
-    for stage in stages:
-        matched = [rows.get(target_id) for target_id in stage.targets]
-        if all(
-            row is not None and not row.get("error") and row.get("contains") is True
-            for row in matched
+def commit_matches(sha: str, commits: list[str]) -> bool:
+    """True when ``sha`` is one of ``commits``, including a git abbreviation."""
+    sha = sha.strip().lower()
+    if not _SHA_RE.fullmatch(sha):
+        return False
+    for commit in commits:
+        other = commit.strip().lower()
+        if _SHA_RE.fullmatch(other) and (
+            sha == other or sha.startswith(other) or other.startswith(sha)
         ):
-            ready.add(stage.name)
-    return ready
+            return True
+    return False
 
 
 def _clip(value: object, limit: int) -> str:
@@ -294,33 +286,8 @@ def _clip(value: object, limit: int) -> str:
     return value.strip()[:limit]
 
 
-def _payload(raw: Any) -> dict[str, Any] | None:
-    if isinstance(raw, tuple) and raw:
-        raw = raw[0]
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
-    if isinstance(raw, dict) and isinstance(raw.get("targets"), list):
-        return raw
-    if isinstance(raw, dict):
-        content = raw.get("content")
-        if isinstance(content, str):
-            return _payload(content)
-        if isinstance(content, list):
-            texts = [
-                block.get("text")
-                for block in content
-                if isinstance(block, dict) and isinstance(block.get("text"), str)
-            ]
-            if texts:
-                return _payload("\n".join(texts))
-    return None
-
-
 def watch_schedule() -> str:
-    """Cron for rollout polls. Invalid values use every 15 minutes."""
+    """Cron that retires an expired watch. Invalid values use every 15 minutes."""
     raw = ENV.ROLLOUT_WATCH_SCHEDULE.get().strip()
     fields = raw.split()
     if len(fields) == 5 and all(_CRON_FIELD.fullmatch(field) for field in fields):
@@ -644,45 +611,54 @@ def _check_prompt(watch: RolloutWatch, stage: RolloutStage, *, last: bool) -> st
     )
 
 
-def _locate_tool_name() -> str:
-    return ENV.ROLLOUT_LOCATE_TOOL.get().replace(".", "_").strip().lower()
+def _stage_targets(watch: RolloutWatch) -> set[str]:
+    return {target for stage in watch.stages for target in stage.targets}
 
 
-async def locate_commit(workspace: str, sha: str) -> dict[str, Any] | None:
-    """Call the configured locate tool. Returns None when it is unavailable."""
-    configured = _locate_tool_name()
-    if not workspace or not configured:
-        return None
-    try:
-        tools = await load_mcp_tools(instance_mcp_source(), workspace_mcp_source(workspace))
-    except Exception:
-        logger.warning("Rollout locate tools failed to load", exc_info=True)
-        return None
-    tool = next(
-        (
-            item
-            for item in tools
-            if str((getattr(item, "metadata", None) or {}).get("mcp_tool_name") or "")
-            .replace(".", "_")
-            .strip()
-            .lower()
-            == configured
-        ),
-        None,
+async def _expire(watch: RolloutWatch) -> str:
+    waiting = (
+        ", ".join(stage.name for stage in watch.stages if stage.name not in watch.dispatched)
+        or "none"
     )
-    if tool is None:
-        logger.info("Configured rollout locate tool is not on the workspace MCP")
-        return None
-    try:
-        raw = await tool.ainvoke({"commit": sha})
-    except Exception:
-        logger.warning("Rollout locate tool failed", exc_info=True)
-        return None
-    return _payload(raw)
+    sent = await _dispatch(
+        watch,
+        prompt(
+            "runs/rollout-expired",
+            pr_url=watch.pr_url,
+            sha=watch.sha,
+            waiting=waiting,
+            days=max_watch_age().days,
+        ),
+    )
+    if not sent:
+        return "dispatch_failed"
+    await _finish(watch)
+    return "expired"
 
 
-async def evaluate_rollout(key: str) -> str:
-    """One cron tick. Dispatches the thread only when an environment newly qualifies."""
+async def _advance(watch: RolloutWatch, *, dirty: bool) -> str:
+    """Dispatch every recorded environment whose targets have all arrived."""
+    changed = False
+    names = {stage.name for stage in watch.stages}
+    arrived = set(watch.arrived)
+    for stage in watch.stages:
+        if stage.name in watch.dispatched or not set(stage.targets) <= arrived:
+            continue
+        last = set(watch.dispatched) | {stage.name} >= names
+        if not await _dispatch(watch, _check_prompt(watch, stage, last=last)):
+            await WATCHES.save(watch)
+            return "dispatch_failed"
+        watch.dispatched.append(stage.name)
+        changed = True
+    if watch.stages and names <= set(watch.dispatched):
+        await _finish(watch)
+        return "done"
+    if dirty or changed:
+        await WATCHES.save(watch)
+    return "checked" if changed else "waiting"
+
+
+async def _record_arrival(key: str, target: str) -> str:
     async with _watch_lock(key) as acquired:
         if not acquired:
             return "locked"
@@ -690,53 +666,36 @@ async def evaluate_rollout(key: str) -> str:
         if watch is None or not watch.active:
             return "inactive"
         if _expired(watch):
-            waiting = (
-                ", ".join(
-                    stage.name for stage in watch.stages if stage.name not in watch.dispatched
-                )
-                or "none"
-            )
-            sent = await _dispatch(
-                watch,
-                prompt(
-                    "runs/rollout-expired",
-                    pr_url=watch.pr_url,
-                    sha=watch.sha,
-                    waiting=waiting,
-                    days=max_watch_age().days,
-                ),
-            )
-            if not sent:
-                return "dispatch_failed"
-            await _finish(watch)
-            return "expired"
-        if not watch.workspace:
-            return "missing_workspace"
-        report = await locate_commit(watch.workspace, watch.sha)
-        if report is None:
-            return "locate_unavailable"
-        raw_targets = report.get("targets")
-        targets: list[Any] = raw_targets if isinstance(raw_targets, list) else []
-        ready = envs_ready(targets, watch.stages)
-        changed = False
-        names = {stage.name for stage in watch.stages}
-        for stage in watch.stages:
-            if stage.name in watch.dispatched or stage.name not in ready:
-                continue
-            if stage.name not in watch.seen:
-                watch.seen.append(stage.name)
-                changed = True
-                continue
-            last = set(watch.dispatched) | {stage.name} >= names
-            content = _check_prompt(watch, stage, last=last)
-            if not await _dispatch(watch, content):
-                await WATCHES.save(watch)
-                return "dispatch_failed"
-            watch.dispatched.append(stage.name)
-            changed = True
-        if names <= set(watch.dispatched):
-            await _finish(watch)
-            return "done"
-        if changed:
-            await WATCHES.save(watch)
+            return await _expire(watch)
+        if target not in _stage_targets(watch):
+            return "ignored"
+        dirty = target not in watch.arrived
+        if dirty:
+            watch.arrived.append(target)
+        return await _advance(watch, dirty=dirty)
+
+
+async def apply_rollout_event(target: str, commits: list[str]) -> None:
+    """Run checks for watches whose merge SHA is in this deploy."""
+    name = _name(target)
+    if not name or not commits:
+        return
+    for watch in await WATCHES.search_all():
+        if not watch.active or not commit_matches(watch.sha, commits):
+            continue
+        if name not in _stage_targets(watch):
+            continue
+        await _record_arrival(watch.key, name)
+
+
+async def evaluate_rollout(key: str) -> str:
+    """One cron tick. Retires the watch once it is older than the max age."""
+    async with _watch_lock(key) as acquired:
+        if not acquired:
+            return "locked"
+        watch = await WATCHES.get(key)
+        if watch is None or not watch.active:
+            return "inactive"
+        if _expired(watch):
+            return await _expire(watch)
         return "waiting"

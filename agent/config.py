@@ -283,13 +283,8 @@ ENV.var(
     "Comma-separated owner/repo pairs whose merged pull requests are watched. Empty watches none.",
 )
 ENV.var(
-    "ROLLOUT_LOCATE_TOOL",
-    "MCP tool that reports which targets contain a commit. Example: releases.locate_commit. "
-    "Empty skips the poll.",
-)
-ENV.var(
     "ROLLOUT_WATCH_SCHEDULE",
-    "Five-field cron schedule for rollout polls.",
+    "Five-field cron for retiring a rollout watch that outlives its max age.",
     default="*/15 * * * *",
 )
 ENV.var(
