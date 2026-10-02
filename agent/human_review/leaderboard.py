@@ -11,7 +11,7 @@ from typing import Literal
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, bindparam, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, bindparam, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -133,6 +133,17 @@ class ReviewPoint(Base):
                 },
             )
         return recorded
+
+    @classmethod
+    async def missed_pick_ids(cls, request_id: UUID) -> set[int]:
+        """GitHub ids of everyone this request rotated away from for not accepting."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(cls.github_id).where(
+                    cls.request_id == request_id, cls.reason == "pick_expired"
+                )
+            )
+            return set(rows.all())
 
 
 async def record_code_review(payload: dict[str, object]) -> None:

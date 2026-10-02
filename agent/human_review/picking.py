@@ -3,7 +3,8 @@
 Each candidate scores the changed files they own plus those they changed within
 ``HISTORY_WINDOW``, divided by one more than the open reviews they already have.
 Only people inside their work hours are picked; when nobody is, the pick waits
-for whoever's work day starts first.
+for whoever's work day starts first. Anyone already on the request, or rotated
+away from it for not accepting, is skipped.
 """
 
 import asyncio
@@ -22,6 +23,7 @@ from agent.github.ci import has_repo_write_permission
 from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.org_membership import team_members
+from agent.human_review.leaderboard import ReviewPoint
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
 from agent.slack.client import get_slack_user_info
@@ -234,10 +236,16 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     owned = await _owned(codeowners, files) if codeowners is not None else Counter[str]()
     logins = sorted((owned.keys() | touched.keys()) - {(pr.author or "").lower()})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
+    taken = {participant.user_id for participant in request.participants}
+    missed = await ReviewPoint.missed_pick_ids(request.id)
     people = {
         login: user
         for login, user in zip(logins, users, strict=True)
-        if user is not None and not _is_bot(login) and not request.is_author(user.id, login)
+        if user is not None
+        and not _is_bot(login)
+        and not request.is_author(user.id, login)
+        and user.id not in taken
+        and user.github_id not in missed
     }
     if not people:
         logger.info("No Open SWE user owns or recently changed these files", extra=extra)

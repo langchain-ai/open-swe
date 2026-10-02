@@ -83,6 +83,11 @@ class User(Base):
         return self._identity_field("github", "login")
 
     @property
+    def github_id(self) -> int | None:
+        external_id = self._identity_field("github", "external_id")
+        return int(external_id) if external_id.isdigit() else None
+
+    @property
     def slack_user_id(self) -> str:
         return self._identity_field("slack", "external_id")
 

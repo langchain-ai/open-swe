@@ -475,6 +475,7 @@ async def control_human_review_requests(owner: str = OWNER, repo: str = REPO) ->
                     {"github_login": r.github_login, "assigned_by_agent": r.assigned_by_agent}
                     for r in request.reviewers
                 ],
+                "picks": [p.github_login for p in request.picks],
             }
             for request in await HumanReviewRequest.all_for_repo(owner, repo)
             if request.kind == "standard"

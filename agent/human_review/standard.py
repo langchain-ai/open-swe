@@ -28,13 +28,16 @@ from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
     latest_review_states,
+    review_authors,
 )
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
-from agent.human_review.card import mention
+from agent.human_review.card import accept_button, mention
+from agent.human_review.leaderboard import MISSED_PICK_POINTS, ReviewPoint
 from agent.human_review.lifecycle import (
+    drop_picks,
     mark_approved,
     mark_closed,
     mark_merged,
@@ -49,7 +52,7 @@ from agent.human_review.people import Outcome, Participant, repo_token, resolve_
 from agent.human_review.picking import Pick, Wait, choose_reviewer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
-from agent.slack.blocks import escape
+from agent.slack.blocks import actions, block_payload, escape, section
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
@@ -65,7 +68,7 @@ UNCLAIMED_AFTER_MINUTES = 30
 AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-DeadlineStep = Literal["unclaimed", "auto_merge"]
+DeadlineStep = Literal["unclaimed", "pick_expiry", "auto_merge"]
 SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
@@ -362,8 +365,9 @@ async def _request_github_review(request: HumanReviewRequest, login: str) -> boo
 
 
 async def _add_reviewer(
-    request: HumanReviewRequest, reviewer: Participant, *, assigned_by_agent: bool
+    request: HumanReviewRequest, reviewer: Participant, *, picked: bool
 ) -> HumanReviewRequest | Outcome:
+    """Sign ``reviewer`` up, or record Open SWE's pick of them; a pick signing up accepts it."""
     if request.state != "open":
         return Outcome("This review request is closed.")
     if request.is_author(reviewer.user.id, reviewer.github_login):
@@ -372,19 +376,25 @@ async def _add_reviewer(
         if row is None or row.state != "open":
             return Outcome("This review request closed before you signed up.")
         existing = row.participant(reviewer.user.id)
-        if existing is not None:
+        if existing is not None and (picked or existing.decision != "picked"):
             return Outcome(f"@{reviewer.github_login} is already reviewing this.")
-        row.participants.append(
-            HumanReviewParticipant(
-                user_id=reviewer.user.id, decision="review", assigned_by_agent=assigned_by_agent
+        if existing is not None:
+            existing.decision = "review"
+        else:
+            row.participants.append(
+                HumanReviewParticipant(
+                    user_id=reviewer.user.id,
+                    decision="picked" if picked else "review",
+                    assigned_by_agent=picked,
+                )
             )
-        )
     logger.info(
         "Added a human reviewer",
         extra={
             "request_id": str(request.id),
             "github_login": reviewer.github_login,
-            "assigned_by_agent": assigned_by_agent,
+            "picked": picked,
+            "accepted_pick": existing is not None,
         },
     )
     current = await HumanReviewRequest.get(request.id)
@@ -395,19 +405,34 @@ async def _add_reviewer(
 
 
 async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
-    """Someone signs up from the card; any number of people may."""
+    """Someone signs up from the card, or accepts Open SWE's pick of them; any number may.
+
+    Whoever else Open SWE picked and is still waiting on no longer needs to.
+    """
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return reviewer
-    added = await _add_reviewer(request, reviewer, assigned_by_agent=False)
+    accepting = any(pick.user_id == reviewer.user.id for pick in request.picks)
+    added = await _add_reviewer(request, reviewer, picked=False)
     if isinstance(added, Outcome):
         return added
-    requested = await _request_github_review(added, reviewer.github_login)
     pr = added.pull_request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    if others := {pick.user_id for pick in added.picks}:
+        await drop_picks(
+            added,
+            others,
+            f"{mention(reviewer.user)} is reviewing {label} *{escape(pr.title)}*, so you no "
+            "longer need to. Open SWE removed you as a reviewer.",
+        )
+    if accepting:
+        return Outcome(
+            f"You accepted the review of {label}. It merges once every reviewer approves on GitHub."
+        )
+    requested = await _request_github_review(added, reviewer.github_login)
     note = "" if requested else " GitHub did not add you as a requested reviewer."
     return Outcome(
-        f"You're down to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>. It merges once "
-        f"every reviewer approves on GitHub.{note}"
+        f"You're down to review {label}. It merges once every reviewer approves on GitHub.{note}"
     )
 
 
@@ -463,6 +488,8 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
+    if user.github_id in await ReviewPoint.missed_pick_ids(request.id):
+        return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return _failure(reviewer.message)
@@ -470,16 +497,28 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     who = mention(user)
     notice, bump = _pick_notice(request, who, label)
-    added = await _add_reviewer(request, reviewer, assigned_by_agent=True)
+    added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
     await _request_github_review(added, github_login)
+    if not await _schedule(added, "pick_expiry", timedelta(minutes=UNCLAIMED_AFTER_MINUTES)):
+        logger.warning(
+            "A reviewer pick will not rotate if it is never accepted",
+            extra={"request_id": str(added.id), "github_login": github_login},
+        )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
+    deadline = (
+        f" Accept within {UNCLAIMED_AFTER_MINUTES} minutes, or Open SWE will ask someone else "
+        f"and you lose {abs(MISSED_PICK_POINTS)} review point."
+    )
+    accept = actions(accept_button(added))
     thread_ts = added.slack_thread_ts or added.slack_message_ts
+    thread_text = f"{notice}{why}{deadline}"
     await post_slack_thread_reply_with_ts(
         added.slack_channel_id,
         thread_ts,
-        f"{notice}{why}",
+        thread_text,
+        blocks=block_payload([section(thread_text), accept]),
         unfurl_links=False,
         agent_thread_id=added.thread_id or None,
         reply_broadcast=bump,
@@ -488,10 +527,10 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
-        await send_dm(
-            user.slack_user_id,
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
+        dm_text = (
+            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        await send_dm(user.slack_user_id, dm_text, blocks=block_payload([section(dm_text), accept]))
     return RequestResult(
         success=True,
         request_id=str(added.id),
@@ -724,16 +763,93 @@ async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
     return True
 
 
+async def expire_picks(request: HumanReviewRequest) -> str:
+    """Rotate away from picks not accepted in time, when someone else could review instead.
+
+    Reviewing on GitHub counts as accepting. Whoever is rotated away loses points.
+    """
+    wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    now = datetime.now(UTC)
+    stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
+    if not stale:
+        return "accepted"
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    reviewed: set[str] | None = None
+    if token is not None:
+        async with github_client(token=token) as client:
+            reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if reviewed is None:
+        await _schedule(request, "pick_expiry", _DEADLINE_RETRY)
+        return "retrying"
+    if started := [p for p in stale if p.github_login.lower() in reviewed]:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            for pick in row.picks if row is not None else []:
+                if pick.user_id in {p.user_id for p in started}:
+                    pick.decision = "review"
+        request = await HumanReviewRequest.get(request.id) or request
+        await refresh_card(request)
+    idle = [p for p in stale if p.github_login.lower() not in reviewed]
+    if not idle:
+        return "accepted"
+    choice = await choose_reviewer(request)
+    if choice is None:
+        logger.info(
+            "Nobody else can review, so an unaccepted pick stays",
+            extra={"request_id": str(request.id)},
+        )
+        return "no_alternative"
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    dropped = await drop_picks(
+        request,
+        {p.user_id for p in idle},
+        f"You didn't accept the review of {label} *{escape(pr.title)}* within "
+        f"{UNCLAIMED_AFTER_MINUTES} minutes, so Open SWE asked someone else and took "
+        f"{abs(MISSED_PICK_POINTS)} review point.",
+    )
+    for pick in dropped:
+        if (github_id := pick.user.github_id) is None:
+            logger.warning(
+                "A missed pick has no GitHub id to take points from",
+                extra={"request_id": str(request.id), "github_login": pick.github_login},
+            )
+            continue
+        await ReviewPoint.award(
+            github_id=github_id,
+            github_login=pick.github_login,
+            reason="pick_expired",
+            repository_key=f"{pr.owner}/{pr.repo}",
+            pr_number=pr.number,
+            request_id=request.id,
+        )
+    current = await HumanReviewRequest.get(request.id)
+    if current is None or current.state != "open":
+        return "closed"
+    if isinstance(choice, Wait):
+        await _schedule(current, "unclaimed", choice.until - datetime.now(UTC))
+        return "rotating"
+    result = await assign(current, choice.login, choice.reason)
+    if not result.success:
+        logger.warning(
+            "Open SWE's next reviewer pick was refused",
+            extra={"request_id": str(request.id), "github_login": choice.login},
+        )
+        return "rotation_refused"
+    return "rotated"
+
+
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
-    """Scheduler entry point for the unclaimed and auto-merge deadlines."""
+    """Scheduler entry point for the unclaimed, pick-expiry and auto-merge deadlines."""
     try:
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step == "pick_expiry":
+        return {"status": await expire_picks(request)}
     if step == "unclaimed":
-        if request.reviewers:
+        if request.reviewers or request.picks:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
