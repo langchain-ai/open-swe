@@ -81,6 +81,12 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
         "get_active_slack_thread",
         AsyncMock(return_value={"channel_id": "C1", "thread_ts": "1.0"}),
     )
+    client = SimpleNamespace(
+        threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {"source": "slack"}}))
+    )
+    monkeypatch.setattr(act_as_slack, "langgraph_client", lambda: client)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(act_as_slack, "dispatch_agent_run", dispatch)
     ephemeral = AsyncMock()
     monkeypatch.setattr(act_as_slack, "post_slack_ephemeral_message", ephemeral)
     concierge = AsyncMock()
@@ -93,6 +99,7 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
         preferences=preferences,
         ephemeral=ephemeral,
         concierge=concierge,
+        dispatch=dispatch,
     )
 
 
@@ -124,6 +131,12 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
         )
     else:
         stack.preferences.assert_not_awaited()
+    if status == "approved":
+        stack.dispatch.assert_awaited_once()
+        assert stack.dispatch.await_args.args[0] == "thread-1"
+        assert stack.dispatch.await_args.args[2]["github_login"] == "alice"
+    else:
+        stack.dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -159,3 +172,4 @@ async def test_a_second_click_cannot_reverse_a_denial(stack):
         "You already answered this request; the first answer stands.",
     )
     stack.preferences.assert_not_awaited()
+    stack.dispatch.assert_not_awaited()

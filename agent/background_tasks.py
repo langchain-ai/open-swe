@@ -135,7 +135,7 @@ def _thread_workspace(metadata: dict[str, Any]) -> str | None:
     return None
 
 
-def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
+def dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
     configurable: dict[str, Any] = {"thread_id": thread_id}
     for key in ("source", "repo", "github_login", "triggering_user_email"):
         value = metadata.get(key)
@@ -254,7 +254,7 @@ async def _reconcile(thread_id: str) -> _Reconciled:
             continue
         message = _notification(task)
         try:
-            configurable = _dispatch_config(metadata, thread_id)
+            configurable = dispatch_config(metadata, thread_id)
             configurable["background_task_completion"] = True
             # A completion run can change task state before delivery finishes.
             status_metadata = None

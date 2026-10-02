@@ -7,6 +7,9 @@ from typing import Literal
 from fastapi import BackgroundTasks
 
 from agent.act_as.records import ActAsRequest, ThreadActAs
+from agent.background_tasks import dispatch_config
+from agent.dispatch import dispatch_agent_run
+from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.prompts import prompt
 from agent.slack.blocks import Block, actions, block_payload, button, context, section
 from agent.slack.client import (
@@ -35,6 +38,16 @@ _LABELS: dict[CardAction, str] = {
     "approve": "Approved",
     "always_allow": "Always allowed",
     "deny": "Denied",
+}
+_ACT_AS_APPROVAL_SENDER: SystemIdentity = {
+    "id": "system:act-as-approval",
+    "display_name": "Act-as approval",
+    "platform": "open-swe",
+}
+_ACT_AS_APPROVAL_CONTEXT: InputMessageContext = {
+    "sender_id": _ACT_AS_APPROVAL_SENDER["id"],
+    "surface": "automation",
+    "kind": "system",
 }
 
 
@@ -97,6 +110,33 @@ async def handle_button(
             channel_id, user_id, "You already answered this request; the first answer stands."
         )
         return ignored("act-as request already answered")
+    if approved:
+        client = langgraph_client()
+        thread_record = await client.threads.get(button.thread_id)
+        metadata = thread_record.get("metadata") if isinstance(thread_record, dict) else None
+        configurable = dispatch_config(
+            metadata if isinstance(metadata, dict) else {}, button.thread_id
+        )
+        configurable.update({"source": "slack", "github_login": request.login})
+        await dispatch_agent_run(
+            button.thread_id,
+            prompt(
+                "runs/act-as-approved",
+                login=request.login,
+                owner=request.owner,
+                repo=request.repo,
+                head=request.head,
+                base=request.base,
+                title=request.title,
+            ),
+            configurable,
+            source="slack",
+            thread_title=None,
+            context=_ACT_AS_APPROVAL_CONTEXT,
+            systems=[_ACT_AS_APPROVAL_SENDER],
+            metadata={},
+            multitask_strategy="enqueue",
+        )
     background_tasks.add_task(_close_card, interaction, _LABELS[action])
     await note_for_concierge(
         user_id,
