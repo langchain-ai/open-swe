@@ -712,6 +712,21 @@ async def start_auto_assign(
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    result = await _auto_assign(request, asked=asked)
+    logger.info(
+        "Auto-assign finished",
+        extra={
+            "request_id": str(request.id),
+            "asked": asked,
+            "status": result.status,
+            "github_login": result.reviewer,
+            "until": result.at.isoformat() if result.at else "",
+        },
+    )
+    return result
+
+
+async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssignResult:
     choice = await choose_reviewer(request)
     if isinstance(choice, Wait):
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
@@ -723,7 +738,11 @@ async def start_auto_assign(
             return AutoAssignResult("picked", choice.login)
         logger.warning(
             "Open SWE's reviewer pick was refused; waking an agent to pick",
-            extra={"request_id": str(request.id), "github_login": choice.login},
+            extra={
+                "request_id": str(request.id),
+                "github_login": choice.login,
+                "error": result.error,
+            },
         )
     return AutoAssignResult("woken" if await _wake_picker(request, asked=asked) else "failed")
 
@@ -774,6 +793,14 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
     stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
+    logger.info(
+        "Checking reviewer picks for expiry",
+        extra={
+            "request_id": str(request.id),
+            "pending": [p.github_login for p in request.picks],
+            "expired": [p.github_login for p in stale],
+        },
+    )
     if not stale:
         return "accepted"
     pr = request.pull_request
@@ -786,6 +813,13 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         await _schedule(request, "pick_expiry", _DEADLINE_RETRY)
         return "retrying"
     if started := [p for p in stale if p.github_login.lower() in reviewed]:
+        logger.info(
+            "A GitHub review counts as accepting the pick",
+            extra={
+                "request_id": str(request.id),
+                "github_logins": [p.github_login for p in started],
+            },
+        )
         async with HumanReviewRequest.locked(request.id) as (_, row):
             for pick in row.picks if row is not None else []:
                 if pick.user_id in {p.user_id for p in started}:
@@ -802,6 +836,15 @@ async def expire_picks(request: HumanReviewRequest) -> str:
             extra={"request_id": str(request.id)},
         )
         return "no_alternative"
+    logger.info(
+        "Rotating away from unaccepted reviewer picks",
+        extra={
+            "request_id": str(request.id),
+            "expired": [p.github_login for p in idle],
+            "next_github_login": choice.login,
+            "next_waits_until": choice.until.isoformat() if isinstance(choice, Wait) else "",
+        },
+    )
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     dropped = await drop_picks(
         request,
