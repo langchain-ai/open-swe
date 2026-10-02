@@ -277,6 +277,22 @@ ENV.var("DEFAULT_REPO_NAME", "Default GitHub repository when a run names none.")
 ENV.var("SLACK_REPO_OWNER", "Slack-specific default repository owner.")
 ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 
+# --- Rollouts ------------------------------------------------------------------------------
+ENV.var(
+    "ROLLOUT_REPOS",
+    "Comma-separated owner/repo pairs whose merged pull requests are watched. Empty watches none.",
+)
+ENV.var(
+    "ROLLOUT_WATCH_SCHEDULE",
+    "Five-field cron for retiring a rollout watch that outlives its max age.",
+    default="*/15 * * * *",
+)
+ENV.var(
+    "ROLLOUT_MAX_WATCH_AGE_DAYS",
+    "Days a rollout watch runs before it stops and reports what is still waiting.",
+    default="7",
+)
+
 # --- Slack and Linear ----------------------------------------------------------------------
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)

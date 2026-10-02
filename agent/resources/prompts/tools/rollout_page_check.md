@@ -1,0 +1,1 @@
+Open a LangSmith page in the sandbox browser. Pass an https URL and what should look different. When the CUA CLI is installed, the tool opens that URL in the sandbox Chrome desktop. It does not log in. If the browser is missing or setup fails, the tool returns browser_unavailable. Say the page check did not run, and do not invent what the page showed.

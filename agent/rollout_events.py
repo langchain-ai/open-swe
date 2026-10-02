@@ -1,7 +1,8 @@
 """Accept a deployment event after an environment has finished syncing.
 
-The route trusts a GitHub Actions OIDC token instead of a shared secret. Matching
-the event to a pull request this server worked on arrives with the rollout watch.
+The route trusts a GitHub Actions OIDC token instead of a shared secret. A
+verified event runs the check for each watch on this server whose merge SHA is
+in the deploy.
 """
 
 import json
@@ -14,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from agent.config import ENV
 from agent.federation.github_oidc import InvalidFederatedToken
 from agent.federation.github_oidc import verify as verify_github_oidc
+from agent.rollouts import RolloutBusy, apply_rollout_event
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,11 @@ async def _authorize(header: str) -> None:
 
 
 async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccepted:
-    """Acknowledge a verified deploy. Watch matching is added with rollouts."""
+    """Run matching watches, then acknowledge the deploy."""
+    try:
+        await apply_rollout_event(target, commits)
+    except RolloutBusy:
+        raise HTTPException(status_code=503, detail="Rollout watch is busy") from None
     logger.info(
         "Accepted rollout deploy",
         extra={"rollout_target": target, "rollout_commits": len(commits)},

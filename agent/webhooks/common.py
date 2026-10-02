@@ -84,6 +84,7 @@ from agent.review.findings import (
 )
 from agent.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from agent.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from agent.rollouts import rollout_payload_allowed, rollout_watch_pending, start_from_merge
 from agent.run_config import Repo
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -1480,16 +1481,22 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 resolves_thread = any(
                     record.get("resolves_thread") is True for record in updated_pull_requests
                 )
+                # A stored check only holds the thread open once a configured
+                # rollout repo merges, or while that watch is already running.
+                watching = metadata.get("rollout_status") == "watching"
+                rollout_pending = rollout_watch_pending(metadata) and (
+                    watching or (new_state == "merged" and rollout_payload_allowed(payload))
+                )
                 needs_attention = metadata.get("attention_reason") == _PRS_CLOSED_ATTENTION_REASON
                 if all_terminal:
                     if state_changed and metadata.get("resolved") is not True:
-                        if resolves_thread:
+                        if resolves_thread and not rollout_pending:
                             metadata_update["resolved"] = True
                             metadata_update["resolved_at_ms"] = int(
                                 datetime.now(UTC).timestamp() * 1000
                             )
                             metadata_update["auto_resolved_by_prs"] = True
-                        elif not needs_attention:
+                        elif not rollout_pending and not needs_attention:
                             metadata_update["attention_reason"] = _PRS_CLOSED_ATTENTION_REASON
                 else:
                     if metadata.get("auto_resolved_by_prs") is True:
@@ -1513,6 +1520,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from agent.thread_feedback import schedule_pr_feedback
 
             await schedule_pr_feedback(thread_id, metadata, pr_url)
+            if rollout_pending:
+                try:
+                    await start_from_merge(thread_id, metadata, payload)
+                except Exception:
+                    logger.warning("Failed to start rollout watch for %s", thread_id, exc_info=True)
         elif new_state == "open" and previous_state in _TERMINAL_PR_STATES:
             from agent.analytics.emitter import task_rework
 

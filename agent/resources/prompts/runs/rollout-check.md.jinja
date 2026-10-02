@@ -1,0 +1,32 @@
+{{ env }} contains {{ sha }}.
+
+PR: {{ pr_url }}
+Author: {{ author }}
+{% if page %}
+Page: {{ page }}
+Expected: {{ expected }}
+{% if host %}
+Call `rollout_page_check` with the https URL of that page on {{ host }}.
+{% else %}
+Call `rollout_page_check` with the https URL of that page on this environment.
+{% endif %}
+When the sandbox browser is available, the tool opens that URL. It does not log in. If the tool returns browser_unavailable, say the page check did not run. Do not invent what the page showed.
+{% endif %}
+{% if metrics %}
+Metrics: {{ metrics }}
+{% if datadog_tags %}
+Query Datadog and compare this revision to the previous one. Query only these tags: {{ datadog_tags }}.
+A metric move describes this environment's revision, not proof this commit caused it.
+{% else %}
+No Datadog tag was recorded for this environment. Do not invent one.
+{% endif %}
+{% endif %}
+{% if not page and not metrics %}
+No page or metric check was stored.
+{% endif %}
+{% if last %}
+Post one verdict in this thread and as a GitHub comment on the PR (`gh pr comment {{ pr_url }}`): whether the issue is fixed, and whether there is a regression. On a failure, mention {{ author }}.
+{% else %}
+Report this environment in the thread. The final verdict waits until the last environment in the check.
+{% endif %}
+Say nothing in Slack unless this work already has a Slack thread. If it does, update that thread with `slack_reply` and mention the author. Do not post anywhere else.

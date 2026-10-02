@@ -64,7 +64,9 @@ async def _post(app: FastAPI, body: bytes, token: str | None) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI) -> None:
+async def test_rollout_webhook_acknowledges_a_github_actions_token(
+    app: FastAPI, fake_store: object
+) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40, "b" * 40, "not-a-sha"]}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 200
@@ -111,7 +113,9 @@ async def test_rollout_webhook_rejects_the_same_filename_in_another_repository(
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_accepts_each_listed_workflow(app: FastAPI) -> None:
+async def test_rollout_webhook_accepts_each_listed_workflow(
+    app: FastAPI, fake_store: object
+) -> None:
     body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
     response = await _post(app, body, _token(workflow_ref=f"{_PROD}@refs/heads/main"))
     assert response.status_code == 200
