@@ -25,10 +25,19 @@ function splitRemote(remote: string): { host: string; path: string } | null {
   return { host, path }
 }
 
+/** A loop, not `/\/+$/`: a regex anchored that way backtracks on runs of slashes. */
+function trimSlashes(path: string): string {
+  let start = 0
+  let end = path.length
+  while (start < end && path[start] === "/") start += 1
+  while (end > start && path[end - 1] === "/") end -= 1
+  return path.slice(start, end)
+}
+
 export function parseGitHubRemote(remote: string): GitHubRepo | null {
   const parts = splitRemote(remote.trim())
   if (parts === null || !GITHUB_HOSTS.has(parts.host.toLowerCase())) return null
-  const segments = parts.path.replace(/^\/+/, "").replace(/\/+$/, "").split("/")
+  const segments = trimSlashes(parts.path).split("/")
   if (segments.length !== 2) return null
   const owner = segments[0] ?? ""
   const name = (segments[1] ?? "").replace(/\.git$/i, "")
