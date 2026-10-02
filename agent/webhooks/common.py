@@ -1378,11 +1378,6 @@ async def get_thread_metadata_safe(thread_id: str) -> dict[str, Any] | None:
     return metadata if isinstance(metadata, dict) else {}
 
 
-def _pr_state_from_payload(payload: dict[str, Any]) -> str | None:
-    event = PullRequestEvent.parse(payload)
-    return event.state if event is not None else None
-
-
 async def _record_pr_merge_feedback(thread_id: str, *, pr_url: str) -> None:
     """Record merge feedback on the thread's trace under two keys.
 

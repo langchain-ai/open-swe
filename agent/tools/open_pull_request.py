@@ -11,6 +11,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
+from agent.act_as.gate import require_consent
 from agent.analytics.usage import record_agent_pr_usage
 from agent.credential_scope import (
     PrAuthorNotAParticipant,
@@ -964,7 +965,9 @@ async def _maybe_append_references(
             lines.append(plan_line)
         try:
             source_lines = await _build_source_reference_lines(cfg)
-            if source_lines and await _is_private_repo(client, token, owner, repo):
+            if source_lines and (
+                cfg.source == "slack" or await _is_private_repo(client, token, owner, repo)
+            ):
                 lines.extend(source_lines)
         except Exception:
             logger.debug("Failed to append source references to PR body", exc_info=True)
@@ -1044,6 +1047,17 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
+        if refusal := await require_consent(
+            thread_id=_configurable().thread_id,
+            token_kind=kind,
+            author=author,
+            owner=owner,
+            repo=repo,
+            head=head,
+            base=base,
+            title=title,
+        ):
+            return dict(refusal)
         preflight_failure = await _preflight_pr_access(
             client=client,
             token=token,

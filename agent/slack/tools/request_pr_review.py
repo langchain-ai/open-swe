@@ -2,6 +2,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
+from agent.utils.dashboard_links import dashboard_review_url
 
 
 async def trigger_pr_review_from_ref(
@@ -44,7 +45,7 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         slack_thread if isinstance(slack_thread, dict) else None,
     )
     slack_thread = active or {}
-    return await trigger_pr_review_from_ref(
+    result = await trigger_pr_review_from_ref(
         pr_ref,
         source=source,
         github_login=configurable.get("github_login", ""),
@@ -52,3 +53,8 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
     )
+    if result.get("success") and (
+        review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    ):
+        result["review_url"] = review_url
+    return result

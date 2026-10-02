@@ -259,17 +259,6 @@ def script_log_path(label: str) -> str:
     return f"{script_root()}/logs/{label}.log"
 
 
-def script_log_paths() -> dict[str, str]:
-    """Every script log path, for handing to a caller that wants to read them later.
-
-    These are paths *inside a sandbox*. A refresh writes them on its own
-    throwaway builder, which is reclaimed once the capture lands — so they are
-    not readable from the thread that started the refresh. They are captured
-    into the snapshot, so any sandbox booted from it afterwards has them.
-    """
-    return {label: script_log_path(label) for label in ("setup", "update")}
-
-
 def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 

@@ -75,10 +75,3 @@ export function describeCron(expr: string): string {
 export function isDescribableCron(expr: string): boolean {
   return describeCron(expr) !== expr
 }
-
-/** Match a cron expression back to a known preset id, if any. */
-export function presetForCron(expr: string): CronPreset["id"] | "custom" {
-  const normalized = expr.trim().split(/\s+/).join(" ")
-  const match = CRON_PRESETS.find((p) => p.value === normalized)
-  return match?.id ?? "custom"
-}

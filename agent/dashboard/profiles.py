@@ -37,8 +37,6 @@ from agent.store import (
     get_value,
     now_iso,
     put_value,
-    search_all_values,
-    search_values,
 )
 from agent.users import User, UserPreferences, UserPreferencesPatch
 
@@ -68,6 +66,10 @@ class ProfileUpdate(BaseModel):
     experimental_assistant_ui: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    experimental_background_callbacks: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -151,18 +153,6 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
-async def resolve_oauth_login(login: str) -> str | None:
-    """Recover the stored OAuth key when older thread metadata lost its casing."""
-    if await get_oauth_token_record(login):
-        return login
-    matches = {
-        candidate
-        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
-        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
-
-
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
     """Write the user's editable settings.
 
@@ -201,6 +191,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "experimental_background_callbacks": (
+            update.experimental_background_callbacks
+            if update.experimental_background_callbacks is not None
+            else existing.get("experimental_background_callbacks")
         ),
         "slack_onboarding_dismissed": (
             update.slack_onboarding_dismissed
@@ -404,10 +399,6 @@ async def has_access_token_record(login: str) -> bool:
     return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
 
 
-async def list_profiles() -> list[dict[str, Any]]:
-    return await search_values(PROFILES_NAMESPACE, limit=1000)
-
-
 router = APIRouter(tags=["profiles"])
 # Not agent.dashboard.deps: that module imports repo_access, which imports this one.
 _SESSION_DEP = Depends(require_session)
@@ -453,6 +444,11 @@ async def put_my_profile(
             preserve_sandbox_memory=update.preserve_sandbox_memory,
             human_review_requests=update.human_review_requests,
             review_channel_watch=update.review_channel_watch,
+            experimental_act_as_approval=update.experimental_act_as_approval,
+            # Switching approval either way starts over from asking every time.
+            act_as_always_allowed=(
+                False if update.experimental_act_as_approval is not None else None
+            ),
         ),
     )
     if preferences is None and (
@@ -460,6 +456,7 @@ async def put_my_profile(
         or update.preserve_sandbox_memory
         or update.human_review_requests
         or update.review_channel_watch
+        or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

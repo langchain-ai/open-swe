@@ -328,10 +328,6 @@ class PullRequest(Base):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
 
-    async def primary_thread(self, *, backfill: bool = True) -> str | None:
-        threads = await self.linked_threads(backfill=backfill)
-        return threads[0] if threads else None
-
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.
 

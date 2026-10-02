@@ -21,6 +21,7 @@ TOOLS_PATH = "/dashboard/api/sandbox-tools"
 TOOLS_HEADER = "X-Open-SWE-Tools-Token"
 TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
+TOOLS_URL_ENV = "OPEN_SWE_TOOLS_URL"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
 OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
 OPENAI_API_KEY_PLACEHOLDER = "sk-7kP9mT2vR5xN8qL4bH6wC3jF1dS0aG9uE2zY5rV8nM4pQ6tK"
@@ -98,7 +99,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
     workspace = (host.get("metadata") or {}).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
-    env_vars = {"OPEN_SWE_TOOLS_URL": url}
+    env_vars = {TOOLS_URL_ENV: url}
     if settings.sandbox_openai_enabled:
         env_vars.update(
             OPENAI_BASE_URL=url.removesuffix(TOOLS_PATH) + OPENAI_PATH,

@@ -43,16 +43,16 @@ import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
   FileDiff,
-  MultiFileDiff,
+  PatchDiff,
   Virtualizer,
   WorkerPoolContextProvider,
   useVirtualizer,
 } from "@pierre/diffs/react"
 import type { Icon } from "@phosphor-icons/react"
-import type { FileContents } from "@pierre/diffs/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
+  FileDiffLoadedFiles,
   FileDiffMetadata,
   SelectedLineRange,
   SelectionSide,
@@ -65,6 +65,7 @@ import type {
   ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
+  ReviewFileContents,
   ReviewFinding,
   PendingReviewComment,
   ReviewUserRef,
@@ -121,6 +122,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
+import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -158,12 +160,15 @@ const SELECTION_CONTEXT_LINES = 2
 
 function makeSideAttachment(
   file: ReviewDiffFile,
+  contents: ReviewFileContents,
   side: "deletions" | "additions",
   fromLine: number,
   toLine: number
 ): ChatAttachment {
   const source =
-    side === "deletions" ? file.originalContent : file.modifiedContent
+    (side === "deletions"
+      ? contents.originalContent
+      : contents.modifiedContent) ?? ""
   const lines = source.split("\n")
   const start = Math.max(1, Math.min(fromLine, toLine))
   const end = Math.min(lines.length, Math.max(fromLine, toLine))
@@ -199,18 +204,21 @@ function makeSideAttachment(
 // side is collected separately.
 function buildSelectionAttachments(
   file: ReviewDiffFile,
+  contents: ReviewFileContents,
   range: SelectedLineRange
 ): Array<ChatAttachment> {
   const startSide = range.side ?? "additions"
   const endSide = range.endSide ?? startSide
   if (startSide === endSide) {
-    return [makeSideAttachment(file, startSide, range.start, range.end)]
+    return [
+      makeSideAttachment(file, contents, startSide, range.start, range.end),
+    ]
   }
   const deletionLine = startSide === "deletions" ? range.start : range.end
   const additionLine = startSide === "additions" ? range.start : range.end
   return [
-    makeSideAttachment(file, "deletions", deletionLine, deletionLine),
-    makeSideAttachment(file, "additions", additionLine, additionLine),
+    makeSideAttachment(file, contents, "deletions", deletionLine, deletionLine),
+    makeSideAttachment(file, contents, "additions", additionLine, additionLine),
   ]
 }
 
@@ -1109,17 +1117,37 @@ function ReviewBodyInner({
   )
 
   const addToChat = useCallback(
-    (path: string, range: SelectedLineRange) => {
+    async (path: string, range: SelectedLineRange) => {
       const file = filesByPathRef.current.get(path)
       if (!file) return
-      for (const attachment of buildSelectionAttachments(file, range)) {
-        composer?.addAttachment(attachment)
-      }
       setSideTab("chat")
       setSidePanelOpen(true)
-      setUserSelection(null)
+      try {
+        const contents = await loadReviewFileContents(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          file
+        )
+        for (const attachment of buildSelectionAttachments(
+          file,
+          contents,
+          range
+        )) {
+          composer?.addAttachment(attachment)
+        }
+        setUserSelection(null)
+      } catch (error) {
+        setUserSelection({ file: path, range })
+        toast.error("Couldn’t add selection to chat", {
+          description:
+            error instanceof Error
+              ? error.message
+              : "Failed to load file contents",
+        })
+      }
     },
-    [composer]
+    [composer, detail.owner, detail.repo, detail.number]
   )
 
   // Open the inline comment composer for a line (gutter "+" click). Clearing the
@@ -2106,9 +2134,30 @@ const FileDiffCard = memo(function FileDiffCard({
   // and only line-selects from the gutter, so the two don't collide. onLineSelectionEnd
   // bails if a native text selection is present, so a code highlight never opens the
   // composer (belt-and-suspenders in case Pierre ever reports a content drag).
+  // Pierre calls this the first time a viewer expands context past the hunks
+  // the patch carried, and upgrades the parsed diff in place.
+  const loadDiffFiles = useCallback(async (): Promise<FileDiffLoadedFiles> => {
+    const contents = await loadReviewFileContents(owner, repo, prNumber, file)
+    const original = contents.originalContent ?? ""
+    const modified = contents.modifiedContent ?? ""
+    return {
+      oldFile: {
+        name: file.previousPath ?? file.path,
+        contents: original,
+        cacheKey: fileContentsCacheKey(file.path, "old", original),
+      },
+      newFile: {
+        name: file.path,
+        contents: modified,
+        cacheKey: fileContentsCacheKey(file.path, "new", modified),
+      },
+    }
+  }, [owner, repo, prNumber, file])
+
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
+      loadDiffFiles,
       enableLineSelection: commentable,
       enableGutterUtility: commentable,
       onGutterUtilityClick: commentable
@@ -2134,6 +2183,7 @@ const FileDiffCard = memo(function FileDiffCard({
     }),
     [
       diffOptions,
+      loadDiffFiles,
       commentable,
       onStartComment,
       onSelectLines,
@@ -2166,23 +2216,6 @@ const FileDiffCard = memo(function FileDiffCard({
       diffWrapperRef.current?.querySelector("diffs-container")
     )?.removeAllRanges()
   }, [visiblePopup, onAddToChat, file.path])
-
-  const oldFile = useMemo<FileContents>(
-    () => ({
-      name: file.path,
-      contents: file.originalContent,
-      cacheKey: fileContentsCacheKey(file.path, "old", file.originalContent),
-    }),
-    [file.path, file.originalContent]
-  )
-  const newFile = useMemo<FileContents>(
-    () => ({
-      name: file.path,
-      contents: file.modifiedContent,
-      cacheKey: fileContentsCacheKey(file.path, "new", file.modifiedContent),
-    }),
-    [file.path, file.modifiedContent]
-  )
 
   const sectionRef = useCallback(
     (node: HTMLDivElement | null) => registerSection(file.path, node),
@@ -2301,7 +2334,7 @@ const FileDiffCard = memo(function FileDiffCard({
         </label>
       </div>
       {expanded &&
-        (file.unrenderable ? (
+        (file.unrenderable || file.patch === null ? (
           <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
             Binary or large file — diff not shown.
           </div>
@@ -2327,9 +2360,9 @@ const FileDiffCard = memo(function FileDiffCard({
                 renderAnnotation={renderAnnotation}
               />
             ) : (
-              <MultiFileDiff<ReviewAnnotation>
-                oldFile={oldFile}
-                newFile={newFile}
+              <PatchDiff<ReviewAnnotation>
+                patch={file.patch}
+                disableWorkerPool
                 options={cardOptions}
                 metrics={DIFF_VIRTUAL_METRICS}
                 lineAnnotations={lineAnnotations}

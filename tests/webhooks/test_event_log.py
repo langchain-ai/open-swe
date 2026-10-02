@@ -1,13 +1,19 @@
 import json
 from datetime import date
+from typing import Literal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import BackgroundTasks
 from sqlalchemy import text
 from starlette.requests import Request
+from starlette.types import Message
 
 from agent.database import transaction
-from agent.webhooks import event_log
+from agent.slack import routes
+from agent.slack.payloads import SlackChannelContext
+from agent.webhooks import common, event_log
 from agent.webhooks.event_log import EventLog, EventRefs
 
 
@@ -116,3 +122,95 @@ async def test_record_links_a_github_pr_comment_to_its_rows(
             )
         ).one()
     assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
+
+
+@pytest.mark.parametrize("kind", ["message", "me_message", "edit", "multiple", "unknown"])
+async def test_slack_event_links_a_single_known_pr_without_dispatching(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(common, "verify_slack_signature", lambda **kwargs: True)
+    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(is_ext_shared=True)),
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(common, "resolve_slack_thread_id", dispatch)
+    ids = {name: uuid4() for name in ("user", "repository", "pull_request")}
+    async with transaction() as conn:
+        for statement in (
+            "INSERT INTO users (id) VALUES (:user)",
+            "INSERT INTO user_identity (user_id, provider, external_id) VALUES (:user, 'slack', 'U1')",
+            "INSERT INTO repository (id, key, full_name) VALUES (:repository, 'acme/widgets', 'acme/widgets')",
+            "INSERT INTO pull_request (id, repository_id, number, owner, repo) VALUES (:pull_request, :repository, 7, 'acme', 'widgets')",
+        ):
+            await conn.execute(text(statement), ids)
+    message = {
+        "ts": "1786573369.551099",
+        "thread_ts": "1786573300.000000",
+        "user": "U1",
+        "text": "<http://www.github.com/Acme/Widgets/pull/7/files|PR> https://github.com/acme/widgets/pull/7",
+    }
+    if kind == "multiple":
+        message["text"] += " https://github.com/acme/widgets/pull/8"
+    elif kind == "unknown":
+        message["text"] = "https://github.com/acme/widgets/pull/99"
+    event = (
+        {
+            "type": "message",
+            "channel": "C1",
+            "subtype": "message_changed",
+            "message": {
+                **message,
+                "text": "",
+                "blocks": [{"type": "section", "text": message["text"]}],
+            },
+            "previous_message": {**message, "text": "https://github.com/acme/widgets/pull/8"},
+        }
+        if kind == "edit"
+        else {"type": "message", "channel": "C1", **message}
+    )
+    if kind == "me_message":
+        event["subtype"] = "me_message"
+    payload = {"type": "event_callback", "team_id": "T1", "event_id": "Ev1", "event": event}
+    body = json.dumps(payload).encode()
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/slack",
+            "query_string": b"",
+            "headers": [],
+        },
+        receive,
+    )
+    tasks = BackgroundTasks()
+    response = await routes.slack_webhook(request, tasks)
+    await tasks()
+    assert response["status"] == "ignored"
+    dispatch.assert_not_awaited()
+    async with transaction() as conn:
+        row = (
+            await conn.execute(
+                text("SELECT user_id, repository_id, pull_request_id FROM event_log")
+            )
+        ).one()
+    assert tuple(row) == (
+        ids["user"],
+        None if kind == "multiple" else ids["repository"],
+        ids["pull_request"] if kind in {"message", "me_message", "edit"} else None,
+    )
+    if kind == "me_message":
+        async with transaction() as conn:
+            link = (
+                await conn.execute(text("SELECT thread_ts, pr_url FROM slack_pull_request_link"))
+            ).one()
+        assert tuple(link) == ("1786573300.000000", "https://github.com/acme/widgets/pull/7")
