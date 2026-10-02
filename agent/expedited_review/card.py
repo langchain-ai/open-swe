@@ -45,10 +45,10 @@ def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
 def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block]:
     pr = approval.pull_request
     label = f"{pr.owner}/{pr.repo}#{pr.number}"
-    return [
-        section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}"),
-        context(f"Author {author}"),
-    ]
+    blocks = [section(f"*Expedited review requested*\n<{pr.url}|{label}> {escape(title)}")]
+    if approval.tldr:
+        blocks.append(section("\n".join(f">{line}" for line in escape(approval.tldr).splitlines())))
+    return [*blocks, context(f"Author {author}")]
 
 
 def _diff_sections(files: list[ChangedFile], diff_image_id: str | None) -> list[Block]:
@@ -111,6 +111,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
     """Send the card to its own channel or another one; offered once, while it awaits a vote."""
     if not choices or approval.sent_elsewhere:
         return []
+    configured_only = len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id
     other = button(
         "Other channel…",
         action_id="open_swe_option_select_other",
@@ -122,7 +123,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
             action_id="open_swe_option_select_broadcast",
             value=_button_value("broadcast", approval),
         )
-        return [actions(broadcast, other, block_id=SEND_BLOCK_ID)]
+        return [actions(broadcast, *([] if configured_only else [other]), block_id=SEND_BLOCK_ID)]
     options = [option(f"#{choice['name']}", choice["id"]) for choice in choices]
     picker = static_select(
         action_id=CHANNEL_SELECT_ACTION,
@@ -146,15 +147,23 @@ def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     )
 
 
-def readiness_prompt(approval: HumanReviewRequest) -> tuple[str, list[Block]]:
-    """The author-only prompt; never included in the shared card."""
+def readiness_prompt(
+    approval: HumanReviewRequest,
+    *,
+    title: str,
+    author: str,
+    files: list[ChangedFile],
+    diff_image_id: str | None = None,
+) -> tuple[str, list[Block]]:
+    """The full author-only draft card."""
     pr = approval.pull_request
     text = f"Mark {pr.url} ready for review so someone else can approve it."
     return text, [
-        section(
-            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> is a draft. Mark it ready for review?"
-        ),
-        actions(_ready_button(approval)),
+        *_header(approval, title, author),
+        divider(),
+        *_voting_diff(approval, files, diff_image_id),
+        section("*Draft.* Mark it ready for review to request an approval in the thread."),
+        actions(_ready_button(approval), _dismiss_button(approval)),
     ]
 
 

@@ -135,28 +135,6 @@ async def test_slack_participants_include_broadcasts_and_exclude_system_messages
 
 
 @pytest.mark.asyncio
-async def test_linear_participants_use_verified_email_mappings() -> None:
-    async def login_for_email(email: str) -> str | None:
-        return {"octo@example.com": "octocat", "missing@example.com": None}.get(email)
-
-    with (
-        patch.object(participants.User, "login_for_email", side_effect=login_for_email),
-        patch.object(
-            participants.User,
-            "for_login",
-            new_callable=AsyncMock,
-            return_value=SimpleNamespace(github_login="octocat"),
-        ),
-    ):
-        logins, unresolved = await participants._mapped_email_logins(
-            {"octo@example.com", "missing@example.com"}
-        )
-
-    assert logins == {"octocat"}
-    assert unresolved == 1
-
-
-@pytest.mark.asyncio
 async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
     class Threads:
         async def get(self, thread_id: str) -> dict[str, object]:

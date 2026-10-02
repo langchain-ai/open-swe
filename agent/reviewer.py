@@ -35,7 +35,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -123,6 +123,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 SanitizeOpenAIResponsesMiddleware(),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
             ],
@@ -1017,6 +1018,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
                 SanitizeThinkingBlocksMiddleware(),
                 RepairOrphanedToolCallsMiddleware(),
                 StableToolResultOrderMiddleware(),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 settle_review_check_on_exit,
