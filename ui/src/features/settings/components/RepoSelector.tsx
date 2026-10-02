@@ -311,11 +311,6 @@ function RepoSelect(
                         {repo.archived ? " archive" : ""}
                       </span>
                     )}
-                    {history.includes(repo.full_name) && (
-                      <span className="ml-auto pl-3 text-[10px] text-muted-foreground">
-                        Recent
-                      </span>
-                    )}
                     {checked && (
                       <span
                         aria-hidden="true"
