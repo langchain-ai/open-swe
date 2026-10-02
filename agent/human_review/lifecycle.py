@@ -195,19 +195,25 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         diff_image_id=approval.slack_diff_file_id or None,
     )
     payload = block_payload(blocks)
-    if (location := approval.slack_location) is not None:
-        if not await post_slack_ephemeral_message(
-            location[0], author.slack_user_id, text, location[1], blocks=payload
-        ):
-            logger.warning(
-                "Could not deliver author-only ephemeral review card",
-                extra={"approval_id": str(approval.id)},
-            )
     dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
     await approval.save()
+    if (location := approval.slack_location) is not None:
+        dm_url = await get_slack_permalink(*dm_location)
+        destination = f"<{dm_url}|your DM>" if dm_url else "your DM"
+        if not await post_slack_ephemeral_message(
+            location[0],
+            author.slack_user_id,
+            f"Mark <{pr.url}|this pull request> ready or dismiss it from {destination}; "
+            "the author-only card stays up to date there.",
+            location[1],
+        ):
+            logger.warning(
+                "Could not deliver author-only review card pointer",
+                extra={"approval_id": str(approval.id)},
+            )
     return None
 
 

@@ -210,6 +210,9 @@ async def test_readiness_button_is_delivered_only_to_the_author(
         return "D_ADA", "4.0"
 
     ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        lifecycle, "get_slack_permalink", AsyncMock(return_value="https://slack.com/dm")
+    )
     monkeypatch.setattr(lifecycle, "post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
@@ -236,7 +239,9 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert "+fixed" in str(private_blocks)
     assert ephemeral.call_args.args[:2] == ("C1", "U_ADA")
     assert ephemeral.call_args.args[3] == "1.0"
-    assert ephemeral.call_args.kwargs["blocks"] == private_blocks
+    assert "<https://slack.com/dm|your DM>" in ephemeral.call_args.args[2]
+    assert "Draft" not in ephemeral.call_args.args[2]
+    assert "blocks" not in ephemeral.call_args.kwargs
     assert "open_swe_option_select_ready" in str(private_blocks)
     assert "open_swe_option_select_ready" not in str(shared_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
