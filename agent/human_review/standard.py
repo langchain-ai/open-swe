@@ -644,12 +644,12 @@ async def settle(request: HumanReviewRequest) -> bool:
     if states is None:
         return False
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
-        picked = len(request.reviewers)
+        picked = len(request.reviewers) + len(request.picks)
         request = await release_picks(
             request, ", ".join(f"@{login}" for login in approvers) + " approved it"
         )
         # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
-        if request.kind == "standard" and len(request.reviewers) < picked:
+        if request.kind == "standard" and len(request.reviewers) + len(request.picks) < picked:
             await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
