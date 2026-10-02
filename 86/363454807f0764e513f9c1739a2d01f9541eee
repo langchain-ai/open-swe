@@ -1,0 +1,48 @@
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_106563039bde42 127-141,149,158
+  s_8c15db54e0c42b::t_fe0beac3a5f6d4 472-476,482-486,488
+  s_8c15db54e0c42b::t_c0aea8e8f20f6b 369
+  s_8c15db54e0c42b::t_53d5f2f258ff4a 393-395
+  s_8c15db54e0c42b::t_835b13e51f2e0f 106-112
+  s_8c15db54e0c42b::t_5992f5bbff25b0 197,249,334
+  s_8c15db54e0c42b::t_82324ec86a8bbf 416-430
+  s_8c15db54e0c42b::t_00fe28c1ebcd9f 402
+  s_8c15db54e0c42b::t_64c24c7cac7943 527-557
+agent/rollouts.py
+  s_8c15db54e0c42b::t_c6bae95fb2b1cf 181-192,194-204,207-208,210-211,213-225,227-233
+  s_8c15db54e0c42b::t_2fea71fa6043ba 238-241
+  s_8c15db54e0c42b::t_b77f7983d9eb64 4-7,16
+  s_8c15db54e0c42b::t_64ec51e3b4c9bf 71-78
+  s_8c15db54e0c42b::t_d92ad9080a560b 665
+  s_8c15db54e0c42b::t_048b677d213799 91
+  s_8c15db54e0c42b::t_2da084a4b1ff4d 44-46
+  s_8c15db54e0c42b::t_f2bd8e4ebec0e0 694-696,698-699,702
+  s_8c15db54e0c42b::t_12699203aca0bf 234-235,244-245,254-255,260,445,483,530-531,552,604,607,614,666-670,692,703,707,709
+agent/resources/prompts/runs/rollout-check.md.jinja
+  s_8c15db54e0c42b::t_9223d2fe8c4c64 16
+agent/resources/prompts/tools/record_rollout_check.md
+  s_8c15db54e0c42b::t_7e098ebebccba8 1
+agent/resources/prompts/system/commit-pr.md
+  s_8c15db54e0c42b::t_a26d80b30307d3 14
+agent/tools/record_rollout_check.py
+  s_8c15db54e0c42b::t_c0213b0d128cd2 36-44,60-61,65
+  s_8c15db54e0c42b::t_e18ca48427c447 95
+  s_8c15db54e0c42b::t_30e185cf8864de 80
+  s_8c15db54e0c42b::t_3fc52dd303dd4e 4,10,12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "86363454807f0764e513f9c1739a2d01f9541eee",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
