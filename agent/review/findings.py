@@ -18,7 +18,9 @@ import copy
 import hashlib
 import json
 import logging
+import threading
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any, Literal, Self, TypedDict, cast
@@ -63,7 +65,6 @@ REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 MAX_SUGGESTION_LINES = 4
 MAX_FINDING_TITLE_LENGTH = 120
 DEFAULT_FINDING_TITLE = "Code review finding"
-REVIEW_FINDING_CAP = 6
 FINDING_FINGERPRINT_VERSION = 1
 
 
@@ -193,12 +194,6 @@ class ReviewerSlackThread(TypedDict, total=False):
 
     channel_id: str
     thread_ts: str
-
-
-class ReviewerEvalPublication(TypedDict):
-    finding_ids: list[str]
-    severity_threshold: Severity
-    cap: int
 
 
 def new_finding_id() -> str:
@@ -746,6 +741,24 @@ async def _link_interaction_authors(session: AsyncSession, rows: list[FindingRow
             interaction.author_user_id = user_ids.get(interaction.author.lower())
 
 
+# Eval runs review one pull request once and are scored from their publish
+# snapshot, so their findings live in this process for the run. Postgres keeps
+# one reviewer thread's findings per pull request, which repeated benchmark runs
+# of the same pull request would contend for.
+_RUN_SCOPED_FINDINGS: OrderedDict[str, list[Finding]] = OrderedDict()
+_RUN_SCOPED_FINDINGS_LIMIT = 1000
+_RUN_SCOPED_FINDINGS_LOCK = threading.Lock()
+
+
+def start_run_scoped_findings(thread_id: str) -> None:
+    """Keep ``thread_id``'s findings in memory for this run, starting empty."""
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        _RUN_SCOPED_FINDINGS.pop(thread_id, None)
+        _RUN_SCOPED_FINDINGS[thread_id] = []
+        while len(_RUN_SCOPED_FINDINGS) > _RUN_SCOPED_FINDINGS_LIMIT:
+            _RUN_SCOPED_FINDINGS.popitem(last=False)
+
+
 def _rows_query(*pull_request_ids: UUID) -> Select[FindingRow]:
     return (
         select(FindingRow)
@@ -761,6 +774,9 @@ async def list_findings(thread_id: str) -> list[Finding]:
     Raises :class:`ReviewerThreadMissingError` when a thread not yet copied to
     PostgreSQL does not exist; other failures degrade to no findings.
     """
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
+            return copy.deepcopy(scoped)
     try:
         pull_request_id = await _ensure_finding_state(thread_id)
         async with postgres.session() as session:
@@ -914,6 +930,10 @@ async def mutate_findings(
     list in place and returns ``True`` when it changed something; we only write
     on change, so a no-op mutation never clobbers a concurrent update.
     """
+    with _RUN_SCOPED_FINDINGS_LOCK:
+        if (scoped := _RUN_SCOPED_FINDINGS.get(thread_id)) is not None:
+            mutator(scoped)
+            return copy.deepcopy(scoped)
     pull_request_id = await _ensure_finding_state(thread_id)
     async with postgres.session() as session:
         await session.execute(
@@ -1072,10 +1092,6 @@ async def set_reviewer_thread_metadata(
         raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
-def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:
-    return bool(metadata.get("watch"))
-
-
 def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:
     value = metadata.get("last_reviewed_sha")
     return value if isinstance(value, str) and value else None
@@ -1105,7 +1121,6 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int | None = None,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
@@ -1113,7 +1128,6 @@ def filter_findings_for_publish(
     - severity must be at or above ``severity_threshold``
     - sorted by the reviewer's ``rank``; unranked findings follow by severity
       descending, then file/start_line for stable ordering
-    - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [
@@ -1131,4 +1145,4 @@ def filter_findings_for_publish(
             f.get("start_line") or 0,
         )
     )
-    return eligible[:cap]
+    return eligible

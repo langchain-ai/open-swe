@@ -111,8 +111,20 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    await _cancel_inflight_runs()
     await _reset_durable_pr_state()
     return JSONResponse({"ok": True})
+
+
+async def _cancel_inflight_runs() -> None:
+    """Stop runs an earlier spec left going; the single dev worker would queue the next spec's run behind them."""
+    client = get_client(url=BASE_URL)
+    # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
+    for thread in await client.threads.search(status="busy", limit=1000):
+        thread_id = thread["thread_id"]
+        for status in ("pending", "running"):
+            for run in await client.runs.list(thread_id, status=status, limit=100):
+                await client.runs.cancel(thread_id, run["run_id"], wait=True)
 
 
 @app.post("/control/reset-default-workspace")
@@ -761,7 +773,13 @@ async def control_login(request: Request) -> JSONResponse:
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
+    from agent.users import User
+
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    token = issue_session(
+        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
+    )
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -794,7 +812,13 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
+    from agent.users import User
+
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    token = issue_session(
+        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
+    )
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -842,7 +866,13 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(uuid.uuid7()))
+    from agent.users import User
+
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    token = issue_session(
+        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
+    )
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp

@@ -1,20 +1,13 @@
-"""Watch pull requests people post in their repository's Slack review channel.
-
-A top-level message linking exactly one pull request, from someone with
-``review_channel_watch`` on, in the channel that repository names as its
-``reviewChannel``, becomes a ``posted`` request on that message.
-"""
+"""Watch pull requests people post in any Slack channel the bot listens in."""
 
 import logging
 import re
 
 from sqlalchemy.exc import IntegrityError
 
-from agent.github.repo_files import RepoSettings
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import record_pull_request, settle
-from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.users import User
 
@@ -31,14 +24,6 @@ def linked_pull_request(text: str) -> GitHubPrRef | None:
         if (ref := parse_github_pr_url(match.group(0))) is not None
     }
     return next(iter(refs.values())) if len(refs) == 1 else None
-
-
-async def _is_review_channel(pr_ref: GitHubPrRef, channel_id: str, token: str) -> bool:
-    configured = (await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)).review_channel
-    if not configured.strip():
-        return False
-    channel = await SlackChannel.resolve(configured)
-    return channel is not None and channel.id == channel_id
 
 
 async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text: str) -> None:
@@ -58,8 +43,6 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
     token = await repo_token(pr_ref.owner, pr_ref.repo)
     if token is None:
         logger.info("Posted pull request is outside the GitHub App's reach", extra=extra)
-        return
-    if not await _is_review_channel(pr_ref, channel_id, token):
         return
     if await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number) is not None:
         logger.info("Posted pull request already has an open review request", extra=extra)

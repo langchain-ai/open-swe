@@ -9,11 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent.api.health import router as health_router
 from agent.api.request_ids import add_request_ids
-from agent.api.tracing import add_trace_resource_names
+from agent.api.tracing import add_trace_resource_names, configure_datadog_environment
 from agent.config import ENV
 from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
+from agent.openai_responses.routes import router as sandbox_openai_router
 from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
@@ -115,6 +116,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    configure_datadog_environment()
     app = FastAPI(lifespan=lifespan)
     allowed_origins = [
         origin.strip()
@@ -143,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(github_webhook_router)
     app.include_router(sandbox_tool_router)
+    app.include_router(sandbox_openai_router)
     mount_dashboard_ui(app)
     return app
 

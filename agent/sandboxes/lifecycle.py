@@ -33,6 +33,7 @@ from agent.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
+from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -48,8 +49,6 @@ from agent.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 client = get_client()
-
-_SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 
 
 def _owner_login(metadata: dict[str, Any]) -> str | None:
@@ -428,7 +427,7 @@ async def ensure_sandbox_for_thread(
             return set_sandbox_backend(
                 thread_id, await BridgeSandboxBackend.connect(thread_id, bridge_id)
             )
-    metadata_proxy_config = sandbox_metadata.get(_SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
         if isinstance(metadata_proxy_config, dict)
@@ -500,20 +499,27 @@ async def ensure_sandbox_for_thread(
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
     if created:
-        sandbox_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
+        bind_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
         if created_proxy_config is not None:
-            sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
+            bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
         async with aphase(thread_id, "sandbox.bind_thread"):
-            await client.threads.update(thread_id=thread_id, metadata=sandbox_metadata)
+            await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
 
     # Publishing last is what makes a failure above visible. Callers reach the
     # proxy's cached backend without awaiting the startup task that produced it,
     # so a backend published before this point would be used by the rest of the
     # run while the initialization that failed is only logged.
     from agent.sandboxes.tool_access import provision_tool_url
+    from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
     await provision_tool_url(thread_id, sandbox_backend)
-    return set_sandbox_backend(thread_id, sandbox_backend)
+    published = set_sandbox_backend(thread_id, sandbox_backend)
+    if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+        from agent.background_tasks import reconcile_background_tasks
+
+        # A runner killed with its sandbox never calls back; this is where its task turns up lost.
+        _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
+    return published
 
 
 async def recreate_sandbox_for_thread(
@@ -521,12 +527,8 @@ async def recreate_sandbox_for_thread(
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-) -> tuple[str, str]:
-    """Bind a thread to a fresh sandbox while preserving its previous sandbox.
-
-    ``workspace`` boots the thread's workspace snapshot; ``base`` boots the base
-    snapshot with deployment defaults, as a thread with no workspace would.
-    """
+) -> tuple[str, str, str | None]:
+    """Best-effort stop the old sandbox and bind the thread to a fresh one."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = metadata.get("sandbox_id")
@@ -536,6 +538,37 @@ async def recreate_sandbox_for_thread(
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
     if Bridge.bridge_id_of(old_sandbox_id) is not None:
         raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
+
+    from agent.sandboxes.providers.langsmith import get_async_sandbox_client
+
+    stop_error = None
+    try:
+        async with asyncio.timeout(10):
+            if ENV.SANDBOX_TYPE.get() != "langsmith":
+                stop_error = "Stopping this sandbox provider is not supported"
+                logger.warning(
+                    "Stopping this sandbox provider is not supported",
+                    extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
+                )
+            else:
+                async with get_async_sandbox_client() as sandbox_client:
+                    await sandbox_client.stop_sandbox(old_sandbox_id)
+    except Exception as exc:
+        stop_error = (
+            "Stopping the old sandbox timed out after 10 seconds"
+            if isinstance(exc, TimeoutError)
+            else str(exc)
+        )
+        logger.warning(
+            "Failed to stop old sandbox before recreation",
+            extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
+            exc_info=True,
+        )
+    else:
+        if stop_error is None:
+            logger.info(
+                "Stopped old sandbox before recreation", extra={"sandbox_id": old_sandbox_id}
+            )
 
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
@@ -551,7 +584,7 @@ async def recreate_sandbox_for_thread(
     sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
     base_proxy_config = get_recorded_proxy_base_config(thread_id)
     if base_proxy_config is not None:
-        sandbox_metadata[_SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config
+        sandbox_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config
     await client.threads.update(
         thread_id=thread_id,
         metadata=sandbox_metadata,
@@ -566,7 +599,7 @@ async def recreate_sandbox_for_thread(
         old_sandbox_id,
         new_sandbox.id,
     )
-    return old_sandbox_id, new_sandbox.id
+    return old_sandbox_id, new_sandbox.id, stop_error
 
 
 def get_cached_sandbox_backend(

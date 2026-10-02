@@ -102,7 +102,6 @@ export function SubagentThreadView({
       <Messages
         messages={messages}
         threadId={thread.id}
-        showUserNames={false}
         scrollKey={`${thread.id}:${subagentId}`}
         isStreaming={isRunning}
         contentWidthClass="max-w-3xl"

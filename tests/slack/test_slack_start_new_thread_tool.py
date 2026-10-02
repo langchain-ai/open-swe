@@ -11,6 +11,7 @@ from agent.credential_scope import (
     pr_author_login,
     private_credential_login,
 )
+from agent.slack import breakout_destination
 from agent.slack.channels import SlackChannel
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
@@ -31,17 +32,30 @@ def _channel(*, private: bool) -> SlackChannel | None:
 @pytest.fixture(autouse=True)
 def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=False)))
+    monkeypatch.setattr(breakout_destination.WORKSPACES, "get", AsyncMock(return_value=None))
 
 
+@pytest.mark.parametrize("private_source", [True, False])
 async def test_slack_start_new_thread_refuses_private_channel(
     monkeypatch: pytest.MonkeyPatch,
+    private_source: bool,
 ) -> None:
     monkeypatch.setattr("agent.run_config.get_config", _config)
-    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=_channel(private=True)))
+    monkeypatch.setattr(
+        SlackChannel,
+        "load",
+        AsyncMock(
+            side_effect=lambda channel_id, **_: _channel(
+                private=(channel_id == "C1") == private_source
+            )
+        ),
+    )
     post = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
-    result = await slack_breakout_tool.slack_start_new_thread("Title", "Do the thing.")
+    result = await slack_breakout_tool.slack_start_new_thread(
+        "Title", "Do the thing.", channel_id="C2"
+    )
 
     assert result["success"] is False
     post.assert_not_awaited()
@@ -55,6 +69,7 @@ def _config() -> dict[str, Any]:
     return {
         "configurable": {
             "thread_id": "parent-thread",
+            "workspace": "engineering",
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "github_login": "alice",
             "user_email": "alice@example.com",
@@ -102,11 +117,18 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "permalink", ["https://example.slack.com/archives/C1/p1700000000111111", None]
+    ("configured", "explicit", "target"),
+    [(None, None, "C1"), ("C2", None, "C2"), ("C2", "C3", "C3")],
 )
 async def test_slack_start_new_thread_success(
-    monkeypatch: pytest.MonkeyPatch, permalink: str | None
+    monkeypatch: pytest.MonkeyPatch, configured: str | None, explicit: str | None, target: str
 ) -> None:
+    permalink = None
+    monkeypatch.setattr(
+        breakout_destination.WORKSPACES,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(breakout_channel_id=configured)),
+    )
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
 
@@ -146,6 +168,7 @@ async def test_slack_start_new_thread_success(
             "unfurl_media": unfurl_media,
             "blocks": blocks,
             "usage": usage,
+            "agent_thread_id": kwargs.get("agent_thread_id"),
         }
         return "1700000000.222222", None
 
@@ -225,6 +248,7 @@ async def test_slack_start_new_thread_success(
     result = await slack_breakout_tool.slack_start_new_thread(
         "Investigate follow-up",
         "Use the same repo and investigate the follow-up aspect in detail.",
+        channel_id=explicit,
     )
 
     expected_thread_id = captured["thread_create"]["thread_id"]
@@ -234,19 +258,19 @@ async def test_slack_start_new_thread_success(
         "thread_id": expected_thread_id,
         "thread_ts": new_ts,
         "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
-        "slack_url": permalink or "https://slack.com/archives/C1/p1700000000111111",
+        "slack_url": permalink or f"https://slack.com/archives/{target}/p1700000000111111",
         "next_step": "End the turn with slack_no_reply_needed; do not reply in the current thread.",
     }
-    get_permalink.assert_awaited_once_with("C1", new_ts)
-    assert captured["top_level_post"]["channel_id"] == "C1"
+    get_permalink.assert_awaited_once_with(target, new_ts)
+    assert captured["top_level_post"]["channel_id"] == target
     assert captured["top_level_post"]["text"] == (
         "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
-    react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", "C1", new_ts)
+    react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False
     assert captured["thread_reply"] == {
-        "channel_id": "C1",
+        "channel_id": target,
         "thread_ts": new_ts,
         "text": (
             "*Repository:* `langchain-ai/open-swe`\n\n"
@@ -257,14 +281,17 @@ async def test_slack_start_new_thread_success(
         "unfurl_media": False,
         "blocks": None,
         "usage": None,
+        "agent_thread_id": expected_thread_id,
     }
     assert captured["thread_create"]["if_exists"] == "do_nothing"
     assert captured["thread_create"]["thread_id"] == expected_thread_id
     assert captured["binding"]["thread_id"] == expected_thread_id
-    assert captured["binding"]["channel_id"] == "C1"
+    assert captured["binding"]["channel_id"] == target
     assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
+    assert metadata["workspace"] == "engineering"
+    assert metadata["source_context"]["slack_thread"]["channel_id"] == target
     assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert metadata["github_login"] == "alice"
     assert metadata["triggering_user_email"] == "alice@example.com"
@@ -278,6 +305,8 @@ async def test_slack_start_new_thread_success(
     dispatch = captured["dispatch"]
     assert dispatch["thread_id"] == expected_thread_id
     assert dispatch["source"] == "slack"
+    assert dispatch["configurable"]["workspace"] == "engineering"
+    assert dispatch["configurable"]["slack_thread"]["channel_id"] == target
     assert dispatch["configurable"]["slack_thread"]["thread_ts"] == new_ts
     assert dispatch["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert dispatch["configurable"]["github_login"] == "alice"
@@ -294,6 +323,7 @@ async def test_slack_start_new_thread_success(
     assert "trace" not in captured
     assert [item["message_ts"] for item in captured["stored_mappings"]] == [new_ts]
     assert all(item["triggering_user_id"] == "U1" for item in captured["stored_mappings"])
+    assert all(item["channel_id"] == target for item in captured["stored_mappings"])
 
 
 @pytest.mark.parametrize(

@@ -461,6 +461,17 @@ test.describe("threads workspace", () => {
       },
     ]);
     await loginAs(page);
+    await page.route("**/dashboard/api/me", async (route) => {
+      const response = await route.fetch();
+      const session = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          ...session,
+          slack_oauth_enabled: true,
+          slack_user_id: null,
+        },
+      });
+    });
 
     const profileGate = deferred();
     const profileStarted = deferred();
@@ -494,7 +505,7 @@ test.describe("threads workspace", () => {
       (window as unknown as Record<string, unknown>).__newThreadDialogSeen =
         seen;
       const detect = () => {
-        if (document.body.textContent?.includes("Choose your default model")) {
+        if (document.body.textContent?.includes("Connect your Slack account")) {
           seen.value = true;
         }
       };
@@ -678,8 +689,11 @@ test.describe("threads workspace", () => {
       name: "Pin No repository",
       includeHidden: true,
     });
-    await pinNoRepo.locator("..").hover();
-    await pinNoRepo.click();
+    // Rows seeded by earlier tests can still shift the folder after the hover lands.
+    await expect(async () => {
+      await pinNoRepo.locator("..").hover();
+      await pinNoRepo.click({ timeout: 2_000 });
+    }).toPass();
     await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
     await expect(
       sidebar.getByRole("button", { name: "No repository", exact: true }),
@@ -692,8 +706,10 @@ test.describe("threads workspace", () => {
       name: "Unpin No repository",
       includeHidden: true,
     });
-    await unpinNoRepo.locator("..").hover();
-    await expect(unpinNoRepo).toBeVisible();
+    await expect(async () => {
+      await unpinNoRepo.locator("..").hover();
+      await expect(unpinNoRepo).toBeVisible({ timeout: 2_000 });
+    }).toPass();
 
     const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
     await sidebar.screenshot({ path: screenshotPath });

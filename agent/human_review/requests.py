@@ -94,6 +94,8 @@ class HumanReviewRequest(Base):
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")
     # Empty for a standard card posted at the top of the review channel.
     slack_thread_ts: Mapped[str] = mapped_column(server_default="", default="")
+    slack_dm_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    slack_dm_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
