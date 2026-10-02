@@ -1,0 +1,29 @@
+agent/resources/prompts/reviewer/main.md.jinja
+  s_1a3ac8f281779f::t_f1765dc820cc65 132
+tests/docs/test_workflow.py
+  s_1a3ac8f281779f::t_9ae1d3d80af649 228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "218e647eda3e0c77e5d61a63c0f946b56f40c6da",
+  "prompts": {},
+  "humans": {
+    "h_3a9d271fbf3886": {
+      "author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    },
+    "h_fd2bd7aaf435a7": {
+      "author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_1a3ac8f281779f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fd7c-6bd3-7083-b326-0bf98c2a0a67",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    }
+  }
+}
