@@ -586,7 +586,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
           target={
-            thread.sandboxBridgeClient === "desktop"
+            localThread || thread.sandboxBridgeClient === "desktop"
               ? "This Mac"
               : thread.sandboxBridgeClient === "cli"
                 ? "Local CLI"

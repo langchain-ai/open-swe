@@ -525,9 +525,14 @@ export function AgentsHome({
       }
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
-      const thread: AgentThread = optimisticThread(threadId, draft, {
-        recorded: session.data?.transcript_recording === true,
-      })
+      const thread: AgentThread = {
+        ...optimisticThread(threadId, draft, {
+          recorded: session.data?.transcript_recording === true,
+        }),
+        // So the seeded thread already reads as This Mac, not Cloud, until
+        // the server's record replaces it.
+        ...(localCheckout ? { sandboxBridgeClient: "desktop" as const } : {}),
+      }
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
