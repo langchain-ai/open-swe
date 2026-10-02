@@ -1,88 +1,115 @@
-"""The rollout webhook verifies the signature and acknowledges the delivery."""
+"""The rollout webhook trusts a GitHub Actions OIDC token for an allowed repo."""
 
-import hashlib
-import hmac
 import json
+import time
 
 import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 
 from openswe.rollout_events import router
 
-_SECRET = "test-rollout-webhook-secret"
+_PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_REPO = "langchain-ai/langchainplus"
+_WORKFLOW = ".github/workflows/notify_rollout.yaml"
+_AUDIENCE = "openswe-rollout"
 
 
-def _signature(body: bytes, secret: str = _SECRET) -> str:
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
+class _SigningKey:
+    def __init__(self) -> None:
+        self.key = _PRIVATE.public_key()
+
+
+class _Keys:
+    def get_signing_key_from_jwt(self, token: str) -> _SigningKey:
+        return _SigningKey()
+
+
+def _token(**overrides: object) -> str:
+    now = int(time.time())
+    claims: dict[str, object] = {
+        "iss": "https://token.actions.githubusercontent.com",
+        "aud": _AUDIENCE,
+        "sub": f"repo:{_REPO}:ref:refs/heads/main",
+        "repository": _REPO,
+        "job_workflow_ref": f"{_REPO}/{_WORKFLOW}@refs/heads/main",
+        "iat": now,
+        "exp": now + 300,
+    }
+    claims.update(overrides)
+    encoded = jwt.encode(claims, _PRIVATE, algorithm="RS256")
+    return encoded if isinstance(encoded, str) else encoded.decode()
 
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.setenv("ROLLOUT_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setenv("ROLLOUT_OIDC_REPOS", _REPO)
+    monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOW", _WORKFLOW)
+    monkeypatch.setenv("ROLLOUT_OIDC_AUDIENCE", _AUDIENCE)
+    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
     return api
 
 
-@pytest.mark.asyncio
-async def test_rollout_webhook_acknowledges_a_signed_deploy(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40, "b" * 40, "not-a-sha"]}).encode()
+async def _post(app: FastAPI, body: bytes, token: str | None) -> httpx.Response:
+    headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.post(
-            "/webhooks/rollout",
-            content=body,
-            headers={"X-Rollout-Signature-256": _signature(body)},
-        )
+        return await client.post("/webhooks/rollout", content=body, headers=headers)
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40, "b" * 40, "not-a-sha"]}).encode()
+    response = await _post(app, body, _token())
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "target": "gcp-dev", "commits": 2}
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_a_bad_signature(app: FastAPI) -> None:
+async def test_rollout_webhook_rejects_a_token_for_another_audience(app: FastAPI) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.post(
-            "/webhooks/rollout",
-            content=body,
-            headers={"X-Rollout-Signature-256": _signature(body, secret="other-secret")},
-        )
+    response = await _post(app, body, _token(aud="https://openswe.langchain.dev"))
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_when_the_secret_is_unset(
+async def test_rollout_webhook_rejects_a_repository_that_is_not_allowed(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+    response = await _post(app, body, _token(repository="other/repo"))
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_rejects_a_different_workflow(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+    response = await _post(
+        app,
+        body,
+        _token(job_workflow_ref=f"{_REPO}/.github/workflows/other.yaml@refs/heads/main"),
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_rejects_when_no_repository_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ROLLOUT_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("ROLLOUT_OIDC_REPOS", raising=False)
+    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=api), base_url="http://test"
-    ) as client:
-        response = await client.post(
-            "/webhooks/rollout",
-            content=body,
-            headers={"X-Rollout-Signature-256": _signature(body)},
-        )
+    response = await _post(api, body, _token())
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_rejects_an_empty_commit_list(app: FastAPI) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": []}).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.post(
-            "/webhooks/rollout",
-            content=body,
-            headers={"X-Rollout-Signature-256": _signature(body)},
-        )
+    response = await _post(app, body, _token())
     assert response.status_code == 400

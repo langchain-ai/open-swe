@@ -44,6 +44,8 @@ class GitHubActionsClaims(BaseModel):
     repository_visibility: str = ""
     ref: str = ""
     workflow_ref: str = ""
+    # Set when the job that requested the token is a reusable workflow.
+    job_workflow_ref: str = ""
     run_id: str = ""
 
     @property
@@ -94,13 +96,15 @@ def _verify(token: str, expected_audience: str) -> GitHubActionsClaims:
     return GitHubActionsClaims.model_validate(claims)
 
 
-async def verify(token: str) -> GitHubActionsClaims:
+async def verify(token: str, *, expected_audience: str | None = None) -> GitHubActionsClaims:
     """The workflow behind ``token``, or raise.
 
-    Runs in a thread because fetching and caching GitHub's keys is synchronous
-    I/O inside PyJWT.
+    ``expected_audience`` overrides the deployment's federated audience so a
+    token minted for one listener cannot be replayed against another. Runs in a
+    thread because fetching and caching GitHub's keys is synchronous I/O inside
+    PyJWT.
     """
-    expected = audience()
+    expected = audience() if expected_audience is None else expected_audience.strip()
     if not expected:
         raise InvalidFederatedToken(
             "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or DASHBOARD_BASE_URL"
