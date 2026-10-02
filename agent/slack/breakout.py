@@ -9,12 +9,15 @@ from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    append_slack_web_link_footer,
     get_active_slack_thread,
     post_slack_ephemeral_message,
     post_slack_top_level_message_with_ts,
+    update_slack_message,
 )
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks import common
@@ -169,9 +172,10 @@ async def _start(
             await _tell_sender(request, "Private threads cannot be broken out to another channel.")
             return
     heading = f"`/breakout`: {_title(instruction)}"
+    root_text = await _root_text(request, heading)
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
-        await _root_text(request, heading),
+        root_text,
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -184,6 +188,19 @@ async def _start(
         return
     await _mark_done(request, target, new_ts)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
+    web_url = dashboard_thread_url(thread_id)
+    if web_url:
+        ok, error = await update_slack_message(
+            target,
+            new_ts,
+            append_slack_web_link_footer(root_text, web_url),
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        if not ok:
+            logger.warning(
+                "Slack breakout header web link update failed", extra={"slack_error": error}
+            )
     moved_channel = target != request.channel_id
     if moved_channel:
         repo = await common.get_slack_repo_config(
@@ -201,6 +218,7 @@ async def _start(
                 "text": instruction,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
+                "breakout_root_suffix": root_text[len(heading) :],
                 "prior_message_text": prior_text,
                 **(
                     {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}

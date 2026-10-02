@@ -303,6 +303,13 @@ async def delete_access_token(login: str) -> None:
     await delete_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
+async def mark_access_token_revoked(login: str, token: str) -> None:
+    """Flag a stored token GitHub rejected so callers prompt a re-login."""
+    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
+    if record and _decrypt_access_token(record) == token:
+        await put_value(OAUTH_TOKENS_NAMESPACE, login, {**record, "revoked": True})
+
+
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
     encrypted = record.get("encrypted_gh_token")
     if not encrypted:
@@ -342,7 +349,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
     """Return a GitHub access token, refreshing proactively when near expiry."""
     record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-    if not record:
+    if not record or record.get("revoked"):
         return None
 
     access_token = _decrypt_access_token(record)

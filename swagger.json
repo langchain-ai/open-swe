@@ -3850,6 +3850,71 @@
         "title": "PullRequestReviewSubmit",
         "type": "object"
       },
+      "PullRequestSearchResult": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "draft",
+              "merged",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number",
+          "url",
+          "title",
+          "body",
+          "state"
+        ],
+        "title": "PullRequestSearchResult",
+        "type": "object"
+      },
+      "PullRequestSearchResults": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "pull_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestSearchResult"
+            },
+            "title": "Pull Requests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pull_requests",
+          "has_more"
+        ],
+        "title": "PullRequestSearchResults",
+        "type": "object"
+      },
       "PullRequestState": {
         "description": "Live GitHub truth for one PR: check verdict plus open/merged/closed.",
         "properties": {
@@ -11114,6 +11179,79 @@
           }
         ],
         "summary": "Api List Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/pull-requests/search": {
+      "get": {
+        "operationId": "api_search_pull_requests_dashboard_api_pull_requests_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestSearchResults"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Search Pull Requests",
         "tags": [
           "dashboard",
           "pull-requests"
