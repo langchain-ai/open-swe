@@ -275,10 +275,12 @@ export function WorkspaceEditor({
                 : "Current channel"}
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Current channel</SelectItem>
+          <SelectContent className="w-max max-w-[calc(100vw-2rem)] min-w-(--anchor-width)">
+            <SelectItem className="pr-8" value="">
+              Current channel
+            </SelectItem>
             {draft.slackChannelIds.map((id) => (
-              <SelectItem key={id} value={id}>
+              <SelectItem className="pr-8" key={id} value={id}>
                 {channelLabel(id)}
               </SelectItem>
             ))}

@@ -795,26 +795,32 @@ describe("WorkspaceSettingsPanel", () => {
       })
     renderPage()
 
-    const fable = (
-      await screen.findByRole("heading", { name: "Fable" })
-    ).closest("section")
-    if (!fable) throw new Error("no Fable section")
-    const toggle = within(fable).getByRole("switch")
+    const row = (await screen.findByText("Review Draft PRs")).closest(
+      "label"
+    )!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
-    expect(within(fable).getByText("Inherited")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
 
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("oss", { review_draft_prs: true })
     )
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(
-      within(fable).getByRole("button", {
-        name: "Reset Allow Fable models to the instance value",
+      await screen.findByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
       })
     )
     await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("false")
+    )
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
+      })
+    ).toBeNull()
   })
 })
