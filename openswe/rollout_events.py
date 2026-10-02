@@ -7,7 +7,7 @@ the event to a pull request this server worked on arrives with the rollout watch
 import json
 import logging
 import re
-from typing import Any
+from typing import Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -18,6 +18,13 @@ from openswe.federation.github_oidc import verify as verify_github_oidc
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class RolloutAccepted(TypedDict):
+    status: Literal["accepted"]
+    target: str
+    commits: int
+
 
 _MAX_COMMITS = 5000
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
@@ -74,21 +81,27 @@ async def _authorize(header: str) -> None:
     try:
         claims = await verify_github_oidc(token, expected_audience=ENV.ROLLOUT_OIDC_AUDIENCE.get())
     except InvalidFederatedToken as exc:
-        logger.warning("Rejected rollout OIDC token: %s", exc)
+        logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
         raise HTTPException(status_code=401, detail="Invalid token") from None
     if claims.repository.lower() not in repos:
-        logger.warning("Rejected rollout event from repository %s", claims.repository)
+        logger.warning(
+            "Rejected rollout event from an unlisted repository",
+            extra={"rollout_repository": claims.repository},
+        )
         raise HTTPException(status_code=401, detail="Invalid token")
     workflows = ENV.ROLLOUT_OIDC_WORKFLOWS.get_list()
     if not workflows:
         logger.warning("ROLLOUT_OIDC_WORKFLOWS is not configured — rejecting rollout event")
         raise HTTPException(status_code=401, detail="Invalid token")
     if not _workflow_allowed(claims.workflow_ref, workflows):
-        logger.warning("Rejected rollout event from workflow %s", claims.workflow_ref)
+        logger.warning(
+            "Rejected rollout event from an unlisted workflow",
+            extra={"rollout_workflow": claims.workflow_ref},
+        )
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-async def accept_rollout_deploy(target: str, commits: list[str]) -> dict[str, Any]:
+async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccepted:
     """Acknowledge a verified deploy. Watch matching is added with rollouts."""
     logger.info(
         "Accepted rollout deploy",
@@ -98,12 +111,12 @@ async def accept_rollout_deploy(target: str, commits: list[str]) -> dict[str, An
 
 
 @router.post("/webhooks/rollout")
-async def rollout_webhook(request: Request) -> dict[str, Any]:
+async def rollout_webhook(request: Request) -> RolloutAccepted:
     """Verify a deployment event and acknowledge it."""
     await _authorize(request.headers.get("Authorization", ""))
     try:
         payload = json.loads(await request.body())
-    except json.JSONDecodeError:
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid JSON") from None
     parsed = parse_rollout_event(payload)
     if parsed is None:
