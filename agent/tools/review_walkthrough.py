@@ -12,6 +12,7 @@ from agent.review_guide.diff import ChangedLine, FileChange
 from agent.review_guide.github import fetch_head
 from agent.review_guide.messages import Stage, refresh_progress, retire
 from agent.review_guide.render import RenderError, fenced
+from agent.review_guide.sessions import GuideMode
 from agent.review_guide.walk import (
     FileRanges,
     Group,
@@ -24,6 +25,9 @@ from agent.review_guide.walk import (
 from agent.run_config import RunConfig
 from agent.slack.code_channels import archive_code_channel, set_session_status_result
 from agent.slack.tools.reply import slack_reply
+from agent.tools.approve_pull_request import approve_pull_request
+from agent.tools.mark_pull_request_ready import mark_pull_request_ready
+from agent.tools.record_author_feedback import record_author_feedback
 
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
@@ -307,3 +311,25 @@ async def end_walkthrough(message: str = "", archive: bool = False) -> dict[str,
         "archived": archive,
         **({"warnings": warnings} if warnings else {}),
     }
+
+
+def walkthrough_tools(mode: GuideMode, *, prefetch: bool) -> list[Callable[..., Awaitable[Any]]]:
+    """The tools a review walkthrough adds; a prepare run gets only those that post nothing."""
+    if prefetch:
+        return [queue_chunk, edit_queue, move_to_other]
+    closing: list[Callable[..., Awaitable[Any]]] = (
+        [mark_pull_request_ready, record_author_feedback]
+        if mode == "author"
+        else [approve_pull_request]
+    )
+    return [
+        show_chunk,
+        show_queued,
+        queue_chunk,
+        edit_queue,
+        move_to_other,
+        skip_changes,
+        show_other,
+        end_walkthrough,
+        *closing,
+    ]

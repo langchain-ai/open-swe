@@ -34,7 +34,6 @@ from agent.input_messages import (
 )
 from agent.prompts import load_prompt
 from agent.review_guide.advance import cancel_prefetch
-from agent.review_guide.sessions import ASSISTANT_ID as REVIEW_GUIDE_ASSISTANT_ID
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
@@ -112,7 +111,6 @@ async def _dispatch_or_queue_slack_run(
     *,
     explicitly_tagged: bool,
     trigger_ts: str,
-    assistant_id: str = "agent",
 ) -> dict[str, Any]:
     """Dispatch explicit requests immediately and enqueue other Slack follow-ups."""
     if isinstance(run_input, list):
@@ -125,7 +123,6 @@ async def _dispatch_or_queue_slack_run(
             source="slack",
             thread_title=None,
             input=run_input,
-            assistant_id=assistant_id,
             metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
@@ -1184,15 +1181,6 @@ async def _process_slack_mention_impl(
         # Dispatch would create the thread itself, with no metadata and so public.
         raise RuntimeError("could not persist thread authorization metadata")
 
-    # An edit corrects a request the agent already has, so it belongs in the
-    # thread's message queue rather than in a run of its own. Nothing drains that
-    # queue while the thread is idle; an edit made after the agent finished waits
-    # for the next message. The review guide never drains that queue, so its edits are dropped.
-    if message_update and review_guide:
-        common.logger.info(
-            "Ignoring a Slack message edit in a review guide", extra={"agent_thread_id": thread_id}
-        )
-        return False
     # The guide starts its own first turn; this quote would only queue a second one behind it.
     if review_guide and _CODE_CHANNEL_ORIGIN_QUOTE.match(text):
         common.logger.info(
@@ -1206,6 +1194,10 @@ async def _process_slack_mention_impl(
     # The reader spoke: stop preparing ahead so the guide hears them now, not after.
     if guide is not None:
         await cancel_prefetch(langgraph_client, thread_id)
+    # An edit corrects a request the agent already has, so it belongs in the
+    # thread's message queue rather than in a run of its own. Nothing drains that
+    # queue while the thread is idle; an edit made after the agent finished waits
+    # for the next message.
     if message_update and await queue_message_for_thread(
         thread_id, [{"type": "text", "text": _MESSAGE_UPDATE_PREAMBLE}, *content_blocks]
     ):
@@ -1287,7 +1279,6 @@ async def _process_slack_mention_impl(
             configurable,
             explicitly_tagged=explicitly_tagged,
             trigger_ts=event_ts,
-            assistant_id=REVIEW_GUIDE_ASSISTANT_ID if review_guide else "agent",
         )
     except Exception:
         # No run means no completion webhook, so nothing else would ever clear
@@ -1313,7 +1304,6 @@ async def _process_slack_mention_impl(
             original_message_ts=original_message_ts,
             recipient_user_id=user_id,
             recipient_team_id=request.team_id,
-            assistant_id=REVIEW_GUIDE_ASSISTANT_ID if review_guide else "agent",
         )
     if is_first_mention:
         if isinstance(run_id, str) and run_id:

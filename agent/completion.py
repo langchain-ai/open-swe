@@ -29,7 +29,6 @@ from agent.linear.notifications import post_linear_notification
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
 from agent.review_guide.advance import top_up_after_run
-from agent.review_guide.sessions import ReviewGuideSession
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
@@ -442,9 +441,6 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
 
     client = langgraph_client()
     try:
-        # Follow-ups run the main agent, which must never run on a review guide's thread.
-        if await ReviewGuideSession.exists(thread_id):
-            return
         metadata = thread_metadata(await client.threads.get(thread_id))
         login = metadata.get("owner_login")
         if not isinstance(login, str) or not login:

@@ -23,8 +23,6 @@ from agent.review_guide.walk import Walk
 from agent.users.models import User
 from agent.utils.json_types import JsonObject
 
-ASSISTANT_ID = "review-guide"
-
 # A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
 GuideMode = Literal["reviewer", "author"]
 
@@ -142,10 +140,6 @@ class ReviewGuideSession(Base):
                 .options(selectinload(cls.pull_request))
                 .where(cls.thread_id == thread_id)
             )
-
-    @classmethod
-    async def exists(cls, thread_id: str) -> bool:
-        return await cls.get(thread_id) is not None
 
     @classmethod
     async def for_pull_request(cls, owner: str, repo: str, number: int) -> list[Self]:

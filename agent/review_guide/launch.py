@@ -7,10 +7,9 @@ Slack archived its channel. Only the reader's own message reopens it.
 
 import logging
 import time
-from uuid import uuid4
 
 from langgraph_sdk.client import LangGraphClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.dashboard.profiles import get_valid_access_token
 from agent.dispatch import create_durable_run
@@ -21,7 +20,12 @@ from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
 from agent.review_guide.github import fetch_head
 from agent.review_guide.messages import pause, refresh_progress
-from agent.review_guide.sessions import ASSISTANT_ID, GuideMode, ReviewGuideSession
+from agent.review_guide.sessions import GuideMode, ReviewGuideSession
+from agent.sandboxes.tool_access import (
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+    sandbox_host_thread_id,
+)
 from agent.slack.channels import SlackChannel
 from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel, slack_user_ids
 from agent.slack.code_channels import (
@@ -49,6 +53,8 @@ class GuideStart(BaseModel):
     owner: str
     repo: str
     number: int
+    # The conversation the walkthrough is forked from, sandbox included.
+    source_thread_id: str
     requester_slack_id: str
     origin_channel_id: str
     origin_message_ts: str
@@ -89,7 +95,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         else "reviewer"
     )
     client = langgraph_client()
-    thread_id = await _fork_builder(client, pull_request, login) or str(uuid4())
+    thread_id = await _fork(client, start.source_thread_id, login)
     channel_id, error = await create_code_channel(
         name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
         session_id=thread_id,
@@ -116,8 +122,6 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             source_context=SourceContext(slack_thread=location),
             workspace=start.workspace_slug,
             owner_login=login,
-            # Reachable from the channel's web link, but read-only there, so kept out of lists.
-            unlisted=True,
         ):
             raise GuideStartError("could not create the review thread")
         await bind_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS, thread_id)
@@ -153,14 +157,10 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         ),
     )
     session = await ReviewGuideSession.get(thread_id)
-    if session is not None:
-        await refresh_progress(session, stage="starting")
-    await dispatch_guide_run(
-        thread_id,
-        location,
-        prompt("review-guide/kickoff", pr_number=start.number),
-        workspace_slug=start.workspace_slug,
-    )
+    if session is None:
+        raise GuideStartError("the review session was not saved")
+    await refresh_progress(session, stage="starting")
+    await dispatch_guide_run(session, prompt("review-guide/kickoff", pr_number=start.number))
     return StartedGuide(thread_id=thread_id, channel_id=channel_id)
 
 
@@ -169,28 +169,24 @@ class _ThreadCopy(BaseModel):
     metadata: dict[str, object] = {}
 
 
-class _BuilderMetadata(BaseModel):
-    visibility: str | None = None
+class _SourceMetadata(BaseModel):
+    sandbox_id: str | None = None
+    proxy_config: object = Field(default=None, alias=SANDBOX_PROXY_CONFIG_METADATA_KEY)
 
 
-async def _fork_builder(
-    client: LangGraphClient, pull_request: PullRequest, login: str
-) -> str | None:
-    """A copy of the thread that built the PR, so the guide remembers why, or ``None``.
+async def _fork(client: LangGraphClient, source_thread_id: str, login: str) -> str:
+    """A copy of the asking thread that shares its sandbox, so the walkthrough knows its work.
 
-    The copy keeps every checkpoint but none of the builder's metadata: an
-    inherited ``sandbox_id`` or Slack location would point the guide at the
-    builder's sandbox and channel. Private builders are never copied, because
-    the guide talks in a channel anyone can join.
+    The copy keeps every checkpoint but none of the source's other metadata: its
+    Slack location, title and run bookkeeping belong to the conversation it came
+    from. It joins the source's sandbox as a guest, the way other threads borrow one.
     """
-    builder = pull_request.agent_thread_id or pull_request.primary_thread_id
-    if not builder:
-        return None
     try:
-        source = _BuilderMetadata.model_validate(thread_metadata(await client.threads.get(builder)))
-        if source.visibility == "private":
-            return None
-        copied = _ThreadCopy.model_validate(await client.threads.copy(builder))
+        source = _SourceMetadata.model_validate(
+            thread_metadata(await client.threads.get(source_thread_id))
+        )
+        host = await sandbox_host_thread_id(source_thread_id)
+        copied = _ThreadCopy.model_validate(await client.threads.copy(source_thread_id))
         await client.threads.update(
             thread_id=copied.thread_id,
             metadata={
@@ -199,51 +195,66 @@ async def _fork_builder(
                 "owner_type": "user",
                 "owner_login": login,
                 "created_at_ms": int(time.time() * 1000),
+                **(
+                    {
+                        SANDBOX_HOST_THREAD_KEY: host,
+                        "sandbox_id": source.sandbox_id,
+                        SANDBOX_PROXY_CONFIG_METADATA_KEY: source.proxy_config,
+                    }
+                    if source.sandbox_id
+                    else {}
+                ),
             },
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
-            "Could not fork the thread that built a pull request",
-            extra={"agent_thread_id": builder, "pr_number": pull_request.number},
+            "Could not fork the thread asking for a review walkthrough",
+            extra={"agent_thread_id": source_thread_id},
         )
-        return None
+        raise GuideStartError("could not copy this conversation into the review channel") from exc
     logger.info(
-        "Forked the builder thread for a review guide",
-        extra={"agent_thread_id": copied.thread_id, "builder_thread_id": builder},
+        "Forked a thread into a review walkthrough",
+        extra={"agent_thread_id": copied.thread_id, "source_thread_id": source_thread_id},
     )
     return copied.thread_id
 
 
 async def dispatch_guide_run(
-    thread_id: str,
-    location: SlackThreadRef,
+    session: ReviewGuideSession,
     text: str,
     *,
-    workspace_slug: str | None,
     prefetch: bool = False,
     approve_ts: str = "",
 ) -> None:
-    """Start a guide turn no person typed, so it cannot approve the pull request.
+    """Start a walkthrough turn no person typed, so it cannot approve the pull request.
 
     A prefetch turn prepares chunks in the background: it shows nothing, so it
     leaves the session's status alone. ``approve_ts`` names a message whose
     "Looks good" the turn records before the model runs.
     """
+    location = SlackThreadRef(
+        channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS
+    )
+    reader = await User.get(session.user_id)
+    pr = session.pull_request
     # Set every run: a thread carries its last run's configurable into the next.
     configurable: dict[str, object] = {
-        "thread_id": thread_id,
+        "thread_id": session.thread_id,
+        "repo": {"owner": pr.owner, "name": pr.repo},
         "slack_thread": location.dump(),
         "source": "slack",
         "review_guide_prefetch": prefetch,
         "review_guide_approve_ts": approve_ts,
     }
-    if workspace_slug:
-        configurable["workspace"] = workspace_slug
-    if not prefetch and location.channel_id:
-        await set_session_status(location.channel_id, "processing")
+    if reader is not None and reader.github_login:
+        configurable["github_login"] = reader.github_login
+    if session.workspace_slug:
+        configurable["workspace"] = session.workspace_slug
+    if not prefetch:
+        await set_session_status(session.slack_channel_id, "processing")
     await create_durable_run(
-        thread_id,
-        ASSISTANT_ID,
+        session.thread_id,
+        "agent",
         input=build_run_input(
             text,
             {"sender_id": _SENDER_ID, "surface": "automation", "kind": "system"},

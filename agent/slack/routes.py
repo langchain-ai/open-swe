@@ -189,8 +189,7 @@ async def _queue_channel_housekeeping(channel_id: str, text: str) -> None:
         )
     except common.SlackThreadMappingError:
         return
-    # Only the main agent drains the queue; a review guide would leave it for one to pick up.
-    if not thread_id or not text.strip() or await ReviewGuideSession.exists(thread_id):
+    if not thread_id or not text.strip():
         return
     await common.queue_message_for_thread(
         thread_id,

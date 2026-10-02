@@ -51,6 +51,7 @@ async def slack_start_review_channel(
                 owner=owner,
                 repo=repo,
                 number=number,
+                source_thread_id=cfg.thread_id,
                 requester_slack_id=requester,
                 origin_channel_id=origin.channel_id,
                 origin_message_ts=origin.triggering_event_ts or origin.thread_ts,

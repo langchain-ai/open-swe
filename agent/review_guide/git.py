@@ -1,7 +1,7 @@
-"""Read-only git for the review guide: the PR's diff and files, from its sandbox checkout.
+"""Read-only git for the review guide: the PR's diff and files, through refs in its sandbox.
 
 Refs under ``refs/review-guide/`` pin the base, head and merge base the
-checkout was prepared for, so a later run can tell when the pull request moved.
+walkthrough is at, so a later run can tell when the pull request moved.
 """
 
 import shlex
@@ -39,6 +39,37 @@ async def built_for(backend: SandboxBackendProtocol, repo_dir: str) -> tuple[str
     if result.exit_code not in (0, None) or len(lines) != 2:
         return None
     return lines[0], lines[1]
+
+
+async def fetch(
+    backend: SandboxBackendProtocol,
+    repo_dir: str,
+    *,
+    full_name: str,
+    pr_number: int,
+    base_sha: str,
+    head_sha: str,
+) -> None:
+    """Fetch the PR's commits, cloning the repository if it is missing; never touches the tree.
+
+    The sandbox may be shared with the thread that is changing the code, so the
+    guide reads everything through refs and leaves the checkout alone.
+    """
+    work_dir, _, name = repo_dir.rpartition("/")
+    pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
+    await backend.aexecute(f"mkdir -p {shlex.quote(work_dir)}", timeout=GIT_TIMEOUT_SECONDS)
+    await _run(
+        backend,
+        work_dir,
+        f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
+        f"{shlex.quote(name)} -- --quiet\n"
+        f"cd {shlex.quote(name)}\n"
+        f"for ref in {shlex.quote(base_sha)} {shlex.quote(head_sha)} {pull_ref}; do\n"
+        '  git fetch --quiet origin "$ref" 2>/dev/null || true\n'
+        "done\n"
+        f"git cat-file -e {shlex.quote(base_sha)}^{{commit}}\n"
+        f"git cat-file -e {shlex.quote(head_sha)}^{{commit}}",
+    )
 
 
 async def pin(

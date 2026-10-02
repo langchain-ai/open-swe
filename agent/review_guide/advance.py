@@ -23,8 +23,6 @@ from agent.review_guide.launch import PREFETCH_KIND, dispatch_guide_run
 from agent.review_guide.messages import post_with_buttons, refresh_progress, retire
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.review_guide.walk import Group, Walk
-from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
-from agent.source_context import SlackThreadRef
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -78,18 +76,8 @@ async def approve_click(session: ReviewGuideSession, walk: Walk, message_ts: str
     return approved
 
 
-def _location(session: ReviewGuideSession) -> SlackThreadRef:
-    return SlackThreadRef(channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS)
-
-
 async def _guide_turn(session: ReviewGuideSession, approve_ts: str = "") -> None:
-    await dispatch_guide_run(
-        session.thread_id,
-        _location(session),
-        prompt("review-guide/looks-good"),
-        workspace_slug=session.workspace_slug,
-        approve_ts=approve_ts,
-    )
+    await dispatch_guide_run(session, prompt("review-guide/looks-good"), approve_ts=approve_ts)
 
 
 async def advance(channel_id: str, message_ts: str) -> None:
@@ -151,11 +139,7 @@ async def start_prefetch(session: ReviewGuideSession) -> None:
     if await _active_runs(client, session.thread_id):
         return
     await dispatch_guide_run(
-        session.thread_id,
-        _location(session),
-        prompt("review-guide/prefetch", depth=QUEUE_DEPTH),
-        workspace_slug=session.workspace_slug,
-        prefetch=True,
+        session, prompt("review-guide/prefetch", depth=QUEUE_DEPTH), prefetch=True
     )
 
 

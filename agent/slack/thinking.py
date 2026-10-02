@@ -301,7 +301,6 @@ async def stream_slack_thinking_steps(
     original_message_ts: str,
     recipient_user_id: str = "",
     recipient_team_id: str = "",
-    assistant_id: str = "agent",
 ) -> None:
     """Mirror one run's structured tool lifecycle into a Slack timeline."""
     stream = SlackThinkingStream(
@@ -322,7 +321,7 @@ async def stream_slack_thinking_steps(
         active = False
         for _ in range(_MAX_SUBSCRIPTIONS):
             done = False
-            async with client.threads.stream(thread_id, assistant_id=assistant_id) as thread_stream:
+            async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
                 # The SDK ends every subscription when any run on the thread ends, such
                 # as the one this run queued behind; the open stream resumes on a new one.
                 received = True
