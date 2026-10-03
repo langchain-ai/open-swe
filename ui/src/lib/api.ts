@@ -1028,6 +1028,20 @@ export interface PullRequestThreadResult {
   already_running: boolean
 }
 
+export interface PullRequestSearchResult {
+  repo: string
+  number: number
+  url: string
+  title: string
+  body: string
+  state: "open" | "draft" | "merged" | "closed"
+}
+
+export interface PullRequestSearchResults {
+  pull_requests: PullRequestSearchResult[]
+  has_more: boolean
+}
+
 export interface OpenPullRequestsPayload {
   pullRequests: OpenPullRequest[]
   nextPage: number | null
@@ -1697,6 +1711,10 @@ export const api = {
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  searchPullRequests: (query: string, offset = 0) =>
+    request<PullRequestSearchResults>(
+      `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
+    ),
   myPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",

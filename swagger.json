@@ -742,6 +742,69 @@
         "title": "BridgeRequestsResponse",
         "type": "object"
       },
+      "CLIArguments": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/JsonValue"
+        },
+        "title": "CLIArguments",
+        "type": "object"
+      },
+      "CLIResult": {
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "content"
+        ],
+        "title": "CLIResult",
+        "type": "object"
+      },
+      "CLITool": {
+        "properties": {
+          "access": {
+            "enum": [
+              "session",
+              "admin"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "parameters",
+          "access"
+        ],
+        "title": "CLITool",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -3897,6 +3960,71 @@
           "event"
         ],
         "title": "PullRequestReviewSubmit",
+        "type": "object"
+      },
+      "PullRequestSearchResult": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "draft",
+              "merged",
+              "closed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number",
+          "url",
+          "title",
+          "body",
+          "state"
+        ],
+        "title": "PullRequestSearchResult",
+        "type": "object"
+      },
+      "PullRequestSearchResults": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "pull_requests": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestSearchResult"
+            },
+            "title": "Pull Requests",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pull_requests",
+          "has_more"
+        ],
+        "title": "PullRequestSearchResults",
         "type": "object"
       },
       "PullRequestState": {
@@ -8707,6 +8835,95 @@
         ]
       }
     },
+    "/dashboard/api/cli/mcp/tools": {
+      "get": {
+        "operationId": "cli_mcp_tools_dashboard_api_cli_mcp_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CLITool"
+                  },
+                  "title": "Response Cli Mcp Tools Dashboard Api Cli Mcp Tools Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Cli Mcp Tools",
+        "tags": [
+          "dashboard",
+          "cli-mcp-tools"
+        ]
+      }
+    },
+    "/dashboard/api/cli/mcp/tools/{name}": {
+      "post": {
+        "operationId": "cli_mcp_invoke_dashboard_api_cli_mcp_tools__name__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CLIArguments"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLIResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Cli Mcp Invoke",
+        "tags": [
+          "dashboard",
+          "cli-mcp-tools"
+        ]
+      }
+    },
     "/dashboard/api/client-errors": {
       "post": {
         "operationId": "api_report_client_error_dashboard_api_client_errors_post",
@@ -11141,6 +11358,79 @@
           }
         ],
         "summary": "Api List Pull Requests",
+        "tags": [
+          "dashboard",
+          "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/pull-requests/search": {
+      "get": {
+        "operationId": "api_search_pull_requests_dashboard_api_pull_requests_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestSearchResults"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Search Pull Requests",
         "tags": [
           "dashboard",
           "pull-requests"

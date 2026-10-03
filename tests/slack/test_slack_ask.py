@@ -41,7 +41,13 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
-async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+async def test_command_thread_is_private_and_unlisted(
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+) -> None:
+    status = AsyncMock()
+    monkeypatch.setattr("agent.slack.thinking.set_slack_thread_status", status)
+    monkeypatch.setattr(slack_ask, "add_slack_reaction", AsyncMock())
     upsert = AsyncMock(return_value=True)
     dispatch = AsyncMock()
     monkeypatch.setattr(
@@ -54,7 +60,12 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
 
     await slack_ask.process_slack_ask(
         slack_ask.SlackAskRequest(
-            channel_id="C1", user_id="U1", question="why?", thread_id="t-1", team_id="T1"
+            channel_id="C1",
+            user_id="U1",
+            question="why?",
+            thread_id="t-1",
+            team_id="T1",
+            reply_thread_ts=reply_thread_ts,
         )
     )
 
@@ -65,6 +76,7 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
     assert configurable["slack_ask"] is True
     assert configurable["slack_thread"]["triggering_user_id"] == "U1"
     assert "thread_ts" not in configurable["slack_thread"]
+    status.assert_not_awaited()
 
 
 @pytest.mark.asyncio

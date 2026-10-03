@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { mcpInputSchema } from "./mcp-catalog.ts"
+import { isRecord } from "./json.ts"
 
 import { ApiClient, ApiError } from "./api.ts"
 import { readConfig } from "./config.ts"
@@ -40,10 +42,10 @@ function rejectedSession(api: ApiClient): (cause: unknown) => never {
   }
 }
 
-export function createMcpServer(
+export async function createMcpServer(
   version: string,
   client: () => Promise<ApiClient> = sessionClient
-): McpServer {
+): Promise<McpServer> {
   const server = new McpServer({ name: "oswe", version })
   server.registerTool(
     "list_threads",
@@ -140,10 +142,44 @@ export function createMcpServer(
       }
     }
   )
+  const api = await client()
+  const tools = await api.mcpTools().catch(rejectedSession(api))
+  for (const tool of tools) {
+    let inputSchema
+    try {
+      inputSchema = mcpInputSchema(tool)
+    } catch (cause) {
+      process.stderr.write(
+        `oswe mcp: skipping ${tool.name}: ${String(cause)}\n`
+      )
+      continue
+    }
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema,
+        annotations: { openWorldHint: true },
+      },
+      async (args) => {
+        const current = await client()
+        if (!isRecord(args))
+          throw new Error(`Invalid arguments for ${tool.name}`)
+        const result = await current
+          .mcpInvoke(tool.name, args)
+          .catch(rejectedSession(current))
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+        }
+      }
+    )
+  }
   return server
 }
 
 /** Serve MCP over stdio until the client closes stdin; stdout carries only protocol messages. */
 export async function serveMcp(version: string): Promise<void> {
-  await createMcpServer(version).connect(new StdioServerTransport())
+  await (await createMcpServer(version)).connect(new StdioServerTransport())
 }

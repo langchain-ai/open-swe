@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.tools.access import Policy, access, ack
 from agent.tools.admin_gate import configurable as _configurable
+from agent.tools.mcp_exposure import expose_mcp
 from agent.workspaces import refresh, store
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
 
 
+@expose_mcp(access="admin")
 @access(_READ)
 async def list_workspaces() -> dict[str, Any]:
     """List every workspace with its snapshot state.
@@ -221,6 +223,7 @@ async def publish_workspace(
     return {"ok": True, "workspace": _summary(record), "created": existing is None}
 
 
+@expose_mcp(access="admin")
 @access(_WRITE)
 async def refresh_workspace_start(name: str) -> dict[str, Any]:
     """Implement the `refresh_workspace_start` tool."""
@@ -231,6 +234,7 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
     return await _start_refresh(slug, name)
 
 
+@expose_mcp(access="admin")
 @access(_WRITE)
 async def delete_workspace(name: str) -> dict[str, Any]:
     """Implement the `delete_workspace` tool."""
@@ -250,6 +254,7 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     return {"ok": True, "deleted": True}
 
 
+@expose_mcp(access="admin")
 @access(_WRITE)
 async def configure_repository(
     workspace: str,

@@ -22,6 +22,8 @@ import {
   type HumanReviewRequestResult,
 } from "./review.ts"
 import { uploadedThreadSchema } from "./upload.ts"
+import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
+import * as z from "zod"
 
 export class ApiError extends Error {
   constructor(
@@ -187,6 +189,24 @@ export class ApiClient {
     if (!parsed.success)
       throw new ProtocolError("/threads/page response is malformed")
     return parsed.data
+  }
+
+  async mcpTools(): Promise<CliTool[]> {
+    const result = z
+      .array(cliToolSchema)
+      .safeParse(await this.json("GET", "/cli/mcp/tools"))
+    if (!result.success)
+      throw new ProtocolError("/cli/mcp/tools response is malformed")
+    return result.data
+  }
+
+  async mcpInvoke(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
+      body: args,
+    })
   }
 
   /** Create a thread from a gzipped JSONL session upload; returns its id. */

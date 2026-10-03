@@ -135,12 +135,12 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 
 
 async def _target_channel(
-    pr_ref: GitHubPrRef, override: str, token: str, head_sha: str
+    pr_ref: GitHubPrRef, override: str, token: str
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
         configured = (
-            await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+            await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
         ).review_channel
     if not configured.strip():
         return _failure(
@@ -239,6 +239,7 @@ async def record_pull_request(
     details = PullRequestPayload.model_validate(payload)
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
     pull_request.title = details.title
+    pull_request.body = details.body or ""
     pull_request.head_ref = details.head_ref
     pull_request.base_ref = details.base_ref
     pull_request.author = details.author
@@ -276,7 +277,7 @@ async def request_review(
             "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
         )
 
-    target = await _target_channel(pr_ref, channel, token, readiness.snapshot.head_sha)
+    target = await _target_channel(pr_ref, channel, token)
     if isinstance(target, RequestResult):
         return target
     recorded = await record_pull_request(pr_ref, token)
@@ -439,19 +440,14 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
-def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str, bool]:
-    """What the thread is told about a pick, and whether it bumps the post in the channel.
-
-    The deadline's wording is used only when its wait really passed; any other pick is
-    announced plainly.
-    """
+def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
+    """Use deadline wording only when the reviewer's wait has passed."""
     now = datetime.now(UTC)
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     if not request.has_card and request.ready_since and now - request.ready_since >= wait:
         return (
             f"{who}, {label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an "
-            "approval, so Open SWE picked you.",
-            True,
+            "approval, so Open SWE picked you."
         )
     if (
         request.has_card
@@ -459,8 +455,8 @@ def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str
         and request.created_at
         and now - request.created_at >= wait
     ):
-        return f"{who}, nobody signed up to review {label}, so Open SWE picked you.", False
-    return f"{who}, Open SWE picked you to review {label}.", False
+        return f"{who}, nobody signed up to review {label}, so Open SWE picked you."
+    return f"{who}, Open SWE picked you to review {label}."
 
 
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
@@ -499,7 +495,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     pr = request.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     who = mention(user)
-    notice, bump = _pick_notice(request, who, label)
+    notice = _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
@@ -524,7 +520,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         blocks=block_payload([section(thread_text), accept]),
         unfurl_links=False,
         agent_thread_id=added.thread_id or None,
-        reply_broadcast=bump,
+        reply_broadcast=False,
     )
     permalink = await _permalink(added)
     if user.slack_user_id:

@@ -65,6 +65,7 @@ def add_slack_message(
             "thread_ts": actual_thread_ts,
             "blocks": blocks,
             "is_bot": is_bot,
+            **({"subtype": "bot_message", "bot_id": "B_OPEN_SWE"} if is_bot else {}),
             "reply_broadcast": reply_broadcast,
         }
     )

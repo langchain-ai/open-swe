@@ -55,6 +55,60 @@ test.describe("my pull requests", () => {
     await loginAs(page, SAME_USER);
   });
 
+  test("finds description-only matches in My PRs and the command palette", async ({
+    page,
+  }) => {
+    const own = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Improve deployment reliability",
+      body: "Prevent aardvark deployment rollback outages.",
+      ...approved,
+    });
+    const theirs = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Someone else's deployment change",
+      body: "Prevent aardvark outages too.",
+      author: "bob",
+      ...approved,
+    });
+    for (const pr of [own, theirs]) {
+      const response = await page.request.get(
+        `/fake-gh/repos/${pr.repo}/pulls/${pr.number}`,
+      );
+      const delivered = await page.request.post("/control/github-event", {
+        data: {
+          event: "pull_request",
+          payload: {
+            action: "edited",
+            repository: { full_name: pr.repo, private: false },
+            pull_request: await response.json(),
+            installation: { id: 42 },
+            sender: { login: "alice" },
+          },
+        },
+      });
+      expect(delivered.ok()).toBeTruthy();
+    }
+    await openMine(page);
+    const search = page.getByRole("textbox", { name: "Search pull requests" });
+    await search.fill("aardvark");
+    await expect(card(page, own)).toContainText(
+      "Improve deployment reliability",
+    );
+    await expect(card(page, theirs)).toHaveCount(0);
+    await search.blur();
+    await page.keyboard.press("Control+k");
+    await page.getByRole("combobox").fill("aardvark");
+    const result = page.getByRole("option", {
+      name: /Improve deployment reliability/,
+    });
+    await expect(result).toBeVisible();
+    await result.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/agents/reviews/fakeorg/demo/${own.number}`),
+    );
+  });
+
   test("lists the signed-in user's open PRs with live status", async ({
     page,
   }) => {
