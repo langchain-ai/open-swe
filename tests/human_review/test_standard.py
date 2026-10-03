@@ -116,7 +116,7 @@ async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | 
         participant = HumanReviewParticipant(user_id=user.id, decision="review")
         participant.user = user
         request.participants.append(participant)
-    with patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)):
+    with patch("agent.human_review.lifecycle.review_standings", AsyncMock(return_value=states)):
         text, blocks = await _render_standard(request, "merged", "token")
     payload = block_payload(blocks)
     assert payload is not None
@@ -164,7 +164,7 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.pull_request = pr
     request.requested_by = None
     with (
-        patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
+        patch("agent.human_review.lifecycle.review_standings", AsyncMock(return_value=states)),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
     ):
         text, blocks = await _render_standard(request, None, "token")
