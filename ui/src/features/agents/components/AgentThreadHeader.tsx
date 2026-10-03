@@ -14,6 +14,7 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import { ThreadParticipants } from "@/features/agents/components/ThreadParticipants"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
 import type { AgentThread } from "@/features/agents/lib/types"
@@ -318,6 +319,9 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          {thread && !localThread && (
+            <ThreadParticipants threadId={thread.id} />
+          )}
           <span className="text-xs text-muted-foreground">{target}</span>
           {!localThread && visibilityMenu}
         </div>
