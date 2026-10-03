@@ -1,4 +1,4 @@
-Read or set a repository's approval mode when the user requests a settings change. Requires a currently authorized workspace admin. `read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement. Authorization is rechecked on every call.
+Read or set a repository's approval mode as a currently authorized workspace admin when the user requests a settings change. Reads require a private admin surface. Writes also work in sole-writer shared threads; mixed Slack channel threads require the saved admin owner's authenticated run and exact-action approval. Shared writes return only an acknowledgement, and authorization is rechecked on every call.
 
 Approval criteria live in the repository's `.open-swe/APPROVALS.md`, read from the pull request's base commit; this tool does not edit them. Change the file through a pull request instead.
 
