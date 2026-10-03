@@ -15,6 +15,11 @@ const POLL_LIMIT = 8
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 10_000
 const REPLY_ATTEMPTS = 3
+/**
+ * Below the server's cap of 1024. An id this far back is long settled, so
+ * leaving it out of a poll cannot get its command run again.
+ */
+const MAX_HELD_SENT = 1_000
 /** How long `close` waits for stopped commands to report before releasing the bridge. */
 const CLOSE_GRACE_MS = 5_000
 /** Margin over the server's long-poll window before the request is abandoned. */
@@ -199,7 +204,7 @@ export class Bridge {
         const requests = await this.api.pollRequests(this.session.bridgeId, {
           wait: POLL_WAIT_SECONDS,
           limit: POLL_LIMIT,
-          held: [...this.held],
+          held: [...this.held].slice(-MAX_HELD_SENT),
           signal: controller.signal,
         })
         backoff = MIN_BACKOFF_MS
@@ -268,7 +273,11 @@ export class Bridge {
           )
           return
         }
-        if (httpStatus(cause) === 404) {
+        // 404: the request is gone. 409: it is settled already, by an earlier
+        // attempt whose response was lost, the agent's own timeout, or the
+        // bridge closing. Either way the server keeps no claim to re-offer.
+        const status = httpStatus(cause)
+        if (status === 404 || status === 409) {
           this.held.delete(request.requestId)
           return
         }
