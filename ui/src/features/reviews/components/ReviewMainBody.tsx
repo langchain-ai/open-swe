@@ -1,3 +1,7 @@
+import {
+  readDiffSelection,
+  selectedRangeFromDiff,
+} from "@/features/agents/utils/diffSelection"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Fragment,
@@ -223,59 +227,6 @@ function buildSelectionAttachments(
     makeSideAttachment(file, contents, "deletions", deletionLine, deletionLine),
     makeSideAttachment(file, contents, "additions", additionLine, additionLine),
   ]
-}
-
-interface ShadowRootWithSelection {
-  getSelection?: () => Selection | null
-}
-
-// Read the active selection inside a <diffs-container>'s open shadow root.
-// Chromium exposes ShadowRoot.getSelection(); elsewhere fall back to the document
-// selection (events from open shadow DOM are composed/retargeted).
-function readDiffSelection(
-  container: Element | null | undefined
-): Selection | null {
-  const root = container?.shadowRoot
-  if (root) {
-    const scoped = (root as ShadowRoot & ShadowRootWithSelection).getSelection
-    if (typeof scoped === "function") return scoped.call(root)
-  }
-  return typeof document !== "undefined" ? document.getSelection() : null
-}
-
-// Map a selection boundary node to its file line number + side via the
-// data-line / data-line-type attributes Pierre stamps on every line div.
-function lineMetaFromNode(
-  node: Node | null
-): { line: number; side: SelectionSide } | null {
-  const el = node instanceof Element ? node : (node?.parentElement ?? null)
-  const lineEl = el?.closest("[data-line]")
-  if (!lineEl) return null
-  const line = Number(lineEl.getAttribute("data-line"))
-  if (!Number.isInteger(line)) return null
-  const type = lineEl.getAttribute("data-line-type") ?? ""
-  return { line, side: type.includes("deletion") ? "deletions" : "additions" }
-}
-
-// Resolve the current native text selection inside a diff to a line range, so a
-// plain text highlight can drive "Add to Chat" (Devin-style) instead of a
-// gutter drag.
-function selectedRangeFromDiff(
-  container: Element | null | undefined
-): SelectedLineRange | null {
-  const selection = readDiffSelection(container)
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0)
-    return null
-  const range = selection.getRangeAt(0)
-  const start = lineMetaFromNode(range.startContainer)
-  const end = lineMetaFromNode(range.endContainer)
-  if (!start || !end) return null
-  return {
-    start: start.line,
-    side: start.side,
-    end: end.line,
-    endSide: end.side,
-  }
 }
 
 // Scroll a file card / group flush to the top of the diff scroller (fallback

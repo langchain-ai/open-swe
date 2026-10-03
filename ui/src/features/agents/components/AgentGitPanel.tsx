@@ -21,6 +21,7 @@ import {
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 
 interface AgentGitPanelProps {
+  onComment?: (content: string) => Promise<void>
   thread: AgentThread
   revealFilePath?: string | null
   revealChangesKey?: number
@@ -30,6 +31,7 @@ interface AgentGitPanelProps {
 
 export function AgentGitPanel({
   thread,
+  onComment,
   revealFilePath,
   revealChangesKey = 0,
   collapsed,
@@ -151,6 +153,7 @@ export function AgentGitPanel({
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}
+          onComment={onComment}
           status={diff.status}
           isLoading={diff.isPending}
           isFetching={diff.isFetching}
