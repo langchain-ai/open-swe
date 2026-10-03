@@ -415,6 +415,10 @@ async def _build_dashboard_configurable(
     return configurable
 
 
+resolve_task_model = _resolve_agent_model_choice
+build_task_configurable = _build_dashboard_configurable
+
+
 async def start_dashboard_thread(
     login: str,
     email: str | None,
@@ -770,6 +774,9 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
 
+    from agent.tasks import assert_user_entry
+
+    await assert_user_entry(thread_id)
     client = langgraph_client()
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1071,6 +1078,9 @@ async def steer_running_thread(
     before its next model call. The reply mirrors the protocol's success
     envelope so the caller cannot tell a steer from a start.
     """
+    from agent.tasks import assert_user_entry
+
+    await assert_user_entry(thread_id)
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
@@ -1478,6 +1488,9 @@ async def _enrich_system_run_start_command(
     """
     if command.get("method") != "run.start":
         raise HTTPException(403, "a machine principal may only start runs")
+    from agent.tasks import assert_user_entry
+
+    await assert_user_entry(thread_id)
 
     params = command.get("params")
     if not isinstance(params, dict):

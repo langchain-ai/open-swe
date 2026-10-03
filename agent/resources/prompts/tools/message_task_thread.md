@@ -1,0 +1,1 @@
+Send a noninterrupting explicit message within the task. A coordinator supplies worker_id; a worker omits it to send progress, results, or a help request to its coordinator. Messages are durably delivered and wake an idle recipient. User follow-ups do not automatically steer or interrupt workers.

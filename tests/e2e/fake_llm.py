@@ -912,11 +912,13 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         StepSpec(content="The review draft is ready."),
     ),
     "review_chat_plain": (StepSpec(content="The pull request adds two constant modules."),),
-    # Parent turn: delegate to two general-purpose subagents in one step so the
-    # transcript renders a subagent card grid. The subagents run this same fake
-    # model; their task description carries the marker that selects the
-    # ``subagent_task`` script below.
     "delegate": (
+        _tool_step(
+            "Inspecting the repository.",
+            "execute",
+            {"command": "ls"},
+            "call-root-ls",
+        ),
         StepSpec(
             content="Delegating the investigation to two subagents.",
             tool_calls=(
@@ -938,7 +940,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 ),
             ),
         ),
-        StepSpec(content="Both subagents finished their investigation."),
+        StepSpec(content="Both delegation attempts were rejected."),
     ),
     # Subagent turn: a briefly slow shell step first so a spec that opens the
     # thread right after the run starts can watch the nested activity live.

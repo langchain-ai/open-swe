@@ -1,0 +1,1 @@
+Inspect a worker with action=status, explicitly cancel it with action=cancel, or retry a failed initial dispatch with action=retry. Only the task's coordinator may control its workers. For new instructions use message_task_thread instead. Invocation completion is not task completion.

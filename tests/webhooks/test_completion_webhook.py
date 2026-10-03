@@ -196,6 +196,31 @@ def _slack_metadata() -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
+async def test_worker_completion_only_notifies_coordinator(monkeypatch, status):
+    from agent.tools import task_threads
+
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(task_threads, "worker_finished", notify)
+    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", AsyncMock())
+    monkeypatch.setattr(completion, "_settle_transcript_turn", AsyncMock())
+    pickup = AsyncMock()
+    feedback = AsyncMock()
+    failure = AsyncMock()
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
+    monkeypatch.setattr(completion, "_handle_successful_run", feedback)
+    monkeypatch.setattr(completion, "_post_failure_reply", failure)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", AsyncMock())
+    result = await completion.handle_run_completion(
+        {"thread_id": "worker", "run_id": "run-1", "status": status}
+    )
+    assert result["status"] == "ok"
+    notify.assert_awaited_once_with("worker", "run-1", status)
+    pickup.assert_not_awaited()
+    feedback.assert_not_awaited()
+    failure.assert_not_awaited()
+
+
 def test_verify_run_complete_token(monkeypatch: pytest.MonkeyPatch) -> None:
     # No secret configured: fail closed (reject everything).
     monkeypatch.setattr(completion, "RUN_COMPLETE_WEBHOOK_SECRET", None)
@@ -219,3 +244,32 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})
     assert set_status.await_args.args == ("C1", "123.45", "Waiting for background tasks…")
+
+
+@pytest.mark.parametrize("membership_failure", [False, True])
+async def test_task_notification_failure_preserves_bookkeeping(monkeypatch, membership_failure):
+    from uuid import uuid4
+
+    from agent.tasks import TaskRole
+    from agent.tools import task_threads
+
+    lookup = AsyncMock(return_value=TaskRole(uuid4(), "parent", "worker", True, ["ship"], False))
+    if membership_failure:
+        lookup.side_effect = RuntimeError("database unavailable")
+    monkeypatch.setattr(task_threads, "role", lookup)
+    monkeypatch.setattr(
+        task_threads, "notify", AsyncMock(side_effect=RuntimeError("parent deleted"))
+    )
+    telemetry, transcript, delivery, failure = (AsyncMock() for _ in range(4))
+    monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", telemetry)
+    monkeypatch.setattr(completion, "_settle_transcript_turn", transcript)
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", delivery)
+    monkeypatch.setattr(completion, "_post_failure_reply", failure)
+    result = await completion.handle_run_completion(
+        {"thread_id": "worker", "run_id": "run-1", "status": "error"}
+    )
+    assert result["status"] == ("error" if membership_failure else "ok")
+    telemetry.assert_awaited_once()
+    transcript.assert_awaited_once()
+    delivery.assert_awaited_once_with("worker", "enqueue")
+    failure.assert_not_awaited()

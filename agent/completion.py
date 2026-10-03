@@ -472,15 +472,33 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+        await EventSubscription.deliver_to(thread_id, "enqueue")
+    worker_completion = False
+    if run_id and status in _TERMINAL_RUN_STATUSES:
+        from agent.tools.task_threads import worker_finished
+
+        try:
+            worker_completion = await worker_finished(thread_id, run_id, str(status))
+        except Exception:
+            logger.exception(
+                "Could not classify completed task thread", extra={"thread_id": thread_id}
+            )
+            return {"status": "error", "reason": "task membership unavailable"}
     payload_metadata = payload.get("metadata")
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
-    if status == "success" and not (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+    if (
+        status == "success"
+        and not worker_completion
+        and not (
+            isinstance(payload_metadata, dict)
+            and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+        )
     ):
         await _start_run_for_pending_follow_ups(thread_id)
-    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
-        await EventSubscription.deliver_to(thread_id, "enqueue")
+    if worker_completion:
+        return {"status": "ok", "reason": "worker completion handled"}
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
     if (
