@@ -36,13 +36,23 @@ async def test_one_request_per_person_survives_a_reload(thread_metadata: JsonObj
     ("logins", "emails", "shared"),
     [
         ({"alice": True}, {}, False),
+        ({"alice": True}, {"alice@example.com": True}, False),
+        ({"alice": True}, {"bob@example.com": True}, True),
         ({"alice": True, "bob": True}, {}, True),
         ({"alice": True}, {"carol@example.com": True}, True),
     ],
 )
-async def test_unlinked_participants_make_a_thread_shared(
-    thread_metadata: JsonObject, logins: JsonObject, emails: JsonObject, shared: bool
+async def test_participants_are_counted_by_identity(
+    thread_metadata: JsonObject,
+    monkeypatch: pytest.MonkeyPatch,
+    logins: JsonObject,
+    emails: JsonObject,
+    shared: bool,
 ) -> None:
+    async def login_for_email(email: str) -> str | None:
+        return {"alice@example.com": "Alice", "bob@example.com": "bob"}.get(email)
+
+    monkeypatch.setattr(User, "login_for_email", login_for_email)
     thread_metadata[PARTICIPANT_LOGINS_KEY] = logins
     thread_metadata[PARTICIPANT_EMAILS_KEY] = emails
 
