@@ -36,7 +36,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
-from agent.transcript.mirror import mirror_thread_metadata
+from agent.threads.titles import update_thread_title
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from agent.utils.langsmith import create_langsmith_thread_feedback
@@ -782,11 +782,10 @@ async def _record_pr_telemetry(
                 metadata["repo_private"] = repo_private
             if record_opening and retitle_thread and isinstance(pr_title, str) and pr_title:
                 metadata.update({"title": pr_title, "title_seed": None})
-            await get_client().threads.update(thread_id=thread_id, metadata=metadata)
             if "title" in metadata:
-                await mirror_thread_metadata(
-                    thread_id, {"title": metadata["title"], "title_seed": None}
-                )
+                await update_thread_title(get_client(), thread_id, metadata)
+            else:
+                await get_client().threads.update(thread_id=thread_id, metadata=metadata)
             origin = (
                 cfg.slack_thread
                 if record_opening and cfg.slack_thread and cfg.slack_thread.channel_id

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from agent.thread_ids import review_chat_thread_id, review_scout_thread_id
 from agent.threads.creation import create_thread
+from agent.threads.titles import update_thread_title
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -109,9 +110,10 @@ class ReviewSession(BaseModel):
                 "created_at_ms": opened_at_ms,
             },
         )
-        await client.threads.update(
-            thread_id=self.thread_id,
-            metadata={
+        await update_thread_title(
+            client,
+            self.thread_id,
+            {
                 "title": thread_title,
                 "participant_logins": {self.login.lower(): True},
                 "thread_category": "review",

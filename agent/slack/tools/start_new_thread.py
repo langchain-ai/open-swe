@@ -25,6 +25,7 @@ from agent.slack.client import (
 )
 from agent.source_context import SourceContext
 from agent.threads.creation import create_thread
+from agent.threads.titles import update_thread_title
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -401,7 +402,7 @@ async def slack_start_new_thread(
     await create_thread(
         client, thread_id, title=thread_title, if_exists="do_nothing", metadata=metadata
     )
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    await update_thread_title(client, thread_id, metadata)
 
     run = await dispatch_agent_run(
         thread_id,

@@ -13,7 +13,7 @@ from agent.prompts import load_prompt
 from agent.slack.client import update_slack_message
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from agent.source_context import SourceContext
-from agent.transcript.mirror import mirror_thread_metadata
+from agent.threads.titles import TITLE_LOCKED_KEY, update_thread_title
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ async def generate_and_store_thread_title(
     title_seed = metadata.get("title_seed")
     if (
         metadata.get("source") not in {"dashboard", "slack"}
+        or metadata.get(TITLE_LOCKED_KEY) is True
         or not isinstance(title_seed, str)
         or expected_title != title_seed
     ):
@@ -107,18 +108,14 @@ async def generate_and_store_thread_title(
 
     try:
         async with asyncio.timeout(TITLE_GENERATION_TIMEOUT_SECONDS):
-            latest = await client.threads.get(thread_id=thread_id)
-            latest_metadata = _thread_metadata(latest)
-            if (
-                latest_metadata.get("title") != expected_title
-                or latest_metadata.get("title_seed") != title_seed
-            ):
-                return
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"title": title, "title_seed": None},
+            updated = await update_thread_title(
+                client,
+                thread_id,
+                {"title": title, "title_seed": None},
+                expected_seed=title_seed,
             )
-            await mirror_thread_metadata(thread_id, {"title": title})
+            if "title" not in updated:
+                return
             # Re-read after the update: the pre-update snapshot can be stale if the
             # thread was promoted to a code channel between the check and the update.
             latest = await client.threads.get(thread_id=thread_id)
