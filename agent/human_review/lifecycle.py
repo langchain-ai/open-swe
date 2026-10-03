@@ -41,6 +41,7 @@ from agent.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
+from agent.run_config import RunConfig
 from agent.slack.blocks import Block, block_payload, escape
 from agent.slack.cards import repost_thread_card
 from agent.slack.channels import SlackChannel
@@ -138,6 +139,12 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
     return file_id
 
 
+def _requester_login(request: HumanReviewRequest) -> str:
+    if request.requested_by is not None:
+        return request.requested_by.github_login
+    return RunConfig.parse(request.run_config).github_login or ""
+
+
 async def post_card(
     approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
@@ -167,6 +174,7 @@ async def post_card(
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
+        login=_requester_login(approval),
     )
 
 
@@ -220,11 +228,12 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
             blocks=block_payload(blocks),
             agent_thread_id=request.thread_id or None,
             reply_broadcast=True,
+            login=_requester_login(request),
         )
     channel = await SlackChannel.load(request.slack_channel_id)
     if channel is None:
         return None, "channel_not_found"
-    return await channel.post(text, blocks=block_payload(blocks))
+    return await channel.post(text, blocks=block_payload(blocks), login=_requester_login(request))
 
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
@@ -390,7 +399,11 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         return
     text, blocks = await render(request, outcome)
     ok, error = await update_slack_message(
-        request.slack_channel_id, request.slack_message_ts, text, blocks=block_payload(blocks)
+        request.slack_channel_id,
+        request.slack_message_ts,
+        text,
+        blocks=block_payload(blocks),
+        login=_requester_login(request),
     )
     if not ok:
         logger.warning(
@@ -399,7 +412,9 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         )
     if outcome is None and (copy := request.slack_copy) is not None:
         text, blocks = await render(request, None, copy=True)
-        ok, error = await update_slack_message(*copy, text, blocks=block_payload(blocks))
+        ok, error = await update_slack_message(
+            *copy, text, blocks=block_payload(blocks), login=_requester_login(request)
+        )
         if not ok:
             logger.warning(
                 "Failed to update the copy of a human review card",
@@ -441,6 +456,7 @@ async def _repost(
         broadcast=broadcast,
         agent_thread_id=request.thread_id or None,
         adopt=adopt,
+        login=_requester_login(request),
     )
 
 
@@ -454,7 +470,9 @@ async def broadcast_card(approval: HumanReviewRequest) -> bool:
 async def copy_card(approval: HumanReviewRequest, channel: SlackChannel) -> str | None:
     """Post the open card at the top of another channel; why it was not, or ``None``."""
     text, blocks = await render(approval, None, copy=True)
-    message_ts, error = await channel.post(text, blocks=block_payload(blocks))
+    message_ts, error = await channel.post(
+        text, blocks=block_payload(blocks), login=_requester_login(approval)
+    )
     if not message_ts:
         logger.warning(
             "Could not copy an expedited review card to another channel",
