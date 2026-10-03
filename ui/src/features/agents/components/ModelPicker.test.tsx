@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -39,7 +40,7 @@ const MODELS: Array<ModelOption> = [
   },
 ]
 
-function openPicker(
+async function openPicker(
   props: Partial<React.ComponentProps<typeof ModelPicker>> = {}
 ) {
   const onSelectionChange = props.onSelectionChange ?? vi.fn()
@@ -52,16 +53,25 @@ function openPicker(
     />
   )
   fireEvent.click(screen.getByRole("button", { expanded: false }))
-  return { onSelectionChange, panel: screen.getByTestId("model-picker-panel") }
+  return {
+    onSelectionChange,
+    panel: await screen.findByTestId("model-picker-panel"),
+  }
 }
 
 function openModelPane() {
   fireEvent.click(screen.getByRole("option", { name: "GPT-5.6 Sol" }))
 }
 
+async function expectPanelClosed() {
+  await waitFor(() =>
+    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+  )
+}
+
 describe("ModelPicker", () => {
-  it("reaches Auto and models with the keyboard while routing automatically", () => {
-    const { onSelectionChange, panel } = openPicker({ selection: null })
+  it("reaches Auto and models with the keyboard while routing automatically", async () => {
+    const { onSelectionChange, panel } = await openPicker({ selection: null })
 
     fireEvent.keyDown(panel, { key: "ArrowRight" })
     fireEvent.keyDown(panel, { key: "ArrowDown" })
@@ -70,14 +80,12 @@ describe("ModelPicker", () => {
       modelId: "openai:gpt-5.6-sol",
       effort: "xhigh",
     })
+    await expectPanelClosed()
 
     fireEvent.click(screen.getByRole("button", { expanded: false }))
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "ArrowRight",
-    })
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "Enter",
-    })
+    const reopened = await screen.findByTestId("model-picker-panel")
+    fireEvent.keyDown(reopened, { key: "ArrowRight" })
+    fireEvent.keyDown(reopened, { key: "Enter" })
     expect(onSelectionChange).toHaveBeenLastCalledWith(null)
   })
 
@@ -122,8 +130,8 @@ describe("ModelPicker", () => {
     expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
   })
 
-  it("shows the selected model's context, reasoning and model row", () => {
-    const { panel } = openPicker()
+  it("shows the selected model's context, reasoning and model row", async () => {
+    const { panel } = await openPicker()
 
     expect(panel.textContent).toContain("Context")
     expect(panel.textContent).toContain("272.0K")
@@ -136,18 +144,16 @@ describe("ModelPicker", () => {
     expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
   })
 
-  it("omits the context section for models without a context window", () => {
-    openPicker({
+  it("omits the context section for models without a context window", async () => {
+    const { panel } = await openPicker({
       selection: { modelId: "google_genai:gemini-3.8-flash", effort: "medium" },
     })
 
-    expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
-      "Context"
-    )
+    expect(panel.textContent).not.toContain("Context")
   })
 
-  it("selects a reasoning effort for the selected model", () => {
-    const { onSelectionChange } = openPicker()
+  it("selects a reasoning effort for the selected model", async () => {
+    const { onSelectionChange } = await openPicker()
 
     fireEvent.click(
       within(
@@ -159,11 +165,11 @@ describe("ModelPicker", () => {
       modelId: "openai:gpt-5.6-sol",
       effort: "low",
     })
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+    await expectPanelClosed()
   })
 
-  it("lists every model with its effort and filters on search", () => {
-    openPicker()
+  it("lists every model with its effort and filters on search", async () => {
+    await openPicker()
     openModelPane()
 
     const models = screen.getByRole("listbox", { name: "Models" })
@@ -189,8 +195,8 @@ describe("ModelPicker", () => {
     ).toEqual(["Kimi K3 High"])
   })
 
-  it("selects a model row with that model's default effort", () => {
-    const { onSelectionChange } = openPicker()
+  it("selects a model row with that model's default effort", async () => {
+    const { onSelectionChange } = await openPicker()
     openModelPane()
 
     fireEvent.click(screen.getByRole("option", { name: "Kimi K3 High" }))
@@ -199,11 +205,13 @@ describe("ModelPicker", () => {
       modelId: "fireworks:accounts/fireworks/models/kimi-k3",
       effort: "high",
     })
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+    await expectPanelClosed()
   })
 
-  it("disables models without image support when images are attached", () => {
-    const { onSelectionChange } = openPicker({ requireImageSupport: true })
+  it("disables models without image support when images are attached", async () => {
+    const { onSelectionChange } = await openPicker({
+      requireImageSupport: true,
+    })
     openModelPane()
 
     const kimi = screen.getByRole("option", { name: "Kimi K3 High" })
@@ -213,8 +221,8 @@ describe("ModelPicker", () => {
     expect(onSelectionChange).not.toHaveBeenCalled()
   })
 
-  it("opens the model pane with ArrowRight and returns with ArrowLeft", () => {
-    const { panel } = openPicker()
+  it("opens the model pane with ArrowRight and returns with ArrowLeft", async () => {
+    const { panel } = await openPicker()
 
     fireEvent.keyDown(panel, { key: "ArrowRight" })
     expect(screen.getByRole("listbox", { name: "Models" })).toBeTruthy()
@@ -223,8 +231,8 @@ describe("ModelPicker", () => {
     expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
   })
 
-  it("moves reasoning focus with the arrow keys and applies it on Enter", () => {
-    const { onSelectionChange, panel } = openPicker()
+  it("moves reasoning focus with the arrow keys and applies it on Enter", async () => {
+    const { onSelectionChange, panel } = await openPicker()
 
     fireEvent.keyDown(panel, { key: "ArrowUp" })
     fireEvent.keyDown(panel, { key: "Enter" })
@@ -235,23 +243,25 @@ describe("ModelPicker", () => {
     })
   })
 
-  it("closes on Escape", () => {
-    openPicker()
+  it("closes on Escape", async () => {
+    const { panel } = await openPicker()
 
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "Escape",
-    })
+    fireEvent.keyDown(panel, { key: "Escape" })
 
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+    await waitFor(() =>
+      expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+    )
   })
 
-  it("returns to the main pane when Escape closes the model pane", () => {
-    const { panel } = openPicker()
+  it("returns to the main pane when Escape closes the model pane", async () => {
+    const { panel } = await openPicker()
     openModelPane()
 
     fireEvent.keyDown(panel, { key: "Escape" })
 
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+    await waitFor(() =>
+      expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
+    )
     expect(screen.getByTestId("model-picker-panel")).toBeTruthy()
   })
 })
