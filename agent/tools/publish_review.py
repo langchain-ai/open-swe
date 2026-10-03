@@ -86,6 +86,14 @@ async def publish_review(
     assessment: ReviewAssessment | None = None,
 ) -> dict[str, Any]:
     """Implement the `publish_review` tool."""
+    if _has_sibling_tool_calls(state):
+        return {
+            "success": False,
+            "error": (
+                "publish_review must be the only tool call in its turn. Wait for your other "
+                "tool calls to return, then call publish_review alone. Nothing was published."
+            ),
+        }
     if severity_threshold not in {"low", "medium", "high", "critical"}:
         return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
 
@@ -151,6 +159,11 @@ async def publish_review(
             ),
             "auth_error": str(exc),
         }
+
+
+def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
+    messages = (state or {}).get("messages") or []
+    return bool(messages) and len(getattr(messages[-1], "tool_calls", None) or []) > 1
 
 
 async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:

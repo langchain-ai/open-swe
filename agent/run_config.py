@@ -203,6 +203,7 @@ class RunConfig(BaseModel):
     schedule_id: str | None = None
     background_task_completion: bool | None = None
     automation_slack_notification: AutomationSlackNotification | None = None
+    automation_dm_user_id: str | None = None
 
     @classmethod
     def parse(cls, raw: Any) -> Self:

@@ -61,6 +61,7 @@ class ProfileUpdate(BaseModel):
     preserve_sandbox_memory: bool | None = None
     human_review_requests: bool | None = None
     review_channel_watch: bool | None = None
+    pr_review_links: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
@@ -303,6 +304,13 @@ async def delete_access_token(login: str) -> None:
     await delete_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
+async def mark_access_token_revoked(login: str, token: str) -> None:
+    """Flag a stored token GitHub rejected so callers prompt a re-login."""
+    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
+    if record and _decrypt_access_token(record) == token:
+        await put_value(OAUTH_TOKENS_NAMESPACE, login, {**record, "revoked": True})
+
+
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
     encrypted = record.get("encrypted_gh_token")
     if not encrypted:
@@ -342,7 +350,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
     """Return a GitHub access token, refreshing proactively when near expiry."""
     record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-    if not record:
+    if not record or record.get("revoked"):
         return None
 
     access_token = _decrypt_access_token(record)
@@ -444,6 +452,7 @@ async def put_my_profile(
             preserve_sandbox_memory=update.preserve_sandbox_memory,
             human_review_requests=update.human_review_requests,
             review_channel_watch=update.review_channel_watch,
+            pr_review_links=update.pr_review_links,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -456,6 +465,7 @@ async def put_my_profile(
         or update.preserve_sandbox_memory
         or update.human_review_requests
         or update.review_channel_watch
+        or update.pr_review_links
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

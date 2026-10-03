@@ -14,6 +14,7 @@ from agent.expedited_review.eligibility import (
     fingerprint_matches,
 )
 from agent.github.ci import fetch_pr
+from agent.github.comments import derive_pr_state
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
@@ -171,7 +172,7 @@ async def expedite_pr_approval(
 
     payload = PullRequestPayload.model_validate(pr)
     review_channel = (
-        await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+        await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
     ).review_channel.strip()
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:
@@ -233,12 +234,16 @@ async def expedite_pr_approval(
             )
 
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if not pull_request.title:
-        pull_request.title = payload.title
-        pull_request.head_ref = payload.head_ref
-        pull_request.base_ref = payload.base_ref
-        pull_request.author = payload.author
-        pull_request.author_github_id = payload.author_id
+    pull_request.title = payload.title
+    pull_request.body = payload.body or ""
+    pull_request.state = derive_pr_state(
+        state=payload.state, merged=payload.merged, draft=payload.draft
+    )
+    pull_request.head_ref = payload.head_ref
+    pull_request.base_ref = payload.base_ref
+    pull_request.author = payload.author
+    pull_request.author_github_id = payload.author_id
+    pull_request = await pull_request.save()
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.

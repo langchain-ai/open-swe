@@ -16,6 +16,7 @@ Args:
         "github_issue_opened".
     model_id: Optional supported model ID.
     effort: Optional reasoning effort for the model.
-    slack_channel_id: Optional Slack channel ID starting with C or G.
+    slack_channel_id: Optional Slack channel ID starting with C or G, or a
+        Slack member ID starting with U or W to DM that person instead.
     slack_notification_mode: Post every run or only when the run takes action.
     admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.

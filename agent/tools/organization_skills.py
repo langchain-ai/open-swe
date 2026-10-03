@@ -6,10 +6,12 @@ from fastapi import HTTPException
 
 from agent.skill_store import store
 from agent.tools.access import Policy, access, ack
+from agent.tools.mcp_exposure import expose_mcp
 
 _WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("name", "skill.name"))
 
 
+@expose_mcp(access="admin")
 @access(_WRITE)
 async def save_organization_skill(
     name: str, description: str, instructions: str = ""
@@ -33,6 +35,7 @@ async def save_organization_skill(
     return {"ok": True, "skill": skill, "created": created}
 
 
+@expose_mcp(access="admin")
 @access(_WRITE)
 async def delete_organization_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_organization_skill` tool."""

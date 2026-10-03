@@ -2,12 +2,18 @@
 
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
 
+from agent.dashboard.profiles import ProfileUpdate, put_my_profile
+from agent.run_config import RunConfig
 from agent.slack import client as slack_utils
+from agent.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
+from agent.users import User, UserPreferences
+from tests.conftest import FakeStore
+from tests.support.slack_api import SlackAPI
 
 
 @pytest.mark.asyncio
@@ -144,3 +150,102 @@ async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
         "chat.postMessage",
         "conversations.replies",
     ]
+
+
+@pytest.mark.parametrize("delivery", ["post", "update", "ephemeral", "command"])
+async def test_review_link_flag_changes_displayed_links_not_code_or_button_values(
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    delivery: str,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: RunConfig(github_login="alice"))
+    monkeypatch.setattr(
+        User, "preferences_for_login", AsyncMock(return_value=UserPreferences(pr_review_links=True))
+    )
+    url = "https://github.com/acme/app/pull/7"
+    target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
+    unchanged = f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
+    text = f"[PR]({url}), <{url}|PR> and {url}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    blocks = block_payload(
+        [
+            markdown(text),
+            section(f"<{url}|PR>"),
+            actions(button("I'll review", action_id="review", value=url, url=url)),
+            *code_blocks(url),
+        ]
+    )
+    if delivery == "post":
+        assert await slack_utils.post_slack_top_level_message_with_ts(
+            "C1", text, blocks=blocks
+        ) == (
+            "1.0",
+            None,
+        )
+    elif delivery == "update":
+        assert await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks) == (
+            True,
+            None,
+        )
+    elif delivery == "ephemeral":
+        assert await slack_utils.post_slack_ephemeral_message("C1", "U1", text, blocks=blocks)
+    else:
+
+        async def handle(request: httpx2.Request) -> httpx2.Response:
+            slack_api.calls.append(("callback", json.loads(request.content)))
+            return httpx2.Response(200, text="ok")
+
+        with patch.object(
+            slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+        ):
+            assert await slack_utils.replace_slack_command_message(
+                "https://hooks.slack.com/commands/test", text, blocks=blocks
+            )
+    payload = slack_api.calls[0][1]
+    expected = (
+        f"[PR]({target}), <{target}|PR> and {target}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
+    )
+    assert payload["text"] == expected
+    sent_blocks = payload["blocks"]
+    assert sent_blocks[0]["text"] == expected
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR>"
+    assert sent_blocks[2]["elements"][0]["url"] == target
+    assert sent_blocks[2]["elements"][0]["value"] == url
+    assert sent_blocks[3] == blocks[3]
+    assert blocks[0]["text"] == text
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
+    fake_store: FakeStore,
+    slack_api: SlackAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example")
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="alice")
+    await User.sign_in("github", "2", login="bob")
+    cfg = RunConfig(github_login="alice")
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+    url = "https://github.com/acme/app/pull/7"
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url
+    saved = await put_my_profile(
+        ProfileUpdate(
+            default_model="openai:gpt-6.1-sol", reasoning_effort="high", pr_review_links=True
+        ),
+        {"sub": "alice", "email": "alice@example.com"},
+    )
+    assert saved["pr_review_links"] is True
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    cfg.github_login = "bob"
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url
+    await slack_utils.update_slack_message("C1", "1.0", url, login="alice")
+    assert slack_api.calls[-1][1]["text"] == "https://openswe.example/agents/reviews/acme/app/7"
+    cfg.github_login = "alice"
+    monkeypatch.delenv("DASHBOARD_BASE_URL")
+    await slack_utils.post_slack_top_level_message_with_ts("C1", url)
+    assert slack_api.calls[-1][1]["text"] == url
