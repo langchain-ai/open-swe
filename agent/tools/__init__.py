@@ -28,6 +28,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "manage_slack_github_mapping": ".manage_slack_github_mapping",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
@@ -65,6 +66,7 @@ _TOOL_MODULES = {
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_list_channel_members": "agent.slack.tools.channels",
     "slack_list_channels": "agent.slack.tools.channels",
+    "slack_lookup_github_user": "agent.slack.tools.lookup_user",
     "slack_move_thread": "agent.slack.tools.move_thread",
     "slack_no_reply_needed": "agent.slack.tools.no_reply_needed",
     "slack_post_message": "agent.slack.tools.channels",
@@ -105,6 +107,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "manage_slack_github_mapping",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
@@ -142,6 +145,7 @@ __all__ = [
     "slack_attach_html",
     "slack_list_channel_members",
     "slack_list_channels",
+    "slack_lookup_github_user",
     "slack_move_thread",
     "slack_no_reply_needed",
     "slack_post_message",
@@ -167,6 +171,7 @@ if TYPE_CHECKING:
         slack_list_channels,
         slack_post_message,
     )
+    from agent.slack.tools.lookup_user import slack_lookup_github_user
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.no_reply_needed import slack_no_reply_needed
@@ -195,6 +200,7 @@ if TYPE_CHECKING:
     from agent.tools.list_review_findings import list_review_findings
     from agent.tools.listen_events import list_event_types, listen_events
     from agent.tools.manage_baby_sit import manage_baby_sit
+    from agent.tools.manage_slack_github_mapping import manage_slack_github_mapping
     from agent.tools.merge_expedited_pr import merge_expedited_pr
     from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import link_pull_request, open_pull_request
