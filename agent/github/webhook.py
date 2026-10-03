@@ -15,6 +15,7 @@ from agent.expedited_review.reviews import REVIEW_BODY_PREFIX
 from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
 from agent.github.pull_requests import PullRequest, PullRequestEvent
+from agent.human_review.feedback import announce_review
 from agent.human_review.lifecycle import close_for_pull_request
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import settle_pull_request, settle_repository
@@ -1639,6 +1640,11 @@ async def settle_human_reviews(payload: dict[str, Any]) -> None:
     owner, repo = event.repository.owner.login, event.repository.name
     for number in event.numbers:
         await settle_pull_request(owner, repo, number)
+
+
+async def announce_human_review(payload: dict[str, Any]) -> None:
+    if postgres.configured():
+        await announce_review(payload)
 
 
 class _StatusEvent(BaseModel):

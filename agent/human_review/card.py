@@ -15,6 +15,7 @@ BUTTON_TYPE = "human_review"
 _STATE_LABELS = {
     "APPROVED": ":white_check_mark: approved",
     "CHANGES_REQUESTED": ":warning: changes requested",
+    "COMMENTED": ":speech_balloon: commented",
     "DISMISSED": ":eyes: reviewing",
 }
 
