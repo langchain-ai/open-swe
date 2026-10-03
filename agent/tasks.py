@@ -1,6 +1,8 @@
 """Durable task membership and execution authority."""
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -9,6 +11,8 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from agent.database import postgres
 
@@ -21,6 +25,105 @@ class _Lease:
 
 
 _HELD: ContextVar[_Lease | None] = ContextVar("task_authority", default=None)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _Owner:
+    id: UUID
+    connection: AsyncConnection
+    tasks: set[asyncio.Task[object]]
+    monitor: asyncio.Task[None] | None = None
+    failed: bool = False
+
+
+_OWNER: _Owner | None = None
+_OWNER_GATE = asyncio.Lock()
+
+
+async def _watch_owner(owner: _Owner) -> None:
+    try:
+        while True:
+            await asyncio.sleep(1)
+            await asyncio.wait_for(owner.connection.execute(text("SELECT 1")), timeout=5)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        owner.failed = True
+        logger.exception("Task admission owner connection lost")
+        for task in tuple(owner.tasks):
+            task.cancel()
+
+
+@asynccontextmanager
+async def admission_owner() -> AsyncIterator[_Owner]:
+    global _OWNER
+    task = asyncio.current_task()
+    if task is None:
+        raise RuntimeError("Task admission requires an async execution")
+    async with _OWNER_GATE:
+        if _OWNER is None:
+            uri = postgres.uri()
+            if uri is None:
+                raise RuntimeError("Task admission requires PostgreSQL")
+            engine = create_async_engine(uri, poolclass=NullPool)
+            conn = await engine.connect()
+            owner_id = uuid4()
+            try:
+                await conn.execute(
+                    text("SELECT pg_advisory_lock(hashtextextended(:key, 0))"),
+                    {"key": f"task-owner:{owner_id}"},
+                )
+                await conn.commit()
+            except BaseException:
+                await conn.close()
+                raise
+            _OWNER = _Owner(owner_id, conn, set())
+            _OWNER.monitor = asyncio.create_task(_watch_owner(_OWNER))
+        owner = _OWNER
+        if owner.failed:
+            raise PermissionError("Task admission owner lost; wait for active tools to stop")
+        owner.tasks.add(task)
+    try:
+        yield owner
+    finally:
+        async with _OWNER_GATE:
+            owner.tasks.discard(task)
+            if not owner.tasks:
+                if owner.monitor:
+                    owner.monitor.cancel()
+                    await asyncio.gather(owner.monitor, return_exceptions=True)
+                try:
+                    await owner.connection.close()
+                finally:
+                    _OWNER = None
+
+
+async def reclaim_admissions(conn: AsyncConnection, thread_id: str) -> None:
+    owners = (
+        (
+            await conn.execute(
+                text("SELECT DISTINCT owner_id FROM task_tool_admission WHERE thread_id = :thread"),
+                {"thread": thread_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for owner_id in owners:
+        if owner_id is None or (_OWNER is not None and _OWNER.id == owner_id):
+            continue
+        abandoned = await conn.scalar(
+            text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"task-owner:{owner_id}"},
+        )
+        if abandoned:
+            await conn.execute(
+                text(
+                    "DELETE FROM task_tool_admission WHERE thread_id = :thread AND owner_id = :owner"
+                ),
+                {"thread": thread_id, "owner": owner_id},
+            )
 
 
 @dataclass(frozen=True)
@@ -66,40 +169,54 @@ async def authority(
     if not postgres.configured():
         yield
         return
-    admission_id = uuid4()
-    async with postgres.transaction() as conn:
-        await conn.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"task-authority:{thread_id}"},
-        )
-        conflict = await conn.scalar(
-            text(
-                "SELECT EXISTS (SELECT 1 FROM task_tool_admission "
-                "WHERE thread_id = :thread AND (:exclusive OR exclusive))"
-            ),
-            {"thread": thread_id, "exclusive": exclusive},
-        )
-        if conflict:
-            raise PermissionError(
-                "Task transition conflicts with active tools; retry after they finish"
-            )
-        await conn.execute(
-            text(
-                "INSERT INTO task_tool_admission (id, thread_id, exclusive) VALUES (:id, :thread, :exclusive)"
-            ),
-            {"id": admission_id, "thread": thread_id, "exclusive": exclusive},
-        )
-    lease = _Lease(thread_id, exclusive)
-    token = _HELD.set(lease)
-    try:
-        yield
-    finally:
-        lease.active = False
-        _HELD.reset(token)
+    async with admission_owner() as owner:
+        admission_id = uuid4()
         async with postgres.transaction() as conn:
             await conn.execute(
-                text("DELETE FROM task_tool_admission WHERE id = :id"), {"id": admission_id}
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"task-authority:{thread_id}"},
             )
+            await reclaim_admissions(conn, thread_id)
+            conflict = await conn.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM task_tool_admission "
+                    "WHERE thread_id = :thread AND (:exclusive OR exclusive))"
+                ),
+                {"thread": thread_id, "exclusive": exclusive},
+            )
+            if conflict:
+                raise PermissionError(
+                    "Task transition conflicts with active tools; retry after they finish"
+                )
+            live = await conn.scalar(
+                text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"task-owner:{owner.id}"},
+            )
+            if live or owner.failed:
+                raise PermissionError("Task admission owner connection lost")
+            await conn.execute(
+                text(
+                    "INSERT INTO task_tool_admission (id, thread_id, exclusive, owner_id) "
+                    "VALUES (:id, :thread, :exclusive, :owner)"
+                ),
+                {
+                    "id": admission_id,
+                    "thread": thread_id,
+                    "exclusive": exclusive,
+                    "owner": owner.id,
+                },
+            )
+        lease = _Lease(thread_id, exclusive)
+        token = _HELD.set(lease)
+        try:
+            yield
+        finally:
+            lease.active = False
+            _HELD.reset(token)
+            async with postgres.transaction() as conn:
+                await conn.execute(
+                    text("DELETE FROM task_tool_admission WHERE id = :id"), {"id": admission_id}
+                )
 
 
 async def ensure_task(thread_id: str) -> TaskRole:

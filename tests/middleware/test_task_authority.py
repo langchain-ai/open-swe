@@ -298,3 +298,61 @@ async def test_parallel_and_proxy_tool_admissions_release_pool_connections(regis
             assert await role(f"host-{index}") is None
 
     await asyncio.wait_for(asyncio.gather(*(call(i) for i in range(12))), 5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exclusive", [False, True])
+async def test_abandoned_admissions_reclaimed_when_owner_session_ends(registry_db, exclusive):
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    owner = uuid4()
+    engine = create_async_engine(postgres.uri(), poolclass=NullPool)
+    session = await engine.connect()
+    await session.execute(
+        text("SELECT pg_advisory_lock(hashtextextended(:key, 0))"),
+        {"key": f"task-owner:{owner}"},
+    )
+    await session.commit()
+    admission = uuid4()
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO task_tool_admission (id, thread_id, exclusive, owner_id) "
+                "VALUES (:id, 'thread', :exclusive, :owner)"
+            ),
+            {"id": admission, "exclusive": exclusive, "owner": owner},
+        )
+    with pytest.raises(PermissionError, match="conflicts"):
+        async with authority("thread"):
+            pytest.fail("Live execution was reclaimed")
+    await session.close()
+    await engine.dispose()
+    async with authority("thread"):
+        async with postgres.transaction() as conn:
+            assert not await conn.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM task_tool_admission WHERE id = :id)"),
+                {"id": admission},
+            )
+
+
+@pytest.mark.asyncio
+async def test_lost_owner_connection_cancels_active_tool(registry_db):
+    from agent import tasks
+
+    entered = asyncio.Event()
+
+    async def tool():
+        async with authority("thread", exclusive=False):
+            entered.set()
+            await asyncio.Event().wait()
+
+    running = asyncio.create_task(tool())
+    await entered.wait()
+    owner = tasks._OWNER
+    assert owner is not None
+    await owner.connection.close()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, 3)
+    async with authority("thread"):
+        assert tasks._OWNER is not owner
