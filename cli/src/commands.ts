@@ -22,7 +22,7 @@ export async function toolCommand(
   })
   const command = positionals[0]
   if (!command || positionals.length !== 1)
-    throw new Error("usage: oswe <tool-name> [--json <object>] [--help]")
+    throw new Error("usage: oswe tool NAME [--json <object>] [--help]")
   const server = await createMcpServer(version, apiClient)
   const client = new Client({ name: "oswe-cli", version })
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()

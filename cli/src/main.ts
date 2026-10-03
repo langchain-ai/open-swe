@@ -35,8 +35,8 @@ Usage:
   oswe run [options] [prompt...]    Start an agent bridged to this directory
   oswe mcp                          Serve an MCP server on stdio
   oswe tools                        List all tool subcommands and JSON schemas
-  oswe <tool-name> [--json <object>] Call any MCP tool (JSON stdin also accepted)
-  oswe <tool-name> --help            Show a tool's description and input schema
+  oswe tool NAME [--json <object>] Call any MCP tool (JSON stdin also accepted)
+  oswe tool NAME --help            Show a tool's description and input schema
   oswe --help | --version
 
 Run options:
@@ -345,13 +345,12 @@ function parseCli(argv: readonly string[]) {
 
 export async function main(argv: readonly string[]): Promise<number> {
   const first = argv[0]
-  if (
-    first &&
-    !first.startsWith("-") &&
-    !["login", "logout", "auth", "mcp", "run", "help"].includes(first)
-  ) {
+  if (first === "tool" || first === "tools") {
     try {
-      return await toolCommand(argv, pkg.version)
+      return await toolCommand(
+        first === "tool" ? argv.slice(1) : argv,
+        pkg.version
+      )
     } catch (cause) {
       fail(errorMessage(cause))
       return 1

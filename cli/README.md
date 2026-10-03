@@ -161,21 +161,21 @@ redirected file, so a CI runner's open stdin never blocks a run.
 
 ## Tool subcommands
 
-Every MCP tool is also an `oswe` subcommand, using the same session,
+Every MCP tool is accessible through `oswe tool NAME`, using the same session,
 validation, authorization and implementation as the MCP server. Use the tool's
 underscore name or its hyphenated spelling. Backend-provided tools appear
 without rebuilding the CLI.
 
 ```sh
 oswe tools
-oswe list-threads --help
-oswe list-threads --json '{"limit":5,"include_archived":true}'
-printf '%s' '{"limit":5}' | oswe list_threads
-oswe request-human-review --json '{"pr_url":"https://github.com/org/repo/pull/1","inline_summary":"Fix retry handling."}'
+oswe tool list-threads --help
+oswe tool list-threads --json '{"limit":5,"include_archived":true}'
+printf '%s' '{"limit":5}' | oswe tool list_threads
+oswe tool request-human-review --json '{"pr_url":"https://github.com/org/repo/pull/1","inline_summary":"Fix retry handling."}'
 ```
 
 `oswe tools` prints the complete catalog, descriptions and JSON input schemas.
-`oswe <tool-name> --help` shows the selected tool's schema. Arguments are a JSON
+`oswe tool NAME --help` shows the selected tool's schema. Arguments are a JSON
 object passed with `--json` or on stdin; omitting both uses `{}`. Results are
 printed on stdout, errors on stderr, and tool failures exit 1. These commands
 require a person's session, just like MCP; machine credentials cannot act for
