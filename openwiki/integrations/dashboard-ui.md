@@ -1,140 +1,112 @@
 ---
 type: integration
-title: Dashboard and Desktop Clients
-description: The dashboard's FastAPI API, React/TanStack Start serving and proxy boundary, authenticated product capabilities, and the Electron client's supervised local-project execution model.
-tags: [dashboard, fastapi, oauth, threads, authorization, tanstack-start, electron, langgraph]
+title: Dashboard, Web UI, and Desktop Integration
+description: Dashboard API composition, authentication, thread and settings surfaces, web serving and proxy boundaries, and Electron supervision of a private local graph.
+tags: [dashboard, web-ui, fastapi, authentication, threads, desktop, proxy]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-03T08:14:13.017Z
 sources:
   - id: openwiki-source-328bde9e94017848bb09ba23
     resource: repo://agent/api/app.py
   - id: openwiki-source-412c2c84023da365b8201b9f
     resource: repo://agent/dashboard/__init__.py
-  - id: openwiki-source-09b129ff728dd4990ea2f25e
-    resource: repo://agent/dashboard/agent_instructions.py
+  - id: openwiki-source-04f1d39360e23b075eaca9f3
+    resource: repo://agent/dashboard/auth_routes.py
   - id: openwiki-source-5460c3972fe61bb256d07994
     resource: repo://agent/dashboard/oauth.py
   - id: openwiki-source-61ace7d4952db9ddb8316aeb
     resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-202e70aa1fb446ab05cc6d99
-    resource: repo://agent/dashboard/schedules.py
-  - id: openwiki-source-fb23e4421b72cc55be83e96d
-    resource: repo://agent/dashboard/skills.py
-  - id: openwiki-source-dc33a233b67bb1d08952543c
-    resource: repo://agent/dashboard/thread_api.py
-  - id: openwiki-source-8c60a9544ea26006748dd7a3
-    resource: repo://agent/desktop.py
-  - id: openwiki-source-31ac80d273943055d537bae8
-    resource: repo://agent/review/styles.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
+  - id: openwiki-source-bcdbf9656d4045712d8041c3
+    resource: repo://agent/schedules/routes.py
+  - id: openwiki-source-483cc1a0c3e95373a80a7ab1
+    resource: repo://agent/skill_store/routes.py
+  - id: openwiki-source-2125456467ee589819c93414
+    resource: repo://agent/threads/terminal.py
   - id: openwiki-source-6e64b1ccdb133daeb8f4d1d4
     resource: repo://agent/utils/dashboard_ui.py
-  - id: openwiki-source-2f66613e587b7c57d9be522e
-    resource: repo://desktop/README.md
   - id: openwiki-source-f94f5d5d16b6aac2f4bc309c
     resource: repo://desktop/src/backend-supervisor.cjs
-  - id: openwiki-source-62d0819e47a738ba26f898fd
-    resource: repo://tests/dashboard/test_dashboard_thread_api_activity.py
-  - id: openwiki-source-654bec991273a9eb3ccdf2c1
-    resource: repo://tests/dashboard/test_dashboard_thread_api.py
+  - id: openwiki-source-0cde9c9157fbf5bcf47c93fe
+    resource: repo://tests/dashboard/test_dashboard_ui.py
   - id: openwiki-source-cee8c9d42a08db69733a075f
     resource: repo://ui/server/backend-proxy.ts
   - id: openwiki-source-3b0d59e2570cb537382d8c12
     resource: repo://ui/src/lib/dashboard-fetch.ts
+  - id: openwiki-source-4eb06f8c7641cb7107e39ca8
+    resource: repo://ui/src/router.tsx
   - id: openwiki-source-c7a3ad58e4b4017484c1e326
     resource: repo://ui/src/routes/agents.tsx
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-03T08:14:13.017Z" }
 ---
 
-# Dashboard and Desktop Clients
+# Dashboard, Web UI, and Desktop Integration
 
-The dashboard is the human-facing surface around the agent: a FastAPI router, a React application built with TanStack Start, and an experimental Electron client. The dashboard API is the policy boundary for sessions, GitHub-derived authority, dashboard records, and LangGraph operations; the browser-facing clients use proxies rather than exposing server credentials or calling a raw LangGraph deployment directly.
+The dashboard is the human-facing integration boundary around the agent. Its FastAPI API owns session-based access control and dashboard-specific operations; the TanStack Start UI and the Electron renderer deliberately reach it through same-origin or application-owned proxies rather than exposing backend credentials to browser JavaScript.
 
-## Composition, serving, and mount paths
+## API composition and policy boundary
 
-`agent.api.app.create_app()` includes the dashboard router, then calls `mount_dashboard_ui(app)`. The router has the `/dashboard/api` prefix and a router-wide mutation-origin dependency. `agent.dashboard` exports that router lazily with `__getattr__`; helper imports consequently do not pull in FastAPI, routes, and the feature modules unless the web app mounts the router.
+`create_app()` builds the FastAPI application, configures credentialed CORS, includes the dashboard aggregate router and other application routers, and only then mounts the UI. The aggregate dashboard router is mounted below `/dashboard/api` and composes authentication, profiles and preferences, repositories and pull requests, threads and transcripts, schedules, skills, review, workspace settings, MCP, audit, analytics, and other product routers. `agent.dashboard.router` is lazy: importing a dashboard helper does not import FastAPI and all feature routers until the web app actually requests the router.
 
-When a dashboard build is available, `agent.utils.dashboard_ui` mounts immutable hashed assets at `/assets` and serves `_shell.html` for HTML navigation requests. It deliberately declines API, webhook, health, LangGraph, docs, metrics, and asset prefixes; a non-HTML request for an unknown UI route is likewise left for the underlying server to return as a 404. The shell is `no-cache` so it can reference a new asset manifest, while hashed assets can be cached for a year. With `DASHBOARD_DEV_SERVER_URL`, the backend instead reverse-proxies non-reserved traffic to Vite, preserving the backend origin and redirect responses. The catch-all is registered last; code which subsequently adds a route must call `keep_dashboard_ui_last`.
-
-`DASHBOARD_STATIC_DIR` selects an explicit build; otherwise the in-repository `ui/.output/public` build is used when present. A build served under a LangGraph mount prefix must be built with the matching `DASHBOARD_BASE_PATH`. The UI router uses Vite's `BASE_URL` as its `basepath`, so client navigation follows that mount.
+Every route in that aggregate receives the mutation-origin dependency. Safe HTTP methods pass. A mutation made solely with a bearer GitHub token passes because it does not rely on an ambient browser cookie; cookie-authenticated mutations require an allowed `Origin` or `Referer`. WebSockets are always origin-checked. If no dashboard origins are configured, the origin checker is intentionally a no-op for local setups. Application CORS also permits `open-swe://app`, supports credentials, and rejects a wildcard `DASHBOARD_ALLOWED_ORIGINS` configuration.
 
 ```mermaid
 sequenceDiagram
     participant Browser
-    participant UI as UI server or backend shell
+    participant WebUI as UI server
     participant API as Dashboard API
     participant Graph as LangGraph
 
-    Browser->>UI: Relative dashboard request
-    UI->>API: Proxy dashboard API request
+    Browser->>WebUI: Relative dashboard API request
+    WebUI->>API: Forward path headers and body
+    API->>API: Session and mutation-origin checks
     API->>Graph: Authorized thread or run operation
     Graph-->>API: Result
-    API-->>UI: Response or redirect
-    UI-->>Browser: Same-origin response
+    API-->>WebUI: Response or OAuth redirect
+    WebUI-->>Browser: Same-origin response
 ```
-Diagram: normal web traffic reaches the dashboard API through either the UI server proxy or the backend's same-origin shell.
+Diagram: web API traffic remains at the UI origin from the browser's perspective while the proxy forwards it to the dashboard backend.
 
-## Session and request security
+## Login, sessions, and desktop handoff
 
-GitHub login creates signed state containing a hash of a nonce placed in a short-lived, HTTP-only state cookie, then redirects to GitHub. The callback verifies the state cookie for normal browser login, exchanges the authorization code, resolves the GitHub user, applies the organization login gate, persists the token response, and redirects with a signed session cookie. A desktop handoff is different: after the same identity checks it returns a PKCE-challenge-bound code to the desktop loopback listener without setting a browser session; `POST /auth/desktop/exchange` requires the matching verifier before minting the desktop session.
+`GET /dashboard/api/auth/login` creates signed OAuth state whose nonce is represented in a short-lived state cookie and redirects to GitHub. The regular callback validates that nonce binding, exchanges the authorization code, resolves and authorizes the GitHub login, persists its access token, signs the user in, and issues the `osw_session` cookie. The post-login destination is constrained to relative safe paths or configured dashboard origins.
 
-Cookie security is derived from the API URL and whether UI and API share an origin: HTTP is non-secure and `SameSite=Lax`; same-origin HTTPS is `Secure; SameSite=Lax`; split-origin HTTPS is `Secure; SameSite=None`. `require_session` turns a missing or invalid session cookie into `401`. Admin routes additionally enforce `is_admin`; CI admin operations may authenticate with an Actions OIDC token or an administrator GitHub PAT.
+The desktop flow shares identity and authorization checks but not the browser session: OAuth state carries a validated PKCE challenge and loopback port. The callback redirects to a fixed `127.0.0.1` callback with a short-lived, PKCE-bound handoff code and clears state without setting a browser session. `POST /auth/desktop/exchange` requires the verifier before returning a session token for the desktop application. Session cookies are seven-day signed JWTs; `require_session` returns `401` for no cookie or an invalid token, while route dependencies use the session to enforce administrator-specific actions.
 
-The router-wide CSRF guard permits safe methods and a request authenticated only with an explicit bearer token. Cookie-authenticated mutations require an allowed `Origin` or `Referer`; WebSockets always receive the origin check. This control protects the ambient cookie, not business authority: individual endpoints still enforce administrator status, repository access, or thread postability. At app construction, credentialed CORS may be configured from `DASHBOARD_ALLOWED_ORIGINS`, but `*` is rejected because it is unsafe with credentials.
+## Product surfaces: threads, terminal, schedules, and skills
 
-## Threads: discovery, reading, and terminal access
+The threads router is the dashboard facade over thread summaries, lifecycle commands, run/stream proxying, file and diff views, pins, feedback, uploads, and pull-request context. Listing is authenticated; `all=true` requires an administrator. The paginated listing rejects incompatible `repo` and `ownerless` filters and validates a repository as `owner/name`. A separate per-user pinned endpoint supports pin and unpin operations. Thread implementations, rather than the UI, remain responsible for readability and mutation authority.
 
-Thread discovery and thread readability are intentionally different. Normal listings search participant login/email metadata, including legacy creator metadata. `all=true` is restricted to administrators. The paginated endpoint clamps `limit` to 1–100, normalizes negative offsets, validates `repo` as `owner/name`, and rejects `repo` together with `ownerless`. Metadata filtering occurs before summary construction; viewed/status filtering requires summaries. Potentially active latest runs are refreshed with a concurrency limit of eight.
+Cloud terminal access is deliberately two-stage. `POST /threads/{thread_id}/terminal/connect` first verifies access to a ready terminal sandbox, then returns a no-store WebSocket URL, `open-swe-terminal` subprotocol, and a short-lived ticket bound to that thread. The WebSocket takes its ticket in the subprotocol rather than a dashboard cookie, verifies the ticket and sandbox access again, only supports a LangSmith sandbox, and uses a semaphore of 20 sessions. When saturated it closes with `1013`; it limits input size and terminal dimensions, and kills the PTY handle when the connection ends.
 
-Any authenticated organization member can read a thread whose source is surfaced; unsurfaced threads return `404`. Posting applies that readable check and additionally requires an administrator for automation and `admin_thread` threads. `/threads/{thread_id}` returns a metadata-derived summary, not converted messages: the client stream provider obtains the transcript from the LangGraph state endpoint. A finished detail read normally writes viewed metadata but supports `mark_viewed=false`, never marks a running thread viewed, and treats metadata-write failure as non-fatal. An interrupted latest run is reported as interrupted even while the thread itself briefly remains busy.
+Schedules expose authenticated listing, but create, update, trigger, and delete require the administrator dependency. The schedule store is therefore the lifecycle owner behind the API rather than a UI-owned timer. Skills have two scopes: user skill CRUD is keyed to the signed-in GitHub login, while every authenticated user may list organization skills and only administrators may change them. This makes the route boundary explicit for settings-like data that appears in prompts or runs.
 
-Projects are metadata-only groups of matching configured repositories, keyed case-insensitively and sorted by latest update; they omit ownerless work and default to excluding resolved and automation threads. Pins are stored per login, not in thread metadata. Pinning verifies readability; loading pins retrieves every saved ID independently and omits missing, failed, or no-longer-readable threads. Thus a pin never bypasses present access checks.
+## UI routing, serving, and proxying
 
-```mermaid
-flowchart TD
-    Req["Authenticated request"] --> List{"Listing"}
-    List -->|"normal"| Participant["Participant and legacy metadata"]
-    List -->|"all true admin"| AllThreads["All metadata"]
-    Participant --> Filters["Metadata filters"]
-    AllThreads --> Filters
-    Filters --> Summaries["Summaries and status filters"]
-    Req --> PinIds["Per-login pin IDs"]
-    PinIds --> PinFetch["Fetch each thread"]
-    PinFetch --> Readable{"Surfaced source"}
-    Readable -->|"yes"| Pinned["Return summary"]
-    Readable -->|"no"| Omit["Omit pin"]
-```
-Diagram: discovery is participant/admin scoped, whereas each pinned item is fetched and rechecked for current readability.
+The React UI uses TanStack Router with `import.meta.env.BASE_URL` as its base path, allowing a build made for a LangGraph mount prefix to navigate under that prefix. Browser dashboard calls form relative `/dashboard/api/*` URLs; this keeps the session cookie same-origin. During server rendering the fetch layer instead addresses `DASHBOARD_API_URL` directly and copies the incoming `cookie` header, since server-side `credentials: "include"` cannot forward a browser cookie jar.
 
-The cloud terminal uses a two-step contract. `POST /threads/{id}/terminal/connect` checks readable thread and ready sandbox, returns a no-store WebSocket URL, the `open-swe-terminal` protocol, and a signed ticket. The WebSocket expects protocol plus ticket, validates its thread-bound ticket and origin, then repeats readable/sandbox validation. It only operates for a LangSmith sandbox, permits 20 concurrent sessions, and closes with `1013` when full. It bridges bounded input and resize messages to a PTY shell and kills the handle when the connection ends.
+In development, Vite proxies backend prefixes to `DASHBOARD_API_URL`, defaulting to `http://localhost:2024`, and preserves redirects. In deployed UI builds, the Nitro handler for `/dashboard/api/**` and `/webhooks/**` obtains `DASHBOARD_API_URL` per request and fails if it is absent. It forwards the request while retaining OAuth `3xx` responses for the browser, removes hop-by-hop and reframed headers, and emits each upstream `Set-Cookie` as its own response header.
 
-## Dashboard-managed configuration and automation
+The Python backend can also serve a bundled client-only build itself. `DASHBOARD_STATIC_DIR` selects an explicit build, otherwise `ui/.output/public` is used when it contains `_shell.html`; `DASHBOARD_DEV_SERVER_URL` instead enables a reverse proxy to Vite while retaining the backend origin. The mounted catch-all refuses server-owned prefixes such as `/dashboard/api`, `/threads`, `/runs`, `/webhooks`, `/health`, and `/assets`. It serves existing files or the no-cache shell only to HTML navigation requests, so unknown non-HTML paths remain server `404`s. Hashed assets are immutable for a year. The catch-all must stay last; callers that add routes after mounting use `keep_dashboard_ui_last` to restore route precedence.
 
-Repository instruction records normalize `owner/repo`; route handlers filter lists and guard direct access through current repository authority. For a run's resolved repository, non-empty instructions are appended to the main prompt (and lookup failure is fail-soft). Review styles use similarly repository-guarded records with `idle`, `running`, `completed`, and `failed` states. A read reconciles an in-progress analyzer; a concurrent analysis returns `409`; a saved prompt allows a terminal or missing analyzer run to become completed.
+Focused UI tests verify that API routes outrank the shell, serving works beneath a mount prefix, files cannot escape the build directory, and the development proxy preserves streamed bodies, redirects, multiple `Set-Cookie` headers, and relevant response headers.
 
-Personal skills are virtual `SKILL.md` files isolated by GitHub login. Organization skills are shared, cursor-paginated, limited to 1,000 records, readable by every session, and writable by administrators only. Schedule listing requires a session, while create, update, trigger, and delete require administration. Workspace-scoped schedule records keep cron configuration separate from run state. Creation writes the record before creating a LangGraph cron and removes it with `502` if creation fails; enabled changes create the replacement cron before deleting the old one, while disabling deletes the cron. Before launch, repository access for the recorded owner is rechecked; failure records an unauthorized run state rather than launching. Successful launch creates an automation thread and resumable durable agent run.
+## Electron and the local graph boundary
 
-## React UI and deployment proxy
+The desktop runtime uses a `BackendSupervisor` to start a private local LangGraph server lazily. Concurrent starts share one readiness promise. It reserves a loopback-only `127.0.0.1` port, generates a random bearer token, requires a project allowlist and worktree directory, starts either development `uv run langgraph dev` using `langgraph.desktop.json` or the packaged runtime/configuration, and supplies the token and local path configuration through child environment variables. It polls the authenticated root endpoint for up to 60 seconds; startup failures include retained child logs.
 
-`ui/` is a React/TanStack Start application with TanStack Router, React Query SSR integration, and a Vite/Nitro server build. The browser API layer forms relative `/dashboard/api/*` URLs and uses `credentials: "include"`. In development, Vite proxies backend prefixes (with a localhost default); deployed Nitro explicitly sends `/dashboard/api/**` and `/webhooks/**` to `ui/server/backend-proxy.ts` and requires `DASHBOARD_API_URL` at runtime.
+The renderer receives only the stable local configuration `{ apiUrl: "/local-graph", graphId: "agent" }`, never the port or token. Requests to that prefix start the supervisor if needed, remove renderer `host` and `cookie` headers, inject the supervisor bearer token, and retain redirects manually. Shutdown clears supervisor state, sends `SIGTERM`, and escalates to `SIGKILL` after five seconds if needed. This proxy boundary lets the desktop UI speak the normal graph protocol without granting renderer code credentials for the loopback backend.
 
-The production proxy retains OAuth redirects with `redirect: "manual"`, forwards request bodies and headers, removes hop-by-hop and reframed response headers, and appends each `Set-Cookie` separately. Server rendering targets `DASHBOARD_API_URL` directly and explicitly forwards the incoming `cookie` header because server-side `credentials: "include"` cannot do so. The Agents layout permits an unauthenticated desktop-local-only mode only at `/agents` and `/agents/local/...`; its shared stream provider chooses local transport only for a local thread and cloud transport otherwise.
+The Agents route permits an unauthenticated desktop-local mode only at `/agents` or `/agents/local/...`; other unauthenticated navigation is sent to login. That restriction keeps the special local transport separate from ordinary cloud dashboard sessions.
 
-## Electron local client and execution boundary
+## Operational checklist
 
-The experimental Electron package bundles the compiled UI at `open-swe://app`. It proxies dashboard API traffic to a user-configured compatible backend and `/local-graph` traffic to a private loopback graph. This separation prevents the renderer from receiving LangSmith credentials or using a raw LangGraph API. Packaged builds have no hosted backend default; changing the configured backend clears that deployment's local session data. The desktop package builds the UI and packages both it and the local backend runtime.
-
-`BackendSupervisor` starts the local graph lazily and shares the in-progress readiness promise. It reserves a `127.0.0.1` port, creates a random bearer token, verifies required project/worktree paths, and starts `uv run langgraph dev` with `langgraph.desktop.json` in development or the bundled Python runtime/configuration when packaged. It passes the token, project allowlist, worktree directory, and an out-of-project artifact location to the child. Startup polls the authenticated loopback root for up to 60 seconds and includes retained child logs in failures. The stable renderer configuration is `{ apiUrl: "/local-graph", graphId: "agent" }`; the proxy strips renderer cookies, injects the bearer token, and does not expose the actual port. Shutdown clears supervisor state, sends `SIGTERM`, and escalates to `SIGKILL` after five seconds.
-
-A `source == "desktop"` run selects `LocalShellBackend`, not a cloud sandbox. `local_project_path` must resolve to an existing allowlisted project directory or a desktop-managed worktree. The local factory uses local model defaults and state-backed user skills, disables cloud sandbox file downloads, and routes `large_tool_results` and conversation history into sanitized per-thread artifact directories outside the project. This preserves the graph protocol while limiting filesystem authority to the selected project and preventing agent scratch files from appearing in its working tree.
-
-## Focused verification
-
-Dashboard thread tests cover image/model compatibility; `run.start` creation metadata; configured-repository display privacy; terminal sandbox readiness; recovery-patch behavior and limits; and the missing-thread command constraint. Activity tests cover run-status refresh, viewing by an authenticated reader, opt-out viewing, and the prohibition on marking a running thread viewed. Desktop changes should also retain the loopback token boundary, health polling, proxy cookie stripping, and termination escalation; UI proxy changes must preserve individual `Set-Cookie` headers and un-followed OAuth redirects.
+- Configure `DASHBOARD_JWT_SECRET` for signed state, sessions, and terminal tickets, and configure GitHub login authorization before production startup.
+- Set `DASHBOARD_API_URL` for deployed UI SSR and Nitro proxying; do not rely on a production fallback.
+- Use `DASHBOARD_STATIC_DIR` for an explicit built UI or `DASHBOARD_DEV_SERVER_URL` for backend-fronted Vite development. Align `DASHBOARD_BASE_PATH` with any LangGraph mount prefix.
+- Preserve the desktop loopback token, cookie stripping, health polling, and forced shutdown behavior when changing desktop transport or startup code.
 
 ## Related
 

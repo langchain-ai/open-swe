@@ -1,8 +1,8 @@
 ---
 type: operations reference
-title: Configuration and Startup Validation
-description: Explains Open SWE's lazy environment registry, persisted administrator settings, model and sandbox selection, secrets, and the validation that can stop a server from starting.
-tags: [configuration, operations, environment-variables, startup-validation, sandbox, models, security]
+title: Runtime Configuration and Workspace Settings
+description: Explains Open SWE's environment registry, boot-time validation, sandbox and model defaults, and the tiered instance and workspace settings that administrators manage at runtime.
+tags: [configuration, operations, environment-variables, startup-validation, sandbox, models, workspaces]
 sources:
   - id: openwiki-source-328bde9e94017848bb09ba23
     resource: repo://agent/api/app.py
@@ -10,16 +10,14 @@ sources:
     resource: repo://agent/completion.py
   - id: openwiki-source-b05c9910677cf23a9325276c
     resource: repo://agent/config.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-07762d55411a883aaa28e2ed
-    resource: repo://agent/dashboard/sandbox_settings.py
-  - id: openwiki-source-23002b87792ed6949edb723b
-    resource: repo://agent/dashboard/team_settings.py
+  - id: openwiki-source-0a6d03ee63c0e527ce21bf77
+    resource: repo://agent/dashboard/workspace_settings.py
   - id: openwiki-source-c48b309c5ca416cf623f0866
     resource: repo://agent/dispatch.py
   - id: openwiki-source-eb53b48336d1b5fc0816441a
     resource: repo://agent/encryption.py
+  - id: openwiki-source-6fd11c8bb15f5eb94b765440
+    resource: repo://agent/sandboxes/lifecycle.py
   - id: openwiki-source-2dedcea02c5aa03c54d81c32
     resource: repo://agent/sandboxes/providers/langsmith.py
   - id: openwiki-source-49bfbb811c25e99235121924
@@ -30,109 +28,100 @@ sources:
     resource: repo://agent/utils/gateway.py
   - id: openwiki-source-56ade344fdbe7d47c84f008f
     resource: repo://agent/utils/model.py
-  - id: openwiki-source-8010c6e64af5a375d8d3b70b
-    resource: repo://docs/CUSTOMIZATION.md
+  - id: openwiki-source-aebc62fe1f2d776d56ba1776
+    resource: repo://agent/workspaces/refresh.py
+  - id: openwiki-source-8b2e0e45c6159bcb1b873246
+    resource: repo://agent/workspaces/store.py
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
+generated: { by: "openwiki/0.4.2", at: "2026-10-03T08:14:13.017Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+    at: 2026-10-03T08:14:13.017Z
 ---
 
-# Configuration and Startup Validation
+# Runtime Configuration and Workspace Settings
 
-Open SWE has two configuration planes:
+Open SWE has two deliberately separate configuration planes:
 
-- **Deployment configuration** is declared centrally in `agent/config.py` and normally supplied through environment variables (including the `.env` file named by `langgraph.json`). It covers connectivity, credentials, provider selection, UI URLs, and deployment defaults.
-- **Administrator settings** are instance-wide records in LangGraph Store. They change selected behavior without a redeploy, notably the default sandbox snapshot and team-wide review/model settings. These are not substitutes for secrets or provider credentials, which remain deployment configuration.
+- **Deployment configuration** is the environment-variable schema in `agent/config.py`. It owns credentials, endpoints, provider selection, process-wide defaults, and security boundaries. Treat it as deployment-managed configuration, not dashboard data.
+- **Runtime settings** are administrator-managed records in LangGraph Store. The instance record supplies shared defaults; each workspace may store sparse overrides. They are appropriate for choices such as models, review behavior, and feature toggles—not provider credentials.
 
-This page describes ownership and failure behavior rather than listing every variable. `agent/config.py` is the complete variable catalog; [deployment](deployment.md) provides installation procedures. See [models, profiles, and instructions](../concepts/models-profiles-instructions.md), [auth and security](../concepts/auth-and-security.md), and [sandbox providers](../integrations/sandbox-providers.md) for their respective domains.
+This page documents resolution and operational failure behavior, rather than copying secret values or enumerating every variable. See [Deployment](deployment.md), [Authentication and security](../concepts/auth-and-security.md), [Models, profiles, and instructions](../concepts/models-profiles-instructions.md), and [Sandbox providers](../integrations/sandbox-providers.md) for adjacent concerns.
 
-## Configuration ownership and value semantics
+## Environment schema and deployment entrypoints
 
-`ENV` is the single registry for application configuration. Code reads values through an `EnvVar` object rather than taking an import-time snapshot of `os.environ`: reads are lazy, so late secret hydration, key rotation, and test monkeypatching can be observed. Whitespace-only values count as unset. The registry also records descriptions, defaults, secret classification, aliases, and deprecated names; its typed accessors parse comma-separated lists, integers, and conventional boolean strings.
+`ENV` is the sole registry for application environment variables. `EnvVar` reads lazily, trims values, and treats blank input as unset; therefore late secret injection and test monkeypatching are observed. Canonical names win over aliases, typed accessors handle integers, booleans, and comma-separated lists, and accessing an undeclared variable raises explicitly. Add a variable to this registry—including its description, secret classification, aliases, and deprecation relationship—before consuming it.
 
-The canonical name takes precedence over aliases. Deprecated aliases are centralized in the registry, rather than scattered through consumers; `deprecated_in_use()` can report an alias or deprecated setting, suppressing a deprecated warning when its replacement is also set. An undeclared `ENV.NAME` or `ENV["NAME"]` is an error, which makes adding a variable an explicit configuration-schema change.
+`langgraph.json` is the platform deployment entrypoint. It registers the `agent`, `reviewer`, `analyzer`, `review-scout`, `chat`, and `scheduler` graphs and mounts `agent.webapp:app` as the HTTP application. It names `.env` as the environment file and configures delete-based checkpointer TTL cleanup: a 60-minute sweep with a 43,200-minute default TTL.
 
-### Deployment topology
+## Process startup: hard gates and degradations
 
-`langgraph.json` registers five graphs (`agent`, `reviewer`, `analyzer`, `chat`, and `scheduler`) and mounts `agent.webapp:app` as the platform HTTP application for dashboard and webhook routes. Its checkpointer uses delete-based TTL cleanup: a 60-minute sweep and a default TTL of 43200 minutes (30 days). The file names `.env` as its environment file.
-
-## Startup lifecycle and failures
-
-The FastAPI composition entrypoint is `agent.api.app:create_app`. It pins the process to a single event loop before queue work is constructed and again in lifespan startup. The lifespan then validates the active sandbox configuration and local-development model credentials. It yields only if both succeed; on shutdown it closes all cached model clients.
+`agent.api.app:create_app` pins one event loop before queue workers are built, rejects `*` in `DASHBOARD_ALLOWED_ORIGINS` because CORS allows credentials, installs the application routes, and serves the dashboard UI. Its lifespan re-pins the loop and performs hard startup gates: GitHub login-allowlist validation, active sandbox validation, local-development default-model credential validation, database configuration, and migrations. A failure in one of those steps prevents serving.
 
 ```mermaid
 flowchart TD
-    Init["Import application"] --> Pin["Pin one event loop"]
-    Pin --> Build["Create FastAPI application"]
-    Build --> Start["Lifespan startup"]
-    Start --> CheckSandbox["Validate active sandbox configuration"]
-    CheckSandbox --> CheckModel["Validate localhost model credential"]
-    CheckModel --> Serve["Serve routes and runs"]
-    CheckSandbox --> Stop["Raise and abort startup"]
-    CheckModel --> Stop
-    Serve --> Close["Close cached model clients"]
+    Compose["Create application"] --> CORS["Reject wildcard credentialed CORS"]
+    CORS --> Life["Lifespan startup"]
+    Life --> Gates["Validate allowlist sandbox model and database"]
+    Gates --> Migrate["Run database migrations"]
+    Migrate --> Optional["Start imports analytics and listeners"]
+    Optional --> Serve["Serve requests and runs"]
+    Gates --> Abort["Abort startup"]
+    Serve --> Shutdown["Stop listeners workers and database"]
 ```
 
-The diagram shows the boot-time checks performed by the FastAPI lifespan and cleanup on shutdown.
+The diagram distinguishes validation and migration gates from auxiliary startup work. User-map and concierge imports, automation migration, analytics, and transcript/bridge listeners log failures and allow startup to continue; degraded cross-process behavior is documented in their logs. Shutdown stops listeners and the analytics worker, then closes the database.
 
-Not every bad setting is checked at boot. The sandbox validator is provider-specific: it currently validates LangSmith resource fields and extra JSON only when `SANDBOX_TYPE=langsmith`; an unknown provider name is rejected when the registry is asked to create a sandbox. Likewise, model startup validation deliberately applies only when an explicitly configured `DASHBOARD_BASE_URL` starts with `http://localhost`; it checks the credential needed by the deployment's `LLM_MODEL_ID` (or default) and does not attempt to validate models that may later be chosen through team, profile, or thread settings.
+Local model-key validation is intentionally narrow: it only runs when an explicitly set `DASHBOARD_BASE_URL` starts with `http://localhost`, and only checks the configured deployment default model. Later workspace, profile, and thread choices are not prevalidated.
 
-`DASHBOARD_ALLOWED_ORIGINS` is separately checked while the application is built: if it contains `*`, construction raises because credentialed CORS cannot safely use a wildcard. Nonempty explicit origins enable credentialed CORS for the dashboard API.
+## Sandbox selection, resource defaults, and workspace snapshots
 
-## Sandboxes: provider, snapshot, and runtime override
+`SANDBOX_TYPE` defaults to `langsmith`. The lazy registry supports `langsmith`, `daytona`, `modal`, `runloop`, `e2b`, and `local`; an unknown name raises a `ValueError` that lists supported types. Optional third-party providers are imported at startup so a missing provider extra fails at boot with its install instruction. Only the LangSmith factory receives snapshot, resource, and arbitrary create-body parameters; other providers receive an optional reconnect ID. The local provider runs on the host without isolation and is development-only.
 
-`SANDBOX_TYPE` defaults to `langsmith`. The lazy provider registry maps `langsmith`, `daytona`, `modal`, `runloop`, `e2b`, and `local` to provider factories. An unsupported value raises `ValueError` and lists the supported values. The local provider executes on the host and has no isolation, so it is for local development rather than untrusted work.
+For LangSmith, deployment resource defaults are 128 GiB filesystem, 4 vCPUs, 16 GiB memory, 7,200 seconds idle TTL, and 2,592,000 seconds delete-after-stop TTL. The two TTLs accept `0` to disable expiry. At startup, configured resource values must be integers, TTLs cannot be negative, and `SANDBOX_CREATE_EXTRA_JSON` must be a JSON object. LangSmith credentials and endpoint come from `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 
-The registry passes `snapshot_id`, resource overrides, and arbitrary create parameters only to the LangSmith factory; other providers receive only an optional existing sandbox ID. For LangSmith, the normal base snapshot comes from `DEFAULT_SANDBOX_SNAPSHOT_ID` (otherwise the provider root snapshot), with defaults of 128 GiB filesystem, 4 vCPUs, 16 GiB memory, 7200 seconds idle TTL, and 2592000 seconds deletion-after-stop TTL. The two TTL values allow `0` to disable their expiration behavior. Malformed numeric resource values, negative TTLs, and invalid/non-object `SANDBOX_CREATE_EXTRA_JSON` fail LangSmith startup validation.
+The base snapshot is no longer an instance-wide sandbox setting. A workspace record owns its optional `base_snapshot_id`, setup/update scripts, resource overrides, and provider create parameters. A full refresh boots from that base snapshot, runs setup and update scripts, and captures only after every script succeeds. Run sandbox creation resolves the workspace and boots from its `ready_snapshot_id`; a deliberately `base` source skips workspace lookup and has no snapshot. Thus a ready workspace snapshot takes precedence over its base snapshot, while no workspace snapshot lets the LangSmith provider use its root snapshot.
 
-`SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` let sandbox operations use another LangSmith workspace; each falls back to its normal `LANGSMITH_*` counterpart. The selected credentials apply to sandbox API operations, proxy setup, and environment snapshot work, so a configured base snapshot must exist in that workspace. `ENVIRONMENT_SNAPSHOT_PREFIX` defaults to `openswe` and separates environment snapshot names when deployments share a workspace.
+## Runtime settings: tiered inheritance
 
-### Stored base snapshot precedence
+The historical “team settings” instance record remains stored at `team_settings/default`; every workspace inherits it. Workspace records live under `workspace_settings/<slug>` and are sparse: `None` or an omitted field falls through to the instance value, which falls through to hardcoded defaults. A legacy workspace record in the old namespace is read for compatibility until the workspace is saved again. Per-user profile choices and thread `configurable` values are applied by callers above these tiers.
 
-The sandbox-settings record is one instance-wide LangGraph Store value. An administrator can read or update it at `GET`/`PUT /dashboard/api/sandbox-settings`; the route accepts a dashboard admin or configured admin token identity. The stored `base_snapshot_id` is trimmed opaque text, capped at 512 characters, and its update records time and updater. A stored value wins over `DEFAULT_SANDBOX_SNAPSHOT_ID`; clearing it restores the environment default. An already-ready captured environment remains a higher-level selection than this base snapshot.
+```mermaid
+flowchart TD
+    Hardcoded["Hardcoded defaults"] --> Instance["Instance settings record"]
+    Instance --> Workspace["Workspace sparse overrides"]
+    Workspace --> Caller["Profile and thread choices where supported"]
+    Caller --> Run["Resolved run behavior"]
+```
 
-The read used during provisioning is intentionally fail-soft: a Store exception is logged and treated as no override, allowing the environment default to keep runs working. In contrast, the dashboard read reports the stored, environment, and effective values plus whether the source is `admin`, `env`, or `unset`.
+The diagram shows precedence from lower to higher specificity. Store reads are deliberately fail-soft: if instance or workspace lookup fails, the application uses hardcoded defaults rather than making all runs fail. The settings API exposes `GET`/`PUT /settings` (with the older `/team-settings` alias) for the instance record and `GET`/`PUT /workspaces/{workspace}/settings` for an existing workspace; writes require an administrator, while reads require a session.
 
-## Models and team settings
+Settings cover review flags and guidelines, gateway, Fable, expedited-review and sandbox-OpenAI toggles, default repository, and model/effort pairs for agent, reviewer, subagents, routing tiers, chat, and titles. Writes validate model/effort compatibility, reject an effort without a model, trim and bound organization guidelines, and clear deprecated model IDs. A workspace view returns both its effective settings and only the overrides it owns, which makes inheritance visible to the dashboard.
 
-`LLM_MODEL_ID` and `LLM_REASONING_EFFORT` establish the deployment fallback pair. Resolution accepts only catalog models allowed as defaults and validates that the effort is supported; an unsupported model or effort raises when defaults are resolved. The deployment default is used when no durable team setting supplies a valid choice. Model selection can be more specific at team, profile, thread, or run scope; changing the environment does not overwrite existing selections.
+When a model pair is stale or invalid at resolution, the system first seeks a supported model from the same provider and then uses the global default. Chat inherits the agent setting when no valid chat-specific pair exists. Fable is disabled by default; when disabled, persisted Fable defaults are replaced with a safe non-Fable fallback, and the runtime gate prevents a Fable model from reaching construction.
 
-The team-settings record is also a single Store record keyed `default`. It includes review toggles, organization guidelines, review trace project, default repository, transcription model, gateway toggle, Fable opt-in, and main/subagent model-and-effort pairs for agent and reviewer, plus grouping, chat, and thread title settings. Input validation rejects unsupported model/effort combinations, an effort without a model, invalid transcription identifiers, and oversized guidelines or trace-project text. Deprecated model IDs are cleared and canonical pairs are normalized. When Fable is disabled, persisted Fable defaults are replaced with safe fallback pairs.
+## Model and gateway deployment defaults
 
-Store reads for team settings are fail-soft because model selection is on the run path: unavailable or absent Store data returns hardcoded defaults. Invalid/stale model data resolves first to a supported model from the same provider where possible, then to the global fallback. Chat inherits the agent default when unset, and review grouping inherits the reviewer subagent default.
+`LLM_MODEL_ID` and `LLM_REASONING_EFFORT` provide the deployment-level fallback pair below runtime settings. The model catalog controls accepted IDs and supported efforts. `make_model` installs six retries for all supported direct providers and a 600-second default request timeout for OpenAI, Anthropic, Baseten, Google GenAI, and Fireworks.
 
-`DEFAULT_LLM_MAX_TOKENS` is 64000 and is an output/completion budget, not a context-window size. `LLM_FALLBACK_MODEL_ID` can name a fallback; otherwise Anthropic and OpenAI primary models have cross-provider defaults. Fallback middleware is installed only if the fallback exists and differs from the selected primary. `make_model` caches constructed clients per running event loop and model options, and startup shutdown closes that cache.
+`LLM_FALLBACK_MODEL_ID` explicitly selects a fallback. If unset, Anthropic and OpenAI primaries use their cross-provider fallback; other providers have none. Fallback middleware is constructed only when the resolved fallback differs from the primary model.
 
-Each supported direct provider request receives up to six retries; OpenAI, Anthropic, Baseten, Google GenAI, and Fireworks also receive a 600-second default request timeout. These bounds complement the agent's separate model-call deadline and run recursion limits described in [models, profiles, and instructions](../concepts/models-profiles-instructions.md).
+Gateway resolution is also layered. `LANGSMITH_GATEWAY_ENABLED` is authoritative when set; otherwise a configured `LANGSMITH_GATEWAY_API_KEY` enables it. A workspace `gateway_enabled` value of `true` or `false` overrides that deployment default, while `null` inherits it. The gateway can route OpenAI, Anthropic, Baseten, Fireworks, and Google GenAI. If its provider is unsupported or no LangSmith key is usable, it logs and calls the provider directly instead of failing the run.
 
-### Gateway precedence
+## Secret-sensitive operational settings
 
-LangSmith LLM Gateway routing is centrally applied by `make_model`. `LANGSMITH_GATEWAY_ENABLED` is authoritative when set; otherwise setting `LANGSMITH_GATEWAY_API_KEY` turns routing on. A team setting is tri-state: `true` or `false` overrides this deployment default, while unset inherits it. Gateway authentication prefers `LANGSMITH_GATEWAY_API_KEY` and falls back to `LANGSMITH_API_KEY`; `LANGSMITH_GATEWAY_BASE_URL` changes the gateway host and `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` defaults to true.
+Keep credentials in deployment configuration; do not move them into runtime settings. `TOKEN_ENCRYPTION_KEY` is one Fernet key or a newest-first comma/newline-separated key list: new tokens use the first key and reads try all keys, enabling rotation without invalidating stored tokens.
 
-Only OpenAI, Anthropic, Baseten, Fireworks, and Google GenAI have gateway routes. If routing is enabled but the provider is not routable, or no LangSmith key is available, the code logs a warning and calls the provider directly rather than failing the run. Direct Baseten calls are stricter: with gateway routing unavailable, `BASETEN_API_KEY` is required.
+Run-completion callbacks are fail-closed. Without `RUN_COMPLETE_WEBHOOK_SECRET`, `/webhooks/run-complete` rejects all calls. Dispatch attaches a callback only if that secret exists and `COMPLETION_WEBHOOK_URL` is absolute and non-loopback; otherwise it omits the callback so platform URL rejection cannot prevent run creation.
 
-## Secrets, identity, and completion delivery
+## Change and test guidance
 
-Keep secrets in deployment configuration or the encrypted credential stores appropriate to their integration; do not place user GitHub access tokens in deployment environment variables. For LangSmith sandboxes, GitHub proxy rules mint an installation token at runtime and inject it on the wire for `github.com` and `api.github.com`; sandbox processes see placeholders rather than the real credential.
-
-Important identity settings include GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, installation ID, client ID/secret, and webhook secret), Slack signing and bot credentials, dashboard cookie/OAuth-state signing (`DASHBOARD_JWT_SECRET`), and `TOKEN_ENCRYPTION_KEY`. The latter accepts one Fernet key or a comma/newline-separated newest-first list: encryption uses the first key and decryption tries all keys, permitting key rotation. Encryption fails when a key is absent; decryption logs and returns an empty string for missing keys or invalid ciphertext.
-
-`CONFIGURED_ADMINS` is a normalized, comma-separated allowlist of GitHub logins and/or emails; with an empty value, no dashboard identity is an admin. `OBSERVABILITY_AUTHORIZED_EMAILS` separately grants the read-only observability tools, while configured admins are always authorized. Repository allowlists use `ALLOWED_GITHUB_ORGS` and `ALLOWED_GITHUB_REPOS`: if both are empty, any repository passes; otherwise an allowlisted owner or exact `owner/repo` is required.
-
-Run-completion replies require both a secret and a usable delivery URL. `RUN_COMPLETE_WEBHOOK_SECRET` makes `/webhooks/run-complete` fail closed: every callback is rejected without it. Dispatch attaches a callback only when the secret exists and `COMPLETION_WEBHOOK_URL` is absolute and non-loopback; a relative or loopback URL is warned about and omitted so it cannot make run creation fail. The dispatch URL carries the token query parameter for the completion endpoint's constant-time comparison.
-
-## Operating guidance
-
-1. Declare new environment variables in `agent/config.py`, including whether they are secret and any alias/deprecation relationship; consume them through `ENV` rather than a new direct environment read.
-2. Treat environment values as deployment defaults and credentials. Use the dashboard's persisted settings only for the explicitly supported instance-wide choices, and account for their fail-soft Store reads when designing changes.
-3. Before rollout, exercise lifespan startup with the selected sandbox and model configuration. In local development, set an explicit `http://localhost...` `DASHBOARD_BASE_URL` to activate model-key validation.
-4. Configure `COMPLETION_WEBHOOK_URL` as the public HTTPS `.../webhooks/run-complete` URL together with `RUN_COMPLETE_WEBHOOK_SECRET` if completion/failure replies are required.
-5. Rotate `TOKEN_ENCRYPTION_KEY` by prepending a new valid key while retaining old keys, then remove old keys only after stored tokens have been re-encrypted or retired.
-
-Focused tests should cover the registry's blank/alias/typed-value behavior, invalid LangSmith numeric and JSON settings during lifespan startup, sandbox override precedence and Store failure fallback, model-pair normalization/inheritance, gateway precedence, and the completion webhook's missing-secret and non-public-URL cases.
+1. Declare deployment variables in `agent/config.py` and use `ENV`; never scatter direct reads of `os.environ`.
+2. Exercise lifespan startup with the selected sandbox provider and credentials. In local development, an explicit localhost dashboard URL activates default-model credential checks.
+3. Use workspace snapshots and workspace resource overrides for repository-specific runtime environments; use deployment variables for provider-wide capacity defaults and credentials.
+4. Test settings changes across all tiers: hardcoded default, instance setting, workspace override, clearing an override, and Store failure fallback. Keep cache keys workspace-specific.
+5. Test invalid sandbox integers/JSON and missing optional provider extras at startup, model/effort validation and stale fallback, gateway precedence/direct fallback, and completion callback rejection for missing secret or loopback URLs.
 
 ## See also
 
@@ -140,4 +129,3 @@ Focused tests should cover the registry's blank/alias/typed-value behavior, inva
 - [Authentication and security](../concepts/auth-and-security.md)
 - [Models, profiles, and instructions](../concepts/models-profiles-instructions.md)
 - [Sandbox providers](../integrations/sandbox-providers.md)
-- [Observability and MCP](../integrations/observability-and-mcp.md)

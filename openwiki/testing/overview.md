@@ -1,12 +1,13 @@
 ---
 type: testing strategy
-title: Focused Validation Strategy
-description: Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.
+title: Focused Testing Strategy and Harnesses
+description: Choose the narrowest behavioral validation that owns an Open SWE change, from isolated Python contracts to dashboard, desktop, and Playwright harnesses. Learn the shared test isolation and controlled end-to-end seams before escalating coverage.
 tags: [testing, pytest, vitest, playwright, sandbox, webhooks, reviewer]
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
 sources:
+  - id: openwiki-source-3f4feeeb872e0d43c9b850c8
+    resource: repo://agent/sandboxes/state.py
+  - id: openwiki-source-f7625f28e19e6cb0404ed4da
+    resource: repo://agent/utils/reviewer_outcomes.py
   - id: openwiki-source-8037e2358a2c4f9b2c722a11
     resource: repo://AGENTS.md
   - id: openwiki-source-24f77a48f966a05631988d08
@@ -53,57 +54,56 @@ sources:
     resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-03T08:14:13.017Z" }
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-03T08:14:13.017Z
 ---
 
-# Focused Validation Strategy
+# Focused Testing Strategy and Harnesses
 
-Validate at the lowest layer that owns the changed observable contract. Use focused pytest tests for agent assembly, reviewer, sandbox, webhook, API, and tool behavior; use dashboard Vitest tests for React rendering and client state; use desktop Node tests for Electron main-process code. Escalate to Playwright only when the contract crosses the real webhook, authenticated dashboard, local git/sandbox, or Electron boundary. Never run the full local suite: target the owning file or one test first.
+Validate at the lowest layer that owns the changed observable contract. Start with one existing behavioral test, one test node, or a focused manual check; do **not** run the full local suite. A new test is justified only by a concrete regression that current coverage would miss. Prefer a deterministic outcome over prompt snapshots, implementation-order assertions, or mocks that only prove themselves.
 
 ```mermaid
 flowchart TD
-    Change["Changed behavior"] --> Owner{"Boundary that owns it"}
+    Change["Changed observable behavior"] --> Owner{"Owning boundary"}
     Owner -->|"Agent reviewer sandbox webhook"| Pytest["Focused pytest"]
     Owner -->|"Dashboard rendering or client state"| Vitest["Dashboard Vitest"]
     Owner -->|"Electron main process"| Node["Desktop Node test"]
     Owner -->|"Real service crossing"| Playwright["Focused Playwright spec"]
-    Pytest --> Gates["Relevant quality gate"]
-    Vitest --> Gates
-    Node --> Gates
-    Playwright --> Gates
+    Pytest --> Gate["Relevant quality gate"]
+    Vitest --> Gate
+    Node --> Gate
+    Playwright --> Gate
 ```
 
-This routing keeps feedback narrow while still requiring an end-to-end proof where independently deployed or stateful pieces meet.
+This decision path routes a change to its narrowest useful proof, then adds an integration harness only when independently stateful or deployed pieces meet.
 
-## Python tests: contracts, not prompt snapshots
+## Python: behavioral contracts and isolation
 
-Pytest collects `tests/` and uses asyncio auto mode, so asynchronous tests and fixtures need no per-test asyncio marker. Tests are grouped by system owner, including `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, and `tests/tools/`.
+Pytest collects from `tests/` and uses asyncio auto mode, so asynchronous tests and fixtures need no per-test asyncio marker. Test families are organized by their owning concern; use the existing focused file instead of broad collection whenever possible.
 
-Do not add tests that merely restate static prompt text. For agent instructions, test rendered output, configuration precedence, tool composition, or a behavioral result instead. For example, the assembly tests capture the `create_deep_agent` arguments: they protect an initialized sandbox-backed composite backend required for deepagents context eviction and summarization, source-dependent skill routing, and the separation between parent and subagent tools. This is the appropriate focused location for server graph wiring, middleware, skill, backend, or authorization changes.
+`tests/conftest.py` makes ordinary Python tests independent of a live LangGraph Store and of an incidental local UI build:
 
-### Shared isolation and fakes
+- `fake_store` redirects `agent.store` access to an in-memory `FakeStore`, while preserving the real `model_dump`/`model_validate` serialization path. Seed it only when persisted state is the behavior under test.
+- An autouse dashboard fixture points `DASHBOARD_STATIC_DIR` at a missing temporary path, so `ui/.output` cannot affect backend tests.
+- The autouse cache reset clears both the local TTL cache and, where applicable, the in-process LangGraph cache before and after each test. The sandbox registries are also cleared around every test.
+- The autouse auto-review stub returns enabled for every repository because the dashboard opt-in list is empty without a live Store. Replace that stub when testing an opt-in denial or repository policy.
 
-`tests/conftest.py` intentionally makes ordinary unit tests independent of a running LangGraph Store and of a locally built dashboard:
+### Select the owner that carries the failure semantics
 
-- `fake_store` redirects `agent.store` to an in-memory store, while retaining the production serialization round trip. Seed it only when persisted state is part of the contract.
-- An autouse dashboard fixture points `DASHBOARD_STATIC_DIR` at a missing temporary directory, so a local `ui/.output` cannot change a Python test's behavior.
-- The autouse TTL-cache reset runs before and after every case, preventing cached team settings from leaking.
-- The autouse auto-review stub enables every repository because no live Store means the dashboard opt-in list is empty. A test of the opt-in gate must replace this stub with its intended policy.
-
-### System-boundary test locations
-
-Use the narrow test family that carries the failure semantics being changed:
-
-| Change | Focused location and protected behavior |
+| Change | Narrow proof and the behavior it protects |
 | --- | --- |
-| Main agent construction, source-specific tools, backend, skills, or middleware | `tests/agent/test_agent_assembly_context.py`; it verifies the initialized `CompositeBackend`/`SandboxBackendProxy` arrangement, read-only skills, dynamic browser-tool exposure, and parent-only tool boundaries. |
-| Reviewer findings, published reviews, reconciliation, check runs, or learning outcomes | `tests/reviewer/`; for example `test_reviewer_outcomes.py` maps resolution and feedback into true/false-positive outcomes and treats absent credentials or repository data as a no-op. |
-| Lazy sandbox reconnection, capture offload, or sandbox identity recovery | `tests/sandbox/test_sandbox_state.py`; it requires `BaseSandbox` compatibility, safe offload fallback, one shared reconnect, cancellation-safe waiting, retry after failed startup, and live-thread metadata fallback. Provider-specific behavior has companion tests in the same directory. |
-| Completion notification and reviewer error cleanup | `tests/webhooks/test_completion_webhook.py`; errors on Slack-originated work send a thread reply and record the run, while reviewer failures settle a tracked check when its metadata and token exist. |
+| Main graph assembly, source-specific tools, skills, middleware, or backend wiring | `tests/agent/test_agent_assembly_context.py`. It captures `create_deep_agent` assembly: a sandbox-backed composite backend enables deepagents filesystem eviction and summarization; it also exercises source/visibility tool and skill boundaries. |
+| Sandbox reconnection or asynchronous file/command operations | `tests/sandbox/test_sandbox_state.py`. It verifies one concurrent reconnect from live thread metadata, ignores stale run-config metadata, shields startup from waiter cancellation, retries a failed start, and delegates operations after lazy startup. |
+| Reviewer learning/outcome persistence | `tests/reviewer/test_reviewer_outcomes.py` verifies the finding-level payload and the create-then-update path. The implementation maps resolved findings to true positives and dismissed findings to false positives; writes are best-effort and no-op without credentials. |
+| Completion handling after an error or timeout | `tests/webhooks/test_completion_webhook.py`. It protects Slack failure replies and per-run deduplication, reviewer check settlement when check metadata and a token exist, and continued notification if reviewer cleanup fails. |
 
-## Focused commands and independent gates
+For a prompt change, do not assert raw wording. Test a rendered result, configuration precedence, available tool boundary, or user-observable behavior only if it represents a plausible regression.
 
-Install Python development dependencies with `make install`, which runs `uv sync --extra dev`. The dev group contains pytest, pytest-asyncio, Ruff, ty, and Pygments. Target a path with `TEST_FILE`; use direct pytest for a single node id because the Makefile's existence guard accepts paths, not a `file.py::test_name` node id.
+## Focused Python commands and independent gates
+
+Install the Python development environment with `make install`, which runs `uv sync --extra dev`. The `dev` extra supplies `ty`, pytest, pytest-asyncio, pytest-xdist, and Ruff; Pygments is a runtime dependency. `make test` and `make tests` run `uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE)` only if `TEST_FILE` is an existing path. A pytest node ID is not a path, so invoke pytest directly for one test.
 
 ```bash
 make install
@@ -113,20 +113,26 @@ make lint
 make typecheck
 ```
 
-`make test` and `make tests` execute `uv run pytest -vvv $(TEST_FILE)` when the target path exists, otherwise they print a skip message. Quality gates are separate: `make lint` runs Ruff checking and a format diff, `make format` applies Ruff formatting and fixes, and `make typecheck` runs `ty check agent tests`.
+Use `PYTEST_ARGS` for a focused pytest option with a file target. The Make target prints a skip message rather than failing for a nonexistent path; do not mistake that for a passing test.
 
-For frontend changes, target the relevant workspace rather than root `pnpm test`, which delegates all workspace test tasks to Turbo:
+Tests are not a substitute for the other Python gates: `make lint` runs Ruff checking and a format diff, `make format` applies both formatter and Ruff fixes, and `make typecheck` runs `ty check agent tests`. Run only the gate relevant to the changed surface when iterating; do not expand a local check into the full suite.
+
+## Dashboard and desktop unit harnesses
+
+The root `pnpm test` delegates workspace `test` tasks to Turbo, so it is broader than a focused change requires. Target the owner workspace instead:
 
 ```bash
 pnpm --filter open-swe-dashboard run test
 pnpm --dir desktop run test
 ```
 
-The dashboard command is `vitest run`; its tests cover components and client-side utilities under `ui/src/`. The desktop command first builds the main bundle and then runs `node --test test/*.test.cjs`. Use a component/client test for rendering, optimistic state, stream transformation, terminal state, or API-client behavior before considering browser e2e.
+The dashboard test command is `vitest run`; use its component/client tests for rendering, optimistic state, stream transformation, terminal state, or API-client behavior. The desktop command builds the Electron main bundle and then runs `node --test test/*.test.cjs`. Escalate from either only when the behavior depends on a real browser/server proxy, webhook, local-agent, or Electron integration boundary.
 
 ## Playwright: real paths with controlled external seams
 
-The E2E harness proves production integration without relying on live SaaS. It runs the real agent through `langgraph dev`, real webhook routes, tools, middleware, local sandbox provider, and real git against a seeded local bare remote. It substitutes a scripted `BaseChatModel`, external GitHub and Slack HTTP endpoints, credential/token paths, and the snapshot service. Fake Slack and GitHub stores are the source rendered by their mock UIs, so browser assertions observe what the real agent wrote.
+The E2E harness is an integration system, not a UI mock. It mounts fake GitHub and Slack endpoints, mock Slack/GitHub pages, and control endpoints alongside the real agent API; its fake stores are the single state rendered in the mock pages. A simulated Slack delivery is signed and sent to the real webhook route. The real graph, tools, middleware, local temporary-directory sandbox, and git interactions execute; the sandbox pushes to a seeded local bare remote.
+
+The scripted `BaseChatModel`, external SaaS HTTP APIs, App/OAuth credential boundaries, and snapshot boundary are substituted. This makes the agent's sequence deterministic without replacing the agent logic. `full_flow.spec.ts` proves the principal Slack request through implementation, branch/PR creation, and a link posted back to the same thread.
 
 ```mermaid
 sequenceDiagram
@@ -138,33 +144,40 @@ sequenceDiagram
     participant Git as Local sandbox and git
     participant Hub as Fake GitHub API
     PW->>Slack: Submit request
-    Slack->>Harness: Simulate signed event
+    Slack->>Harness: Create signed event
     Harness->>API: POST Slack webhook
     API->>Agent: Dispatch run
-    Agent->>Git: Edit commit and push branch
+    Agent->>Git: Edit commit and push
     Agent->>Hub: Create pull request
     Agent->>Slack: Post thread reply
-    PW->>Slack: Assert reply and pull request link
+    PW->>Slack: Assert reply and PR link
 ```
 
-The diagram shows the browser happy path while preserving the real webhook, graph, sandbox, and git execution paths.
+The sequence shows the browser happy path: SaaS seams are controlled, while the webhook, graph, sandbox, git, and production tool paths remain real.
 
-The browser suite drives the real built `ui/` application, not a mock. Global setup builds it with the harness as the server-side API and E2E proxy target, starts its Nitro server, and the browser drives that UI-server origin. This exercises SSR, session gate and redirects, hydration, and the same-origin dashboard API proxy. `E2E_FORCE_UI_BUILD=1` rebuilds after UI or port changes; otherwise the built server is reused.
+### Browser dashboard path
 
-Use Playwright for the flow most directly related to the change. `full_flow.spec.ts` proves the Slack request to implementation, PR, and same-thread reply path. The browser directory also separates dashboard/thread behavior, environment and plan approval, Slack redelivery/debouncing, SSR, output iframe, sandbox identity, and workspace scenarios. The desktop spec separately resets harness state, clones the seeded remote into an isolated temporary project, installs a harness-issued `osw_session` cookie, and verifies both the local edit and fake-GitHub PR result.
+Browser E2E builds and starts the real `ui/` app rather than a dashboard mock. Global setup directs its server-side dashboard API and E2E proxy at the harness, then Playwright drives the UI server origin. That specifically covers server rendering, the session gate and redirect, hydration, same-origin `/dashboard/api/*` proxying, and a genuine signed session cookie. `E2E_FORCE_UI_BUILD=1` rebuilds the UI after UI or port changes. The browser configuration runs serially with one worker, excludes `desktop.spec.ts`, and has a 90-second test timeout.
+
+Use the narrowest spec in `tests/e2e/tests/`; the directory includes flows for SSR, dashboard/thread state, approval/review behavior, Slack redelivery, sandbox identity, and workspaces. E2E needs PostgreSQL for the backend, so configure `POSTGRES_URI` before starting it.
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm run test:e2e:install
 pnpm exec playwright test tests/full_flow.spec.ts
-pnpm run test:e2e:desktop
 ```
 
-Install Chromium before the first browser run. The browser configuration is serial with one worker, ignores `desktop.spec.ts`, uses a 90-second test timeout, and reuses a warm server outside CI. Desktop selects only `desktop.spec.ts` with longer test and expectation timeouts and separate output directories.
+Install Chromium with `test:e2e:install` before the first run. Prefer the single-spec command, which can reuse the warm `langgraph dev` server locally, over `pnpm run test:e2e`.
 
-## Failures and diagnostics
+### Desktop end to end
 
-Browser runs retain screenshots on failure and retain trace/video on failure locally or on the first retry in CI. Set `E2E_ARTIFACTS=1` when a passing scenario needs inspection; artifacts are written below `test-results/` and `playwright-report/`. The desktop configuration turns off automatic Playwright media because its spec explicitly records an Electron trace and attaches screenshots; temporary desktop state is removed unless `E2E_KEEP_TMP` is set.
+`pnpm run test:e2e:desktop` selects only `desktop.spec.ts` and raises test and expectation timeouts to 180 and 120 seconds. The spec resets shared harness state, clones the seeded bare remote into an isolated temporary project, obtains a harness-issued `osw_session` cookie, and launches Electron against the shared fake boundaries. It verifies the local project edit and the fake-GitHub PR fields, rather than only an Electron UI response.
+
+The desktop spec explicitly records an Electron trace and attaches screenshots for unified and completed local-agent views. It removes temporary desktop state unless `E2E_KEEP_TMP` is set; unlike browser E2E, the desktop Playwright configuration disables automatic trace, video, and screenshot capture.
+
+## Failure diagnostics
+
+Browser runs capture screenshots on failure and retain trace/video on failed attempts locally or the first retry in CI. Set `E2E_ARTIFACTS=1` to retain trace and video for every attempt, under `test-results/` and `playwright-report/`.
 
 ```bash
 pnpm exec playwright show-report
@@ -172,12 +185,11 @@ pnpm exec playwright show-trace test-results/<test>/trace.zip
 SLOW_MO=700 pnpm exec playwright test --headed
 ```
 
-Inspect the trace, screenshot, and fake-boundary state before raising a timeout or weakening an assertion.
+Inspect the trace, screenshot, server logs, and fake-boundary state before increasing a timeout or weakening an assertion. A focused manual check is preferable when it directly proves a UI detail without requiring a new broad or brittle test.
 
 ## Related pages
 
 - [Agent graph](/openwiki/architecture/agent-graph.md)
 - [Sandbox lifecycle](/openwiki/architecture/sandbox-lifecycle.md)
-- [Dashboard UI](/openwiki/integrations/dashboard-ui.md)
 - [Quickstart](/openwiki/quickstart.md)
-- [PR review workflow](/openwiki/workflows/pr-review.md)
+- [Invocation workflow](/openwiki/workflows/invocation.md)
