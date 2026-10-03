@@ -1,6 +1,6 @@
+import { IconButton } from "@/components/ui/button"
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import { formatTokenCount } from "@/features/agents/lib/contextUsage"
-import { cn } from "@/lib/utils"
 
 export interface ContextWindowMeterProps {
   usedTokens?: number | null
@@ -50,15 +50,13 @@ export function ContextWindowMeter({
         delay={150}
         openOnHover
         render={
-          <button
+          <IconButton
             aria-label={label}
-            className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground transition-colors outline-none",
-              "hover:bg-accent data-[pressed]:bg-accent",
-              "focus-visible:ring-2 focus-visible:ring-ring"
-            )}
+            className="cursor-pointer rounded-full text-muted-foreground transition-colors hover:bg-accent data-[pressed]:bg-accent"
             data-testid="context-window-indicator"
+            size="icon"
             type="button"
+            variant="ghost"
           >
             <span className="relative flex size-5 items-center justify-center">
               <svg
@@ -91,7 +89,7 @@ export function ContextWindowMeter({
                 )}
               </svg>
             </span>
-          </button>
+          </IconButton>
         }
       />
       <PopoverPopup
