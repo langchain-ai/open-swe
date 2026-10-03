@@ -8,6 +8,7 @@ import {
 
 import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
+import { RepoSelector } from "./RepoSelector"
 import { useRepos } from "@/lib/profile"
 import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import {
@@ -78,47 +79,48 @@ export function RepositoryPicker({
     [repos.data, owners]
   )
   return (
-    <OwnershipPicker
-      triggerLabel="Choose repositories"
-      title="Bound repositories"
-      description="Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace."
-      noun="repository"
-      pluralNoun="repositories"
-      items={items}
-      selected={selected}
-      workspaceSlug={workspaceSlug}
-      onChange={onChange}
-      searchPlaceholder="Search repositories"
-      filter={{
-        label: "Exclude archived",
-        matches: (item) => !reposByName.get(item.id)?.archived,
-      }}
-      filters={[
-        {
-          label: "Public",
-          matches: (item) => reposByName.get(item.id)?.private === false,
+    <RepoSelector
+      ownership={{
+        triggerLabel: "Choose repositories",
+        title: "Bound repositories",
+        description:
+          "Events on these repositories run in this workspace, and its image preloads them. A repository is bound to one workspace.",
+        noun: "repository",
+        pluralNoun: "repositories",
+        items,
+        selected,
+        workspaceSlug,
+        onChange,
+        searchPlaceholder: "Search repositories",
+        filter: {
+          label: "Exclude archived",
+          matches: (item) => !reposByName.get(item.id)?.archived,
         },
-        {
-          label: "Internal",
-          matches: (item) => reposByName.get(item.id)?.private === true,
+        filters: [
+          {
+            label: "Public",
+            matches: (item) => reposByName.get(item.id)?.private === false,
+          },
+          {
+            label: "Internal",
+            matches: (item) => reposByName.get(item.id)?.private === true,
+          },
+        ],
+        manual: {
+          label: "Add a repository by name",
+          placeholder: "owner/repo",
+          normalize: (raw) => {
+            const value = raw.trim()
+            return REPO_PATTERN.test(value) ? value : null
+          },
+          invalidHint: "Use the owner/repo form.",
         },
-      ]}
-      manual={{
-        label: "Add a repository by name",
-        placeholder: "owner/repo",
-        normalize: (raw) => {
-          const value = raw.trim()
-          return REPO_PATTERN.test(value) ? value : null
-        },
-        invalidHint: "Use the owner/repo form.",
-      }}
-      loading={repos.isLoading}
-      loadError={
-        repos.isError
+        loading: repos.isLoading,
+        loadError: repos.isError
           ? "Could not load the installation's repositories; add them by name."
-          : null
-      }
-      disabled={disabled}
+          : null,
+        disabled,
+      }}
     />
   )
 }

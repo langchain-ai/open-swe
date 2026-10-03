@@ -216,6 +216,8 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         await ongoingToolCall.elementHandle(),
       ),
     ).toBe(true);
+    await page.getByRole("button", { name: "Stop run" }).click();
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeHidden();
   });
 
   test("keeps grouped live work after its fold row", async ({ page }) => {
