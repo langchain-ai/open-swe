@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -18,6 +18,14 @@ function refusal(pr: OpenPullRequest): string | null {
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const profile = useProfile()
+  const availability = useQuery({
+    queryKey: ["human-review-availability", pr],
+    queryFn: () => api.humanReviewAvailability(pr),
+    enabled:
+      Boolean(profile.data?.human_review_requests) &&
+      pr.reviewDecision !== "approved",
+    staleTime: 60_000,
+  })
   const blocked = refusal(pr)
   const requestReview = useMutation({
     mutationFn: () => api.requestHumanReview(pr),
@@ -46,7 +54,11 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     },
     retry: false,
   })
-  if (!profile.data?.human_review_requests || pr.reviewDecision === "approved")
+  if (
+    !profile.data?.human_review_requests ||
+    pr.reviewDecision === "approved" ||
+    !availability.data?.available
+  )
     return null
   const label =
     requestReview.isPending || requestReview.isSuccess
