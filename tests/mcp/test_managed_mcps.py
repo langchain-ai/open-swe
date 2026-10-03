@@ -13,7 +13,7 @@ SERVER_ID = "2ba201a8-8751-427f-92b5-dd3ede30551c"
 
 @pytest.fixture(autouse=True)
 def lmt(monkeypatch):
-    monkeypatch.setenv("LMT_TENANT_ID", "tenant")
+    monkeypatch.delenv("LMT_TENANT_ID", raising=False)
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "open-swe")
     tokens = {"alice": "alice-langsmith-token"}
 
@@ -58,6 +58,7 @@ async def test_catalog_is_read_with_the_users_own_token_and_omits_builtins(monke
     ]
     assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
     assert "X-LangSmith-Identity" not in requests[-1].headers
+    assert "X-Tenant-Id" not in requests[-1].headers
 
 
 async def test_user_without_langsmith_sign_in_gets_no_catalog_or_tools(fake_store, monkeypatch):

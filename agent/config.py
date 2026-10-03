@@ -337,8 +337,8 @@ ENV.var(
 )
 ENV.var(
     "LMT_TENANT_ID",
-    "LangSmith workspace whose Managed Tools servers people with a LangSmith connection may "
-    "enable. Unset disables personal managed tools.",
+    "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
+    "person chose when connecting LangSmith.",
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")

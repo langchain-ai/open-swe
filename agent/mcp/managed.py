@@ -95,7 +95,7 @@ class ManagedSelectionUpdate(BaseModel):
 
 
 def managed_tools_configured() -> bool:
-    return ENV.LMT_TENANT_ID.is_set() and langsmith_oauth_configured()
+    return langsmith_oauth_configured()
 
 
 def _base_url() -> str:
@@ -108,7 +108,12 @@ async def _headers(login: str) -> dict[str, str]:
     token = await langsmith_access_token(login)
     if token is None:
         raise LangSmithNotConnected
-    return {"Authorization": f"Bearer {token}", "X-Tenant-Id": ENV.LMT_TENANT_ID.get()}
+    headers = {"Authorization": f"Bearer {token}"}
+    # Without a pin, LangSmith uses the workspace the person chose when signing in,
+    # which their token carries.
+    if tenant := ENV.LMT_TENANT_ID.optional():
+        headers["X-Tenant-Id"] = tenant
+    return headers
 
 
 def _server_id(value: str) -> str:
