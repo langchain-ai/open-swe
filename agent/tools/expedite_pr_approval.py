@@ -40,7 +40,7 @@ from agent.tools.manage_baby_sit import dispatch_run_config
 
 
 def _failure(error: str) -> dict[str, Any]:
-    return {"success": False, "error": error}
+    return {"success": False, "card_sent": False, "error": error}
 
 
 def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
@@ -114,11 +114,11 @@ async def expedite_pr_approval(
     if action == "cancel":
         approval = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if approval is None or approval.kind != "expedited":
-            return {"success": True, "cancelled": False}
+            return {"success": True, "card_sent": False, "cancelled": False}
         if approval.thread_id and approval.thread_id != thread_id:
             return _failure("This expedited review belongs to another agent thread")
         await retire(approval, "cancelled", "cancelled by the agent")
-        return {"success": True, "cancelled": True}
+        return {"success": True, "card_sent": False, "cancelled": True}
 
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
     channel_id, thread_ts = own_channel, own_thread
@@ -202,6 +202,7 @@ async def expedite_pr_approval(
         readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
+            "card_sent": active.awaiting_ready and readiness_warning is None,
             "readiness_warning": readiness_warning,
             "approval_id": str(active.id),
             "pr_url": pr_ref.url,
@@ -275,6 +276,7 @@ async def expedite_pr_approval(
         await remove_superseded_cards(approval)
         return {
             "success": True,
+            "card_sent": True,
             "approval_id": str(approval.id),
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
@@ -301,6 +303,7 @@ async def expedite_pr_approval(
     readiness_warning = await prompt_author_ready(approval)
     return {
         "success": True,
+        "card_sent": True,
         "readiness_warning": readiness_warning,
         "approval_id": str(approval.id),
         "pr_url": pr_ref.url,
