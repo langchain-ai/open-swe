@@ -61,6 +61,7 @@ _TOOL_MODULES = {
     "search_pull_requests": ".search_pull_requests",
     "search_repo_code": "agent.github.tools.search_repo_code",
     "start_thread": ".threads",
+    "propose_channel_memory": "agent.slack.tools.channel_memory",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_list_channel_members": "agent.slack.tools.channels",
@@ -138,6 +139,7 @@ __all__ = [
     "search_pull_requests",
     "search_repo_code",
     "start_thread",
+    "propose_channel_memory",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_list_channel_members",
@@ -162,6 +164,7 @@ if TYPE_CHECKING:
     from agent.incidents.tools import manage_incident
     from agent.slack.tools.add_reaction import slack_add_reaction
     from agent.slack.tools.attach_html import slack_attach_html
+    from agent.slack.tools.channel_memory import propose_channel_memory
     from agent.slack.tools.channels import (
         slack_list_channel_members,
         slack_list_channels,

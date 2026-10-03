@@ -54,6 +54,7 @@ class ChannelIdentity(TypedDict):
     thread_id: NotRequired[str]
     topic: NotRequired[str]
     purpose: NotRequired[str]
+    memory: NotRequired[str]
     description: NotRequired[str]
     default_repo: NotRequired[str]
     web_url: NotRequired[str]
@@ -110,6 +111,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "thread_id",
         "topic",
         "purpose",
+        "memory",
         "description",
         "default_repo",
         "web_url",
