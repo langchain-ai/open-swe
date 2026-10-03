@@ -307,7 +307,6 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
         patch(
             "agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=assessment_mode)
         ),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
@@ -355,9 +354,8 @@ async def test_published_review_registry_failure_does_not_complete_or_invite_dup
             assert "merge remains blocked" in str(result["warning"])
             post.assert_awaited_once()
             assert post.await_args is not None
-            assert post.await_args.kwargs["event"] == (
-                "APPROVE" if assessment_mode == "approve" else "COMMENT"
-            )
+            # Assessments are advisory: no approval event in any mode.
+            assert "event" not in post.await_args.kwargs
         else:
             with pytest.raises(RuntimeError, match="Storage unavailable"):
                 await publish()
@@ -1055,21 +1053,18 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
 
 
 @pytest.mark.parametrize(
-    "prepared_policy,mode,current_head,expected_event,has_assessment",
+    "prepared_policy,mode,has_assessment",
     [
-        (None, "approve", True, "COMMENT", False),
-        ("Docs only", "off", True, "COMMENT", False),
-        ("Docs only", "dry_run", True, "COMMENT", True),
-        ("Docs only", "approve", False, "COMMENT", True),
-        ("Docs only", "approve", True, "APPROVE", True),
+        (None, "approve", False),
+        ("Docs only", "off", False),
+        ("Docs only", "dry_run", True),
+        ("Docs only", "approve", True),
     ],
-    ids=["no-policy", "switched-off", "dry-run", "head-moved", "approve"],
+    ids=["no-policy", "switched-off", "dry-run", "approve"],
 )
-async def test_publication_respects_the_base_policy_and_current_mode(
+async def test_publication_respects_the_base_policy(
     prepared_policy: str | None,
     mode: str,
-    current_head: bool,
-    expected_event: str,
     has_assessment: bool,
 ) -> None:
     from agent.tools.publish_review import _publish_review_async
@@ -1077,10 +1072,6 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
-        patch(
-            "agent.tools.publish_review.approval_allowed_for_head",
-            AsyncMock(return_value=current_head),
-        ),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
             "agent.tools.publish_review.post_pull_request_review",
@@ -1108,15 +1099,15 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         )
     assert result["success"] is True
     assert post.await_args is not None
-    assert post.await_args.kwargs["event"] == expected_event
+    # Reviews never submit an approval event, whatever the stored mode.
+    assert "event" not in post.await_args.kwargs
     body = post.await_args.kwargs["body"]
-    assert ("Risk:" in body) is has_assessment
-    assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")
+    assert ("Risk:" in body and "(advisory)" in body) is has_assessment
+    assert "Approved" not in body
     saved = await ASSESSMENTS.get("77")
     assert (saved is not None) is has_assessment
     if saved is not None:
-        assert saved.dry_run is (mode == "dry_run")
-        assert saved.approved is (expected_event == "APPROVE")
+        assert saved.approved is False
 
 
 @pytest.mark.parametrize(
@@ -1128,21 +1119,14 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         {},
     ],
 )
-async def test_approval_rechecks_github_head_and_pr_state(pr: dict[str, object]) -> None:
-    from agent.review.publish import approval_allowed_for_head
-
-    response = MagicMock()
-    response.json.return_value = pr
-    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)):
-        assert not await approval_allowed_for_head(
-            owner="o", repo="r", pr_number=7, head_sha="a" * 40, token="t"
-        )
-
-
-async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None:
+async def test_review_posts_comment_event_regardless_of_pr_state(
+    pr: dict[str, object],
+) -> None:
+    """Reviews post as comments for any PR state; no approval recheck exists."""
+    del pr
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"id": 77, "state": "APPROVED"}
+    response.json.return_value = {"id": 77, "state": "COMMENTED"}
     with patch("agent.review.publish.github_request", AsyncMock(return_value=response)) as request:
         await post_pull_request_review(
             owner="o",
@@ -1150,28 +1134,23 @@ async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None
             pr_number=7,
             head_sha="a" * 40,
             token="t",
-            body="Approved",
+            body="Findings",
             inline_comments=[],
-            event="APPROVE",
         )
     assert request.await_args is not None
     payload = request.await_args.kwargs["json"]
-    assert payload["event"] == "APPROVE"
+    assert payload["event"] == "COMMENT"
     assert payload["commit_id"] == "a" * 40
 
 
 @pytest.mark.parametrize(
     "status,error_body,retry,succeeds",
     [
-        (422, {"errors": ["Can not approve your own pull request"]}, True, True),
-        (422, {"message": "Can not approve your own pull request"}, True, True),
-        (422, {"errors": [{"message": "Can not approve your own pull request"}]}, True, True),
         (422, {"errors": ["Review body is too long"]}, False, False),
-        (500, {"message": "Can not approve your own pull request"}, False, False),
-        (422, {"errors": ["Can not approve your own pull request"]}, True, False),
+        (500, {"message": "Internal error"}, False, False),
     ],
 )
-async def test_approval_publication_handles_github_rejections(
+async def test_publication_handles_github_rejections(
     status: int, error_body: dict[str, object], retry: bool, succeeds: bool
 ) -> None:
     import httpx2
@@ -1191,7 +1170,6 @@ async def test_approval_publication_handles_github_rejections(
     with (
         patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("agent.tools.publish_review.approval_mode_for", AsyncMock(return_value="approve")),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
         patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch("agent.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
         patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
@@ -1216,13 +1194,7 @@ async def test_approval_publication_handles_github_rejections(
         )
     assert result["success"] is succeeds
     payloads = [call.kwargs["json"] for call in post.await_args_list]
-    assert [payload["event"] for payload in payloads] == (
-        ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
-    )
-    if retry:
-        assert payloads[1]["commit_id"] == "a" * 40
-        assert "Would approve" in payloads[1]["body"]
-        assert "Approved" not in payloads[1]["body"]
+    assert [payload["event"] for payload in payloads] == ["COMMENT"]
     saved = await ASSESSMENTS.get("77")
     if succeeds:
         assert saved is not None
