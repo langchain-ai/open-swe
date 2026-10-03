@@ -10,6 +10,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
+from agent.message_queue import QueuedMessage
 from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_run_mapping,
@@ -102,6 +103,7 @@ async def _active_run_ids(client: LangGraphClient, thread_id: str) -> list[str]:
 
 
 async def _clear_deferred_work(client: LangGraphClient, thread_id: str) -> None:
+    await QueuedMessage.clear(thread_id)
     for namespace_prefix, key in _QUEUE_RECORDS:
         await client.store.delete_item((*namespace_prefix, thread_id), key)
 

@@ -14,6 +14,7 @@ from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
+from pydantic import BaseModel
 
 from agent.dashboard.options import model_supports_images
 from agent.input_messages import (
@@ -22,6 +23,7 @@ from agent.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from agent.message_queue import QueuedContent, QueuedMessage
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -37,6 +39,8 @@ from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.multimodal import fetch_image_block, vision_not_supported_warning
 
 logger = logging.getLogger(__name__)
+# Where the LangGraph Store held every follow-up in one list; drained, never written.
+_LEGACY_QUEUE_KEY = "pending_messages"
 
 
 class LinearNotifyState(ReplySurfaceState):
@@ -156,22 +160,20 @@ def _message_update(
     return {"messages": queued, **surface_update}
 
 
-async def _consume_queued_messages(
-    store: BaseStore, namespace: tuple[str, ...], consumed: list[dict[str, Any]]
-) -> None:
-    """Remove ``consumed`` from the queue, keeping follow-ups appended since.
+class _LegacyMessage(BaseModel):
+    content: QueuedContent
 
-    Building the injected messages awaits (model lookup, image fetches), and a
-    follow-up queued during that time is not in the snapshot; deleting the
-    whole entry would drop it without ever delivering it.
-    """
-    current_item = await store.aget(namespace, "pending_messages")
-    current = current_item.value.get("messages", []) if current_item is not None else []
-    remaining = [message for message in current if message not in consumed]
-    if remaining:
-        await store.aput(namespace, "pending_messages", {"messages": remaining})
-    else:
-        await store.adelete(namespace, "pending_messages")
+
+class _LegacyQueue(BaseModel):
+    messages: list[_LegacyMessage]
+
+
+async def _legacy_queued_contents(store: BaseStore, thread_id: str) -> list[QueuedContent]:
+    """Follow-ups queued in the LangGraph Store before the queue moved to PostgreSQL."""
+    item = await store.aget(("queue", thread_id), _LEGACY_QUEUE_KEY)
+    if item is None:
+        return []
+    return [message.content for message in _LegacyQueue.model_validate(item.value).messages]
 
 
 async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
@@ -240,38 +242,29 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if pending_autofix:
             content_blocks.append({"type": "text", "text": pending_autofix})
 
-        namespace = ("queue", thread_id)
-
         try:
-            queued_item = await store.aget(namespace, "pending_messages")
+            legacy = await _legacy_queued_contents(store, thread_id)
+            # A snapshot: what this call consumes, whatever is queued meanwhile.
+            queued_messages = await QueuedMessage.for_thread(thread_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
+        contents = [*legacy, *(message.content for message in queued_messages)]
 
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-
-        queued_value = queued_item.value
-        # A snapshot: what this call consumes, whatever is appended meanwhile.
-        queued_messages = list(queued_value.get("messages", []))
-
-        if not queued_messages:
-            await store.adelete(namespace, "pending_messages")
+        if not contents:
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
 
         logger.info(
             "Found %d queued message(s) for thread %s, injecting into state",
-            len(queued_messages),
+            len(contents),
             thread_id,
         )
 
         has_images = any(
-            isinstance(msg.get("content"), dict)
-            and (msg["content"].get("image_urls") or msg["content"].get("images"))
-            for msg in queued_messages
+            isinstance(content, dict) and (content.get("image_urls") or content.get("images"))
+            for content in contents
         )
         resolved_model_id: str | None = None
         if has_images and not configurable.get("image_model_fallback_enabled"):
@@ -288,8 +281,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         surface = current_reply_surface(state)
         moved_surface: ReplySurface | None = None
-        for msg in queued_messages:
-            content = msg.get("content")
+        for content in contents:
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
@@ -355,7 +347,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         _flush_blocks(queued_updates, content_blocks, injected)
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
-        await _consume_queued_messages(store, namespace, queued_messages)
+        await QueuedMessage.remove(queued_messages)
+        if legacy:
+            await store.adelete(("queue", thread_id), _LEGACY_QUEUE_KEY)
         return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
