@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
 from agent.threads.access import _readable_thread_metadata
-from agent.threads.diffs import _response_output, create_sandbox
+from agent.threads.diffs import _response_output, connect_sandbox
 from agent.threads.summary import _assert_thread_promptable, _metadata_repo
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ async def _run_workspace_script(
     if not isinstance(sandbox_id, str) or not sandbox_id:
         raise HTTPException(404, "thread has no workspace")
     try:
-        sandbox = await create_sandbox(sandbox_id)
+        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not connect to sandbox for files", extra={"sandbox": sandbox_id})
         raise HTTPException(503, "Could not connect to the workspace.") from exc

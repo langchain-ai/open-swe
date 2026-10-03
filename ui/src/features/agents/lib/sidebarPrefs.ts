@@ -21,7 +21,6 @@ export interface SidebarPrefs {
    * Pins for local threads. Cloud pins live server-side (`thread_pins`); local
    * threads only exist on this machine, so their pins do too.
    */
-  pinnedLocalIds: Array<string>
   /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
   pinnedRepoKeys: Array<string>
   collapsedRepoKeys: Array<string>
@@ -40,7 +39,6 @@ export interface SidebarPrefs {
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
-  pinnedLocalIds: [],
   pinnedRepoKeys: [],
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
@@ -115,7 +113,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         ? raw.compact
         : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
-    pinnedLocalIds: asStringArray(raw.pinnedLocalIds),
     pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
     collapsedRepoKeys: repoKeys(
       raw,
@@ -230,14 +227,6 @@ export function useSidebarPrefs() {
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
   )
-  const toggleLocalPin = useCallback(
-    (threadId: string) =>
-      setPrefs((prev) => ({
-        ...prev,
-        pinnedLocalIds: toggleMembership(prev.pinnedLocalIds, threadId),
-      })),
-    []
-  )
   const toggleRepoPin = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -306,7 +295,6 @@ export function useSidebarPrefs() {
     prefs,
     setCompact,
     setFilters,
-    toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
     setCollapseSubagentsByDefault,

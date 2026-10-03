@@ -10,7 +10,6 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 
 const menuItemClassName =
@@ -18,7 +17,6 @@ const menuItemClassName =
 
 export function ThreadMenuItems({
   thread,
-  localThread,
   pinned,
   archived,
   isDeleting,
@@ -27,7 +25,6 @@ export function ThreadMenuItems({
   onDelete,
 }: {
   thread: AgentThread | null
-  localThread?: DesktopLocalThreadSummary
   pinned: boolean
   archived: boolean
   isDeleting: boolean
@@ -35,7 +32,7 @@ export function ThreadMenuItems({
   onToggleArchived: () => void
   onDelete: () => void
 }) {
-  const threadId = thread?.id ?? localThread?.id
+  const threadId = thread?.id
   return (
     <>
       {thread?.traceUrl && (
@@ -49,17 +46,6 @@ export function ThreadMenuItems({
           <TreeStructureIcon className="size-3.5" />
           Open trace
         </Menu.LinkItem>
-      )}
-      {localThread && (
-        <Menu.Item
-          onClick={() => {
-            void window.openSweDesktop?.openLocalTrace(localThread.id)
-          }}
-          className={menuItemClassName}
-        >
-          <TreeStructureIcon className="size-3.5" />
-          Open trace
-        </Menu.Item>
       )}
       {thread?.sourceUrl && (
         <Menu.LinkItem

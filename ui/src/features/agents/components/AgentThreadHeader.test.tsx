@@ -12,17 +12,13 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentThreadHeader } from "./AgentThreadHeader"
 
 vi.mock("@/lib/session", () => ({ useSession: () => ({ data: null }) }))
-vi.mock("@/features/agents/lib/desktopProjects", () => ({
-  useDesktopProjects: () => ({ projects: [] }),
-}))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useRefreshLocalThreads: () => vi.fn(),
+  useLocalThread: () => null,
 }))
 vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
   useSidebarPrefs: () => ({
-    prefs: { pinnedLocalIds: [], filters: {} },
-    toggleLocalPin: vi.fn(),
+    prefs: { filters: {} },
   }),
 }))
 vi.mock("@/features/agents/lib/queries", () => ({

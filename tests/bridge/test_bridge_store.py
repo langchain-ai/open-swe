@@ -6,6 +6,7 @@ would not be testing the thing that has to hold.
 """
 
 import asyncio
+from datetime import date
 
 import pytest
 from sqlalchemy import text
@@ -190,3 +191,31 @@ async def test_pruning_closes_a_bridge_that_stopped_heartbeating(registry_db: No
     reloaded = await BridgeStore.load(live.bridge_id, owner_id=OWNER)
     assert reloaded is not None
     assert reloaded.is_alive
+
+
+async def _request_partitions() -> set[str]:
+    async with postgres.transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+                "WHERE i.inhparent = 'sandbox_bridge_request'::regclass"
+            )
+        )
+        return set(rows.scalars().all())
+
+
+async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
+    registry_db: None,
+) -> None:
+    await BridgeStore.rotate_partitions(date(2026, 9, 1))
+    assert await _request_partitions() == {
+        "sandbox_bridge_request_20260901",
+        "sandbox_bridge_request_20260902",
+    }
+
+    await BridgeStore.rotate_partitions(date(2026, 9, 3))
+    assert await _request_partitions() == {
+        "sandbox_bridge_request_20260902",
+        "sandbox_bridge_request_20260903",
+        "sandbox_bridge_request_20260904",
+    }

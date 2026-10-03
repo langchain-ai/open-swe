@@ -2,6 +2,10 @@ const { execFile, execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const {
+  parseGitHubRemote,
+  repoFullName: githubRepoName,
+} = require("open-swe-bridge-client");
 
 const MAX_FILES = 200;
 const MAX_FILE_BYTES = 400_000;
@@ -318,6 +322,18 @@ function checkpointRef(sessionId) {
   return `${CHECKPOINT_NAMESPACE}/${sessionId.replace(/[^A-Za-z0-9._-]/g, "-")}`;
 }
 
+/** `owner/name` of the checkout's GitHub `origin`, for the cloud thread's repo. */
+async function originRepo(cwd) {
+  try {
+    const remote = parseGitHubRemote(
+      text(await git(cwd, ["remote", "get-url", "origin"])),
+    );
+    return remote ? githubRepoName(remote) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function repoRoot(cwd) {
   try {
     return text(await git(cwd, ["rev-parse", "--show-toplevel"])) || null;
@@ -631,6 +647,7 @@ module.exports = {
   defaultBranch,
   localBranches,
   deleteRefs,
+  originRepo,
   parsePullRequest,
   readDiff,
   removeWorktree,
