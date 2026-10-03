@@ -132,9 +132,16 @@ async def _target_channel(
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
-        configured = (
-            await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
-        ).review_channel
+        settings = await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+        try:
+            configured = await settings.channel_for_pr(
+                pr_ref.owner, pr_ref.repo, pr_ref.number, token=token
+            )
+        except httpx2.HTTPError, ValueError:
+            logger.exception("Could not resolve review channel from changed files")
+            return _failure(
+                "Could not read the complete changed-file list for review channel routing."
+            )
     if not configured.strip():
         return _failure(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
