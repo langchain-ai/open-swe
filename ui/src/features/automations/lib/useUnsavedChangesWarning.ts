@@ -1,15 +1,21 @@
 import { useCallback, useRef } from "react"
 import { useBlocker } from "@tanstack/react-router"
 
-const UNSAVED_CHANGES_MESSAGE =
-  "You have unsaved changes. Leave without saving?"
+import { useConfirm } from "@/components/ConfirmDialog"
 
 export function useUnsavedChangesWarning(isDirty: boolean) {
+  const confirm = useConfirm()
   const allowNavigationRef = useRef(false)
-  const shouldBlockFn = useCallback(() => {
+  const shouldBlockFn = useCallback(async () => {
     if (allowNavigationRef.current) return false
-    return !window.confirm(UNSAVED_CHANGES_MESSAGE)
-  }, [])
+    return !(await confirm({
+      title: "Leave without saving?",
+      description: "You have unsaved changes.",
+      confirmLabel: "Leave",
+      cancelLabel: "Keep editing",
+      destructive: true,
+    }))
+  }, [confirm])
 
   useBlocker({
     shouldBlockFn,

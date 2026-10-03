@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router"
-import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyContent, EmptyDescription } from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/spinner"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -33,35 +35,39 @@ export function AutomationRuns({
 
   if (runsQuery.isLoading) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
-        Loading automation runs…
-      </div>
+      <Empty className="border border-border py-12">
+        <EmptyDescription className="flex items-center gap-2">
+          <Spinner />
+          Loading automation runs…
+        </EmptyDescription>
+      </Empty>
     )
   }
   if (runsQuery.isError) {
     return (
-      <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
-        <p className="text-xs text-destructive">
+      <Empty className="border border-solid border-destructive/30 bg-destructive/5 py-12">
+        <EmptyDescription className="text-destructive">
           Automation runs could not be loaded.
-        </p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="mt-3"
-          onClick={() => void runsQuery.refetch()}
-          disabled={runsQuery.isFetching}
-        >
-          {runsQuery.isFetching ? "Retrying…" : "Retry"}
-        </Button>
-      </div>
+        </EmptyDescription>
+        <EmptyContent>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void runsQuery.refetch()}
+            disabled={runsQuery.isFetching}
+          >
+            {runsQuery.isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </EmptyContent>
+      </Empty>
     )
   }
   if (runs.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
-        No automation runs yet.
-      </div>
+      <Empty className="border border-border py-12">
+        <EmptyDescription>No automation runs yet.</EmptyDescription>
+      </Empty>
     )
   }
 
@@ -125,7 +131,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
       className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70"
     >
       {run.status === "running" ? (
-        <CircleNotchIcon className="size-4 shrink-0 animate-spin text-primary" />
+        <Spinner className="size-4 text-primary" />
       ) : (
         <span
           className={cn(

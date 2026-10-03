@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react"
 import { CaretRightIcon, ClockIcon, PlusIcon } from "@phosphor-icons/react"
 
+import { Button } from "@/components/ui/button"
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuTrigger,
+} from "@/components/ui/menu"
 import { CRON_PRESETS } from "@/features/automations/lib/cron"
-import { cn } from "@/lib/utils"
 
 interface ScheduleTriggerPickerProps {
   /** Called with a cron value for a preset, or null when the user picks Custom. */
@@ -23,56 +30,36 @@ export function ScheduleTriggerPicker({
   onSelect,
   triggerLabel = "Add Trigger",
 }: ScheduleTriggerPickerProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    <Menu>
+      <MenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto w-full justify-start gap-2 rounded-lg px-3 py-2.5 font-normal text-muted-foreground"
+          />
+        }
       >
         <PlusIcon className="size-4" />
         {triggerLabel}
-      </button>
-
-      {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-lg">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+      </MenuTrigger>
+      <MenuPopup align="start" className="w-72">
+        <MenuGroup>
+          <MenuGroupLabel className="flex items-center gap-2 text-[11px] tracking-wide text-muted-foreground/70 uppercase">
             <ClockIcon className="size-3.5" />
             Scheduled
-          </div>
+          </MenuGroupLabel>
           {OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => {
-                onSelect(option.cron)
-                setOpen(false)
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              )}
-            >
+            <MenuItem key={option.id} onClick={() => onSelect(option.cron)}>
               <span className="flex-1">{option.label}</span>
               {option.cron === null && (
-                <CaretRightIcon className="size-3.5 opacity-50" />
+                <CaretRightIcon className="opacity-50" />
               )}
-            </button>
+            </MenuItem>
           ))}
-        </div>
-      )}
-    </div>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
   )
 }
