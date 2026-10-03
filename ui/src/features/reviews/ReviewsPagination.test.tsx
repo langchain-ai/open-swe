@@ -22,8 +22,8 @@ vi.mock("@/lib/api", () => ({ api: { listReviews: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: { login: "octocat" } }),
 }))
-vi.mock("./MyPullRequests", () => ({
-  MyPullRequests: () => <div>Open PRs</div>,
+vi.mock("./OpenPullRequests", () => ({
+  OpenPullRequests: () => <div>Open PRs</div>,
 }))
 
 afterEach(() => {
