@@ -120,6 +120,21 @@ describe("RunCollector", () => {
     })
   })
 
+  test("ignores another run's lifecycle and results during a replay", () => {
+    const collector = new RunCollector("run-2")
+    collector.handle(lifecycle("run-1", "running"))
+    collector.handle(resultCall({ stdout: "old", exit_code: 0 }))
+    expect(collector.handle(lifecycle("run-1", "completed"))).toBeNull()
+    collector.handle(lifecycle("run-2", "running"))
+    expect(collector.handle(lifecycle("run-1", "failed"))).toBeNull()
+    collector.handle(resultCall({ stdout: "new", exit_code: 2 }))
+    expect(collector.handle(lifecycle("run-2", "completed"))).toEqual({
+      status: "completed",
+      error: null,
+      result: { stdout: "new", exitCode: 2 },
+    })
+  })
+
   test("keeps the top-level agent's last result, not a subagent's", () => {
     const collector = new RunCollector("run-1")
     collector.handle(lifecycle("run-1", "running"))
@@ -130,6 +145,28 @@ describe("RunCollector", () => {
       status: "completed",
       error: null,
       result: { stdout: "second", exitCode: 0 },
+    })
+  })
+
+  test("reports an interrupted run with its error and last result", () => {
+    const collector = new RunCollector("run-1")
+    collector.handle(lifecycle("run-1", "running"))
+    collector.handle(resultCall({ stdout: "partial", exit_code: 2 }))
+    expect(
+      collector.handle(
+        frame({
+          method: "lifecycle",
+          event_id: "synth:run-1:lc|2",
+          params: {
+            namespace: [],
+            data: { event: "interrupted", error: "cancelled" },
+          },
+        })
+      )
+    ).toEqual({
+      status: "interrupted",
+      error: "cancelled",
+      result: { stdout: "partial", exitCode: 2 },
     })
   })
 
