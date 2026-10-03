@@ -8,6 +8,7 @@ import type {
   AutomationTrigger,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
+import { AUTOMATION_TRIGGER_LABELS } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -43,10 +44,11 @@ import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
-const TRIGGER_ITEMS: Array<{ value: AutomationTrigger; label: string }> = [
-  { value: "schedule", label: "Schedule" },
-  { value: "github_issue_opened", label: "GitHub issue opened" },
-]
+const TRIGGER_ITEMS = (
+  Object.entries(AUTOMATION_TRIGGER_LABELS) as Array<
+    [AutomationTrigger, string]
+  >
+).map(([value, label]) => ({ value, label }))
 
 const NOTIFICATION_ITEMS: Array<{
   value: SlackNotificationMode
@@ -164,7 +166,7 @@ export function AutomationEditor({
     prompt.trim().length > 0 &&
     workspace !== null &&
     !savedWorkspaceMissing &&
-    (trigger === "github_issue_opened" ? !!repo : !!cron)
+    (trigger === "schedule" ? !!cron : !!repo)
 
   const onPickTrigger = (value: string | null) => {
     if (value === null) {

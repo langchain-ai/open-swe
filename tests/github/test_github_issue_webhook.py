@@ -100,7 +100,8 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
 ) -> None:
     called: dict[str, object] = {}
 
-    async def fake_launch(payload: dict[str, object], delivery_id: str) -> None:
+    async def fake_launch(event_type: str, payload: dict[str, object], delivery_id: str) -> None:
+        called["event_type"] = event_type
         called["payload"] = payload
         called["delivery_id"] = delivery_id
 
@@ -110,7 +111,7 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         called["gate_calls"] = int(called.get("gate_calls", 0)) + 1
         return {"status": "ignored", "reason": "Sender is not authorized"}
 
-    monkeypatch.setattr(github_routes, "_launch_issue_automations", fake_launch)
+    monkeypatch.setattr(github_routes, "_launch_automations", fake_launch)
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", reject_external_author)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
@@ -129,6 +130,7 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         "status": "ignored",
         "reason": f"Issue does not mention {webhook_common.describe_open_swe_tags()}",
     }
+    assert called["event_type"] == "issues"
     assert called["delivery_id"] == "delivery-1"
     assert called.get("gate_calls", 0) == 0
 

@@ -233,7 +233,21 @@ export interface LocalRepo {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger = "schedule" | "github_issue_opened"
+export type AutomationTrigger =
+  | "schedule"
+  | "github_issue_opened"
+  | "github_pull_request_opened"
+  | "github_pull_request_closed"
+  | "github_pull_request_merged"
+
+/** Labels for each trigger, shared by the editor and the list. */
+export const AUTOMATION_TRIGGER_LABELS: Record<AutomationTrigger, string> = {
+  schedule: "Schedule",
+  github_issue_opened: "GitHub issue opened",
+  github_pull_request_opened: "GitHub pull request opened",
+  github_pull_request_closed: "GitHub pull request closed",
+  github_pull_request_merged: "GitHub pull request merged",
+}
 
 export interface AgentSchedule {
   id: string
