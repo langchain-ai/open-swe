@@ -410,19 +410,14 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
-def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str, bool]:
-    """What the thread is told about a pick, and whether it bumps the post in the channel.
-
-    The deadline's wording is used only when its wait really passed; any other pick is
-    announced plainly.
-    """
+def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
+    """Use deadline wording only when the reviewer's wait has passed."""
     now = datetime.now(UTC)
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     if not request.has_card and request.ready_since and now - request.ready_since >= wait:
         return (
             f"{who}, {label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an "
-            "approval, so Open SWE picked you.",
-            True,
+            "approval, so Open SWE picked you."
         )
     if (
         request.has_card
@@ -430,8 +425,8 @@ def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> tuple[str
         and request.created_at
         and now - request.created_at >= wait
     ):
-        return f"{who}, nobody signed up to review {label}, so Open SWE picked you.", False
-    return f"{who}, Open SWE picked you to review {label}.", False
+        return f"{who}, nobody signed up to review {label}, so Open SWE picked you."
+    return f"{who}, Open SWE picked you to review {label}."
 
 
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
@@ -468,7 +463,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     pr = request.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     who = mention(user)
-    notice, bump = _pick_notice(request, who, label)
+    notice = _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, assigned_by_agent=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
@@ -481,7 +476,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         f"{notice}{why}",
         unfurl_links=False,
         agent_thread_id=added.thread_id or None,
-        reply_broadcast=bump,
+        reply_broadcast=False,
     )
     permalink = await _permalink(added)
     if user.slack_user_id:
