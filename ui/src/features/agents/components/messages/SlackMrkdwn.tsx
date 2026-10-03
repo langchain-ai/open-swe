@@ -66,7 +66,7 @@ function closingDelimiter(
   return -1
 }
 
-function SlackUserMention({ userId }: { userId: string }) {
+export function SlackUserMention({ userId }: { userId: string }) {
   const { data } = useQuery({
     queryKey: ["slackUserName", userId],
     queryFn: () => api.slackUserName(userId),
