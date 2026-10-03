@@ -335,6 +335,11 @@ ENV.var(
     "Public OAuth application registered in the LangSmith organization (Settings > OAuth "
     "applications) for personal LangSmith connections. Unset hides the connection.",
 )
+ENV.var(
+    "LMT_TENANT_ID",
+    "Optional LangSmith workspace to pin Managed Tools to. Unset uses the workspace each "
+    "person chose when connecting LangSmith.",
+)
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")
 

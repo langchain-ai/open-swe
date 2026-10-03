@@ -30,6 +30,7 @@ import {
 } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
+import { PersonalManagedToolsSection } from "./PersonalManagedToolsSection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
@@ -318,6 +319,7 @@ export function WorkspaceSettingsPanel({
       <LLMGatewaySection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
+      <PersonalManagedToolsSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection

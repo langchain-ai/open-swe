@@ -95,6 +95,7 @@ from agent.input_messages import (
 )
 from agent.mcp import load_mcp_tools
 from agent.mcp.instance import instance_mcp_source
+from agent.mcp.managed import managed_mcp_source
 from agent.mcp.user import user_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
 from agent.middleware import (
@@ -755,11 +756,14 @@ async def _notion_tools_for(profile_login: str | None) -> list[Any]:
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
-    A later tier's connection replaces a same-named one from the tier before.
+    A later tier's connection replaces a same-named one from the tier before. The
+    owner's managed (LMT) servers come last, when the workspace allows them.
     """
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
+        if (await cached_workspace_settings(workspace)).personal_managed_tools_enabled:
+            sources.append(managed_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
 
 

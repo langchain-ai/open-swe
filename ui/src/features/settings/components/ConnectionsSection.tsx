@@ -191,8 +191,10 @@ function LangSmithRow() {
       ),
     }),
     onError: (_e, _v, ctx) => ctx?.undo(),
-    onSettled: () =>
-      qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+      void qc.invalidateQueries({ queryKey: ["myManagedMCPs"] })
+    },
   })
   if (!status.data?.available) return null
   const connected = status.data.connected

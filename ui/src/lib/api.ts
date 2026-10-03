@@ -311,6 +311,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** Whether private runs may load the owner's LangSmith Managed Tools servers. On by default. */
+  personal_managed_tools_enabled?: boolean
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -377,11 +379,37 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
+export interface ManagedServer {
+  id: string
+  name: string
+  upstream_url: string
+  kind: "oauth" | "secret" | "none"
+  connected: boolean
+}
+
+export interface ManagedSelection {
+  server_id: string
+  name: string
+  upstream_url: string
+  enabled: boolean
+  /** Tools the person turned off; every other tool the server lists is offered. */
+  disabled_tools: string[]
+  revision: string
+  updated_at: string
+}
+
 export interface LangSmithConnectionStatus {
   available: boolean
   connected: boolean
   email?: string | null
   updated_at?: string | null
+}
+
+export interface ManagedToolsView {
+  configured: boolean
+  langsmith_connected: boolean
+  servers: ManagedServer[]
+  selections: ManagedSelection[]
 }
 
 export interface NotionCredentialStatus {
@@ -1655,10 +1683,38 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  getMyManagedMCPs: () => request<ManagedToolsView>("/my-managed-mcps"),
   getMyLangSmithStatus: () =>
     request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
   disconnectLangSmith: () =>
     request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
+  connectMyManagedMCP: (serverId: string) =>
+    request<{ connected: boolean; url?: string | null }>(
+      `/my-managed-mcps/${encodeURIComponent(serverId)}/connect`,
+      { method: "POST" }
+    ),
+  disconnectMyManagedMCP: (serverId: string) =>
+    request<void>(
+      `/my-managed-mcps/${encodeURIComponent(serverId)}/credential`,
+      { method: "DELETE" }
+    ),
+  discoverMyManagedMCP: (serverId: string) =>
+    request<{ name: string; description: string }[]>(
+      `/my-managed-mcps/${encodeURIComponent(serverId)}/discover`,
+      { method: "POST" }
+    ),
+  saveMyManagedMCP: (
+    serverId: string,
+    body: { enabled: boolean; disabled_tools: string[] }
+  ) =>
+    request<ManagedSelection>(
+      `/my-managed-mcps/${encodeURIComponent(serverId)}`,
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
+  deleteMyManagedMCP: (serverId: string) =>
+    request<void>(`/my-managed-mcps/${encodeURIComponent(serverId)}`, {
       method: "DELETE",
     }),
   getMyNotionStatus: () =>
