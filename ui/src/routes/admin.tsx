@@ -138,6 +138,7 @@ export function SlackIntegrationSection({
   }
 
   const manifestConfig = {
+    dashboardUrl: typeof window === "undefined" ? null : window.location.origin,
     backendUrl:
       backendUrl ||
       dashboardApiBase() ||

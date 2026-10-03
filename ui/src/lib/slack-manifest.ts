@@ -6,6 +6,8 @@ const BASE_BOT_SCOPES = [
   "channels:read",
   "channels:join",
   "chat:write",
+  "links:read",
+  "links:write",
   "files:write",
   "groups:history",
   "groups:read",
@@ -21,6 +23,7 @@ const BASE_BOT_SCOPES = [
 
 const BASE_BOT_EVENTS = [
   "app_mention",
+  "link_shared",
   "message.im",
   "message.mpim",
   "message.channels",
@@ -36,6 +39,7 @@ export const ASK_COMMAND = "/oswe"
 
 export interface SlackManifestConfig {
   backendUrl?: string | null
+  dashboardUrl?: string | null
 }
 
 export function slackManifestPlaceholdersRemain(
@@ -58,6 +62,13 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
+    unfurl_domains: [
+      new URL(
+        config.dashboardUrl?.trim() ||
+          config.backendUrl?.trim() ||
+          "https://your-dashboard.example.com"
+      ).hostname,
+    ],
     slash_commands: [
       {
         command: ASK_COMMAND,
