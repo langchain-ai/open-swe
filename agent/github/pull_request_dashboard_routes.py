@@ -27,6 +27,7 @@ from agent.github.pull_request_status import (
 )
 from agent.github.pull_requests import PullRequest
 from agent.github.repos import accessible_repo_full_names
+from agent.human_review.requests import HumanReviewRequest
 from agent.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -92,7 +93,7 @@ async def api_list_pull_requests(
     token = await get_valid_access_token(session["sub"])
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await list_open_pull_requests(
+    result = await list_open_pull_requests(
         session["sub"],
         token,
         repo,
@@ -102,6 +103,12 @@ async def api_list_pull_requests(
         page=page,
         scope=scope,
     )
+    urls = await HumanReviewRequest.active_slack_urls(
+        [(pr.repo, pr.number) for pr in result.pull_requests]
+    )
+    for pr in result.pull_requests:
+        pr.review_request_url = urls.get((pr.repo.lower(), pr.number))
+    return result
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}")
@@ -114,9 +121,13 @@ async def api_pull_request_details(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     async with github_client(token=token) as client:
-        return await load_open_pull_request(
+        result = await load_open_pull_request(
             client, {"repo_full_name": f"{owner}/{repo}", "number": number}
         )
+    if result is not None:
+        urls = await HumanReviewRequest.active_slack_urls([(result.repo, result.number)])
+        result.review_request_url = urls.get((result.repo.lower(), result.number))
+    return result
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
