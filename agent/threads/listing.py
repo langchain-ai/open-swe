@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from agent.review.session import ReviewSessionMetadata
 from agent.review.walkthrough import Walkthrough
+from agent.threads.code_changes import has_slack_code_changes, with_code_changes
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -312,6 +313,7 @@ async def _summarize_threads(
                 minimal_run_update=minimal_run_update,
             )
 
+    threads = await with_code_changes(client, threads)
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
     await attach_subagents(summaries)
     return summaries
@@ -334,11 +336,14 @@ async def _collect_thread_candidates(
     include_private: bool = True,
     target_per_search: int | None = None,
     surfaced_only: bool = False,
+    hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
+    edit_evidence: dict[str, ThreadLike] = {}
     for search_filter in searches:
-        matched_for_search = 0
+        matched_ids: set[str] = set()
         offset = 0
         metadata_filter = _search_metadata_filter(
             search_filter,
@@ -359,7 +364,9 @@ async def _collect_thread_candidates(
                 break
             for thread in batch:
                 metadata = _thread_metadata(thread)
-                if thread_source(metadata) == "incidents_agent":
+                if thread_source(metadata) == "incidents_agent" or (
+                    hide_slack_threads and thread_source(metadata) == "slack"
+                ):
                     continue
                 review = ReviewSessionMetadata.parse(metadata)
                 if review is not None and not review.owned_by(viewer_login):
@@ -386,11 +393,29 @@ async def _collect_thread_candidates(
                 thread_id = _thread_id(thread)
                 if not thread_id:
                     continue
-                matched_for_search += 1
                 seen.setdefault(thread_id, thread)
+                matched_ids.add(thread_id)
+            if hide_slack_without_code_changes:
+                annotated = await with_code_changes(
+                    client,
+                    [
+                        thread
+                        for thread_id, thread in seen.items()
+                        if thread_id not in edit_evidence
+                    ],
+                )
+                edit_evidence.update(
+                    (thread_id, thread) for thread in annotated if (thread_id := _thread_id(thread))
+                )
+                seen = {
+                    thread_id: edit_evidence[thread_id]
+                    for thread_id in seen
+                    if has_slack_code_changes(edit_evidence[thread_id])
+                }
+                matched_ids.intersection_update(seen)
             if len(batch) < _THREADS_SEARCH_PAGE:
                 break
-            if target_per_search is not None and matched_for_search >= target_per_search:
+            if target_per_search is not None and len(matched_ids) >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
     return sorted(
@@ -478,6 +503,8 @@ async def list_dashboard_thread_repos(
     email: str | None = None,
     include_resolved: bool = False,
     include_automations: bool = False,
+    hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     include_all: bool = False,
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
@@ -493,6 +520,8 @@ async def list_dashboard_thread_repos(
         viewer_email=email,
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
+        hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -551,6 +580,8 @@ async def list_dashboard_threads_page(
     surfaced_only: bool = False,
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
+    hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
@@ -581,6 +612,8 @@ async def list_dashboard_threads_page(
         include_private=include_private,
         target_per_search=target,
         surfaced_only=surfaced_only,
+        hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
         sort_by=sort_by,
     )
 
