@@ -8,7 +8,7 @@ import type {
   ReviewerEvalStartRequest,
   ReviewerEvalStatus,
 } from "@/lib/api"
-import { AuthedAppShell, SettingsRow, SettingsSection } from "@/components/AuthedAppShell"
+import { AuthedAppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {

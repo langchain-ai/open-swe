@@ -7,7 +7,7 @@ import {
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
-} from "@/components/AuthedAppShell"
+} from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Input } from "@/components/ui/input"
