@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronRight } from "lucide-react"
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { formatElapsed } from "@/lib/utils"
 
 function reasoningLabel(elapsedMs: number | null): string {
@@ -45,16 +50,13 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
 
   return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => {
-          if (!isLive) setUserExpanded((value) => !value)
-        }}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default"
-        aria-expanded={expanded}
-        disabled={isLive}
-      >
+    <Collapsible
+      className="my-1"
+      disabled={isLive}
+      open={expanded}
+      onOpenChange={setUserExpanded}
+    >
+      <CollapsibleTrigger className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default data-disabled:cursor-default">
         {isLive ? (
           <span className="shimmer-text text-[13px]">Thinking...</span>
         ) : (
@@ -68,12 +70,12 @@ export function ReasoningBlock({
             </span>
           </>
         )}
-      </button>
-      {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+      </CollapsibleTrigger>
+      {trimmed && (
+        <CollapsibleContent className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
           {trimmed}
-        </div>
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   )
 }

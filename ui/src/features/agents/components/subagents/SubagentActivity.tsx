@@ -1,6 +1,7 @@
 import { useToolCalls } from "@langchain/react"
-import { Check, Loader2, X } from "lucide-react"
+import { Check, X } from "lucide-react"
 
+import { Spinner } from "@/components/ui/spinner"
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import type { AgentStream } from "@/features/agents/lib/stream/connection"
@@ -75,12 +76,9 @@ function ActivityLine({
       {status === "completed" ? (
         <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
       ) : status === "error" ? (
-        <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
+        <X className="h-3 w-3 shrink-0 text-destructive" aria-hidden />
       ) : (
-        <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
-          aria-hidden
-        />
+        <Spinner className="size-3 text-muted-foreground/70" aria-hidden />
       )}
       <span className="truncate text-[10px] text-muted-foreground/70">
         {humanizeToolName(name)}
