@@ -650,6 +650,17 @@ async def settle_repository(owner: str, repo: str) -> None:
         await settle(request)
 
 
+async def _author_identity(pr: PullRequest) -> str:
+    """The author's Open SWE identity for the picker prompt, or their login alone when unknown."""
+    author = await User.get(pr.author_user_id) if pr.author_user_id else None
+    if author is None:
+        return f"@{pr.author}"
+    identity = f"@{author.login_for('github')} (Open SWE user:{author.id}, {author.display_name})"
+    if author.slack_user_id:
+        identity = identity[:-1] + f", Slack <@{author.slack_user_id}>)"
+    return identity
+
+
 async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False) -> bool:
     """Wake an agent to pick a reviewer, as the unclaimed deadline does; whether one was woken.
 
@@ -661,6 +672,7 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
         pr_url=pr.url,
         minutes=UNCLAIMED_AFTER_MINUTES,
         author=pr.author,
+        author_identity=await _author_identity(pr),
         posted=not request.has_card,
         asked=asked,
     )
