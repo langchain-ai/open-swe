@@ -337,22 +337,32 @@ async def test_abandoned_admissions_reclaimed_when_owner_session_ends(registry_d
 
 
 @pytest.mark.asyncio
-async def test_lost_owner_connection_cancels_active_tool(registry_db):
+async def test_lost_owner_connection_only_cancels_fenced_tools(registry_db, monkeypatch):
     from agent import tasks
 
-    entered = asyncio.Event()
+    monkeypatch.setattr(tasks, "_OWNER_GATE", asyncio.Lock())
+    await update_task("member", ["ship"], False, "")
+    entered = {name: asyncio.Event() for name in ("ordinary", "member", "transition")}
+    release = asyncio.Event()
 
-    async def tool():
-        async with authority("thread", exclusive=False):
-            entered.set()
-            await asyncio.Event().wait()
+    async def tool(name):
+        async with authority(name, exclusive=name == "transition"):
+            entered[name].set()
+            await release.wait()
 
-    running = asyncio.create_task(tool())
-    await entered.wait()
+    running = {name: asyncio.create_task(tool(name)) for name in entered}
+    await asyncio.gather(*(event.wait() for event in entered.values()))
     owner = tasks._OWNER
     assert owner is not None
     await owner.connection.close()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(running, 3)
+    for name in ("member", "transition"):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(running[name], 3)
+    assert not running["ordinary"].done()
+    with pytest.raises(PermissionError, match="owner lost"):
+        async with authority("new"):
+            pytest.fail("Lost ownership allowed admission")
+    release.set()
+    await running["ordinary"]
     async with authority("thread"):
         assert tasks._OWNER is not owner

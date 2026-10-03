@@ -1,11 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Runs that Open SWE dispatches itself (Slack, Linear, GitHub, schedules) must
-// stream the same v3 protocol events as runs the dashboard starts: `tools`
-// events for the root agent and namespaced events for its subagents. The
-// server fixes a run's streaming protocol at creation, so a legacy-shaped
-// `runs.create` leaves the dashboard with `values` only — subagent cards then
-// never show nested activity, and tool status comes from message replay alone.
 const USER = { login: "alice", email: "alice@example.com" };
 
 interface ProtocolEvent {
@@ -100,7 +94,7 @@ async function replayEvents(page: Page, threadId: string) {
 }
 
 test.describe("dispatched run events", () => {
-  test("a Slack-dispatched run streams tool events for the root agent and its subagents", async ({
+  test("a Slack-dispatched run streams tool events and rejects synchronous delegation", async ({
     page,
   }) => {
     await login(page);
@@ -125,40 +119,16 @@ test.describe("dispatched run events", () => {
         .filter((event) => event.params?.data?.event === "tool-finished")
         .map((event) => event.params?.data?.tool_call_id);
 
-    // The root agent's two `task` calls, started and finished.
     const rootTools = toolEvents.filter(
       (event) => namespaceOf(event).length === 0,
     );
-    expect(startedNames(rootTools)).toEqual(["task", "task"]);
-    expect(finishedIds(rootTools).sort()).toEqual([
-      "call-subagent-files",
-      "call-subagent-layout",
-    ]);
-
-    // Each subagent runs under its own namespace and reports its own shell
-    // steps there — the events the dashboard's subagent cards subscribe to.
-    const nested = toolEvents.filter((event) => namespaceOf(event).length > 0);
-    const nestedNamespaces = new Set(
-      nested.map((event) => namespaceOf(event).join("/")),
+    expect(startedNames(rootTools)).toEqual(["execute"]);
+    expect(finishedIds(rootTools)).toEqual(["call-root-ls"]);
+    expect(toolEvents.filter((event) => namespaceOf(event).length > 0)).toEqual(
+      [],
     );
-    expect(nestedNamespaces.size).toBe(2);
-    for (const namespace of nestedNamespaces) {
-      const scope = nested.filter(
-        (event) => namespaceOf(event).join("/") === namespace,
-      );
-      expect(startedNames(scope)).toEqual(["execute", "execute"]);
-      expect(finishedIds(scope).sort()).toEqual([
-        "call-subagent-echo",
-        "call-subagent-ls",
-      ]);
-    }
-
-    const subagentLifecycle = events
-      .filter(
-        (event) =>
-          event.method === "lifecycle" && namespaceOf(event).length > 0,
-      )
-      .map((event) => event.params?.data?.graph_name);
-    expect(subagentLifecycle).toContain("general-purpose");
+    expect(JSON.stringify(events)).toContain(
+      "Synchronous delegation is disabled",
+    );
   });
 });

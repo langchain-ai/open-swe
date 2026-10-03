@@ -33,6 +33,7 @@ class _Owner:
     id: UUID
     connection: AsyncConnection
     tasks: set[asyncio.Task[object]]
+    fenced_tasks: set[asyncio.Task[object]]
     monitor: asyncio.Task[None] | None = None
     failed: bool = False
 
@@ -51,7 +52,7 @@ async def _watch_owner(owner: _Owner) -> None:
     except Exception:
         owner.failed = True
         logger.exception("Task admission owner connection lost")
-        for task in tuple(owner.tasks):
+        for task in tuple(owner.fenced_tasks):
             task.cancel()
 
 
@@ -78,7 +79,7 @@ async def admission_owner() -> AsyncIterator[_Owner]:
             except BaseException:
                 await conn.close()
                 raise
-            _OWNER = _Owner(owner_id, conn, set())
+            _OWNER = _Owner(owner_id, conn, set(), set())
             _OWNER.monitor = asyncio.create_task(_watch_owner(_OWNER))
         owner = _OWNER
         if owner.failed:
@@ -89,6 +90,7 @@ async def admission_owner() -> AsyncIterator[_Owner]:
     finally:
         async with _OWNER_GATE:
             owner.tasks.discard(task)
+            owner.fenced_tasks.discard(task)
             if not owner.tasks:
                 if owner.monitor:
                     owner.monitor.cancel()
@@ -209,6 +211,12 @@ async def authority(
         lease = _Lease(thread_id, exclusive)
         token = _HELD.set(lease)
         try:
+            if exclusive or await role(thread_id) is not None:
+                task = asyncio.current_task()
+                if task is not None:
+                    owner.fenced_tasks.add(task)
+            if owner.failed:
+                raise PermissionError("Task admission owner connection lost")
             yield
         finally:
             lease.active = False
