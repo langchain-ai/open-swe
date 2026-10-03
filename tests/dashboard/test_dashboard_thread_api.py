@@ -505,6 +505,7 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     monkeypatch.setattr(thread_runs.postgres, "configured", lambda: True)
+    monkeypatch.setattr("agent.tasks.role", AsyncMock(return_value=None))
 
     recorded = uuid7()
     appended: list[str] = []
