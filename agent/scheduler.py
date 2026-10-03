@@ -11,6 +11,8 @@ from agent.agent_cost import run_agent_cost_refresh
 from agent.baby_sit import evaluate_watch
 from agent.background_tasks import CRON_KIND as BACKGROUND_TASK_CRON_KIND
 from agent.background_tasks import monitor_background_tasks
+from agent.github.merge_reminders import TASK as MERGE_REMINDER_TASK
+from agent.github.merge_reminders import run_reminders
 from agent.human_review.lifecycle import LEGACY_CRON_TASK as EXPEDITED_REVIEW_TASK
 from agent.human_review.lifecycle import delete_legacy_crons
 from agent.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_TASK
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 class SchedulerState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    login: str | None = None
     schedule_id: str | None = None
     task: str | None = None
     workspace_slug: str | None = None
@@ -60,6 +63,8 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
     async def launch_once() -> dict[str, Any]:
         cfg = RunConfig.from_config(config)
         task = state.task or cfg.task
+        if task == MERGE_REMINDER_TASK:
+            return {"result": await run_reminders(state.login or "")}
         if task == "reconcile":
             return {"result": await reconcile_stale_runs()}
         if task == "baby_sit":
