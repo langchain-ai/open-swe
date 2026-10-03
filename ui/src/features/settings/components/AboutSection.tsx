@@ -32,18 +32,25 @@ export function AboutSection({ user }: { user: SessionUser }) {
           }
         />
       ) : null}
-      <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
-        <p>
-          API: {apiBase.origin ?? "same origin"} {apiBase.path}
-        </p>
-        <p>
-          OPENSWE_ENV: <IdentityValue value={buildInfo?.backend.environment} />
-        </p>
-        <BuildIdentityDetails buildInfo={buildInfo} />
-        <CopyDiagnosticsButton
-          getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
-        />
-      </div>
+      <details className="group p-4 text-xs break-words text-muted-foreground">
+        <summary className="w-fit cursor-pointer rounded-sm font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+          <span className="group-open:hidden">Show diagnostics</span>
+          <span className="hidden group-open:inline">Hide diagnostics</span>
+        </summary>
+        <div className="mt-4 space-y-2">
+          <p>
+            API: {apiBase.origin ?? "same origin"} {apiBase.path}
+          </p>
+          <p>
+            OPENSWE_ENV:{" "}
+            <IdentityValue value={buildInfo?.backend.environment} />
+          </p>
+          <BuildIdentityDetails buildInfo={buildInfo} />
+          <CopyDiagnosticsButton
+            getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
+          />
+        </div>
+      </details>
     </SettingsSection>
   )
 }

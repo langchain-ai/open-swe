@@ -2,6 +2,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import {
+  IoBugOutline,
   IoCopyOutline,
   IoDesktopOutline,
   IoLogOutOutline,
@@ -13,6 +14,14 @@ import {
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogPopup,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 import {
   getDatadogSessionLink,
@@ -46,6 +55,7 @@ export function SidebarUserMenu({
   const navigate = useNavigate()
   const { theme, setTheme } = useTheme()
   const [open, setOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [datadogCopyStatus, setDatadogCopyStatus] = useState<
     "idle" | "copied" | "error"
   >("idle")
@@ -159,21 +169,19 @@ export function SidebarUserMenu({
             </div>
           </div>
           <div className="my-1 h-px bg-border" />
-          {datadogInitialized && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
-            >
-              <IoCopyOutline className="size-3.5" />
-              {datadogCopyStatus === "copied"
-                ? "Copied Datadog link"
-                : datadogCopyStatus === "error"
-                  ? "Couldn't copy Datadog link"
-                  : "Copy Datadog link"}
-            </button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              setDatadogCopyStatus("idle")
+              setReportOpen(true)
+            }}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+          >
+            <IoBugOutline className="size-3.5" />
+            Report an issue
+          </button>
           {showSettingsLink && (
             <Link
               to="/my-settings"
@@ -196,6 +204,42 @@ export function SidebarUserMenu({
           </button>
         </div>
       )}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogPopup className="gap-4 p-6">
+          <DialogTitle>Report an issue</DialogTitle>
+          <DialogDescription>
+            Send the Open SWE team a description of what went wrong, what you
+            expected, and any steps to reproduce it.
+          </DialogDescription>
+          <p className="text-xs text-muted-foreground">
+            {datadogInitialized
+              ? "Copy your session link and include it in your message so the team can find your Datadog session replay. Nothing is sent automatically."
+              : "A session replay link is unavailable. You can still report the issue and include diagnostics from Settings → About."}
+          </p>
+          {datadogInitialized && (
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyDatadogSessionLink()}
+              >
+                <IoCopyOutline className="size-3.5" />
+                Copy session link
+              </Button>
+              <p role="status" className="text-xs text-muted-foreground">
+                {datadogCopyStatus === "copied"
+                  ? "Session link copied. Include it in your message to the team."
+                  : datadogCopyStatus === "error"
+                    ? "Couldn't copy the session link. You can still report the issue without it."
+                    : null}
+              </p>
+            </div>
+          )}
+          <DialogClose render={<Button variant="outline" size="sm" />}>
+            Close
+          </DialogClose>
+        </DialogPopup>
+      </Dialog>
     </div>
   )
 }
