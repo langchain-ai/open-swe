@@ -759,7 +759,6 @@ async def slack_action(request: Request) -> JSONResponse:
 
     payload = {
         "type": "block_actions",
-        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
         "user": {"id": user_id},
         "channel": {"id": channel_id},
         "container": {
@@ -774,7 +773,7 @@ async def slack_action(request: Request) -> JSONResponse:
             "blocks": source_message["blocks"],
         },
         "actions": [{**action, "action_ts": fakes.next_slack_ts()}],
-        "trigger_id": user_id,
+        "trigger_id": f"trigger-{user_id}-{fakes.next_slack_ts()}",
     }
     response = await _deliver_slack_interaction(payload)
     return JSONResponse(response.json(), status_code=response.status_code)
@@ -1643,6 +1642,10 @@ async def slack_views_open(request: Request) -> JSONResponse:
     ):
         return JSONResponse({"ok": False, "error": "invalid_trigger"})
     OPEN_SLACK_VIEWS.append({"trigger_id": trigger_id, "view": view})
+    for user in TEST_USERS:
+        slack_id = str(user["slack_id"])
+        if trigger_id.startswith(f"trigger-{slack_id}-"):
+            SLACK_VIEWS[slack_id] = view
     return _ok({"view": {"id": f"V{len(OPEN_SLACK_VIEWS)}", **view}})
 
 
@@ -1968,14 +1971,6 @@ _ = (e2e_env, HUMAN_USER)
 
 
 SLACK_VIEWS: dict[str, dict[str, object]] = {}
-
-
-@app.post("/fake-slack/views.open")
-async def slack_views_open(request: Request) -> JSONResponse:
-    body = await request.json()
-    view = body["view"]
-    SLACK_VIEWS[str(body["trigger_id"])] = view
-    return _ok({"view": {"id": "V_REVIEW", **view}})
 
 
 @app.get("/mock/slack/modal")

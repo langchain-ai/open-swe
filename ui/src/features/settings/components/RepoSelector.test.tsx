@@ -163,10 +163,10 @@ it("hides archives even in search until opted in, without clearing the selection
   )
   fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
   expect(
-    await screen.findByRole("option", { name: /org\/active\s*Public/ })
+    await screen.findByRole("button", { name: /org\/active\s*Public/ })
   ).toBeTruthy()
   expect(
-    screen.queryByRole("option", { name: /org\/legacy\s*Public\s*archive/ })
+    screen.queryByRole("button", { name: /org\/legacy\s*Public\s*archive/ })
   ).toBeNull()
   expect(onRepoChange).not.toHaveBeenCalled()
 
@@ -176,13 +176,13 @@ it("hides archives even in search until opted in, without clearing the selection
   expect(screen.getByText("No matches")).toBeTruthy()
   fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
   expect(
-    screen.getByRole("option", { name: /org\/legacy\s*Public\s*archive/ })
+    screen.getByRole("button", { name: /org\/legacy\s*Public\s*archive/ })
   ).toBeTruthy()
   expect(
-    screen.queryByRole("option", { name: /org\/active\s*Public/ })
+    screen.queryByRole("button", { name: /org\/active\s*Public/ })
   ).toBeNull()
   fireEvent.click(
-    screen.getByRole("option", {
+    screen.getByRole("button", {
       name: /org\/internal-legacy\s*Private\s*archive/,
     })
   )

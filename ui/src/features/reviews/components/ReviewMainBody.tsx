@@ -117,7 +117,6 @@ import {
 } from "@/features/agents/utils/diffUtils"
 import { CheckStatusIcon } from "@/features/reviews/components/CheckStatus"
 import { DiffStat } from "@/components/DiffStat"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -2944,15 +2943,6 @@ function FindingBadge({ children }: { children: React.ReactNode }) {
     <Badge variant="outline" className="text-muted-foreground capitalize">
       {children}
     </Badge>
-  )
-}
-
-function UserAvatar({ src }: { src: string | null | undefined }) {
-  return (
-    <Avatar className="size-4 after:hidden">
-      {src && <AvatarImage src={src} alt="" />}
-      <AvatarFallback />
-    </Avatar>
   )
 }
 

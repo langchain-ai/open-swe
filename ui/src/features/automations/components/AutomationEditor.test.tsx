@@ -197,23 +197,25 @@ describe("AutomationEditor", () => {
     signInAsAdmin()
     useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
     render(
-      <AutomationEditor
-        mode="edit"
-        schedule={{
-          id: "sched_1",
-          name: "Nightly",
-          prompt: "Check dependencies",
-          schedule: "0 9 * * *",
-          trigger: "schedule",
-          scope: "workspace",
-          workspace: "core",
-          repo: null,
-          slackNotificationMode: "always",
-          adminThread: false,
-          model: "Default",
-          enabled: true,
-        }}
-      />
+      <ConfirmProvider>
+        <AutomationEditor
+          mode="edit"
+          schedule={{
+            id: "sched_1",
+            name: "Nightly",
+            prompt: "Check dependencies",
+            schedule: "0 9 * * *",
+            trigger: "schedule",
+            scope: "workspace",
+            workspace: "core",
+            repo: null,
+            slackNotificationMode: "always",
+            adminThread: false,
+            model: "Default",
+            enabled: true,
+          }}
+        />
+      </ConfirmProvider>
     )
     expect(mocks.unsavedWarning).toHaveBeenLastCalledWith(false)
     fireEvent.change(screen.getByPlaceholderText("Untitled automation"), {
@@ -228,7 +230,11 @@ describe("AutomationEditor", () => {
   it("defaults only new automations to a recent repository", () => {
     signInAsAdmin()
     useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(
+      <ConfirmProvider>
+        <AutomationEditor mode="create" template={TEMPLATE} />
+      </ConfirmProvider>
+    )
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
       repo: "acme/oss",

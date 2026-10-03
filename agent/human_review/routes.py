@@ -12,13 +12,13 @@ from agent.dashboard import profiles, repo_access
 from agent.dashboard.deps import SESSION_DEP
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.expedited_review.readiness import latest_review_states
+from agent.github.ci import fetch_pr
 from agent.github.http import github_client
 from agent.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
     pull_request_identity,
 )
-from agent.github.ci import fetch_pr
 from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
 from agent.human_review.lifecycle import dismiss_by

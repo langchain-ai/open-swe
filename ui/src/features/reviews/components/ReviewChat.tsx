@@ -95,7 +95,13 @@ export function ReviewChat({
   const meta = useQuery(reviewChatQuery({ owner, repo, number }))
   if (meta.isPending) return <Skeleton className="h-40 w-full" />
   if (meta.isError || !meta.data.available)
-    return <Empty><EmptyDescription>Chat is unavailable right now. Reload the page to try again.</EmptyDescription></Empty>
+    return (
+      <Empty>
+        <EmptyDescription>
+          Chat is unavailable right now. Reload the page to try again.
+        </EmptyDescription>
+      </Empty>
+    )
   return (
     <AgentThreadPage
       threadId={meta.data.thread_id}

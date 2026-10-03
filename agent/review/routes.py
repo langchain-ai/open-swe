@@ -23,6 +23,7 @@ from agent.review.assessment_feedback import (
     save_feedback,
 )
 from agent.review.chat import (
+    ReviewChat,
     get_review_chat,
     proxy_review_chat_commands,
     proxy_review_chat_history,
@@ -524,7 +525,7 @@ async def api_get_review_chat(
     repo: str,
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewChat:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_chat(owner, repo, pr_number, session["sub"], session.get("email"))
 

@@ -409,20 +409,22 @@ export function OpenPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <Empty className="flex-none rounded-lg border border-solid border-border bg-card py-12"><EmptyDescription>
-                    {detailsLoading ||
-                    query.isFetchingNextPage ||
-                    descriptionSearch.isSearching
-                      ? "Loading matching PRs…"
-                      : all.length
-                        ? "No PRs match these filters."
-                        : scope === "mine"
-                          ? "No open PRs found."
-                          : scope === "review-assigned"
-                            ? "No Open SWE assignments. You’re all caught up."
-                            : "No pending GitHub review requests."}
-                    {githubLink}
-                  </EmptyDescription></Empty>
+                  <Empty className="flex-none rounded-lg border border-solid border-border bg-card py-12">
+                    <EmptyDescription>
+                      {detailsLoading ||
+                      query.isFetchingNextPage ||
+                      descriptionSearch.isSearching
+                        ? "Loading matching PRs…"
+                        : all.length
+                          ? "No PRs match these filters."
+                          : scope === "mine"
+                            ? "No open PRs found."
+                            : scope === "review-assigned"
+                              ? "No Open SWE assignments. You’re all caught up."
+                              : "No pending GitHub review requests."}
+                      {githubLink}
+                    </EmptyDescription>
+                  </Empty>
                 ) : (
                   <PullRequestList
                     rows={visible}

@@ -124,7 +124,10 @@ export function ReviewCommentsMenu({
                     }}
                     className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
                   >
-                    <UserAvatar login={comment.author} className="mt-0.5 size-4" />
+                    <UserAvatar
+                      login={comment.author}
+                      className="mt-0.5 size-4"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 text-[11px]">
                         <span className="font-medium text-foreground">

@@ -8,7 +8,11 @@ import type {
   ReviewerEvalStartRequest,
   ReviewerEvalStatus,
 } from "@/lib/api"
-import { AuthedAppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  AuthedAppShell,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -49,11 +53,13 @@ function ReviewerEvalPage() {
       title="Reviewer eval"
       description="Runs the reviewer benchmark in a LangSmith sandbox against this deployment. Progress streams here live."
     >
-      {() => (<>
-      <ReviewerEvalRunConfigSection />
-      <ReviewerEvalStatusSection />
-      <ReviewerEvalLogs />
-      </>)}
+      {() => (
+        <>
+          <ReviewerEvalRunConfigSection />
+          <ReviewerEvalStatusSection />
+          <ReviewerEvalLogs />
+        </>
+      )}
     </AuthedAppShell>
   )
 }

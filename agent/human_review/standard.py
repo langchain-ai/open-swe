@@ -146,7 +146,7 @@ async def _target_channel(
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
-        settings = await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+        settings = await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token)
         try:
             configured = await settings.channel_for_pr(
                 pr_ref.owner, pr_ref.repo, pr_ref.number, token=token
@@ -561,7 +561,11 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
-        await send_dm(user.slack_user_id, dm_text, blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]))
+        await send_dm(
+            user.slack_user_id,
+            dm_text,
+            blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]),
+        )
     return RequestResult(
         success=True,
         request_id=str(added.id),
@@ -923,6 +927,8 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
         return "retrying"
     return "reminded"
+
+
 async def expire_picks(request: HumanReviewRequest) -> str:
     """Rotate away from picks not accepted in time, when someone else could review instead.
 

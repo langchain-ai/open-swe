@@ -14,7 +14,6 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import { UserAvatar } from "@/components/UserAvatar"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export type ThreadFix = (
@@ -22,16 +21,8 @@ export type ThreadFix = (
   scope: ThreadFixScope
 ) => Promise<void> | void
 
-const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  open: "bg-success/15 text-success-foreground",
-  merged: "bg-merged/15 text-merged-foreground",
-  closed: "bg-destructive/10 text-destructive",
-}
-
 import { DiffStat } from "@/components/DiffStat"
 import { PrStateBadge } from "@/components/PrState"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {

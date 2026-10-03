@@ -1,6 +1,6 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 

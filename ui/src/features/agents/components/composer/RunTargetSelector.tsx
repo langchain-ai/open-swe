@@ -34,7 +34,6 @@ import {
   MenuTrigger,
 } from "@/components/ui/menu"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
 

@@ -5,19 +5,8 @@ import {
   FolderIcon,
 } from "@phosphor-icons/react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Command,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
-import { Spinner } from "@/components/ui/spinner"
-import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { useRefreshRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import { useRecentRepos } from "@/lib/recentRepos"
@@ -189,7 +178,6 @@ function RepoSelect(
         repo.full_name.toLowerCase().includes(q)
     )
   }, [repos, query, history, allowArchived, showArchived])
-
 
   return (
     <Popover
