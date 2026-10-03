@@ -228,7 +228,7 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
         return list(await pull_request.discover_threads() or [])
 
 
-async def _find_pr_threads(
+async def find_pr_threads(
     owner: str, repo: str, number: int, login: str, email: str | None
 ) -> list[Thread]:
     client = langgraph_client()
@@ -277,7 +277,7 @@ async def _find_or_create_pr_thread(
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await _find_pr_threads(owner, repo, number, login, email)
+    candidates = await find_pr_threads(owner, repo, number, login, email)
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
@@ -317,7 +317,7 @@ async def pull_request_thread_running(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     await require_repo_access_for_user(login, f"{owner}/{repo}")
-    threads = await _find_pr_threads(owner, repo, number, login, email)
+    threads = await find_pr_threads(owner, repo, number, login, email)
     return PullRequestThreadStatus(
         running=any(thread.get("status") == "busy" for thread in threads)
     )

@@ -512,7 +512,7 @@ async def api_update_review_comment(
     )
 
 
-# --- PR chat (sandbox-less ``chat`` graph) -----------------------------------
+# --- PR chat (main agent) ---------------------------------------------------
 # The frontend points a LangGraph StreamProvider at the base
 # ``/reviews/{owner}/{repo}/{pr_number}/chat``; the SDK then issues the
 # ``/threads/{id}/{commands,stream/events,state,history}`` calls proxied below.
@@ -526,7 +526,7 @@ async def api_get_review_chat(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_chat(owner, repo, pr_number, session["sub"])
+    return await get_review_chat(owner, repo, pr_number, session["sub"], session.get("email"))
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")

@@ -76,6 +76,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  composerText?: string
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -107,7 +108,10 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  composerText,
+}: AgentThreadViewProps) {
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -735,7 +739,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onSubmit={submitMessage}
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
-                restoreDraft={restoreDraft}
+                restoreDraft={
+                  composerText
+                    ? {
+                        key: composerText.length,
+                        text: composerText,
+                        images: [],
+                      }
+                    : restoreDraft
+                }
                 droppedFiles={droppedFiles}
                 models={models}
                 routed={routed}
