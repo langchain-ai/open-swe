@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -157,6 +157,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         "200.0",
         f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE> "
         "<https://dashboard.example/agents/new-thread|Open in Web>",
+        blocks=ANY,
         unfurl_links=False,
         unfurl_media=False,
     )
