@@ -18,7 +18,8 @@ REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
 
 
-# What a positive approval assessment does; a repository with no mode set is ``dry_run``.
+# What a stored approval mode once controlled; assessments are advisory now,
+# so every mode reads as a comment-only publication.
 ApprovalMode = Literal["off", "dry_run", "approve"]
 
 
