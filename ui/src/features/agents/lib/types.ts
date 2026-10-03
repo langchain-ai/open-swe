@@ -455,6 +455,7 @@ export interface AgentThread {
   planStatus?: string | null
   adminThread?: boolean
   source?: AgentSource
+  hasEdits?: boolean | null
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
   triggerKind?: AgentTriggerKind | string

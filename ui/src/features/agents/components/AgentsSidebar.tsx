@@ -280,12 +280,16 @@ export function AgentsSidebar({
     repoMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    hideSlackWithoutCodeChanges: prefs.filters.hideSlackWithoutCodeChanges,
+    hideSlackThreads: prefs.filters.hideSlackThreads,
     sort: prefs.sortChats,
     enabled: !localOnly,
   })
   const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    hideSlackWithoutCodeChanges: prefs.filters.hideSlackWithoutCodeChanges,
+    hideSlackThreads: prefs.filters.hideSlackThreads,
     enabled: !localOnly && repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(
@@ -338,12 +342,16 @@ export function AgentsSidebar({
   const pageThreads = recentsQuery.items.filter(
     (thread) => !cloudPinnedIds.has(thread.id)
   )
-  const activeThread = useSidebarActiveThread({
+  const activeCandidate = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [...pinnedThreads, ...pageThreads],
     includeResolved: prefs.filters.includeResolved,
     enabled: !localOnly,
   })
+  const activeThread = filterThreads(
+    activeCandidate ? [activeCandidate] : [],
+    prefs.filters
+  )[0]
   const activeInRepo = Boolean(repoMode && activeThread?.repoFullName.trim())
   const recentThreads = [
     ...(activeThread && !activeInRepo ? [activeThread] : []),
@@ -629,6 +637,25 @@ export function AgentsSidebar({
         >
           Show automations
         </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.hideSlackThreads}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, hideSlackThreads: checked })
+          }
+        >
+          Hide all Slack chats
+        </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.hideSlackWithoutCodeChanges}
+          onCheckedChange={(checked) =>
+            setFilters({
+              ...prefs.filters,
+              hideSlackWithoutCodeChanges: checked,
+            })
+          }
+        >
+          Hide Slack chats without code changes
+        </MenuCheckboxItem>
         <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
           Compact rows
         </MenuCheckboxItem>
@@ -654,6 +681,8 @@ export function AgentsSidebar({
       collapsed={prefs.collapsedRepoKeys.includes(group.key)}
       expanded={prefs.expandedRepoKeys.includes(group.key)}
       pinned={pinnedRepoKeys.has(group.key)}
+      hideSlackWithoutCodeChanges={prefs.filters.hideSlackWithoutCodeChanges}
+      hideSlackThreads={prefs.filters.hideSlackThreads}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       sort={prefs.sortChats}
@@ -1094,6 +1123,8 @@ function RepoGroup({
   pinned,
   includeResolved,
   includeAutomations,
+  hideSlackWithoutCodeChanges,
+  hideSlackThreads,
   sort,
   activeThreadId,
   openThread,
@@ -1114,6 +1145,8 @@ function RepoGroup({
   pinned: boolean
   includeResolved: boolean
   includeAutomations: boolean
+  hideSlackWithoutCodeChanges: boolean
+  hideSlackThreads: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1135,6 +1168,8 @@ function RepoGroup({
     repoFullName: group.repoFullName,
     includeResolved,
     includeAutomations,
+    hideSlackWithoutCodeChanges,
+    hideSlackThreads,
     sort,
     enabled: !collapsed,
   })
