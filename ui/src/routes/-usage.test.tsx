@@ -195,8 +195,10 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   expect(await screen.findByText("example-model")).toBeTruthy()
   expect(screen.getByText("Analytics are up to date")).toBeTruthy()
   expect(
-    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
-  ).toBe(true)
+    screen
+      .getByRole("button", { name: "Details" })
+      .getAttribute("aria-expanded")
+  ).toBe("true")
   expect(screen.getAllByText(/Last event processed/).length).toBe(1)
   client.clear()
 })
@@ -468,7 +470,7 @@ it("shows unavailable attribution thread IDs for admin triage", async () => {
   const client = mountReport()
   fireEvent.click(await screen.findByText("Unavailable model attribution (1)"))
   expect(screen.getByText(threadId)).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "Copy" }))
+  fireEvent.click(screen.getByRole("button", { name: "Copy thread ID" }))
   expect(writeText).toHaveBeenCalledWith(threadId)
   client.clear()
 })
@@ -680,7 +682,7 @@ it.each([
   const row = (await screen.findByText("example-model")).closest("tr")!
   const deliveryCell = metricCell(row, "Time to PR")
   expect(deliveryCell.textContent).toBe("\u2014")
-  expect(within(deliveryCell).getByTitle(expected)).toBeTruthy()
+  expect(within(deliveryCell).getByLabelText(expected)).toBeTruthy()
   client.clear()
 })
 
@@ -715,7 +717,7 @@ it("renders a zero avg time to PR as a real duration, not an empty marker", asyn
   expect(deliveryCell.textContent).not.toBe("\u2014")
   expect(deliveryCell.textContent).toContain("0")
   expect(
-    within(deliveryCell).queryByTitle(/valid timing|unavailable/i)
+    within(deliveryCell).queryByLabelText(/valid timing|unavailable/i)
   ).toBeNull()
   client.clear()
 })
@@ -861,8 +863,10 @@ it("refreshes the usage leaderboard and merge rate report from the coverage foot
     await screen.findByRole("button", { name: "Refresh now" })
   ).toBeTruthy()
   expect(
-    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
-  ).toBe(false)
+    screen
+      .getByRole("button", { name: "Details" })
+      .getAttribute("aria-expanded")
+  ).toBe("false")
   client.clear()
 })
 
@@ -1104,7 +1108,9 @@ it("shows usage metrics but removes stale results when a refresh becomes unavail
   expect(screen.getByText("$2.50")).toBeTruthy()
   expect(screen.getByRole("columnheader", { name: "Threads" })).toBeTruthy()
   expect(screen.getByText("0.25")).toBeTruthy()
-  expect(screen.getByTitle("50 additions, 15 deletions").textContent).toBe("35")
+  expect(screen.getByLabelText(/50 additions, 15 deletions/).textContent).toBe(
+    "35"
+  )
   expect(screen.getByText("7 human replies tracked")).toBeTruthy()
 
   vi.mocked(api.usageLeaderboard).mockRejectedValue(

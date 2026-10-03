@@ -113,7 +113,7 @@ function diffColumn(page: Page): Locator {
 }
 
 async function openChatTab(page: Page) {
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page.getByRole("tab", { name: "Chat", exact: true }).click();
   await expect(
     page.getByPlaceholder("Ask anything about this PR…"),
   ).toBeVisible();
