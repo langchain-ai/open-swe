@@ -10,6 +10,12 @@ import { MultiFileDiff } from "@pierre/diffs/react"
 import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
+import { DiffStat } from "@/components/DiffStat"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
@@ -52,7 +58,6 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   isError: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
-  const toggle = useCallback(() => setExpanded((prev) => !prev), [])
   const diffOptions = useDiffOptions()
   const inlineDiffOptions = useMemo(
     () => ({ ...diffOptions, disableFileHeader: true }),
@@ -83,48 +88,49 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   const oldFile = { name: filePath, contents: originalContent }
   const newFile = { name: filePath, contents: newContent }
 
-  if (!expanded) {
-    return (
-      <div className="my-0.5 text-[12px] leading-5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
-        >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
-            Edited <span className="text-primary">{fileName}</span>
-          </span>
-        </button>
-      </div>
-    )
-  }
-
   return (
-    <div className="my-1">
-      <div className="my-0.5 mb-1.5 text-[12px] leading-5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
-        >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
-            Edited file
-          </span>
-          <span className="text-[10px] text-muted-foreground/70">▾</span>
-        </button>
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
+      className={expanded ? "my-1" : undefined}
+    >
+      <div
+        className={`my-0.5 text-[12px] leading-5 ${expanded ? "mb-1.5" : ""}`}
+      >
+        <CollapsibleTrigger className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125">
+          {expanded ? (
+            <>
+              <span
+                className={
+                  isError ? "text-destructive" : "text-muted-foreground"
+                }
+              >
+                Edited file
+              </span>
+              <span className="text-[10px] text-muted-foreground/70">▾</span>
+            </>
+          ) : (
+            <span
+              className={isError ? "text-destructive" : "text-muted-foreground"}
+            >
+              Edited <span className="text-primary">{fileName}</span>
+            </span>
+          )}
+        </CollapsibleTrigger>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border/60 bg-muted">
+      <CollapsibleContent className="overflow-hidden rounded-lg border border-border/60 bg-muted">
         <div className="flex items-center gap-2 px-3 py-2">
           <span
-            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-primary"}`}
+            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-destructive" : "text-primary"}`}
           >
             {filePath}
           </span>
-          <span className="flex shrink-0 items-center gap-2 text-xs">
-            <span className="text-green-400">+{additions}</span>
-            <span className="text-red-400">-{deletions}</span>
-          </span>
+          <DiffStat
+            additions={additions}
+            deletions={deletions}
+            className="shrink-0 text-xs"
+          />
         </div>
 
         <div
@@ -139,8 +145,8 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
             options={inlineDiffOptions}
           />
         </div>
-      </div>
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })
 
@@ -210,7 +216,9 @@ export const ToolExecution = memo(function ToolExecution({
     )
     return (
       <div className="my-0.5 text-[12px] leading-5">
-        <span className="text-yellow-400">Editing {getFileName(path)}...</span>
+        <span className="text-warning-foreground">
+          Editing {getFileName(path)}...
+        </span>
       </div>
     )
   }
@@ -222,9 +230,9 @@ export const ToolExecution = memo(function ToolExecution({
   const displayName = formatToolDisplay(title, toolKind, input, repoPath)
   const statusTextClass =
     status === "error"
-      ? "text-red-400"
+      ? "text-destructive"
       : status === "in_progress" || status === "pending"
-        ? "text-yellow-400"
+        ? "text-warning-foreground"
         : "text-muted-foreground"
 
   return (
@@ -232,7 +240,7 @@ export const ToolExecution = memo(function ToolExecution({
       <div className="flex min-w-0 items-center gap-2">
         <span className={`${statusTextClass} truncate`}>{displayName}</span>
         {status === "error" && output && (
-          <span className="truncate text-red-400/80">
+          <span className="truncate text-destructive/80">
             {output.slice(0, 80)}
           </span>
         )}
