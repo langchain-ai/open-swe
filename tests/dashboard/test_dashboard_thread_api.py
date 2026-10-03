@@ -16,6 +16,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.message_queue import MessageQueue
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -1037,9 +1038,12 @@ async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
     build_compare.assert_not_awaited()
 
 
-async def test_cancel_settles_its_runs_before_the_queued_follow_up(monkeypatch) -> None:
+async def test_cancel_settles_its_runs_before_the_queued_follow_up(
+    monkeypatch, registry_db: None
+) -> None:
     """The replacement run's own turn must not be settled as interrupted."""
     order: list[str] = []
+    await MessageQueue("thread-1").put({"text": "and also this"})
     thread = {
         "thread_id": "thread-1",
         "status": "busy",
@@ -1060,14 +1064,9 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(monkeypatch) 
         async def cancel_many(self, **kwargs: object) -> None:
             order.append("cancel")
 
-    class FakeStore:
-        async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, object]:
-            return {"value": {"messages": [{"text": "and also this"}]}}
-
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
-        store = FakeStore()
 
     async def fake_settle(thread_id: str, run_id: str | None, **kwargs: object) -> None:
         order.append(f"settle:{run_id}")
@@ -1165,8 +1164,9 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
-async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
-    store = FakeStore()
+async def test_steer_running_thread_records_and_delivers_the_follow_up(
+    monkeypatch, registry_db: None
+) -> None:
     updates: list[dict[str, object]] = []
     turn = uuid7()
 
@@ -1185,8 +1185,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
-
-    FakeClient.store = store  # type: ignore[attr-defined]
 
     appended: list[object] = []
 
@@ -1234,11 +1232,12 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         },
     }
     # The running agent finds the message before its next model call.
-    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
-    assert queued["content"]["queue_id"] == "msg-1"
-    assert queued["content"]["text"] == "also check the tests"
-    assert queued["content"]["sender"]["github_login"] == "teammate"
-    assert "source" not in queued["content"]
+    [queued] = await MessageQueue("tid").messages()
+    assert isinstance(queued.content, dict)
+    assert queued.content["queue_id"] == "msg-1"
+    assert queued.content["text"] == "also check the tests"
+    assert queued.content["sender"]["github_login"] == "teammate"
+    assert "source" not in queued.content
     # The transcript shows it on the live turn right away, under the id the
     # middleware will record it with, so the two writes deduplicate.
     [command] = appended
