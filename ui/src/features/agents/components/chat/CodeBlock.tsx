@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, Copy, WrapText } from "lucide-react"
+import { WrapText } from "lucide-react"
 import { getSingletonHighlighter } from "shiki"
 import type { ThemedToken } from "shiki"
+import { CopyButton } from "@/components/CopyButton"
+import { Toggle } from "@/components/ui/toggle"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { useResolvedTheme } from "@/lib/theme"
 
 interface CodeBlockProps {
@@ -55,7 +58,6 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
   // part of the fence, and this value is what Copy writes to the clipboard.
   const code = useMemo(() => text.replace(/\n$/, ""), [text])
   const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
-  const [copied, setCopied] = useState(false)
   const [wrapped, setWrapped] = useState(false)
   const resolvedTheme = useResolvedTheme()
   const shikiTheme = SHIKI_THEME[resolvedTheme]
@@ -108,16 +110,6 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
     }
   }, [code, normalizedLanguage, shikiTheme])
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    } catch {
-      setCopied(false)
-    }
-  }
-
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines"
   const lineClassName = wrapped
     ? "[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
@@ -134,29 +126,23 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
           role="toolbar"
           aria-label="Code block actions"
         >
-          <button
-            type="button"
-            onClick={() => setWrapped((value) => !value)}
-            aria-pressed={wrapped}
-            aria-label={wrapLabel}
-            title={wrapLabel}
-            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground aria-pressed:text-foreground"
-          >
-            <WrapText className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            aria-label={copied ? "Copied" : "Copy code"}
-            title={copied ? "Copied" : "Copy code"}
-            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {copied ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  aria-label={wrapLabel}
+                  className="text-muted-foreground aria-pressed:text-foreground"
+                  onPressedChange={setWrapped}
+                  pressed={wrapped}
+                  size="sm"
+                />
+              }
+            >
+              <WrapText className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>{wrapLabel}</TooltipPopup>
+          </Tooltip>
+          <CopyButton label="Copy code" text={code} />
         </span>
       </div>
       <pre

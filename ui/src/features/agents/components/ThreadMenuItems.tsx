@@ -1,4 +1,3 @@
-import { Menu } from "@base-ui/react/menu"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
@@ -10,11 +9,10 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
+import { MenuItem } from "@/components/ui/menu"
 import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
-
-const menuItemClassName =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 
 export function ThreadMenuItems({
   thread,
@@ -35,95 +33,77 @@ export function ThreadMenuItems({
   onToggleArchived: () => void
   onDelete: () => void
 }) {
+  const { copy } = useCopyToClipboard()
   const threadId = thread?.id ?? localThread?.id
   return (
     <>
       {thread?.traceUrl && (
-        <Menu.LinkItem
-          href={thread.traceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
+        <MenuItem
+          render={<a href={thread.traceUrl} target="_blank" rel="noreferrer" />}
         >
-          <TreeStructureIcon className="size-3.5" />
+          <TreeStructureIcon />
           Open trace
-        </Menu.LinkItem>
+        </MenuItem>
       )}
       {localThread && (
-        <Menu.Item
+        <MenuItem
           onClick={() => {
             void window.openSweDesktop?.openLocalTrace(localThread.id)
           }}
-          className={menuItemClassName}
         >
-          <TreeStructureIcon className="size-3.5" />
+          <TreeStructureIcon />
           Open trace
-        </Menu.Item>
+        </MenuItem>
       )}
       {thread?.sourceUrl && (
-        <Menu.LinkItem
-          href={thread.sourceAppUrl ?? thread.sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
+        <MenuItem
+          render={
+            <a
+              href={thread.sourceAppUrl ?? thread.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+            />
+          }
         >
-          <IoLogoSlack className="size-3.5" />
+          <IoLogoSlack />
           Open in Slack
-        </Menu.LinkItem>
+        </MenuItem>
       )}
-      <Menu.Item onClick={onTogglePin} className={menuItemClassName}>
-        {pinned ? (
-          <PushPinSlashIcon className="size-3.5" />
-        ) : (
-          <PushPinIcon className="size-3.5" />
-        )}
+      <MenuItem onClick={onTogglePin}>
+        {pinned ? <PushPinSlashIcon /> : <PushPinIcon />}
         {pinned ? "Unpin thread" : "Pin thread"}
-      </Menu.Item>
+      </MenuItem>
       {thread && (
-        <Menu.Item
+        <MenuItem
           disabled={!thread.sandboxId}
           onClick={() => {
             if (thread.sandboxId) {
-              void navigator.clipboard.writeText(thread.sandboxId)
+              void copy(thread.sandboxId)
             }
           }}
-          title={thread.sandboxId ?? undefined}
-          className={`${menuItemClassName} data-disabled:pointer-events-none data-disabled:opacity-50`}
         >
-          <CopyIcon className="size-3.5" />
+          <CopyIcon />
           Copy sandbox ID
-        </Menu.Item>
+        </MenuItem>
       )}
       {threadId && (
-        <Menu.Item
+        <MenuItem
           onClick={() => {
-            void navigator.clipboard.writeText(threadId)
+            void copy(threadId)
           }}
-          title={threadId}
-          className={menuItemClassName}
         >
-          <CopyIcon className="size-3.5" />
+          <CopyIcon />
           Copy thread ID
-        </Menu.Item>
+        </MenuItem>
       )}
-      <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>
-        {archived ? (
-          <ArrowCounterClockwiseIcon className="size-3.5" />
-        ) : (
-          <ArchiveIcon className="size-3.5" />
-        )}
+      <MenuItem onClick={onToggleArchived}>
+        {archived ? <ArrowCounterClockwiseIcon /> : <ArchiveIcon />}
         {archived ? "Unarchive thread" : "Archive thread"}
-      </Menu.Item>
-      <Menu.Item
-        onClick={onDelete}
-        disabled={isDeleting}
-        className={`${menuItemClassName} text-destructive data-disabled:pointer-events-none data-disabled:opacity-50`}
-      >
-        <TrashIcon className="size-3.5" />
+      </MenuItem>
+      <MenuItem variant="destructive" onClick={onDelete} disabled={isDeleting}>
+        <TrashIcon />
         Delete thread
-      </Menu.Item>
+      </MenuItem>
     </>
   )
 }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { LoaderCircle } from "lucide-react"
 
+import { IconButton } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { cn } from "@/lib/utils"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -57,6 +59,9 @@ function useEscapeToStop(enabled: boolean, onStop: () => void) {
   }, [enabled])
 }
 
+const roundActionClassName =
+  "rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 duration-150 hover:scale-105 hover:bg-foreground/85 active:shadow-none"
+
 function SendIcon() {
   return (
     <svg
@@ -84,23 +89,19 @@ function SendButton({
   label = "Send message",
 }: ComposerPrimaryActionsProps & { label?: string }) {
   return (
-    <button
+    <IconButton
       aria-label={label}
       className={cn(
-        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
-        "hover:scale-105 hover:bg-foreground/85 active:shadow-none enabled:cursor-pointer",
-        "disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
+        roundActionClassName,
+        "relative isolate overflow-hidden enabled:cursor-pointer disabled:opacity-30 disabled:shadow-none"
       )}
       disabled={!canSubmit}
       onClick={onSubmit}
+      size="icon-lg"
       type="button"
     >
-      {submitting ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
-      ) : (
-        <SendIcon />
-      )}
-    </button>
+      {submitting ? <Spinner /> : <SendIcon />}
+    </IconButton>
   )
 }
 
@@ -116,20 +117,17 @@ function StopButton({
   useEscapeToStop(stopOnEscape && !disabled, onStop)
 
   return (
-    <button
-      aria-label="Stop run"
-      className={cn(
-        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background shadow-xs shadow-foreground/20 transition-all duration-150",
-        "hover:scale-105 hover:bg-foreground/85 active:shadow-none",
-        "disabled:pointer-events-none disabled:opacity-40"
-      )}
+    <TooltipIconButton
+      className={cn(roundActionClassName, "cursor-pointer disabled:opacity-40")}
       disabled={disabled}
+      label="Stop run"
       onClick={onStop}
-      title="Stop run (Esc)"
-      type="button"
+      size="icon-lg"
+      tooltip="Stop run (Esc)"
+      variant="default"
     >
       {disabled ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
+        <Spinner />
       ) : (
         <svg
           aria-hidden="true"
@@ -141,7 +139,7 @@ function StopButton({
           <rect height="8" rx="1.5" width="8" x="2" y="2" />
         </svg>
       )}
-    </button>
+    </TooltipIconButton>
   )
 }
 

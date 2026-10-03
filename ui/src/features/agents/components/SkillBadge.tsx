@@ -2,7 +2,7 @@ import { splitPromptIntoSegments } from "./composer/composerMentions"
 
 export function SkillBadge({ name }: { name: string }) {
   return (
-    <span className="inline-flex items-center rounded-md bg-amber-500/20 px-1.5 py-0.5 leading-tight font-medium text-amber-600 select-none dark:text-amber-300">
+    <span className="inline-flex items-center rounded-md bg-warning/20 px-1.5 py-0.5 leading-tight font-medium text-warning-foreground select-none">
       /{name}
     </span>
   )
