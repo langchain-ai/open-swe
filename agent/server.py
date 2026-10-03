@@ -131,6 +131,7 @@ from agent.middleware.client_tools import ClientToolsMiddleware
 from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from agent.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
+from agent.middleware.pr_thread_reminder import pr_thread_reminder_before_model
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.require_cli_result import RequireCliResultMiddleware
 from agent.middleware.require_user_reply import (
@@ -2108,7 +2109,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     *(
                         []
                         if stop_summary_mode
-                        else [check_message_queue_before_model, deliver_event_matches_before_model]
+                        else [
+                            check_message_queue_before_model,
+                            deliver_event_matches_before_model,
+                            pr_thread_reminder_before_model,
+                        ]
                     ),
                     *(
                         []

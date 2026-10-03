@@ -389,6 +389,44 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert "plan_mode" not in command["params"]["config"]["configurable"]
 
 
+@pytest.mark.parametrize("dispatched", [False, True])
+async def test_replacement_preserves_source_when_dispatch_fails(
+    monkeypatch: pytest.MonkeyPatch, dispatched: bool
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool, "get_config", lambda: {"configurable": {"thread_id": "source"}}
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "_authorized_locator",
+        AsyncMock(side_effect=[("target", {}), ("source", {})]),
+    )
+    monkeypatch.setattr(
+        threads_tool, "_send_message", AsyncMock(return_value={"success": dispatched})
+    )
+    resolved: list[str] = []
+
+    async def resolve(thread_id: str, *args: object, **kwargs: object) -> dict[str, object]:
+        resolved.append(thread_id)
+        return {}
+
+    monkeypatch.setattr(threads_tool, "resolve_dashboard_thread", resolve)
+    monkeypatch.setattr(threads_tool, "get_active_slack_thread", AsyncMock(return_value=None))
+    client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+
+    result = await threads_tool.manage_thread(
+        "target", "send_message", message="Continue", replace_current=True
+    )
+
+    assert resolved == (["source"] if dispatched else [])
+    assert result["success"] is dispatched
+    if dispatched:
+        assert result["target_thread_id"] == "target"
+        assert result["replaced_thread_id"] == "source"
+
+
 async def test_manage_thread_rejects_plan_format_conversion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

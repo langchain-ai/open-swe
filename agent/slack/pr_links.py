@@ -20,7 +20,7 @@ _PR_URL = re.compile(
 )
 
 
-def _linked_urls(value: object) -> set[str]:
+def linked_pull_request_urls(value: object) -> set[str]:
     if isinstance(value, str):
         return {
             ref.url.lower()
@@ -28,9 +28,9 @@ def _linked_urls(value: object) -> set[str]:
             if (ref := parse_github_pr_url(match.group(0))) is not None and ref.number > 0
         }
     if isinstance(value, dict):
-        return set().union(*(_linked_urls(item) for item in value.values()))
+        return set().union(*(linked_pull_request_urls(item) for item in value.values()))
     if isinstance(value, list):
-        return set().union(*(_linked_urls(item) for item in value))
+        return set().union(*(linked_pull_request_urls(item) for item in value))
     return set()
 
 
@@ -56,7 +56,9 @@ def event_pull_requests(envelope: SlackEventEnvelope) -> list[GitHubPrRef]:
         return []
     return [
         ref
-        for url in sorted(_linked_urls(message.model_dump(exclude={"message", "previous_message"})))
+        for url in sorted(
+            linked_pull_request_urls(message.model_dump(exclude={"message", "previous_message"}))
+        )
         if (ref := parse_github_pr_url(url)) is not None
     ]
 
