@@ -175,11 +175,17 @@ async def _start(
             return
     heading = f"`/breakout`: {_title(instruction)}"
     root_text = await _root_text(request, heading)
-    footer = await origin_footer(request.thread_id or "", (request.channel_id, request.thread_ts))
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
         root_text,
-        blocks=block_payload([section(root_text), *footer]),
+        blocks=block_payload(
+            [
+                section(root_text),
+                *await origin_footer(
+                    request.thread_id or "", (request.channel_id, request.thread_ts)
+                ),
+            ]
+        ),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -199,7 +205,12 @@ async def _start(
             new_ts,
             append_slack_web_link_footer(root_text, web_url),
             blocks=block_payload(
-                [section(append_slack_web_link_footer(root_text, web_url)), *footer]
+                [
+                    section(append_slack_web_link_footer(root_text, web_url)),
+                    *await origin_footer(
+                        request.thread_id or "", (request.channel_id, request.thread_ts)
+                    ),
+                ]
             ),
             unfurl_links=False,
             unfurl_media=False,

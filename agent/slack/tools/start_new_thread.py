@@ -304,7 +304,12 @@ async def slack_start_new_thread(
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
         root_text,
-        blocks=block_payload([section(root_text), *await origin_footer(cfg.thread_id)]),
+        blocks=block_payload(
+            [
+                section(" · ".join(part for part in root_parts if part)),
+                *await origin_footer(cfg.thread_id),
+            ]
+        ),
         unfurl_links=False,
         unfurl_media=False,
     )
