@@ -30,12 +30,10 @@ from agent.human_review.lifecycle import (
 )
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import summary_line
-from agent.prompts import prompt
 from agent.run_config import RunConfig
-from agent.slack.blocks import escape
 from agent.slack.cards import run_slack_location
 from agent.slack.channels import SlackChannel
-from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.slack.client import parse_github_pr_url
 from agent.tools.manage_baby_sit import dispatch_run_config
 
 
@@ -74,20 +72,6 @@ async def _discard(approval: HumanReviewRequest) -> None:
     async with HumanReviewRequest.locked(approval.id) as (session, row):
         if row is not None:
             await session.delete(row)
-
-
-async def _post_root_message(
-    channel: SlackChannel, pr_ref: GitHubPrRef, title: str
-) -> tuple[str | None, str | None]:
-    """Open a thread in ``channel`` for the card."""
-    return await channel.post(
-        prompt(
-            "slack/expedited-review-requested",
-            pr_url=pr_ref.url,
-            label=f"{pr_ref.owner}/{pr_ref.repo}#{pr_ref.number}",
-            title=escape(title),
-        )
-    )
 
 
 async def expedite_pr_approval(
@@ -221,17 +205,6 @@ async def expedite_pr_approval(
         }
     if active is not None:
         await retire(active, "superseded", "Replaced by a card for the newer diff.")
-
-    if not thread_ts:
-        target = target or await SlackChannel.load(channel_id)
-        if target is None:
-            return _failure(f"Slack channel {channel_id} is unavailable")
-        thread_ts, error = await _post_root_message(target, pr_ref, payload.title)
-        if not thread_ts:
-            return _failure(
-                f"Could not post in Slack channel {channel_id}: {error or 'unknown error'}. "
-                "For a private channel, invite the bot first."
-            )
 
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
     pull_request.title = payload.title
