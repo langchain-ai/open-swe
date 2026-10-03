@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useRecentRepos } from "@/lib/recentRepos"
 import { AutomationEditor } from "./AutomationEditor"
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 import { useSession } from "@/lib/session"
 
 const mocks = vi.hoisted(() => ({
@@ -120,7 +121,11 @@ describe("AutomationEditor", () => {
       data: { is_admin: true },
     } as unknown as ReturnType<typeof useSession>)
 
-    const adminMarkup = renderToStaticMarkup(<AutomationEditor mode="create" />)
+    const adminMarkup = renderToStaticMarkup(
+      <ConfirmProvider>
+        <AutomationEditor mode="create" />
+      </ConfirmProvider>
+    )
 
     expect(adminMarkup).toContain("Run as admin thread")
 
@@ -129,7 +134,9 @@ describe("AutomationEditor", () => {
     } as unknown as ReturnType<typeof useSession>)
 
     const memberMarkup = renderToStaticMarkup(
-      <AutomationEditor mode="create" />
+      <ConfirmProvider>
+        <AutomationEditor mode="create" />
+      </ConfirmProvider>
     )
 
     expect(memberMarkup).not.toContain("Run as admin thread")
@@ -143,23 +150,25 @@ describe("AutomationEditor", () => {
     } as unknown as ReturnType<typeof useSession>)
 
     const markup = renderToStaticMarkup(
-      <AutomationEditor
-        mode="edit"
-        schedule={{
-          id: "sched_1",
-          name: "Nightly",
-          prompt: "Check dependencies",
-          schedule: "0 9 * * *",
-          trigger: "schedule",
-          scope: "workspace",
-          workspace: "core",
-          repo: "acme/oss",
-          slackNotificationMode: "always",
-          adminThread: false,
-          model: "Default",
-          enabled: true,
-        }}
-      />
+      <ConfirmProvider>
+        <AutomationEditor
+          mode="edit"
+          schedule={{
+            id: "sched_1",
+            name: "Nightly",
+            prompt: "Check dependencies",
+            schedule: "0 9 * * *",
+            trigger: "schedule",
+            scope: "workspace",
+            workspace: "core",
+            repo: "acme/oss",
+            slackNotificationMode: "always",
+            adminThread: false,
+            model: "Default",
+            enabled: true,
+          }}
+        />
+      </ConfirmProvider>
     )
 
     expect(markup).toContain(">Core<")
@@ -168,7 +177,11 @@ describe("AutomationEditor", () => {
 
   it("starts a new automation in the default workspace", () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(
+      <ConfirmProvider>
+        <AutomationEditor mode="create" template={TEMPLATE} />
+      </ConfirmProvider>
+    )
 
     expect(
       screen.getByRole("button", { name: "Workspace" }).textContent
@@ -222,12 +235,16 @@ describe("AutomationEditor", () => {
     })
   })
 
-  it("sends a workspace the user picked", () => {
+  it("sends a workspace the user picked", async () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    render(
+      <ConfirmProvider>
+        <AutomationEditor mode="create" template={TEMPLATE} />
+      </ConfirmProvider>
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-    fireEvent.click(screen.getByRole("button", { name: /^Core/ }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /^Core/ }))
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
@@ -235,34 +252,38 @@ describe("AutomationEditor", () => {
     })
   })
 
-  it("lets an automation whose workspace was deleted move to the only one left", () => {
+  it("lets an automation whose workspace was deleted move to the only one left", async () => {
     signInAsAdmin()
     const previous = mocks.workspaces
     mocks.workspaces = [previous[0]!]
     try {
       render(
-        <AutomationEditor
-          mode="edit"
-          schedule={{
-            id: "sched_1",
-            name: "Nightly",
-            prompt: "Check dependencies",
-            schedule: "0 9 * * *",
-            trigger: "schedule",
-            scope: "workspace",
-            workspace: "gone",
-            repo: null,
-            slackNotificationMode: "always",
-            adminThread: false,
-            model: "Default",
-            enabled: true,
-          }}
-        />
+        <ConfirmProvider>
+          <AutomationEditor
+            mode="edit"
+            schedule={{
+              id: "sched_1",
+              name: "Nightly",
+              prompt: "Check dependencies",
+              schedule: "0 9 * * *",
+              trigger: "schedule",
+              scope: "workspace",
+              workspace: "gone",
+              repo: null,
+              slackNotificationMode: "always",
+              adminThread: false,
+              model: "Default",
+              enabled: true,
+            }}
+          />
+        </ConfirmProvider>
       )
 
       expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
       fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
-      expect(screen.getByRole("button", { name: /^Default/ })).toBeTruthy()
+      expect(
+        await screen.findByRole("menuitemradio", { name: /^Default/ })
+      ).toBeTruthy()
     } finally {
       mocks.workspaces = previous
     }
