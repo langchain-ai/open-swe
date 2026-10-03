@@ -13,7 +13,7 @@ import type {
   AgentPullRequestHealth,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/UserAvatar"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -247,7 +247,6 @@ export function PullRequestHoverCard({
   healthUnavailable: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
-  const authorInitial = pullRequest.author?.slice(0, 1).toUpperCase() || "?"
   const state = pullRequestState(pullRequest, health)
 
   return (
@@ -286,12 +285,7 @@ export function PullRequestHoverCard({
         <span className="truncate">{pullRequest.headRef}</span>
       </div>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Avatar size="sm">
-          {pullRequest.authorAvatarUrl && (
-            <AvatarImage src={pullRequest.authorAvatarUrl} alt="" />
-          )}
-          <AvatarFallback>{authorInitial}</AvatarFallback>
-        </Avatar>
+        <UserAvatar login={pullRequest.author} size="sm" />
         <span className="min-w-0 truncate">
           {pullRequest.author ?? "Unknown author"}
         </span>
