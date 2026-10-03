@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
+from agent.human_review.lifecycle import refresh_author_dm_card
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewRequest
 from agent.slack.client import post_slack_ephemeral_message, slack_thread_mutation_lock
@@ -63,6 +64,13 @@ async def answer_click(
             "outcome": outcome.message,
         },
     )
+    if (
+        outcome.dm_card_success
+        and request.kind == "expedited"
+        and channel_id == request.slack_dm_channel_id
+        and await refresh_author_dm_card(request, None)
+    ):
+        return
     if outcome.message and not await post_slack_ephemeral_message(
         channel_id, slack_user_id, outcome.message, thread_ts
     ):
