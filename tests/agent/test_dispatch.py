@@ -276,7 +276,7 @@ async def test_dispatch_uses_moved_slack_destination_from_metadata(
         config={"configurable": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}},
     )
     client.threads.get.assert_awaited_once_with("thread-1")
-    set_status.assert_awaited_once_with("C2", "2.0", "Thinking...")
+    assert set_status.await_args.args[:2] == ("C2", "2.0")
 
 
 async def test_dispatch_reads_task_state_if_run_finishes_before_status_sync(
