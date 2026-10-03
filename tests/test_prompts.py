@@ -2,7 +2,48 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from agent.prompts import (
+    _deployment_context,
+    apply_tool_descriptions,
+    common_prompt,
+    load_prompt,
+    prompt,
+)
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        (
+            {"OPENSWE_ENV": " preview ", "LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev"},
+            ("preview", "OPENSWE_ENV"),
+        ),
+        (
+            {"LANGSMITH_LANGGRAPH_API_VARIANT": "local_dev"},
+            ("local", "LANGSMITH_LANGGRAPH_API_VARIANT"),
+        ),
+        ({}, ("unknown", "no explicit environment or local runtime marker")),
+    ],
+)
+def test_deployment_context(
+    monkeypatch: pytest.MonkeyPatch, environ: dict[str, str], expected: tuple[str, str]
+) -> None:
+    for name in (
+        "OPENSWE_ENV",
+        "LANGSMITH_LANGGRAPH_API_VARIANT",
+        "LANGGRAPH_URL",
+        "DASHBOARD_API_BASE_URL",
+        "DASHBOARD_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+
+    assert _deployment_context() == expected
+    assert f"**{expected[0]}**" in common_prompt()
+
+    monkeypatch.setenv("OPENSWE_ENV", "staging")
+    assert "**staging**" in common_prompt()
 
 
 def sample_tool(value: str) -> str:
