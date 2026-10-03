@@ -18,6 +18,7 @@ import { ToolResultBody } from "./ToolResultBody"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
+import { DiffStat } from "@/components/DiffStat"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
@@ -255,14 +256,11 @@ export function WorkEntryRow({
                   </span>
                 ))}
               {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
-                    +{entry.diffStats.additions}
-                  </span>
-                  <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
-                    -{entry.diffStats.deletions}
-                  </span>
+                <span className="shrink-0 text-[11px]">
+                  <DiffStat
+                    additions={entry.diffStats.additions}
+                    deletions={entry.diffStats.deletions}
+                  />
                 </span>
               )}
             </p>
@@ -271,7 +269,7 @@ export function WorkEntryRow({
           <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
             {trailing}
             {hoverTimestamp && (
-              <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
+              <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-focus-within/entry:opacity-100 group-hover/entry:opacity-100">
                 {hoverTimestamp}
               </time>
             )}
