@@ -14,6 +14,8 @@ import type { FileContents } from "@pierre/diffs/react"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
+import { DiffStat } from "@/components/DiffStat"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import {
   DIFF_VIRTUALIZER_CONFIG,
@@ -216,10 +218,10 @@ export function DiffFilesView({
                   {truncated ? "first " : ""}
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </span>
-                <span className="text-success-foreground">
-                  +{totals.additions}
-                </span>
-                <span className="text-destructive">-{totals.deletions}</span>
+                <DiffStat
+                  additions={totals.additions}
+                  deletions={totals.deletions}
+                />
               </span>
             )}
           </div>
@@ -249,9 +251,9 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
-            {emptyLabel}
-          </div>
+          <Empty className="min-h-0 overflow-y-auto">
+            <EmptyDescription>{emptyLabel}</EmptyDescription>
+          </Empty>
         )}
 
         {fullScreen && !isMobile && files.length > 0 && (
@@ -311,6 +313,7 @@ const FileDiffSection = memo(
       <div ref={sectionRef} className="overflow-hidden border-b border-border">
         <button
           type="button"
+          aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
         >
@@ -326,9 +329,8 @@ const FileDiffSection = memo(
             )}
             <span className="font-medium text-foreground">{fileName}</span>
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-success-foreground">+{file.additions}</span>
-            <span className="text-destructive">-{file.deletions}</span>
+          <span className="ml-auto flex shrink-0">
+            <DiffStat additions={file.additions} deletions={file.deletions} />
           </span>
         </button>
         {open &&

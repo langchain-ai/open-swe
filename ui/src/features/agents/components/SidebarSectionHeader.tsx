@@ -6,7 +6,11 @@ import {
 import type { ReactNode } from "react"
 
 import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { cn } from "@/lib/utils"
+
+const sectionControlClassName =
+  "rounded text-muted-foreground/70 opacity-0 transition-opacity group-focus-within/section:opacity-100 group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:opacity-100"
 
 /**
  * The Pinned / Repositories / Recents header. The caret only shows on hover while
@@ -40,7 +44,9 @@ export function SidebarSectionHeader({
         <Caret
           className={cn(
             "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/section:block"
+            collapsed
+              ? "block"
+              : "hidden group-focus-within/section:block group-hover/section:block"
           )}
         />
       </button>
@@ -62,9 +68,16 @@ export function SidebarSectionMenu({
   return (
     <Menu>
       <MenuTrigger
-        aria-label={label}
-        title={label}
-        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:opacity-100"
+        render={
+          <TooltipIconButton
+            label={label}
+            size="icon-xs"
+            className={cn(
+              sectionControlClassName,
+              "data-popup-open:opacity-100"
+            )}
+          />
+        }
       >
         <DotsThreeIcon className="size-4" />
       </MenuTrigger>
@@ -85,14 +98,13 @@ export function SidebarSectionAction({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
+    <TooltipIconButton
+      label={label}
+      size="icon-xs"
       onClick={onClick}
-      className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground"
+      className={sectionControlClassName}
     >
       {icon}
-    </button>
+    </TooltipIconButton>
   )
 }

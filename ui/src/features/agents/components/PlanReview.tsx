@@ -10,37 +10,12 @@ import {
 } from "@/lib/plan"
 import { reportError } from "@/lib/errorReporting"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 
 const POLL_MS = 4000
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  const nav = navigator as { clipboard?: Clipboard }
-  try {
-    if (window.isSecureContext && nav.clipboard) {
-      await nav.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const textarea = document.createElement("textarea")
-    textarea.value = text
-    textarea.setAttribute("readonly", "")
-    textarea.style.position = "fixed"
-    textarea.style.top = "-9999px"
-    document.body.appendChild(textarea)
-    textarea.select()
-    textarea.setSelectionRange(0, text.length)
-    const copied = document.execCommand("copy")
-    document.body.removeChild(textarea)
-    return copied
-  } catch {
-    return false
-  }
-}
 
 export function PlanReview({ plan }: { plan: PlanData }) {
   const [comments, setComments] = useState<Array<PlanComment>>([])
@@ -54,7 +29,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     key: number
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyToClipboard()
   const commentRefs = useRef(new Map<string, HTMLElement>())
   const commentMutation = useRef(0)
   const format = plan.html.trim() ? "html" : "markdown"
@@ -144,16 +119,6 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
   }, [])
 
-  const copyPlan = useCallback(async () => {
-    setError(null)
-    if (await copyToClipboard(content)) {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } else {
-      setError(`Couldn't copy the artifact ${format} to the clipboard.`)
-    }
-  }, [content, format])
-
   return (
     <main
       data-testid="plan-review"
@@ -175,7 +140,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               data-testid="copy-plan"
               variant="secondary"
               disabled={!content.trim()}
-              onClick={() => void copyPlan()}
+              onClick={() => void copy(content)}
             >
               {copied
                 ? "Copied!"
@@ -220,7 +185,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-xs text-muted-foreground">
                         {anchor.exact}
                       </blockquote>
-                      <textarea
+                      <Textarea
                         data-testid="comment-input"
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
@@ -228,7 +193,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         placeholder="Leave a comment"
                         rows={3}
                         autoFocus
-                        className="mt-3 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="mt-3"
                       />
                       <div className="mt-2 flex justify-end gap-2">
                         <Button
@@ -289,7 +254,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                 {index + 1}. {comment.author}
                               </span>
                               {comment.anchor && (
-                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-yellow-400 pl-2 text-xs text-muted-foreground">
+                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-warning pl-2 text-xs text-muted-foreground">
                                   {comment.anchor.exact}
                                 </blockquote>
                               )}
@@ -298,14 +263,15 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               </span>
                             </button>
                             {comment.author_login === plan.user.login && (
-                              <button
-                                type="button"
+                              <Button
                                 data-testid="comment-delete"
-                                className="mt-2 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                variant="ghost"
+                                size="xs"
+                                className="mt-2 text-muted-foreground"
                                 onClick={() => void removeComment(comment.id)}
                               >
                                 Delete
-                              </button>
+                              </Button>
                             )}
                           </article>
                         ))}
