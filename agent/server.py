@@ -47,6 +47,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -93,6 +94,7 @@ from agent.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
+from agent.langsmith_connection.tools import load_tools as load_langsmith_tools
 from agent.mcp import load_mcp_tools
 from agent.mcp.instance import instance_mcp_source
 from agent.mcp.user import user_mcp_source
@@ -1646,8 +1648,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
+    langsmith_tools: list[BaseTool] = []
     if not stop_summary_mode and not local_run and credential_scope_known:
-        mcp_tools, notion_tools = await asyncio.gather(
+        mcp_tools, notion_tools, langsmith_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
                 "factory.mcp_tools",
@@ -1659,6 +1662,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 thread_id,
                 "factory.notion_tools",
                 lambda: _notion_tools_for(credential_login),
+            ),
+            _phase_result(
+                thread_id,
+                "factory.langsmith_tools",
+                lambda: load_langsmith_tools(credential_login),
             ),
         )
 
@@ -1813,6 +1821,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
         "MCPs": mcp_tools,
         "Notion": notion_tools,
+        "LangSmith": langsmith_tools,
     }
     if integration_tool_groups:
         candidate = DynamicToolMiddleware(
