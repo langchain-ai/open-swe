@@ -377,6 +377,18 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
+export type LangSmithRegion = "us" | "eu" | "apac"
+
+export interface LangSmithCredentialStatus {
+  connected: boolean
+  method: "oauth" | "api_key" | null
+  region: LangSmithRegion
+  email: string | null
+  name: string | null
+  workspace_id: string | null
+  reconnect_required: boolean
+}
+
 export interface NotionCredentialStatus {
   connected: boolean
   token_expires_at?: string | null
@@ -1646,6 +1658,21 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  getMyLangSmithStatus: () =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith"),
+  connectLangSmithKey: (body: {
+    region: LangSmithRegion
+    api_key: string
+    workspace_id: string | null
+  }) =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  disconnectLangSmith: () =>
+    request<LangSmithCredentialStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -1944,16 +1971,25 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "notion",
-  redirectTo?: string,
-  target: "_self" | "_blank" = "_self"
+  ...[provider, option, target = "_self"]:
+    | [provider: "langsmith", region?: LangSmithRegion]
+    | [
+        provider: "slack" | "notion",
+        redirectTo?: string,
+        target?: "_self" | "_blank",
+      ]
 ) {
-  const pending = window.openSweDesktop?.connectService(provider)
+  const pending =
+    provider === "langsmith"
+      ? window.openSweDesktop?.connectService(provider, option)
+      : window.openSweDesktop?.connectService(provider)
   if (!pending) {
     const query =
-      provider === "notion" && redirectTo
-        ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
-        : ""
+      provider === "langsmith" && option
+        ? `?${new URLSearchParams({ region: option })}`
+        : provider === "notion" && option
+          ? `?${new URLSearchParams({ redirect_to: option })}`
+          : ""
     const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
     if (target === "_blank") {
       window.open(url, "_blank", "noopener,noreferrer")
