@@ -58,7 +58,11 @@ from agent.middleware import (
     settle_review_check_on_exit,
 )
 from agent.middleware.prepare_run import PrepareRunState
-from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.sandbox_circuit_breaker import (
+    post_sandbox_notification,
+    post_sandbox_unreachable_notification,
+    sandbox_config_rejected_message,
+)
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.review.approvals import approval_policy_for_review
 from agent.review.diff import (
@@ -88,6 +92,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.sandboxes.providers.registry import SandboxProxyConfigError
 from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from agent.sandboxes.state import SandboxUnreachableError
 from agent.tools import (
@@ -594,6 +599,11 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
             # sandbox. Say so on the PR instead of leaving it looking unreviewed.
             await post_sandbox_unreachable_notification(
                 self._config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+            )
+            raise
+        except SandboxProxyConfigError as exc:
+            await post_sandbox_notification(
+                self._config or {}, sandbox_config_rejected_message(str(exc))
             )
             raise
         work_dir = await resolve_sandbox_work_dir(sandbox_backend)
