@@ -174,6 +174,79 @@ def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> N
     assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
 
 
+def test_format_slack_messages_for_prompt_renders_integration_attachment() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "bot_id": "B123",
+                "attachments": [
+                    {
+                        "title": "High error rate",
+                        "title_link": "https://app.datadoghq.com/monitors/1",
+                        "text": "The monitor is alerting.",
+                        "fields": [
+                            {"title": "Query", "value": "sum(last_5m):errors > 10"},
+                            {"title": "Value", "value": "42"},
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert "High error rate (https://app.datadoghq.com/monitors/1)" in formatted
+    assert "The monitor is alerting." in formatted
+    assert "Query: sum(last_5m):errors > 10" in formatted
+    assert "Value: 42" in formatted
+
+
+def test_format_slack_messages_for_prompt_renders_blocks() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [
+            {
+                "ts": "1.0",
+                "text": "",
+                "bot_id": "B123",
+                "blocks": [
+                    {"type": "header", "text": {"type": "plain_text", "text": "Alert"}},
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": "The service is down."},
+                        "fields": [{"type": "mrkdwn", "text": "Region: us-east-1"}],
+                    },
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "@on-call"}],
+                    },
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [{"type": "text", "text": "Details"}],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert "Alert" in formatted
+    assert "The service is down." in formatted
+    assert "Region: us-east-1" in formatted
+    assert "@on-call" in formatted
+    assert "Details" in formatted
+
+
+def test_format_slack_messages_for_prompt_keeps_non_text_fallback() -> None:
+    formatted = format_slack_messages_for_prompt([{"ts": "1.0", "text": "", "bot_id": "B123"}])
+
+    assert formatted.endswith(": [non-text message]")
+
+
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:

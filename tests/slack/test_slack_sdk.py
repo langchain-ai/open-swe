@@ -38,7 +38,20 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
     slack_api.respond(
         {
             "ok": True,
-            "messages": [{"ts": "1.0", "user": "U1", "text": "First message"}],
+            "messages": [
+                {
+                    "ts": "1.0",
+                    "bot_id": "B1",
+                    "text": "",
+                    "attachments": [
+                        {
+                            "title": "Datadog monitor alert",
+                            "text": "The monitor is alerting.",
+                            "fields": [{"title": "Value", "value": "42"}],
+                        }
+                    ],
+                }
+            ],
             "response_metadata": {"next_cursor": "page2"},
         }
     )
@@ -50,7 +63,12 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
     assert result["success"] is True
     assert result["count"] == 2
     assert "Alice" in result["formatted"]
-    assert result["formatted"].index("First message") < result["formatted"].index("Second message")
+    assert "Datadog monitor alert" in result["formatted"]
+    assert "The monitor is alerting." in result["formatted"]
+    assert "Value: 42" in result["formatted"]
+    assert result["formatted"].index("Datadog monitor alert") < result["formatted"].index(
+        "Second message"
+    )
     assert slack_api.calls == [
         ("conversations.replies", {"channel": "C1", "ts": "1.0", "limit": "200"}),
         (

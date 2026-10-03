@@ -359,6 +359,122 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
     return "\n".join(forwarded)
 
 
+def _format_bot_message_content(message: dict[str, Any]) -> str:
+    content: list[str] = []
+    rendered_count = 0
+    visited_count = 0
+
+    def add_content(parts: list[str], depth: int) -> None:
+        nonlocal rendered_count
+        if rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT:
+            return
+        text = "\n".join(part.strip() for part in parts if part.strip())
+        if not text:
+            return
+        if len(text) > SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS:
+            text = text[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS].rstrip() + "… [truncated]"
+        indentation = "  " * depth
+        content.append(f"{indentation}[Slack integration message]\n{indentation}{text}")
+        rendered_count += 1
+
+    def text_value(value: Any) -> str:
+        if isinstance(value, dict):
+            value = value.get("text")
+        return value.strip() if isinstance(value, str) else ""
+
+    def rich_text_values(value: Any) -> list[str]:
+        if isinstance(value, dict):
+            text = value.get("text")
+            if isinstance(text, str) and text.strip():
+                return [text.strip()]
+            values: list[str] = []
+            for child in value.values():
+                values.extend(rich_text_values(child))
+            return values
+        if isinstance(value, list):
+            values = []
+            for child in value:
+                values.extend(rich_text_values(child))
+            return values
+        return []
+
+    def visit_attachments(values: Any, depth: int) -> None:
+        nonlocal visited_count
+        if depth > SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH or not isinstance(values, list):
+            return
+        for attachment in values:
+            if (
+                rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT
+                or visited_count >= SLACK_FORWARDED_ATTACHMENT_MAX_NODES
+            ):
+                return
+            visited_count += 1
+            if not isinstance(attachment, dict):
+                continue
+            if any(
+                attachment.get(flag) is True
+                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+            ):
+                visit_attachments(attachment.get("attachments"), depth + 1)
+                continue
+
+            parts: list[str] = []
+            pretext = text_value(attachment.get("pretext"))
+            if pretext:
+                parts.append(pretext)
+            title = text_value(attachment.get("title"))
+            title_link = text_value(attachment.get("title_link"))
+            if title:
+                parts.append(f"{title} ({title_link})" if title_link else title)
+            attachment_text = text_value(attachment.get("text"))
+            if attachment_text:
+                parts.append(attachment_text)
+            fields = attachment.get("fields")
+            if isinstance(fields, list):
+                for field in fields:
+                    if not isinstance(field, dict):
+                        continue
+                    field_title = text_value(field.get("title"))
+                    field_value = text_value(field.get("value"))
+                    if field_title and field_value:
+                        parts.append(f"{field_title}: {field_value}")
+                    elif field_value:
+                        parts.append(field_value)
+            if not parts:
+                fallback = text_value(attachment.get("fallback"))
+                if fallback:
+                    parts.append(fallback)
+            add_content(parts, depth)
+            visit_attachments(attachment.get("attachments"), depth + 1)
+
+    visit_attachments(message.get("attachments"), 0)
+    blocks = message.get("blocks")
+    if isinstance(blocks, list):
+        for block in blocks:
+            if rendered_count >= SLACK_FORWARDED_ATTACHMENT_MAX_COUNT:
+                break
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            parts: list[str] = []
+            if block_type in {"section", "header"}:
+                block_text = text_value(block.get("text"))
+                if block_text:
+                    parts.append(block_text)
+                fields = block.get("fields")
+                if isinstance(fields, list):
+                    parts.extend(text for field in fields if (text := text_value(field)))
+            elif block_type == "context":
+                elements = block.get("elements")
+                if isinstance(elements, list):
+                    parts.extend(text for element in elements if (text := text_value(element)))
+            elif block_type == "rich_text":
+                parts.extend(rich_text_values(block.get("elements")))
+            add_content(parts, 0)
+
+    return "\n".join(content)
+
+
 def _slack_thread_reply_marker(message: dict[str, Any]) -> str:
     """A pointer to the replies hanging off a channel message, when it has any."""
     raw_thread_ts = message.get("thread_ts")
@@ -387,14 +503,19 @@ def format_slack_messages_for_prompt(
     lines: list[str] = []
     for message in messages:
         forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
-        text = label_slack_user_mentions(
-            replace_bot_mention_with_username(
-                str(message.get("text", "")),
-                bot_user_id=bot_user_id,
-                bot_username=bot_username,
-            ),
-            user_names_by_id or {},
-        ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
+        bot_content = _format_bot_message_content(message)
+        text = (
+            label_slack_user_mentions(
+                replace_bot_mention_with_username(
+                    str(message.get("text", "")),
+                    bot_user_id=bot_user_id,
+                    bot_username=bot_username,
+                ),
+                user_names_by_id or {},
+            ).strip()
+            or bot_content
+            or ("[forwarded message]" if forwarded else "[non-text message]")
+        )
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
             author = f"@{bot_username or 'Open SWE'}(self)"
