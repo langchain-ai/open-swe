@@ -10,13 +10,11 @@ import {
 import { IoLogoSlack } from "react-icons/io5"
 
 import { MenuItem } from "@/components/ui/menu"
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard"
 
 export function ThreadMenuItems({
   thread,
-  localThread,
   pinned,
   archived,
   isDeleting,
@@ -25,7 +23,6 @@ export function ThreadMenuItems({
   onDelete,
 }: {
   thread: AgentThread | null
-  localThread?: DesktopLocalThreadSummary
   pinned: boolean
   archived: boolean
   isDeleting: boolean
@@ -34,22 +31,12 @@ export function ThreadMenuItems({
   onDelete: () => void
 }) {
   const { copy } = useCopyToClipboard()
-  const threadId = thread?.id ?? localThread?.id
+  const threadId = thread?.id
   return (
     <>
       {thread?.traceUrl && (
         <MenuItem
           render={<a href={thread.traceUrl} target="_blank" rel="noreferrer" />}
-        >
-          <TreeStructureIcon />
-          Open trace
-        </MenuItem>
-      )}
-      {localThread && (
-        <MenuItem
-          onClick={() => {
-            void window.openSweDesktop?.openLocalTrace(localThread.id)
-          }}
         >
           <TreeStructureIcon />
           Open trace

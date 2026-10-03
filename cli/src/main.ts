@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 
 import pkg from "../package.json"
 import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
-import { Bridge } from "./bridge.ts"
+import { Bridge } from "open-swe-bridge-client"
 import { toolCommand } from "./commands.ts"
 import {
   forgetSession,
@@ -200,10 +200,13 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   let bridge: Bridge
   try {
-    bridge = await Bridge.open(api, {
+    bridge = await Bridge.open(api.bridges(), {
+      client: "cli",
       rootPath: root,
       label: basename(root),
       bridgeId,
+      credentialRejected: credential.rejected,
+      log: (message) => process.stderr.write(`oswe: ${message}\n`),
     })
   } catch (cause) {
     if (!(cause instanceof ApiError)) throw cause

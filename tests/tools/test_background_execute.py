@@ -28,11 +28,6 @@ from agent.tools.background_execute import (
 )
 from agent.utils.background_task_state import update_background_task_state
 
-# _launch_command refuses to run without setsid, which macOS does not ship; the
-# sandbox these tasks run in is always Linux.
-requires_setsid = pytest.mark.skipif(
-    shutil.which("setsid") is None, reason="setsid is unavailable on this host"
-)
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
 import pathlib, sys
@@ -93,7 +88,6 @@ def test_runner_calls_back_on_completion_until_accepted(
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
-@requires_setsid
 def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch) -> None:
     if Path(tool_access.TOOLS_URL_FILE).exists():
         pytest.skip("this host has a provisioned sandbox tools URL")
@@ -112,7 +106,6 @@ def test_background_launch_requires_callback_url(monkeypatch: pytest.MonkeyPatch
         shutil.rmtree(Path(TASK_ROOT, task_id), ignore_errors=True)
 
 
-@requires_setsid
 def test_background_command_returns_while_running_then_caps_output(fake_curl: Path) -> None:
     task_id = f"test-{uuid.uuid4().hex}"
     task_dir = Path(TASK_ROOT, task_id)
@@ -143,7 +136,6 @@ def test_background_command_returns_while_running_then_caps_output(fake_curl: Pa
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
-@requires_setsid
 def test_background_command_timeout_and_stop(fake_curl: Path) -> None:
     for timeout, stop, expected in ((1, False, "timed_out"), (10, True, "stopped")):
         task_id = f"test-{uuid.uuid4().hex}"
@@ -209,7 +201,7 @@ async def test_heartbeat_keeps_the_sandbox_alive_only_for_a_running_task(
     monkeypatch: pytest.MonkeyPatch, tasks: list[dict[str, str]], status_code: int
 ) -> None:
     create_sandbox = AsyncMock(return_value=object())
-    monkeypatch.setattr(background_tasks, "create_sandbox", create_sandbox)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", create_sandbox)
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=tasks))
     http, token = await _callback_client(monkeypatch)
     async with http:
@@ -372,7 +364,7 @@ async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool)
                 side_effect=RuntimeError("metadata unavailable") if tracking_failure else None
             ),
         ),
-        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=backend)),
+        patch("agent.background_tasks.connect_sandbox", AsyncMock(return_value=backend)),
         patch("agent.background_tasks._list_tasks", AsyncMock(return_value=[task])),
         patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
         patch("agent.background_tasks._mark_delivered", AsyncMock()),
@@ -411,7 +403,7 @@ async def test_reconcile_releases_claim_when_dispatch_fails() -> None:
 
     with (
         patch("agent.background_tasks._client", return_value=client),
-        patch("agent.background_tasks.create_sandbox", AsyncMock(return_value=AsyncMock())),
+        patch("agent.background_tasks.connect_sandbox", AsyncMock(return_value=AsyncMock())),
         patch("agent.background_tasks._list_tasks", AsyncMock(return_value=[task])),
         patch("agent.background_tasks._claim", AsyncMock(return_value=True)),
         patch("agent.background_tasks._unclaim", AsyncMock()) as unclaim,
@@ -458,7 +450,7 @@ async def test_reconcile_uses_fresh_state_for_concurrent_launch(
     backend = AsyncMock()
     backend.aexecute.return_value = SimpleNamespace(exit_code=0)
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
-    monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[]))
     set_status = AsyncMock()
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
@@ -509,7 +501,7 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(dispatch, "dispatch_client", lambda: client)
     monkeypatch.setattr(thread_feedback, "note_feedback_activity", AsyncMock())
-    monkeypatch.setattr(background_tasks, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(
         background_tasks,
         "_list_tasks",

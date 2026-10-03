@@ -1,14 +1,24 @@
+"""Give a desktop thread's placeholder worktree branch a name that says what it is for.
+
+The desktop app checks a new worktree out on ``open-swe/local-<hex>`` because
+it has nothing better to call it yet. The first run renames it, through the
+thread's bridge, since the checkout is on the user's machine. Only a branch
+still carrying that exact placeholder shape is ever renamed, so a branch the
+user named, or one already renamed, is left alone.
+"""
+
 import asyncio
 import contextvars
 import logging
 import re
+import shlex
 from collections.abc import Sequence
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from agent.desktop import is_desktop_worktree
 from agent.input_messages import dynamic_context_hash, input_message_text
 from agent.prompts import load_prompt
 
@@ -21,9 +31,9 @@ MAX_BRANCH_SLUG_CHARS = 48
 BRANCH_GENERATION_TIMEOUT_SECONDS = 10
 _TEMPORARY_BRANCH = re.compile(rf"^{re.escape(TEMPORARY_BRANCH_PREFIX)}-[0-9a-f]{{8}}$")
 _background_tasks: set[asyncio.Task[None]] = set()
-_inflight_paths: set[str] = set()
+_inflight_threads: set[str] = set()
 
-_BRANCH_SYSTEM_PROMPT = load_prompt("desktop-branch.md")
+_BRANCH_SYSTEM_PROMPT = load_prompt("worktree-branch.md")
 
 
 class _BranchName(BaseModel):
@@ -53,23 +63,16 @@ def _request_text(messages: Sequence[BaseMessage]) -> str | None:
     return None
 
 
-async def _git(cwd: str, *args: str) -> str | None:
-    process = await asyncio.create_subprocess_exec(
-        "git",
-        *args,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    stdout, _ = await process.communicate()
-    return stdout.decode().strip() if process.returncode == 0 else None
+async def _git(backend: SandboxBackendProtocol, *args: str) -> str | None:
+    result = await backend.aexecute(shlex.join(["git", *args]) + " 2>/dev/null")
+    return result.output.strip() if result.exit_code == 0 else None
 
 
 async def rename_temporary_worktree_branch(
-    *, worktree_path: str, request: str, model: BaseChatModel
+    *, backend: SandboxBackendProtocol, request: str, model: BaseChatModel
 ) -> str | None:
     """Rename a placeholder worktree branch to one that describes the request."""
-    current = await _git(worktree_path, "symbolic-ref", "--quiet", "--short", "HEAD")
+    current = await _git(backend, "symbolic-ref", "--quiet", "--short", "HEAD")
     if not current or not is_temporary_branch(current):
         return None
 
@@ -90,29 +93,35 @@ async def rename_temporary_worktree_branch(
     if not target or target == current:
         return None
     for candidate in (target, *(f"{target}-{suffix}" for suffix in range(2, 10))):
-        if await _git(worktree_path, "branch", "-m", "--", current, candidate) is not None:
+        if await _git(backend, "branch", "-m", "--", current, candidate) is not None:
             return candidate
     return None
 
 
 def schedule_worktree_branch_rename(
-    *, worktree_path: str, messages: Sequence[BaseMessage], model: BaseChatModel
+    *,
+    thread_id: str,
+    backend: SandboxBackendProtocol,
+    messages: Sequence[BaseMessage],
+    model: BaseChatModel,
 ) -> None:
-    """Name an app-created worktree's branch without blocking the run."""
+    """Name the thread's worktree branch without blocking the run."""
     request = _request_text(messages)
-    if not request or worktree_path in _inflight_paths or not is_desktop_worktree(worktree_path):
+    if not request or thread_id in _inflight_threads:
         return
-    _inflight_paths.add(worktree_path)
+    _inflight_threads.add(thread_id)
 
     async def run() -> None:
         try:
-            await rename_temporary_worktree_branch(
-                worktree_path=worktree_path, request=request, model=model
+            await rename_temporary_worktree_branch(backend=backend, request=request, model=model)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Worktree branch rename failed",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Worktree branch rename failed for %s: %s", worktree_path, exc)
         finally:
-            _inflight_paths.discard(worktree_path)
+            _inflight_threads.discard(thread_id)
 
     # A fresh context, not the caller's: an inherited context carries LangGraph's
     # stream writer, and this call's structured-output chunks would then be

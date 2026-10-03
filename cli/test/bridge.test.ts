@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { ApiClient } from "../src/api.ts"
 import { SessionCredential } from "../src/credentials.ts"
-import { Bridge } from "../src/bridge.ts"
+import { Bridge } from "open-swe-bridge-client"
 import { isRecord } from "../src/json.ts"
 
 interface Reply {
@@ -21,6 +21,8 @@ interface Fake {
   firstReply: Promise<Reply>
   opened: () => Record<string, unknown>[]
   deleted: () => string[]
+  /** The `held` list each long poll sent, in order. */
+  held: () => unknown[]
   stop: () => Promise<void>
 }
 
@@ -31,9 +33,10 @@ function fakeBackend(
     method: string
     params: Record<string, unknown>
   }[],
-  options: { reopen404?: boolean } = {}
+  options: { reopen404?: boolean; replyStatus?: number } = {}
 ): Fake {
   const opens: Record<string, unknown>[] = []
+  const held: unknown[] = []
   const deletes: string[] = []
   const pending = [...queue]
   let settleReply: (reply: Reply) => void = () => {}
@@ -66,6 +69,8 @@ function fakeBackend(
         })
       }
       if (request.method === "POST" && path.endsWith("/requests/claim")) {
+        const body: unknown = await request.json()
+        if (isRecord(body)) held.push(body["held"])
         const requests = pending.splice(0, pending.length)
         return Response.json({ requests })
       }
@@ -78,7 +83,12 @@ function fakeBackend(
           origin: request.headers.get("origin"),
           hasAuthorization: request.headers.has("authorization"),
         })
-        return new Response(null, { status: 204 })
+        return options.replyStatus === undefined
+          ? new Response(null, { status: 204 })
+          : Response.json(
+              { detail: "sandbox bridge request is already answered" },
+              { status: options.replyStatus }
+            )
       }
       if (request.method === "DELETE") {
         deletes.push(path)
@@ -96,6 +106,7 @@ function fakeBackend(
     firstReply,
     opened: () => opens,
     deleted: () => deletes,
+    held: () => held,
     stop: async () => {
       await server.stop(true)
     },
@@ -112,7 +123,10 @@ describe("Bridge", () => {
         params: { command: "echo bridged", timeout: 30 },
       },
     ])
-    const bridge = await Bridge.open(fake.api, {
+    const bridge = await Bridge.open(fake.api.bridges(), {
+      client: "cli",
+      credentialRejected: "rejected",
+      log: () => {},
       rootPath: root,
       label: "repo",
       bridgeId: null,
@@ -131,6 +145,7 @@ describe("Bridge", () => {
       expect(result["truncated"]).toBe(false)
       expect(String(result["output"]).trim()).toBe("bridged")
       expect(fake.opened()[0]).toEqual({
+        client: "cli",
         root_path: root,
         hostname: expect.any(String),
         label: "repo",
@@ -143,11 +158,55 @@ describe("Bridge", () => {
     expect(fake.deleted()).toEqual(["/bridges/bridge-1"])
   })
 
+  test("stops holding a request the server already settled", async () => {
+    const fake = fakeBackend(
+      [{ request_id: "req-3", method: "execute", params: { command: "true" } }],
+      { replyStatus: 409 }
+    )
+    const bridge = await Bridge.open(fake.api.bridges(), {
+      client: "cli",
+      credentialRejected: "rejected",
+      log: () => {},
+      rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
+      label: null,
+      bridgeId: null,
+    })
+    bridge.start(() => {})
+    try {
+      await fake.firstReply
+      const deadline = Date.now() + 5_000
+      const pollsBefore = fake.held().length
+      // The next poll after the 409 must not name req-3, or the id is held for
+      // good and the list eventually outgrows what the server accepts.
+      while (
+        Date.now() < deadline &&
+        !fake
+          .held()
+          .slice(pollsBefore)
+          .some((held) => Array.isArray(held) && held.length === 0)
+      ) {
+        await new Promise((done) => setTimeout(done, 20))
+      }
+      expect(
+        fake
+          .held()
+          .slice(pollsBefore)
+          .some((held) => Array.isArray(held) && held.length === 0)
+      ).toBe(true)
+    } finally {
+      await bridge.close()
+      await fake.stop()
+    }
+  })
+
   test("never swaps a resumed thread's missing bridge for a new one", async () => {
     const fake = fakeBackend([], { reopen404: true })
     try {
       await expect(
-        Bridge.open(fake.api, {
+        Bridge.open(fake.api.bridges(), {
+          client: "cli",
+          credentialRejected: "rejected",
+          log: () => {},
           rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
           label: null,
           bridgeId: "stale-bridge",
@@ -165,7 +224,10 @@ describe("Bridge", () => {
     const fake = fakeBackend([
       { request_id: "req-2", method: "teleport", params: {} },
     ])
-    const bridge = await Bridge.open(fake.api, {
+    const bridge = await Bridge.open(fake.api.bridges(), {
+      client: "cli",
+      credentialRejected: "rejected",
+      log: () => {},
       rootPath: await mkdtemp(join(tmpdir(), "open-swe-bridge-")),
       label: null,
       bridgeId: null,

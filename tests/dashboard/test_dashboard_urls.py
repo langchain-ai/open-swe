@@ -42,7 +42,6 @@ def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
 
     for name in ("DASHBOARD_BASE_URL", "LANGGRAPH_URL", "OPENAI_API_KEY", "LLM_MODEL_ID"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(model, "desktop_openai_oauth_available", lambda: False)
 
     assert dashboard_links.dashboard_base_url() == "http://localhost:2024"
     model.validate_local_dev_llm_config()

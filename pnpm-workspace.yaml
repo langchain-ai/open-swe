@@ -1,4 +1,5 @@
 packages:
+  - bridge-client
   - ui
   - desktop
   - cli

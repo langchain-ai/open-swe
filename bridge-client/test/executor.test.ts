@@ -9,10 +9,10 @@ import {
   OUTPUT_KEEP_BYTES,
   OUTPUT_LIMIT_BYTES,
   OutputWindow,
-} from "../src/executor.ts"
+} from "../src/executor"
 
 async function workspace(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "open-swe-cli-"))
+  return await mkdtemp(join(tmpdir(), "open-swe-bridge-"))
 }
 
 describe("commandEnvironment", () => {
@@ -69,7 +69,7 @@ describe("OutputWindow", () => {
     expect(truncated).toBe(true)
     expect(output.startsWith("H")).toBe(true)
     expect(output.endsWith("Z")).toBe(true)
-    expect(output).toContain(`[oswe: omitted 1024 bytes of output]`)
+    expect(output).toContain(`[omitted 1024 bytes of output]`)
     expect(output.length).toBeLessThan(OUTPUT_KEEP_BYTES * 2 + 200)
   })
 })
@@ -98,7 +98,18 @@ describe("execute", () => {
     const executor = new LocalExecutor(await workspace())
     const result = await executor.execute("sleep 5", 1)
     expect(result.exit_code).toBe(124)
-    expect(result.output).toContain("[oswe: command timed out after 1s]")
+    expect(result.output).toContain("[command timed out after 1s]")
+  })
+
+  test("stops a running command when the bridge closes", async () => {
+    const executor = new LocalExecutor(await workspace())
+    const started = Date.now()
+    const running = executor.execute("sleep 30", 300)
+    await new Promise((done) => setTimeout(done, 200))
+    executor.stopAll()
+    const result = await running
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(result.output).toContain("[command stopped")
   })
 
   test("truncates output beyond the cap", async () => {

@@ -2,7 +2,6 @@ import { useNavigate } from "@tanstack/react-router"
 import {
   Command as CommandIcon,
   GitPullRequest,
-  Laptop,
   MessageSquare,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -11,7 +10,6 @@ import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
 import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { DesktopLocalThreadSummary } from "@/desktop"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -26,7 +24,6 @@ import {
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
-import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { useChatRoutes } from "@/lib/chatRoutes"
@@ -45,13 +42,6 @@ interface CloudThreadResult {
   thread: AgentThread
 }
 
-interface LocalThreadResult {
-  id: string
-  kind: "local-thread"
-  label: string
-  thread: DesktopLocalThreadSummary
-}
-
 interface PullRequestResult {
   id: string
   kind: "pull-request"
@@ -59,11 +49,7 @@ interface PullRequestResult {
   pr: PullRequestSearchResult
 }
 
-type PaletteResult =
-  | CommandResult
-  | CloudThreadResult
-  | LocalThreadResult
-  | PullRequestResult
+type PaletteResult = CommandResult | CloudThreadResult | PullRequestResult
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
@@ -84,7 +70,6 @@ function commandMatches(command: AppCommand, query: string): boolean {
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
-  localThreads: ReadonlyArray<DesktopLocalThreadSummary>,
   query: string
 ): Array<PaletteResult> {
   const normalizedQuery = query.trim().toLowerCase()
@@ -128,23 +113,7 @@ export function buildPaletteResults(
       label: thread.title,
       thread,
     }))
-  const localResults: Array<LocalThreadResult> = localThreads
-    .filter(
-      (thread) =>
-        !actionsOnly &&
-        (!searchQuery ||
-          [thread.title, thread.cwd]
-            .join(" ")
-            .toLowerCase()
-            .includes(searchQuery))
-    )
-    .map((thread) => ({
-      id: `local:${thread.id}`,
-      kind: "local-thread",
-      label: thread.title,
-      thread,
-    }))
-  return [...commandResults, ...cloudResults, ...localResults]
+  return [...commandResults, ...cloudResults]
 }
 
 export function AppCommandPalette({
@@ -160,8 +129,6 @@ export function AppCommandPalette({
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   useEffect(() => {
     if (!open) {
@@ -182,7 +149,6 @@ export function AppCommandPalette({
     },
     { enabled: open, staleWhileRevalidate: true }
   )
-  const localThreads = useDesktopLocalThreads({ enabled: open && isDesktop })
   const pullRequests = usePullRequestSearch(
     query,
     open && !query.trim().startsWith(">")
@@ -192,7 +158,6 @@ export function AppCommandPalette({
       ...buildPaletteResults(
         commands,
         cloudThreads.data?.pages.flatMap((page) => page.items) ?? [],
-        localThreads.data ?? [],
         query
       ),
       ...(open && !query.trim().startsWith(">")
@@ -206,14 +171,7 @@ export function AppCommandPalette({
           ) ?? [])
         : []),
     ],
-    [
-      cloudThreads.data?.pages,
-      commands,
-      localThreads.data,
-      query,
-      open,
-      pullRequests.data,
-    ]
+    [cloudThreads.data?.pages, commands, query, open, pullRequests.data]
   )
   const resultGroups = useMemo(() => {
     const grouped = new Map<string, Array<PaletteResult>>()
@@ -222,10 +180,8 @@ export function AppCommandPalette({
         result.kind === "command"
           ? result.command.group
           : result.kind === "cloud-thread"
-            ? "Cloud threads"
-            : result.kind === "pull-request"
-              ? "Pull requests"
-              : "This Mac"
+            ? "Threads"
+            : "Pull requests"
       grouped.set(group, [...(grouped.get(group) ?? []), result])
     }
     return [...grouped]
@@ -242,18 +198,13 @@ export function AppCommandPalette({
         to: chat.thread,
         params: { threadId: result.thread.id },
       })
-    } else if (result.kind === "pull-request") {
+    } else {
       const [owner, repo] = result.pr.repo.split("/")
       if (owner && repo) {
         void navigate(
           reviewPageRoute({ owner, repo, number: result.pr.number })
         )
       }
-    } else {
-      void navigate({
-        to: "/agents/local/$sessionId",
-        params: { sessionId: result.thread.id },
-      })
     }
   }
 
@@ -300,11 +251,9 @@ export function AppCommandPalette({
                 const Icon =
                   result.kind === "command"
                     ? CommandIcon
-                    : result.kind === "local-thread"
-                      ? Laptop
-                      : result.kind === "pull-request"
-                        ? GitPullRequest
-                        : MessageSquare
+                    : result.kind === "pull-request"
+                      ? GitPullRequest
+                      : MessageSquare
                 return (
                   <CommandItem
                     key={result.id}
