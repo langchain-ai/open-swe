@@ -1,5 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router"
 
+import { PageHeader } from "@/components/AppShell"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useQueryClient } from "@tanstack/react-query"
+import { api } from "@/lib/api"
+import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -27,6 +32,15 @@ const tabs = [
 
 function ReviewsPage() {
   const session = useSession()
+  const queryClient = useQueryClient()
+  const prefetch = (tab: string) => {
+    if (tab !== "all") return
+    void queryClient.prefetchQuery({
+      queryKey: ["reviews", false, 0],
+      queryFn: () => api.listReviews(0, false),
+      staleTime: BROWSER_CACHE_MAX_AGE_MS,
+    })
+  }
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
@@ -40,7 +54,6 @@ function ReviewsPage() {
         )
           ? { page: undefined }
           : {}),
-        ...("pr" in changes ? { files: undefined, at: undefined } : {}),
       }),
       replace,
     })
@@ -56,40 +69,42 @@ function ReviewsPage() {
             !selection && "max-w-6xl"
           )}
         >
-          <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
-              Pull Requests
-            </h1>
-            <div className="flex items-center gap-1">
-              {tabs.map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={tab === value}
-                  onClick={() => {
+          <PageHeader
+            className="mb-0"
+            title="Pull Requests"
+            action={
+              <div className="flex items-center gap-3">
+                <Tabs
+                  value={tab}
+                  onValueChange={(value: "mine" | "to-review" | "all") =>
                     changeFilters({
                       tab: value === "mine" ? undefined : value,
                       page: undefined,
                       pr: undefined,
                     })
-                  }}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    tab === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
-                  )}
+                  }
                 >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <OpenPullRequestInput />
-            <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
-              Drag to your bookmarks bar
-            </span>
-          </div>
+                  <TabsList>
+                    {tabs.map(([value, label]) => (
+                      <TabsTrigger
+                        key={value}
+                        value={value}
+                        onPointerEnter={() => prefetch(value)}
+                        onFocus={() => prefetch(value)}
+                      >
+                        {label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <OpenPullRequestInput />
+                <ReviewBookmarklet />
+                <span className="hidden text-xs text-muted-foreground lg:inline">
+                  Drag to your bookmarks bar
+                </span>
+              </div>
+            }
+          />
 
           {session.data &&
             (tab === "all" ? (
