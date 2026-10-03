@@ -25,6 +25,10 @@ class AuditLogEnrichments(BaseModel):
     workspace: str | None = None
     thread_id: str | None = None
     delegated_from_sandbox_id: str | None = None
+    channel_memory_patch: str | None = None
+    proposed_by_slack_user_id: str | None = None
+    approved_by_slack_user_id: str | None = None
+    channel_memory_revision: int | None = None
 
 
 class AuditLog(BaseModel):

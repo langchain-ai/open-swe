@@ -205,6 +205,7 @@ from agent.tools import (
     notify_automation_channel,
     open_pull_request,
     output_iframe,
+    propose_channel_memory,
     publish_workspace,
     read_only_sql,
     read_user_settings,
@@ -1665,6 +1666,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     slack_tools = [
         manage_code_channel,
         manage_incident,
+        propose_channel_memory,
         slack_add_reaction,
         slack_attach_html,
         slack_list_channel_members,
@@ -1717,6 +1719,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         list_event_types,
         manage_code_channel,
         manage_incident,
+        propose_channel_memory,
         slack_add_reaction,
         slack_attach_html,
         slack_list_channel_members,
