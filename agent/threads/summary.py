@@ -477,6 +477,13 @@ async def _thread_summary(
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
+        # Which app serves a bridged thread's machine, so a client can tell
+        # whether it is the one that can run the thread.
+        "sandboxBridgeClient": (
+            (metadata.get("sandbox_bridge_client") or "cli")
+            if metadata.get("sandbox_kind") == "bridge"
+            else None
+        ),
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

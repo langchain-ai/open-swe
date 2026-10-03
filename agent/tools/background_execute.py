@@ -54,6 +54,12 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
         output_path = os.path.join(task_dir, "output.log")
         stop_path = os.path.join(task_dir, "stop")
         command = base64.b64decode({encoded(command)!r}).decode()
+        # Detach from the launching shell's session here rather than with
+        # `setsid(1)`, which macOS does not ship.
+        try:
+            os.setsid()
+        except OSError:
+            pass
         try:
             os.remove(__file__)
         except OSError:
@@ -184,14 +190,15 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
             elif process.poll() is not None:
                 status = "completed" if process.returncode == 0 else "failed"
             if status in {{"stopped", "timed_out"}}:
+                # macOS answers EPERM, not ESRCH, for a group left with only zombies.
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
                     process.wait(2)
-                except (subprocess.TimeoutExpired, ProcessLookupError):
+                except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
                     pass
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
         if process.stdout:
             os.set_blocking(process.stdout.fileno(), False)
@@ -220,7 +227,7 @@ def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool)
         else ""
     )
     return (
-        "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
+        "command -v python3 >/dev/null || { echo 'background execution requires python3' >&2; exit 69; }; "
         f"{callback_checks}"
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
         f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
@@ -230,7 +237,7 @@ def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool)
         f"[ \"$active\" -lt {MAX_ACTIVE_TASKS} ] || {{ echo 'active task limit reached' >&2; exit 72; }}; "
         f"mkdir {shlex.quote(task_dir)} || exit 73; "
         f"printf %s {shlex.quote(runner)} | base64 -d > {shlex.quote(task_dir + '/runner.py')}; "
-        f"setsid python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
+        f"python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
         f"for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f {shlex.quote(task_dir + '/state.json')} ] && break; sleep .1; done; "
         f"[ -f {shlex.quote(task_dir + '/state.json')} ] || {{ echo 'background runner did not start' >&2; exit 70; }}; "
         f"rmdir {lock}; trap - 0; cat {shlex.quote(task_dir + '/state.json')}"

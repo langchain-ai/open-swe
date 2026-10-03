@@ -15,7 +15,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { pageTitle } from "@/lib/pageTitle"
@@ -48,16 +47,11 @@ function AgentsLayout() {
     from: "/agents/$threadId",
     shouldThrow: false,
   })
-  const localMatch = useMatch({
-    from: "/agents/local/$sessionId",
-    shouldThrow: false,
-  })
   const reviewMatch = useMatch({
     from: "/agents/reviews/$owner/$repo/$number",
     shouldThrow: false,
   })
   const activeThreadId = threadMatch?.params.threadId
-  const activeLocalSessionId = localMatch?.params.sessionId
   const reviewNumber = Number(reviewMatch?.params.number)
   // A review page's sidebar row is the user's review chat thread.
   const reviewChat = useQuery({
@@ -75,14 +69,13 @@ function AgentsLayout() {
   const [desktopSource] = useDesktopThreadSource()
   const localHome =
     Boolean(homeMatch) &&
-    (!session.data ||
-      Boolean(homeMatch?.search.localRepo) ||
+    (Boolean(homeMatch?.search.localRepo) ||
       (typeof window !== "undefined" &&
         Boolean(window.openSweDesktop) &&
         desktopSource === "local" &&
         !homeMatch?.search.repo &&
         !homeMatch?.search.noRepo))
-  const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
+  const runtimeThreadId = activeThreadId ?? null
   // Only a thread route has to wait for the profile: mounting the runtime the
   // profile does not select hydrates that thread's transcript a second time.
   const location = useRouterState({
@@ -95,12 +88,6 @@ function AgentsLayout() {
     (runtimeThreadId !== null ||
       pathname === "/agents" ||
       pathname === "/agents/")
-  const localOnly = !session.data && isDesktopLocalModeEnabled()
-  const isLocalRoute =
-    pathname === "/agents" ||
-    pathname === "/agents/" ||
-    Boolean(activeLocalSessionId)
-
   useEffect(() => {
     rememberAppLocation(location.href)
   }, [location.href])
@@ -113,7 +100,7 @@ function AgentsLayout() {
     )
   }
 
-  if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
+  if (!session.data) return <RequireLogin />
   if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
     if (activeThreadId)
       return (
@@ -138,10 +125,8 @@ function AgentsLayout() {
 
   return (
     <AgentsShell
-      user={session.data ?? null}
-      localOnly={localOnly}
+      user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
-      activeLocalSessionId={activeLocalSessionId}
     >
       {awaitingRuntimeChoice ? (
         <main className="flex min-w-0 flex-1 items-center justify-center p-6">

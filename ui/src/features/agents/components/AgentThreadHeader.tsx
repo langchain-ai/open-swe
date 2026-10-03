@@ -2,11 +2,8 @@ import { DotsThreeIcon } from "@phosphor-icons/react"
 import { Folder } from "lucide-react"
 import { useRef, useState } from "react"
 
-import { useNavigate } from "@tanstack/react-router"
-import type { DesktopLocalThreadSummary } from "@/desktop"
-import { useRefreshLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
-import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { IconButton } from "@/components/ui/button"
@@ -34,32 +31,22 @@ import {
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
 import type { ThreadVisibility } from "@/lib/api"
-import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
-function ThreadRepoIndicator({
-  thread,
-  localThread,
-}: {
-  thread?: AgentThread
-  localThread?: DesktopLocalThreadSummary
-}) {
+function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const [open, setOpen] = useState(false)
-  const { projects: localRepos } = useDesktopProjects()
   const { prefs } = useSidebarPrefs()
   const session = useSession()
   const cloudRepos = useSidebarRepos({
     ...prefs.filters,
-    enabled: !localThread && Boolean(session.data),
+    enabled: Boolean(session.data),
   })
-  const repo = !localThread ? thread?.repoFullName.trim() : undefined
-  const repoName = localThread
-    ? localRepos.find((candidate) => candidate.cwd === localThread.cwd)?.name
-    : (cloudRepos.data?.find(
-        (candidate) =>
-          candidate.repoFullName.toLowerCase() === repo?.toLowerCase()
-      )?.name ?? (repo ? thread?.repo || repo : undefined))
+  const repo = thread.repoFullName.trim()
+  const repoName =
+    cloudRepos.data?.find(
+      (candidate) => candidate.repoFullName.toLowerCase() === repo.toLowerCase()
+    )?.name ?? (repo ? thread.repo || repo : undefined)
   if (!repoName) return null
 
   return (
@@ -91,7 +78,6 @@ export function AgentThreadHeader({
   panelCollapsed,
   thread,
   onRename,
-  localThread,
   visibility,
   onVisibilityChange,
 }: {
@@ -99,16 +85,12 @@ export function AgentThreadHeader({
   target: "Cloud" | "This Mac" | "Local CLI"
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
-  localThread?: DesktopLocalThreadSummary
   thread?: AgentThread
   // Visibility of a thread that does not exist yet.
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
-  const navigate = useNavigate()
-  const refreshLocalThreads = useRefreshLocalThreads()
-  const { prefs, toggleLocalPin } = useSidebarPrefs()
-  const [deletingLocal, setDeletingLocal] = useState(false)
+  const localThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -125,37 +107,14 @@ export function AgentThreadHeader({
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const pinned = localThread
-    ? prefs.pinnedLocalIds.includes(localThread.id)
-    : Boolean(
-        pinnedThreads.data?.some((candidate) => candidate.id === thread?.id)
-      )
-  const archived = localThread
-    ? localThread.archived === true
-    : thread?.resolved === true
-  const isDeleting = deletingLocal || deleteThread.isPending
-  const confirmDelete = async () => {
-    if (isDeleting) return
-    if (!localThread) {
-      if (thread)
-        deleteThread.mutate(thread.id, {
-          onSuccess: () => setDeleteOpen(false),
-        })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted = await window.openSweDesktop?.deleteLocalThread(
-        localThread.id
-      )
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      refreshLocalThreads(localThread.id)
-      setDeleteOpen(false)
-      void navigate({ to: "/agents" })
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+  const pinned = Boolean(
+    pinnedThreads.data?.some((candidate) => candidate.id === thread?.id)
+  )
+  const archived = thread?.resolved === true
+  const isDeleting = deleteThread.isPending
+  const confirmDelete = () => {
+    if (isDeleting || !thread) return
+    deleteThread.mutate(thread.id, { onSuccess: () => setDeleteOpen(false) })
   }
   const [draft, setDraft] = useState<string | null>(null)
   const [savingTitle, setSavingTitle] = useState<string | null>(null)
@@ -171,9 +130,8 @@ export function AgentThreadHeader({
     setSavingTitle(next)
     try {
       await onRename(next)
-    } catch (error) {
-      // Cloud renames go through a mutation, which reports its own failure.
-      if (localThread) reportError({ title: "Couldn't rename thread", error })
+    } catch {
+      // The rename mutation reports its own failure.
     }
     setSavingTitle(null)
   }
@@ -185,7 +143,7 @@ export function AgentThreadHeader({
     setDraft(title)
   }
   const continueThreadPrivately = () => {
-    if (!thread || localThread || continuePrivately.isPending) return
+    if (!thread || continuePrivately.isPending) return
     continuePrivately.mutate(thread.id)
   }
   const visibilityMenu = thread ? (
@@ -214,25 +172,16 @@ export function AgentThreadHeader({
   const menuItems = (
     <ThreadMenuItems
       thread={thread ?? null}
-      localThread={localThread}
       pinned={pinned}
       archived={archived}
       isDeleting={isDeleting}
       onTogglePin={() => {
-        if (localThread) toggleLocalPin(localThread.id)
-        else if (thread && !pinThread.isPending) {
+        if (thread && !pinThread.isPending) {
           pinThread.mutate({ threadId: thread.id, pinned: !pinned })
         }
       }}
       onToggleArchived={() => {
-        if (localThread) {
-          void window.openSweDesktop
-            ?.updateLocalThread({
-              threadId: localThread.id,
-              archived: !archived,
-            })
-            .then(() => refreshLocalThreads(localThread.id))
-        } else if (thread && !resolveThread.isPending) {
+        if (thread && !resolveThread.isPending) {
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })
         }
       }}
@@ -254,9 +203,7 @@ export function AgentThreadHeader({
       >
         {title && (
           <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
-            {(thread || localThread) && (
-              <ThreadRepoIndicator thread={thread} localThread={localThread} />
-            )}
+            {thread && <ThreadRepoIndicator thread={thread} />}
             {draft !== null ? (
               <Input
                 autoFocus
@@ -329,13 +276,13 @@ export function AgentThreadHeader({
             <ThreadParticipants threadId={thread.id} />
           )}
           <span className="text-xs text-muted-foreground">{target}</span>
-          {!localThread && visibilityMenu}
+          {visibilityMenu}
         </div>
       </div>
     </header>
   )
 
-  if (!thread && !localThread) return header
+  if (!thread) return header
 
   return (
     <>
@@ -365,10 +312,10 @@ export function AgentThreadHeader({
         onOpenChange={setDeleteOpen}
         threadTitle={title ?? ""}
         isDeleting={isDeleting}
-        onConfirm={() => void confirmDelete()}
+        onConfirm={confirmDelete}
         detail={
           localThread
-            ? localThread.ownedWorktrees?.length
+            ? localThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
             : undefined

@@ -56,10 +56,9 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function render() {
-  return renderHook(
-    () => useAgentThreadStream({ transport: "cloud", threadId: "one" }),
-    { wrapper }
-  )
+  return renderHook(() => useAgentThreadStream({ threadId: "one" }), {
+    wrapper,
+  })
 }
 
 function lastStream(): StreamOptions {

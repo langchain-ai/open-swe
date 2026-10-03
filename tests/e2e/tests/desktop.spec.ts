@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -40,7 +40,7 @@ async function typeIntoComposer(
   await editor.press("Enter");
 }
 
-test("Desktop runs a local thread on the Open SWE graph against the shared fakes", async ({
+test("Desktop runs a This Mac thread on the cloud agent through its bridge", async ({
   request,
 }, testInfo) => {
   mkdirSync(e2eTmp, { recursive: true });
@@ -63,9 +63,6 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
   });
   expect(login.ok()).toBeTruthy();
   const cookie = sessionCookie(login.headers()["set-cookie"] ?? "");
-  const pythonPath = [e2eRoot, process.env.PYTHONPATH]
-    .filter((value): value is string => Boolean(value))
-    .join(delimiter);
 
   const electronApp = await electron.launch({
     executablePath: electronPath,
@@ -82,18 +79,9 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
-      // The local backend runs the real graph with the scripted fake model, so
-      // the provider keys only have to satisfy the composer's credential gate.
-      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(e2eRoot, "langgraph.desktop.json"),
-      ANTHROPIC_API_KEY: "e2e-fake-key",
-      OPENAI_API_KEY: "e2e-fake-key",
-      E2E_BASE: baseURL,
-      E2E_FAKE_GITHUB_API: `${baseURL}/fake-gh`,
-      E2E_REMOTE: fakeRemote,
-      E2E_TMP: e2eTmp,
+      // The bridge runs the agent's commands with this environment, so the
+      // fake model's script pushes with this git config rather than yours.
       GIT_CONFIG_GLOBAL: gitConfig,
-      PYTHONPATH: pythonPath,
-      UV_CACHE_DIR: join(e2eTmp, "uv-cache"),
     },
   });
 
@@ -166,7 +154,9 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
       "E2E_DESKTOP_LOCAL please add a greet() helper and open a PR",
     );
 
-    await expect(page).toHaveURL(/open-swe:\/\/app\/agents\/local\//);
+    await expect(page).toHaveURL(
+      /open-swe:\/\/app\/agents\/[0-9a-f]{8}-[0-9a-f]{4}-/,
+    );
     await expect(page.getByText(/Done! I added/)).toBeVisible();
     await expect(
       sidebar.getByRole("link", {
@@ -203,79 +193,10 @@ test("Desktop runs a local thread on the Open SWE graph against the shared fakes
         },
       ]);
 
-    await page.getByRole("button", { name: "Thread actions" }).click();
+    // The agent ran in the checkout on this machine, through the bridge.
     await expect(
-      page.getByRole("menuitem", { name: "Open trace", exact: true }),
+      page.getByText("This Mac", { exact: true }).first(),
     ).toBeVisible();
-    await expect(
-      page.getByRole("menuitem", { name: "Copy trace URL" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("menuitem", { name: "Copy thread ID" }),
-    ).toBeVisible();
-    const menuScreenshot = testInfo.outputPath("desktop-open-trace.png");
-    await page.screenshot({ path: menuScreenshot, fullPage: true });
-    await testInfo.attach("desktop-open-trace", {
-      path: menuScreenshot,
-      contentType: "image/png",
-    });
-    for (const scenario of [
-      "https",
-      "http",
-      "missing",
-      "unsafe",
-      "malformed",
-      "http-error",
-      "network-error",
-      "shell-error",
-    ]) {
-      await electronApp.evaluate(({ shell, dialog, clipboard }, outcome) => {
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = async (input, init) => {
-          if (!String(input).includes("/dashboard/api/me/local-trace-url/"))
-            return originalFetch(input, init);
-          globalThis.fetch = originalFetch;
-          if (outcome === "network-error")
-            throw new Error("Network unavailable");
-          return Response.json(
-            {
-              trace_url:
-                outcome === "missing"
-                  ? null
-                  : outcome === "unsafe"
-                    ? "file:///tmp/trace"
-                    : outcome === "malformed"
-                      ? "not a URL"
-                      : `${outcome === "http" ? "http" : "https"}://smith.langchain.com/trace`,
-            },
-            { status: outcome === "http-error" ? 503 : 200 },
-          );
-        };
-        clipboard.writeText("");
-        shell.openExternal = async (url) => {
-          if (outcome === "shell-error") throw new Error("Browser unavailable");
-          clipboard.writeText(`opened:${url}`);
-        };
-        dialog.showMessageBox = async () => {
-          clipboard.writeText("error-dialog");
-          return { response: 0, checkboxChecked: false };
-        };
-      }, scenario);
-      if (scenario !== "https")
-        await page.getByRole("button", { name: "Thread actions" }).click();
-      await page
-        .getByRole("menuitem", { name: "Open trace", exact: true })
-        .click();
-      await expect
-        .poll(() =>
-          electronApp.evaluate(({ clipboard }) => clipboard.readText()),
-        )
-        .toBe(
-          scenario === "https" || scenario === "http"
-            ? `opened:${scenario}://smith.langchain.com/trace`
-            : "error-dialog",
-        );
-    }
 
     const screenshot = testInfo.outputPath("desktop-local-agent.png");
     await page.screenshot({ path: screenshot, fullPage: true });

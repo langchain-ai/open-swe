@@ -68,11 +68,8 @@ def test_create_local_sandbox_keeps_explicit_global_git_config(monkeypatch, tmp_
     assert not (tmp_path / "work" / local_mod.SANDBOX_GITCONFIG).exists()
 
 
-def test_create_local_sandbox_excludes_credential_broker_env(monkeypatch, tmp_path):
+def test_create_local_sandbox_excludes_provider_credentials(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCAL_SANDBOX_ROOT_DIR", str(tmp_path / "work"))
-    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_BROKER_URL", "http://127.0.0.1:3210/token")
-    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN", "broker-secret")
-    monkeypatch.setenv("OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE", "/tmp/legacy-account.json")
     monkeypatch.setenv("OPENAI_API_KEY", "provider-secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "provider-secret")
     monkeypatch.setenv("VISIBLE_TO_AGENT", "visible")
@@ -82,8 +79,5 @@ def test_create_local_sandbox_excludes_credential_broker_env(monkeypatch, tmp_pa
 
     stub = cast(_StubLocalShellBackend, backend)
     assert stub.env["VISIBLE_TO_AGENT"] == "visible"
-    assert "OPEN_SWE_OPENAI_OAUTH_BROKER_URL" not in stub.env
-    assert "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN" not in stub.env
-    assert "OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE" not in stub.env
     assert "OPENAI_API_KEY" not in stub.env
     assert "ANTHROPIC_API_KEY" not in stub.env
