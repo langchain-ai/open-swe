@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid7
 
+import httpx2
 from sqlalchemy import BigInteger, case, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
+from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.review.styles import normalize_repo_full_name
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,31 @@ class Repository(Base):
             return await session.scalar(
                 select(cls).where(cls.key == normalize_repo_full_name(full_name).lower())
             )
+
+    @classmethod
+    async def resolve_default_branch(cls, full_name: str, *, token: str | None) -> str:
+        repository = await cls.get(full_name)
+        if repository and repository.default_branch:
+            return repository.default_branch
+        if token is None:
+            return ""
+        try:
+            async with github_client(token=token) as client:
+                response = await github_request(
+                    client, "GET", f"{GITHUB_API_BASE}/repos/{full_name}"
+                )
+                response.raise_for_status()
+                value = response.json().get("default_branch")
+                if isinstance(value, str) and value:
+                    await cls(full_name=full_name, default_branch=value).save()
+                    return value
+        except httpx2.HTTPError:
+            logger.warning(
+                "Could not resolve repository default branch",
+                extra={"repo_full_name": full_name},
+                exc_info=True,
+            )
+        return ""
 
     @classmethod
     async def all(cls) -> list[Self]:

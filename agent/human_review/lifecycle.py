@@ -146,25 +146,9 @@ async def _warn_target(
     pr = request.pull_request
     if not pr.base_ref:
         return card
-    repository = await Repository.get(pr.repo_full_name)
-    default_branch = repository.default_branch if repository else ""
-    if not default_branch and (token := await repo_token(pr.owner, pr.repo)):
-        try:
-            async with github_client(token=token) as client:
-                response = await github_request(
-                    client, "GET", f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}"
-                )
-                response.raise_for_status()
-                value = response.json().get("default_branch")
-                if isinstance(value, str):
-                    default_branch = value
-                    await Repository(full_name=pr.repo_full_name, default_branch=value).save()
-        except httpx2.HTTPError:
-            logger.warning(
-                "Could not resolve review card default branch",
-                extra={"request_id": str(request.id)},
-                exc_info=True,
-            )
+    default_branch = await Repository.resolve_default_branch(
+        pr.repo_full_name, token=await repo_token(pr.owner, pr.repo)
+    )
     if not default_branch or pr.base_ref == default_branch:
         return card
     warning = (
