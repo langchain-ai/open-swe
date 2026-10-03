@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -259,6 +260,49 @@ async def test_green_webhook_wakes_the_agent_and_stops_the_watch(
     assert "checks are green" in dispatch.await_args.args[1]
     notify.assert_not_awaited()
     assert watch_client.store.values == {}
+
+
+@pytest.mark.parametrize("kind", ["standard", "posted"])
+async def test_non_expedited_review_does_not_change_ready_wake_or_notifications(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    watch = await _start_watch(watch_client)
+    monkeypatch.setattr(baby_sit.postgres, "configured", lambda: True)
+    monkeypatch.setattr(
+        baby_sit.HumanReviewRequest,
+        "active_for",
+        AsyncMock(return_value=SimpleNamespace(kind=kind, thread_id="thread-1")),
+    )
+    dispatch = AsyncMock(return_value={"run_id": "run-1"})
+    monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
+    notify = AsyncMock(return_value=True)
+    monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
+
+    assert await baby_sit._has_expedited_card(watch) is False
+    assert await baby_sit._finish_ready(watch) == "stopped"
+    assert dispatch.await_args is not None
+    ready_prompt = dispatch.await_args.args[1]
+    assert "open expedited review card" not in ready_prompt
+    assert "Call `merge_expedited_pr` now" not in ready_prompt
+    assert "checks are green" in ready_prompt
+
+    assert await baby_sit._notify_watch(watch, "checks failed") is True
+    notify.assert_awaited_once()
+
+
+@pytest.mark.parametrize("thread_id", ["", "thread-1"])
+async def test_expedited_review_card_is_detected(
+    watch_client: _Client, monkeypatch: pytest.MonkeyPatch, thread_id: str
+) -> None:
+    watch = await _start_watch(watch_client)
+    monkeypatch.setattr(baby_sit.postgres, "configured", lambda: True)
+    monkeypatch.setattr(
+        baby_sit.HumanReviewRequest,
+        "active_for",
+        AsyncMock(return_value=SimpleNamespace(kind="expedited", thread_id=thread_id)),
+    )
+
+    assert await baby_sit._has_expedited_card(watch) is True
 
 
 async def test_terminal_notification_falls_back_to_originating_agent_thread(

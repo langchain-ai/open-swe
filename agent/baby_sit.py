@@ -333,7 +333,11 @@ async def _has_expedited_card(watch: BabySitWatch) -> bool:
     except Exception:
         logger.warning("Expedited review lookup failed for %s", watch.key, exc_info=True)
         return False
-    return approval is not None and approval.thread_id in {"", watch.thread_id}
+    return (
+        approval is not None
+        and approval.kind == "expedited"
+        and approval.thread_id in {"", watch.thread_id}
+    )
 
 
 async def _finish_ready(watch: BabySitWatch) -> str:
