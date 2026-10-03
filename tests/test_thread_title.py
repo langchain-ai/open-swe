@@ -69,6 +69,20 @@ class _Threads:
             },
         ),
         (
+            {
+                "source": "slack",
+                "title": "My title",
+                "title_seed": "My title",
+                "title_locked": True,
+            },
+            {
+                "source": "slack",
+                "title": "My title",
+                "title_seed": "My title",
+                "title_locked": True,
+            },
+        ),
+        (
             {"source": "github", "title": "PR #1947", "title_seed": "PR #1947"},
             {"source": "github", "title": "PR #1947", "title_seed": "PR #1947"},
         ),
