@@ -7,6 +7,13 @@ import {
 } from "@assistant-ui/react"
 import { ArrowUp, Plus, Square, X } from "lucide-react"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -17,6 +24,10 @@ import { useSession } from "@/lib/session"
 import { useThreadMetadata } from "./AssistantProvider"
 
 const EMPTY_REPOS: string[] = []
+import { cn } from "@/lib/utils"
+
+const INLINE_SELECT_TRIGGER =
+  "rounded-full border-transparent bg-transparent px-2 text-muted-foreground hover:bg-muted dark:bg-transparent"
 
 function Attachment() {
   const attachment = useAuiState((state) => state.attachment)
@@ -176,24 +187,30 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 triggerClassName="max-w-40 text-xs"
               />
               {workspaces.length > 0 && (
-                <select
-                  aria-label="Workspace"
+                <Select
                   value={
                     typeof config?.environment === "string"
                       ? config.environment
-                      : (workspaceQuery.data?.default_slug ?? "")
+                      : (workspaceQuery.data?.default_slug ?? null)
                   }
-                  onChange={(event) =>
-                    update({ environment: event.target.value })
+                  onValueChange={(value: string | null) =>
+                    value && update({ environment: value })
                   }
-                  className="max-w-32 bg-transparent text-xs"
                 >
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.slug} value={workspace.slug}>
-                      {workspace.slug}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    aria-label="Workspace"
+                    className={cn(INLINE_SELECT_TRIGGER, "max-w-32")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false} align="start">
+                    {workspaces.map((workspace) => (
+                      <SelectItem key={workspace.slug} value={workspace.slug}>
+                        {workspace.slug}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </>
           )}

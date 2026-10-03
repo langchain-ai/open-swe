@@ -40,6 +40,15 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollTo")
 })
 
+const DISCLOSURE = "[data-transcript-disclosure]"
+const TRIGGER = `${DISCLOSURE} > [data-slot="collapsible-trigger"]`
+
+function isOpen(disclosure: Element) {
+  return (
+    disclosure.querySelector(TRIGGER)?.getAttribute("aria-expanded") === "true"
+  )
+}
+
 function Transcript({ messages }: { messages: BaseMessage[] }) {
   const converted = useExternalMessageConverter({
     messages,
@@ -101,15 +110,15 @@ describe("native transcript", () => {
       render(<Transcript messages={toolExchange(calls)} />)
       fireEvent.click(screen.getByText("Show activity"))
       const summary = screen.getByText(`${label} src/service.ts · 10 calls`)
-      const group = summary.closest("details")!
-      expect(group.open).toBe(false)
+      const group = summary.closest<HTMLElement>(DISCLOSURE)!
+      expect(isOpen(group)).toBe(false)
       fireEvent.click(summary)
-      expect(group.open).toBe(true)
+      expect(isOpen(group)).toBe(true)
       for (const call of calls) {
         const result = within(group).getByText(`Result ${call.id}`)
-        const details = result.closest("details")!
+        const details = result.closest<HTMLElement>(DISCLOSURE)!
         fireEvent.click(within(details).getByText(name))
-        expect(details.open).toBe(true)
+        expect(isOpen(details)).toBe(true)
         expect(
           within(details).getByText(JSON.stringify(call.args, null, 2), {
             normalizer: (text) => text,
@@ -132,7 +141,7 @@ describe("native transcript", () => {
       { id: "read-d", name: "read_file", args: { file_path: "a.ts" } },
     ]
     const { container } = render(<Transcript messages={toolExchange(calls)} />)
-    const summaries = [...container.querySelectorAll("summary")].map(
+    const summaries = [...container.querySelectorAll(TRIGGER)].map(
       (element) => element.textContent
     )
     expect(summaries.filter((text) => text?.includes("·"))).toEqual([
@@ -162,9 +171,9 @@ describe("native transcript", () => {
     })
     render(<Transcript messages={messages} />)
     expect(screen.queryByText(/· \d+ calls/)).toBeNull()
-    const failure = screen.getByText("Permission denied").closest("details")!
-    expect(failure.open).toBe(true)
-    expect(failure.parentElement?.closest("details")).toBeNull()
+    const failure = screen.getByText("Permission denied").closest(DISCLOSURE)!
+    expect(isOpen(failure)).toBe(true)
+    expect(failure.parentElement?.closest(DISCLOSURE)).toBeNull()
     expect(screen.getByText("Result missing")).toBeTruthy()
     expect(screen.getByText("Result empty")).toBeTruthy()
   })
@@ -203,17 +212,11 @@ describe("native transcript", () => {
         ]}
       />
     )
-    expect(screen.getByText("Command failed").closest("details")?.open).toBe(
-      true
-    )
-    expect(
-      screen
-        .getByText("Command failed")
-        .closest("details")
-        ?.parentElement?.closest("details")
-    ).toBeNull()
+    const failure = screen.getByText("Command failed").closest(DISCLOSURE)!
+    expect(isOpen(failure)).toBe(true)
+    expect(failure.parentElement?.closest(DISCLOSURE)).toBeNull()
     const report = await screen.findByTitle("My report")
-    expect(report.closest("details")).toBeNull()
+    expect(report.closest(DISCLOSURE)).toBeNull()
     expect(report.getAttribute("sandbox")).not.toContain("allow-same-origin")
   })
 
