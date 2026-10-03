@@ -9,6 +9,9 @@ import { ThreadPullRequests } from "@/features/agents/components/ThreadPullReque
 import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
 import { useAgentThreadPullRequestStatus } from "@/features/agents/lib/queries"
 import { agentsApi } from "@/features/agents/lib/api"
+import { Button } from "@/components/ui/button"
+import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/spinner"
 import { useSession } from "@/lib/session"
 import { pageTitle } from "@/lib/pageTitle"
 import { AssistantMessage } from "./Message"
@@ -61,12 +64,14 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
             {thread?.title ?? "New conversation"}
           </h1>
           {thread && (
-            <button
-              className="text-xs"
+            <Button
+              type="button"
+              variant="ghost"
+              aria-expanded={!panelCollapsed}
               onClick={() => setPanelCollapsed(!panelCollapsed)}
             >
               Files and terminal
-            </button>
+            </Button>
           )}
         </header>
         <ThreadPrimitive.Viewport
@@ -76,18 +81,27 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         >
           <div className="mx-auto w-full max-w-3xl px-5 py-6 sm:px-8">
             {loading && empty ? (
-              <p
-                role="status"
-                className="py-16 text-center text-sm text-muted-foreground"
-              >
-                Loading conversation…
-              </p>
+              <Empty className="py-16">
+                <EmptyDescription
+                  role="status"
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <Spinner aria-hidden />
+                  Loading conversation…
+                </EmptyDescription>
+              </Empty>
             ) : (
               empty &&
               !running && (
-                <h2 className="py-16 text-center text-2xl">
-                  What are we working on?
-                </h2>
+                <Empty className="py-16">
+                  <EmptyTitle
+                    role="heading"
+                    aria-level={2}
+                    className="text-2xl font-normal"
+                  >
+                    What are we working on?
+                  </EmptyTitle>
+                </Empty>
               )
             )}
             <ThreadPrimitive.Messages>
