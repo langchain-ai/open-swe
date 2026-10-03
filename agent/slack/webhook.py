@@ -610,6 +610,7 @@ async def process_slack_mention(
         and not request.code_channel
         and not request.concierge_mode
         and not request.message_update
+        and not request.kitchen_channel
     )
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
@@ -1140,6 +1141,7 @@ async def _process_slack_mention_impl(
         "user_email": user_email,
         "source": "slack",
         "slack_kickoff_eligible": False,
+        "slack_defer_thinking_status": request.kitchen_channel,
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -1341,5 +1343,6 @@ async def _process_slack_mention_impl(
             run_id=run_id,
             channel_id=channel_id,
             thread_ts=thread_ts,
+            defer_until_tool=request.kitchen_channel,
         )
     return bool(isinstance(run_id, str) and run_id)

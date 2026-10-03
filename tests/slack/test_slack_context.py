@@ -439,7 +439,11 @@ async def test_slack_file_provisioning_requires_account_and_persisted_thread(
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
 @pytest.mark.parametrize("kitchen_channel", [True, False])
 def test_slack_followup_publishes_as_requester_and_preserves_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool, fake_store
+    monkeypatch: pytest.MonkeyPatch,
+    explicitly_tagged: bool,
+    kitchen_channel: bool,
+    fake_store,
+    slack_api,
 ) -> None:
     import importlib
 
@@ -450,6 +454,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     opr = importlib.import_module("agent.tools.open_pull_request")
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
+    monkeypatch.setattr(slack_webhooks, "show_slack_thinking_status", AsyncMock())
     client = slack_webhooks.get_langgraph_client()
     client.store = fake_store
     saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
@@ -482,6 +487,8 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     run_create = captured["run_create"]
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
+    statuses = [params["status"] for method, params in slack_api.calls if "status" in params]
+    assert ("Thinking..." in statuses) is not kitchen_channel
     assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
     assert (
         f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
