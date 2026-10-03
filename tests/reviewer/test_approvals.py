@@ -1,4 +1,4 @@
-"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; the repository's mode gates them."""
+"""Approval criteria come from .open-swe/APPROVALS.md at the base commit; publication is advisory."""
 
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
@@ -101,7 +101,7 @@ async def test_tool_rechecks_private_admin_and_repo_access(
     fake_store: FakeStore, grant_tool_access: Callable[..., None]
 ) -> None:
     grant_tool_access(admin=True, admin_thread=True)
-    refused = await manage_review_approval_mode("set", "o/r", "approve")
+    refused = await manage_review_approval_mode("read", "o/r")
     assert "not available in this thread" in str(refused["error"])
     grant_tool_access(admin=True, admin_surface=True)
     with (
@@ -114,5 +114,6 @@ async def test_tool_rechecks_private_admin_and_repo_access(
         ),
         pytest.raises(HTTPException),
     ):
-        await manage_review_approval_mode("set", "private/repo", "approve")
-    assert await REVIEW_STYLES.get("private/repo") is None
+        await manage_review_approval_mode("read", "private/repo")
+    with pytest.raises(ValueError, match="read-only"):
+        await manage_review_approval_mode("set", "private/repo")  # type: ignore[call-overload]
