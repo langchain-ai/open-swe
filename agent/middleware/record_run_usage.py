@@ -10,26 +10,12 @@ from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from agent.agent_cost import finalize_agent_invocation_usage
+from agent.middleware.model_selection import ROUTE_METADATA_KEY
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
+from agent.utils.run_metadata import tag_root_run_metadata, tag_run_metadata
 
 logger = logging.getLogger(__name__)
-
-
-def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
-    """Attach ``extra_metadata`` to the current LangSmith run, best-effort."""
-    try:
-        from langsmith.run_helpers import get_current_run_tree
-
-        run_tree = get_current_run_tree()
-    except Exception:  # noqa: BLE001
-        run_tree = None
-    if run_tree is None:
-        return
-    try:
-        run_tree.metadata.update(extra_metadata)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not tag run metadata", exc_info=True)
 
 
 class RecordRunUsageMiddleware(OpenSWEMiddleware):
@@ -42,7 +28,14 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
     ) -> ModelResponse:
         model_route = request.state.get("model_route")
         if isinstance(model_route, str) and model_route:
-            _tag_run_metadata({"open_swe_model_route": model_route})
+            # Nested tag kept: per-model-call granularity is useful when a
+            # thread's route changes, and existing queries depend on it.
+            tag_run_metadata({ROUTE_METADATA_KEY: model_route})
+            # Root tag so `is_root=true` queries can see the route too. This is
+            # belt-and-braces alongside the tag in ModelSelectionMiddleware:
+            # it also covers turns that reuse a route from persisted state
+            # without going through the classifier.
+            tag_root_run_metadata({ROUTE_METADATA_KEY: model_route})
         try:
             response = await handler(request)
         except Exception as exc:
@@ -67,7 +60,7 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
             if isinstance(message, AIMessage):
                 message.response_metadata = {
                     **message.response_metadata,
-                    **({"open_swe_model_route": model_route} if model_route else {}),
+                    **({ROUTE_METADATA_KEY: model_route} if model_route else {}),
                     **(
                         {"open_swe_invocation_id": invocation_id, "open_swe_run_id": invocation_id}
                         if invocation_id
