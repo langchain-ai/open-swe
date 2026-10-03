@@ -143,15 +143,13 @@ def _patch_handler(
         )
         return {"run_id": "run-summary"}
 
-    class FakeMessageQueue:
-        def __init__(self, thread_id: str) -> None:
-            self.thread_id = thread_id
-
-        async def clear(self) -> None:
-            client.cleared_queues.append(self.thread_id)
+    class FakeQueuedMessage:
+        @staticmethod
+        async def clear(thread_id: str) -> None:
+            client.cleared_queues.append(thread_id)
 
     monkeypatch.setattr(slack_stop, "get_client", lambda url: client)
-    monkeypatch.setattr(slack_stop, "MessageQueue", FakeMessageQueue)
+    monkeypatch.setattr(slack_stop, "QueuedMessage", FakeQueuedMessage)
     monkeypatch.setattr(slack_stop, "claim_slack_event", fake_claim)
     monkeypatch.setattr(slack_stop, "dispatch_agent_run", fake_dispatch)
     return dispatched, claimed

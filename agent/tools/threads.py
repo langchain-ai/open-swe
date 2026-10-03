@@ -18,7 +18,7 @@ from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 from agent.prompts import prompt
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
@@ -537,7 +537,7 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
 
 async def _queued_message_count(thread_id: str) -> int:
     try:
-        return len(await MessageQueue(thread_id).messages())
+        return len(await QueuedMessage.for_thread(thread_id))
     except Exception:
         logger.warning(
             "Could not count queued messages",

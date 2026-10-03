@@ -14,7 +14,7 @@ from agent.incidents.models import (
     IncidentReportRecord,
 )
 from agent.incidents.report import CONTEXT_MARKER
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ async def test_completion_reschedules_only_stranded_context(
     )
     turns.create_durable_run.assert_not_awaited()
 
-    await MessageQueue("thread-1").put("late")
+    await QueuedMessage.put("thread-1", "late")
     result = await turns.handle_run_completion("thread-1", "r1", "success")
     assert result["reason"] == "queued incident context rescheduled"
     turns.create_durable_run.assert_awaited_once()

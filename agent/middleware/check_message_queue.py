@@ -23,7 +23,7 @@ from agent.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
-from agent.message_queue import MessageQueue, QueuedContent
+from agent.message_queue import QueuedContent, QueuedMessage
 from agent.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -242,11 +242,10 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if pending_autofix:
             content_blocks.append({"type": "text", "text": pending_autofix})
 
-        queue = MessageQueue(thread_id)
         try:
             legacy = await _legacy_queued_contents(store, thread_id)
             # A snapshot: what this call consumes, whatever is queued meanwhile.
-            queued_messages = await queue.messages()
+            queued_messages = await QueuedMessage.for_thread(thread_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
             _flush_blocks(queued_updates, content_blocks, injected)
@@ -348,7 +347,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         _flush_blocks(queued_updates, content_blocks, injected)
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
-        await queue.remove(queued_messages)
+        await QueuedMessage.remove(queued_messages)
         if legacy:
             await store.adelete(("queue", thread_id), _LEGACY_QUEUE_KEY)
         return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300

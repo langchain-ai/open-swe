@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 from agent.utils import thread_ops
 
 
@@ -14,4 +14,4 @@ async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch, regis
     assert await thread_ops.queue_message_for_thread("thread-1", message) is True
     assert await thread_ops.queue_message_for_thread("thread-1", message) is True
 
-    assert [queued.content for queued in await MessageQueue("thread-1").messages()] == [message]
+    assert [queued.content for queued in await QueuedMessage.for_thread("thread-1")] == [message]

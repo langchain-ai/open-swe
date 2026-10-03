@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 
 threads_tool = importlib.import_module("agent.tools.threads")
 
@@ -141,7 +141,7 @@ async def test_get_thread_counts_pending_run_outside_history_window(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
-    await MessageQueue("thread-1").put("queued")
+    await QueuedMessage.put("thread-1", "queued")
     client = _DetailClient()
 
     async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:

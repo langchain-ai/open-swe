@@ -16,7 +16,7 @@ def upgrade() -> None:
             thread_id text NOT NULL,
             queue_id text,
             content jsonb NOT NULL,
-            queued_at timestamptz NOT NULL DEFAULT now()
+            queued_at timestamptz NOT NULL DEFAULT clock_timestamp()
         )
         """
     )

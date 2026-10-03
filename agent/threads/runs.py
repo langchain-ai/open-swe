@@ -48,7 +48,7 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
@@ -1335,7 +1335,7 @@ async def dispatch_pending_follow_ups(
     the store; the new run's first model call picks it up. Returns the run id,
     or ``None`` when nothing was waiting.
     """
-    if not await MessageQueue(thread_id).messages():
+    if not await QueuedMessage.for_thread(thread_id):
         return None
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(

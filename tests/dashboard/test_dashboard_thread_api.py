@@ -16,7 +16,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -1043,7 +1043,7 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(
 ) -> None:
     """The replacement run's own turn must not be settled as interrupted."""
     order: list[str] = []
-    await MessageQueue("thread-1").put({"text": "and also this"})
+    await QueuedMessage.put("thread-1", {"text": "and also this"})
     thread = {
         "thread_id": "thread-1",
         "status": "busy",
@@ -1232,7 +1232,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
         },
     }
     # The running agent finds the message before its next model call.
-    [queued] = await MessageQueue("tid").messages()
+    [queued] = await QueuedMessage.for_thread("tid")
     assert isinstance(queued.content, dict)
     assert queued.content["queue_id"] == "msg-1"
     assert queued.content["text"] == "also check the tests"

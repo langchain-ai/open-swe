@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.message_queue import MessageQueue
+from agent.message_queue import QueuedMessage
 from agent.middleware.check_message_queue import (
     LinearNotifyState,
     check_message_queue_before_model,
@@ -52,7 +52,8 @@ async def _run(store: _GraphStore, state: dict[str, Any]) -> dict[str, Any] | No
 
 @pytest.mark.asyncio
 async def test_check_message_queue_announces_the_move_to_web_only_once(registry_db: None) -> None:
-    await MessageQueue("thread-1").put(
+    await QueuedMessage.put(
+        "thread-1",
         {
             "text": "and another thing",
             "source": "dashboard",
@@ -62,7 +63,7 @@ async def test_check_message_queue_announces_the_move_to_web_only_once(registry_
                 "platform": "github",
                 "github_login": "octocat",
             },
-        }
+        },
     )
 
     result = await _run(_GraphStore(), {"messages": [], "reply_surface": "web"})
@@ -76,11 +77,10 @@ async def test_check_message_queue_announces_the_move_to_web_only_once(registry_
 async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
     registry_db: None,
 ) -> None:
-    queue = MessageQueue("thread-1")
-    await queue.put({"text": "first", "image_urls": ["https://img.test/a.png"]})
+    await QueuedMessage.put("thread-1", {"text": "first", "image_urls": ["https://img.test/a.png"]})
 
     async def build_and_queue(payload: dict[str, Any], *, model_id: str | None) -> list:
-        await queue.put({"text": "queued during the image fetch"})
+        await QueuedMessage.put("thread-1", {"text": "queued during the image fetch"})
         return [{"type": "text", "text": payload["text"]}]
 
     with (
@@ -97,7 +97,7 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
 
     assert result is not None
     assert "first" in _envelope(result["messages"][-1])
-    assert [message.content for message in await queue.messages()] == [
+    assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]
 

@@ -14,7 +14,7 @@ from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel
 
 from agent.config import ENV
-from agent.message_queue import MessageQueue, QueuedContent
+from agent.message_queue import QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,8 @@ async def queue_message_for_thread(thread_id: str, message_content: QueuedConten
     """
     queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None
     try:
-        await MessageQueue(thread_id).put(
-            message_content, queue_id=queue_id if isinstance(queue_id, str) else None
+        await QueuedMessage.put(
+            thread_id, message_content, queue_id=queue_id if isinstance(queue_id, str) else None
         )
         from agent.thread_feedback import note_feedback_activity
 

@@ -549,9 +549,9 @@ async def control_queued(thread_id: str = "") -> JSONResponse:
     While the agent is busy, debounced follow-ups accumulate in
     ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
-    from agent.message_queue import MessageQueue
+    from agent.message_queue import QueuedMessage
 
-    return JSONResponse({"queued_count": len(await MessageQueue(thread_id).messages())})
+    return JSONResponse({"queued_count": len(await QueuedMessage.for_thread(thread_id))})
 
 
 _MAPPINGS_SEEDED = False
