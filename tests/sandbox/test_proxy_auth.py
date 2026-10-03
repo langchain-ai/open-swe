@@ -9,6 +9,7 @@ from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.sandboxes.providers.langsmith import (
     configure_sandbox_proxy,
 )
+from agent.sandboxes.providers.registry import SandboxProxyConfigError
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -113,11 +114,60 @@ class TestConfigureSandboxProxy:
             mock_client.patch = AsyncMock(return_value=failed_response)
             _mock_async_client(mock_client_cls, mock_client)
 
-            with pytest.raises(httpx2.HTTPStatusError):
+            with pytest.raises(SandboxProxyConfigError):
                 await configure_sandbox_proxy("sandbox-abc", "token")
 
             mock_client.patch.assert_called_once()
             mock_sleep.assert_not_called()
+
+    async def test_rejected_config_raises_config_error_with_response_body(self) -> None:
+        """A 4xx is a bad request, not a dead sandbox, and the API's reason must
+        survive into the raised error."""
+        request = httpx2.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx2.Response(
+            422, request=request, text='{"detail":"value is required for plaintext headers"}'
+        )
+        error = httpx2.HTTPStatusError("Unprocessable", request=request, response=response)
+        with (
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = error
+            mock_client.patch = AsyncMock(return_value=failed_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            with pytest.raises(SandboxProxyConfigError, match="plaintext headers") as excinfo:
+                await configure_sandbox_proxy("sandbox-abc", "token")
+
+        assert excinfo.value.sandbox_id == "sandbox-abc"
+        assert excinfo.value.status_code == 422
+        assert excinfo.value.__cause__ is not None
+        assert isinstance(excinfo.value.__cause__, httpx2.HTTPStatusError)
+
+    async def test_server_error_propagates_as_http_error(self) -> None:
+        """A 5xx after exhausting retries is not a configuration problem."""
+        request = httpx2.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        response = httpx2.Response(503, request=request)
+        error = httpx2.HTTPStatusError("Unavailable", request=request, response=response)
+        with (
+            patch("agent.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("agent.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock),
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            failed_response = MagicMock()
+            failed_response.raise_for_status.side_effect = error
+            mock_client.patch = AsyncMock(return_value=failed_response)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            with pytest.raises(httpx2.HTTPStatusError):
+                await configure_sandbox_proxy("sandbox-abc", "token")
 
 
 class TestConfigureSandboxProxyStartsStoppedSandbox:

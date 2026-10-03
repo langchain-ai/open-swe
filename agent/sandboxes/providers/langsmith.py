@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from agent.config import ENV
 from agent.sandboxes.paths import WORKSPACE_DIR
-from agent.sandboxes.providers.registry import SandboxGoneError
+from agent.sandboxes.providers.registry import SandboxGoneError, SandboxProxyConfigError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 from agent.utils.startup_trace import asubphase
 
@@ -180,7 +180,7 @@ def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, An
 
 class GitHubProxyHeader(TypedDict):
     name: str
-    type: Literal["opaque", "plaintext"]
+    type: Literal["opaque"]
     value: str
 
 
@@ -427,18 +427,41 @@ async def configure_sandbox_proxy(
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx2.HTTPStatusError as exc:
-            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
-                raise
-            logger.warning(
-                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
-                sandbox_name,
-                exc,
+            await _patch_proxy_config_starting_if_needed(
+                client, url, payload, api_key, sandbox_name
             )
-            await _start_sandbox_best_effort(sandbox_name)
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        except httpx2.HTTPStatusError as exc:
+            # A 400 after the start retry is a sandbox that will not come up, which
+            # callers treat as unreachable; any other 4xx is our request being wrong.
+            if (
+                not exc.response.is_client_error
+                or exc.response.status_code == PROXY_CONFIG_NOT_READY_STATUS
+            ):
+                raise
+            detail = exc.response.text.strip()[:PROXY_CONFIG_ERROR_BODY_CHARS]
+            raise SandboxProxyConfigError(sandbox_name, exc.response.status_code, detail) from exc
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
+
+
+async def _patch_proxy_config_starting_if_needed(
+    client: httpx2.AsyncClient,
+    url: str,
+    payload: dict[str, Any],
+    api_key: str,
+    sandbox_name: str,
+) -> None:
+    try:
+        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+    except httpx2.HTTPStatusError as exc:
+        if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
+            raise
+        logger.warning(
+            "Proxy config rejected for sandbox %s; starting it and retrying: %s",
+            sandbox_name,
+            exc,
+        )
+        await _start_sandbox_best_effort(sandbox_name)
+        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
 
 
 class WorkspaceServiceURL(BaseModel):
