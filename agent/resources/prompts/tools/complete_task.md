@@ -1,0 +1,1 @@
+Mark the task complete after evaluating every acceptance criterion. Supply one nonempty evidence entry per criterion, in the same order. Only the permanent coordinator can complete the task, and all worker invocations must have ended first. Worker success alone is not task completion. Delegate any further edits or verification instead of doing implementation yourself.

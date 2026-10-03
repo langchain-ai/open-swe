@@ -21,6 +21,8 @@ from agent.sandboxes.tool_access import (
     TOOLS_HEADER,
     authenticate_tool_access,
 )
+from agent.tasks.ingress import require_sandbox_guest_access
+from agent.tasks.store import thread_lock
 from agent.threads.runs import create_dashboard_thread_record, start_sandbox_guest_run
 from agent.threads.summary import repo_config_from_metadata
 from agent.utils.json_types import JsonObject, thread_metadata
@@ -55,6 +57,7 @@ class SandboxCaller:
             if scheme.lower() == "bearer" and bearer != OPENAI_API_KEY_PLACEHOLDER:
                 token = bearer
         access = await authenticate_tool_access(token)
+        await require_sandbox_guest_access(access.thread_id)
         host = await langgraph_client().threads.get(access.thread_id)
         return cls(access.thread_id, access.sandbox_id, thread_metadata(host))
 
@@ -101,7 +104,9 @@ class SandboxCaller:
     @asynccontextmanager
     async def reserve_capacity(self, thread_id: str | None) -> AsyncIterator[None]:
         """Hold the host's guest slots from the busy check until the body has started its run."""
-        async with postgres.transaction() as conn:
+        await require_sandbox_guest_access(self.host_thread_id)
+        async with thread_lock(self.host_thread_id), postgres.transaction() as conn:
+            await require_sandbox_guest_access(self.host_thread_id)
             await conn.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
                 {"subject": f"sandbox-openai:{self.host_thread_id}"},

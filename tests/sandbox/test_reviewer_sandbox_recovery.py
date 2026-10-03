@@ -16,6 +16,7 @@ from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
+from agent.tasks.store import TaskRecord
 
 
 @pytest.mark.asyncio
@@ -262,3 +263,80 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     # the identity write is joined inside the creation step.
     assert order == ["init", "bind"]
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.parametrize("thread_id", ["coordinator", "worker"])
+@pytest.mark.parametrize("sandbox_id", [None, "sandbox-deleted"])
+async def test_task_shared_sandbox_is_never_replaced(
+    thread_id: str, sandbox_id: str | None
+) -> None:
+    task = TaskRecord(
+        id="task-1",
+        coordinator_thread_id="coordinator",
+        workspace="task-workspace",
+        title="Task",
+        acceptance_criteria=["Fix the bug"],
+        delegated=True,
+        status="active",
+        completion_evidence=None,
+    )
+    with (
+        patch("agent.sandboxes.lifecycle.task_store.task_for_thread", AsyncMock(return_value=task)),
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            AsyncMock(return_value={"sandbox_id": sandbox_id}),
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._connect_existing_sandbox",
+            AsyncMock(side_effect=SandboxGoneError("deleted")),
+        ),
+        patch("agent.sandboxes.lifecycle._create_sandbox_with_proxy", AsyncMock()) as create,
+        pytest.raises(SandboxUnreachableError, match="human remediation"),
+    ):
+        await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
+    create.assert_not_awaited()
+
+
+async def test_worker_uses_coordinator_sandbox_binding_and_scope() -> None:
+    task = TaskRecord(
+        id="task-1",
+        coordinator_thread_id="coordinator",
+        workspace="task-workspace",
+        title="Task",
+        acceptance_criteria=["Fix the bug"],
+        delegated=True,
+        status="active",
+        completion_evidence=None,
+    )
+    backend = MagicMock(id="sandbox-shared")
+
+    async def metadata(thread_id: str) -> dict[str, object]:
+        return {
+            "sandbox_id": "sandbox-shared" if thread_id == "coordinator" else "sandbox-stale",
+            "sandbox_host_thread_id": "forged-host",
+        }
+
+    with (
+        patch("agent.sandboxes.lifecycle.task_store.task_for_thread", AsyncMock(return_value=task)),
+        patch("agent.sandboxes.lifecycle.get_sandbox_metadata", side_effect=metadata),
+        patch("agent.sandboxes.lifecycle.thread_token_repositories", AsyncMock(return_value=None)),
+        patch(
+            "agent.sandboxes.lifecycle._connect_existing_sandbox", AsyncMock(return_value=backend)
+        ) as connect,
+        patch("agent.sandboxes.lifecycle.client.threads.update", AsyncMock()) as update,
+        patch("agent.sandboxes.tool_access.provision_tool_url", AsyncMock()) as provision,
+    ):
+        try:
+            result = await ensure_sandbox_for_thread("worker", workspace_slug="forged-workspace")
+            assert result.id == "sandbox-shared"
+            assert connect.await_args is not None
+            assert connect.await_args.args == ("coordinator",)
+            assert connect.await_args.kwargs["sandbox_id"] == "sandbox-shared"
+            assert connect.await_args.kwargs["workspace_slug"] == "task-workspace"
+            update.assert_awaited_once_with(
+                thread_id="worker",
+                metadata={"sandbox_id": "sandbox-shared", "sandbox_host_thread_id": "coordinator"},
+            )
+            provision.assert_awaited_once_with("coordinator", backend)
+        finally:
+            SANDBOX_BACKENDS.pop("worker", None)

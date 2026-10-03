@@ -7,6 +7,7 @@ import pytest
 
 from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
 from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
+from agent.tasks.store import TaskRecord
 
 
 @pytest.fixture(autouse=True)
@@ -224,3 +225,27 @@ async def test_recreate_sandbox_rejects_non_distinct_provider_result() -> None:
     update.assert_not_awaited()
     assert SANDBOX_BACKENDS[thread_id].current is old_sandbox
     SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.parametrize("thread_id", ["coordinator", "worker"])
+async def test_shared_task_recreation_is_rejected_before_stopping_sandbox(
+    sandbox_client: AsyncMock, thread_id: str
+) -> None:
+    task = TaskRecord(
+        id="task-1",
+        coordinator_thread_id="coordinator",
+        workspace="task-workspace",
+        title="Task",
+        acceptance_criteria=["Fix the bug"],
+        delegated=True,
+        status="active",
+        completion_evidence=None,
+    )
+    with (
+        patch("agent.sandboxes.lifecycle.task_store.task_for_thread", AsyncMock(return_value=task)),
+        patch("agent.sandboxes.lifecycle._create_sandbox_with_proxy", AsyncMock()) as create,
+        pytest.raises(PermissionError, match="shared sandbox"),
+    ):
+        await recreate_sandbox_for_thread(thread_id)
+    sandbox_client.stop_sandbox.assert_not_awaited()
+    create.assert_not_awaited()

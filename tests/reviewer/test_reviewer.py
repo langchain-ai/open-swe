@@ -99,7 +99,11 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = create_agent.call_args.kwargs["middleware"][0]
+        prepare = next(
+            item
+            for item in create_agent.call_args.kwargs["middleware"]
+            if isinstance(item, reviewer.PrepareReviewerRunMiddleware)
+        )
         await prepare.abefore_agent({}, None)
 
     mock_sandbox.assert_awaited_once_with(
@@ -137,7 +141,11 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
         patch("agent.reviewer.create_deep_agent", return_value=_DummyAgent()) as create_agent,
     ):
         await reviewer.get_reviewer_agent(config)
-        prepare = create_agent.call_args.kwargs["middleware"][0]
+        prepare = next(
+            item
+            for item in create_agent.call_args.kwargs["middleware"]
+            if isinstance(item, reviewer.PrepareReviewerRunMiddleware)
+        )
         with pytest.raises(RuntimeError, match="installation token unavailable"):
             await prepare.abefore_agent({}, None)
 
@@ -270,7 +278,9 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
         assert isinstance(middleware, list)
-        prepare = cast(AgentMiddleware, middleware[0])
+        prepare = next(
+            item for item in middleware if isinstance(item, reviewer.PrepareReviewerRunMiddleware)
+        )
         updates = await _run_prepare(prepare)
         captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
 
@@ -350,7 +360,9 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
         await reviewer.get_reviewer_agent(config)
         middleware = captured["middleware"]
         assert isinstance(middleware, list)
-        prepare = cast(AgentMiddleware, middleware[0])
+        prepare = next(
+            item for item in middleware if isinstance(item, reviewer.PrepareReviewerRunMiddleware)
+        )
         updates = await _run_prepare(prepare)
 
     mock_fetch_diff.assert_awaited_once_with(

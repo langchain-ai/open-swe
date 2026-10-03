@@ -34,6 +34,7 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     ToolErrorMiddleware,
 )
+from agent.middleware.task_role import NonTaskGraphMiddleware
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
@@ -47,6 +48,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.tasks.ingress import assert_non_task_graph
 from agent.tools.read_finding_outcomes import read_finding_outcomes
 from agent.tools.save_review_style import save_review_style_prompt
 from agent.utils.analyzer_skills import SKILLS_ROUTE, skill_path_for_mode
@@ -123,6 +125,8 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
     thread_id = cfg.thread_id
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
+    if thread_id is not None:
+        await assert_non_task_graph(thread_id)
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
@@ -158,6 +162,7 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                NonTaskGraphMiddleware(thread_id),
                 PrepareAnalyzerRunMiddleware(thread_id=thread_id, config=config),
                 ModelCallLimitMiddleware(
                     run_limit=STYLE_ANALYZER_MODEL_CALL_LIMIT,

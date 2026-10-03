@@ -15,6 +15,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.pull_requests import PullRequest
 from agent.prompts import prompt
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
@@ -352,6 +353,7 @@ async def start_pull_request_thread(
         )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
+        await require_user_facing_thread(thread_id)
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
         busy = current.get("status") == "busy"
@@ -400,6 +402,7 @@ async def dispatch_pull_request_prompt(
         thread_id = await _find_or_create_pr_thread(
             owner, repo, number, login, None, prompt=prompt, title=title
         )
+        await require_user_facing_thread(thread_id)
         await before_dispatch(thread_id)
         current = await client.threads.get(thread_id)
         configurable = await _build_dashboard_configurable(

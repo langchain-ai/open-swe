@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -206,6 +207,7 @@ async def proxy_dashboard_thread_commands(
         metadata_run_status = metadata.get("latest_run_status")
         thread_busy = _thread_is_busy(thread) or metadata_run_status in {"pending", "running"}
 
+    await require_user_facing_thread(thread_id)
     start_params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
     # The client's queue-or-steer choice rides the run's multitask strategy.
     # LangGraph's commands endpoint does not take it, so it is consumed here.
@@ -435,6 +437,7 @@ async def proxy_dashboard_thread_run_enqueue(
         raise HTTPException(404, "thread not found")
     metadata = thread_metadata(thread)
     _assert_thread_postable(metadata, login, email)
+    await require_user_facing_thread(thread_id)
 
     command = {
         "method": "run.start",
@@ -465,6 +468,7 @@ async def proxy_dashboard_thread_run_cancel(
 ) -> tuple[int, bytes, str | None]:
     metadata = await _authorized_thread_metadata(thread_id, login, email=email)
     _assert_thread_postable(metadata, login, email)
+    await require_user_facing_thread(thread_id)
     try:
         run = await langgraph_client().runs.get(thread_id, run_id)
     except Exception as exc:  # noqa: BLE001

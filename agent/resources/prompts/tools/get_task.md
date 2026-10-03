@@ -1,0 +1,1 @@
+Read this thread's task, acceptance criteria, permanent coordinator, and worker invocation statuses. This is a nonblocking status check; progress and terminal results are delivered automatically to the coordinator.

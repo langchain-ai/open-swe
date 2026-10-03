@@ -24,6 +24,7 @@ from agent.sandboxes.retry import (
 )
 from agent.schedules.store import launch_scheduled_agent_run
 from agent.session_cost import run_session_cost_refresh
+from agent.tasks.ingress import assert_non_task_graph
 from agent.thread_feedback import run_feedback_prompt
 from agent.workspaces.refresh import LEGACY_REFRESH_TASK, run_workspace_refresh_tick
 from agent.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH_TASK
@@ -57,6 +58,10 @@ class SchedulerState(BaseModel):
 
 
 async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, Any]:
+    thread_id = RunConfig.from_config(config).thread_id
+    if thread_id is not None:
+        await assert_non_task_graph(thread_id)
+
     async def launch_once() -> dict[str, Any]:
         cfg = RunConfig.from_config(config)
         task = state.task or cfg.task

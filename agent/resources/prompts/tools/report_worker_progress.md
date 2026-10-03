@@ -1,0 +1,1 @@
+Report progress or a blocker from a worker to its permanent coordinator without waiting for a response. Set request_help=true when another assignment or worker is needed. The coordinator is notified automatically and decides how to help. Do not message users or spawn another worker yourself.
