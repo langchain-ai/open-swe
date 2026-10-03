@@ -5,11 +5,16 @@ const assistant = {
   home: "/assistant",
   thread: "/assistant/$threadId",
 } as const
+const copilot = { home: "/copilot", thread: "/copilot/$threadId" } as const
+
+function within(pathname: string, home: string) {
+  return pathname === home || pathname.startsWith(`${home}/`)
+}
 
 export function chatRoutes(pathname: string) {
-  return pathname === "/assistant" || pathname.startsWith("/assistant/")
-    ? assistant
-    : standard
+  if (within(pathname, assistant.home)) return assistant
+  if (within(pathname, copilot.home)) return copilot
+  return standard
 }
 
 export function useChatRoutes() {

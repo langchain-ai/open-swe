@@ -9,6 +9,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
 import type { IncomingMessage } from "node:http"
 import type { Plugin } from "vite"
+import { COPILOT_RUNTIME_PATH } from "./src/lib/copilotRuntimePath"
 
 // Paths the backend owns, not the app router. `/dashboard/api` is the only one a
 // deployed dashboard serves; the rest exist when the backend is the mock harness,
@@ -192,7 +193,11 @@ function deployedBackendSession(): Plugin | null {
         `http://127.0.0.1:${DEV_PORT}`,
       ])
       server.middlewares.use((req, res, next) => {
-        if (matchesBackendPrefix(req.url)) {
+        // The CopilotKit runtime forwards these headers to the backend.
+        if (
+          matchesBackendPrefix(req.url) ||
+          req.url?.startsWith(`${COPILOT_RUNTIME_PATH}/`)
+        ) {
           // Any page open in the browser can post here while this runs, and a
           // blanket rewrite would launder its Origin past the backend's CSRF
           // check on a session it never had. Only this server's pages get that.
@@ -315,27 +320,33 @@ const config = defineConfig({
       // a localhost default the handler deliberately refuses to have. Only the
       // two prefixes a deployed dashboard fronts, since proxying `/static`
       // would shadow nitro's assets.
-      handlers: IS_PRODUCTION
-        ? [
-            {
-              route: "/.well-known/apple-app-site-association",
-              handler: "./server/apple-app-site-association.ts",
-            },
-            ...[
-              "/dashboard/api",
-              "/webhooks",
-              // A built server fronting the mock harness fronts its fake-SaaS and
-              // control routes too, so the E2E browser has the one origin a
-              // deployment gives it and reaches the backend the way it really
-              // does — through the handler below. Serving the app from the
-              // harness instead let the suite pass while this proxy was broken.
-              ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
-            ].map((prefix) => ({
-              route: `${prefix}/**`,
-              handler: "./server/backend-proxy.ts",
-            })),
-          ]
-        : [],
+      handlers: [
+        {
+          route: `${COPILOT_RUNTIME_PATH}/**`,
+          handler: "./server/copilotkit.ts",
+        },
+        ...(IS_PRODUCTION
+          ? [
+              {
+                route: "/.well-known/apple-app-site-association",
+                handler: "./server/apple-app-site-association.ts",
+              },
+              ...[
+                "/dashboard/api",
+                "/webhooks",
+                // A built server fronting the mock harness fronts its fake-SaaS and
+                // control routes too, so the E2E browser has the one origin a
+                // deployment gives it and reaches the backend the way it really
+                // does — through the handler below. Serving the app from the
+                // harness instead let the suite pass while this proxy was broken.
+                ...(process.env.E2E_HARNESS ? E2E_HARNESS_PREFIXES : []),
+              ].map((prefix) => ({
+                route: `${prefix}/**`,
+                handler: "./server/backend-proxy.ts",
+              })),
+            ]
+          : []),
+      ],
       // Nitro gives every node_modules package its own server chunk. The
       // LangGraph SDK reaches CJS-only `eventemitter3` through `p-queue`, and
       // splitting that cycle puts the CommonJS interop helper in the SDK's chunk

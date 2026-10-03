@@ -10,9 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ag-ui/client": "1.0.1",
     "@assistant-ui/react": "^0.15.22",
     "@assistant-ui/react-langchain": "0.0.33",
     "@base-ui/react": "^1.7.0",
+    "@copilotkit/react-core": "1.77.0",
+    "@copilotkit/runtime": "1.77.0",
     "@datadog/browser-rum": "7.15.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@langchain/core": "^1.2.9",

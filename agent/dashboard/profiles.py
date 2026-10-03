@@ -67,6 +67,9 @@ class ProfileUpdate(BaseModel):
     experimental_assistant_ui: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    experimental_copilotkit_ui: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     experimental_background_callbacks: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -192,6 +195,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
+        ),
+        "experimental_copilotkit_ui": (
+            update.experimental_copilotkit_ui
+            if update.experimental_copilotkit_ui is not None
+            else existing.get("experimental_copilotkit_ui")
         ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
