@@ -8,6 +8,7 @@ import {
   useState,
 } from "react"
 import {
+  Clock,
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
@@ -65,6 +66,7 @@ import { agentsApi } from "@/features/agents/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
+import { formatRelativeTime } from "@/lib/utils"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { useConnectionStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import { runTranscriptCommitted } from "@/lib/perf/streaming"
@@ -104,6 +106,28 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       Open in Slack
       <ArrowUpRight className="size-3" />
     </a>
+  )
+}
+
+function ScheduledWakeup({ at }: { at?: number | null }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!at || at <= now) return
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      Math.min(30_000, at - now)
+    )
+    return () => clearTimeout(timer)
+  }, [at, now])
+  if (!at || at <= now) return null
+  return (
+    <div
+      className="mb-2 flex w-fit items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground"
+      title={`Scheduled for ${new Date(at).toLocaleString()}`}
+    >
+      <Clock className="size-3.5" />
+      Agent wakes up {formatRelativeTime(at)}
+    </div>
   )
 }
 
@@ -711,6 +735,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
+              {!isStreaming && <ScheduledWakeup at={thread.nextWakeupAt} />}
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}
                 health={pullRequestHealth}

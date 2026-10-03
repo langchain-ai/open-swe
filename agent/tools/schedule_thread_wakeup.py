@@ -30,6 +30,7 @@ _WAKEUP_SENDER_ID = "system:thread-wakeup"
 _MAX_WAKEUPS_BETWEEN_USER_MESSAGES = 10
 _WAKEUP_GENERATION_METADATA_KEY = "thread_wakeup_generation"
 _WAKEUP_COUNT_METADATA_KEY = "thread_wakeup_count"
+_NEXT_WAKEUP_METADATA_KEY = "next_wakeup_at_ms"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _PURGE_PAGE_SIZE = 100
 
@@ -136,6 +137,19 @@ async def _record_wakeup(client: Any, thread_id: str, generation: str, count: in
             _WAKEUP_COUNT_METADATA_KEY: count,
         },
     )
+
+
+async def _record_next_wakeup(client: Any, thread_id: str, fire_time: datetime) -> None:
+    """Expose the pending wakeup to the dashboard; never raises."""
+    try:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={_NEXT_WAKEUP_METADATA_KEY: int(fire_time.timestamp() * 1000)},
+        )
+    except Exception:
+        logger.warning(
+            "Failed to record next thread wakeup", extra={"thread_id": thread_id}, exc_info=True
+        )
 
 
 async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
@@ -314,7 +328,7 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
             logger.exception("Failed to record thread wakeup budget for %s", thread_id)
             return {"success": False, "error": "Unable to record the thread wakeup limit"}
         try:
-            return await _create_wakeup_cron(
+            result = await _create_wakeup_cron(
                 thread_id=thread_id,
                 fire_time=fire_time,
                 prompt=wakeup_prompt,
@@ -324,3 +338,5 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
             return {"success": False, "error": str(exc)}
+    await _record_next_wakeup(client, thread_id, fire_time)
+    return result
