@@ -148,8 +148,8 @@ async def post_card(
     if approval.awaiting_ready:
         return None, "draft card is author-only"
     location = approval.slack_location
-    if location is None:
-        return None, "no Slack thread"
+    if not approval.slack_channel_id:
+        return None, "no Slack channel"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     if not approval.slack_channel_choices:
         approval.slack_channel_choices = await channel_choices(approval)
@@ -161,6 +161,14 @@ async def post_card(
         diff_image_id=approval.slack_diff_file_id or None,
         choices=await _channel_choices(approval),
     )
+    if location is None:
+        channel = await SlackChannel.load(approval.slack_channel_id)
+        if channel is None:
+            return None, "channel_not_found"
+        message_ts, error = await channel.post(text, blocks=block_payload(blocks))
+        if message_ts:
+            approval.slack_thread_ts = message_ts
+        return message_ts, error
     return await post_slack_thread_reply_with_ts(
         location[0],
         location[1],
@@ -415,6 +423,11 @@ async def _repost(
     if not request.has_card or location is None or not request.slack_message_ts:
         return False
     old_ts = request.slack_message_ts
+    if old_ts == request.slack_thread_ts:
+        request.slack_broadcast = broadcast
+        await request.save()
+        await refresh_card(request, outcome=outcome)
+        return True
     request.slack_broadcast = broadcast
     text, blocks = await render(request, outcome)
 
@@ -582,7 +595,11 @@ async def refresh_card_in_thread(
 async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
     """Delete older cards for ``approval``'s PR, so its thread only ever shows one."""
     for stale in await HumanReviewRequest.superseded_on_slack(approval.pull_request_id):
-        if stale.id == approval.id or not stale.has_card:
+        if (
+            stale.id == approval.id
+            or not stale.has_card
+            or stale.slack_message_ts == stale.slack_thread_ts
+        ):
             continue
         if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
             continue
