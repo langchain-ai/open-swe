@@ -431,6 +431,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export interface ThreadParticipant {
+  id: string
+  displayName: string
+  githubLogin: string | null
+  avatarUrl: string
+}
+
 export interface AgentThread {
   ownerLogin?: string | null
   visibility?: "public" | "private"
