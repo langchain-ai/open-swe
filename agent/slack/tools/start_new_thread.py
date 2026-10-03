@@ -9,8 +9,10 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import prompt
 from agent.run_config import RunConfig
+from agent.slack.blocks import block_payload, section
 from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     append_slack_web_link_footer,
@@ -295,11 +297,13 @@ async def slack_start_new_thread(
         source_line,
         f"<@{requester}>" if requester else "",
     )
+    root_text = append_slack_web_link_footer(
+        " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+    )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        append_slack_web_link_footer(
-            " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
-        ),
+        root_text,
+        blocks=block_payload([section(root_text), *await origin_footer(cfg.thread_id)]),
         unfurl_links=False,
         unfurl_media=False,
     )

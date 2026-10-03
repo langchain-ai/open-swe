@@ -5,8 +5,10 @@ import re
 from dataclasses import dataclass
 
 from agent.slack import webhook as service
+from agent.slack.blocks import block_payload, section
 from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     append_slack_web_link_footer,
@@ -173,9 +175,11 @@ async def _start(
             return
     heading = f"`/breakout`: {_title(instruction)}"
     root_text = await _root_text(request, heading)
+    footer = await origin_footer(request.thread_id or "", (request.channel_id, request.thread_ts))
     new_ts, slack_error = await post_slack_top_level_message_with_ts(
         target,
         root_text,
+        blocks=block_payload([section(root_text), *footer]),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -194,6 +198,9 @@ async def _start(
             target,
             new_ts,
             append_slack_web_link_footer(root_text, web_url),
+            blocks=block_payload(
+                [section(append_slack_web_link_footer(root_text, web_url)), *footer]
+            ),
             unfurl_links=False,
             unfurl_media=False,
         )
