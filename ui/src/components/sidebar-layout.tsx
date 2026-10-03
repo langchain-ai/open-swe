@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom"
 import { SidebarSimpleIcon } from "@phosphor-icons/react"
 
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { cn } from "@/lib/utils"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
@@ -123,18 +124,19 @@ export function SidebarFrame({
     // a page header marked draggable would swallow clicks on this floating
     // toggle if it came earlier. Portal it after all content to keep it last.
     return createPortal(
-      <button
-        type="button"
-        aria-label="Expand sidebar"
-        data-sidebar-expand=""
-        onClick={toggle}
+      <TooltipIconButton
         className={cn(
-          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "fixed top-2 left-2 z-30 cursor-pointer",
           isDesktop && "left-[90px]"
         )}
+        data-sidebar-expand=""
+        label="Expand sidebar"
+        onClick={toggle}
+        side="right"
+        size="icon"
       >
         <SidebarSimpleIcon className="size-4" />
-      </button>,
+      </TooltipIconButton>,
       document.body
     )
   }
@@ -229,18 +231,18 @@ export function SidebarCollapseButton({
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
   return (
-    <button
-      type="button"
-      aria-label="Collapse sidebar"
-      data-sidebar-collapse=""
-      onClick={onToggle}
+    <TooltipIconButton
       className={cn(
-        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        "cursor-pointer",
         isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}
+      data-sidebar-collapse=""
+      label="Collapse sidebar"
+      onClick={onToggle}
+      side="right"
     >
       <SidebarSimpleIcon className="size-4" />
-    </button>
+    </TooltipIconButton>
   )
 }
