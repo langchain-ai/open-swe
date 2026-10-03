@@ -343,7 +343,11 @@ async def create_durable_run(
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
     cfg = RunConfig.from_config(run_config)
-    if assistant_id == "agent" and cfg.slack_ask is not True:
+    if (
+        assistant_id == "agent"
+        and cfg.slack_ask is not True
+        and not cfg.slack_defer_thinking_status
+    ):
         from agent.slack.thinking import sync_slack_background_status
 
         await sync_slack_background_status(

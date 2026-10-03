@@ -252,6 +252,70 @@ async def test_status_sync_does_not_clear_run_started_during_settlement(
     set_status.assert_not_awaited()
 
 
+@pytest.mark.parametrize("tool_name", ["slack_no_reply_needed", "slack_add_reaction"])
+async def test_deferred_status_waits_for_work_decision(slack_api, tool_name: str) -> None:
+    complete = asyncio.Event()
+    client = _status_client()
+
+    async def join(*_args):
+        await complete.wait()
+        return {}
+
+    client.runs.join.side_effect = join
+    loop = asyncio.get_running_loop()
+
+    def respond(method, params, _headers):
+        if method == "assistant.threads.setStatus" and params.get("status") == "Thinking...":
+            loop.call_soon_threadsafe(complete.set)
+        return 200, {"ok": True}, {}
+
+    slack_api.handler = respond
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def subscribe(self, _channels):
+            async def iterator():
+                yield {
+                    **_event("lifecycle", {"event": "running"}),
+                    "event_id": "synth:previous-run:lc||running",
+                }
+                yield _event("tools", {"event": "tool-started", "tool_name": "execute"})
+                yield {
+                    **_event("lifecycle", {"event": "running"}),
+                    "event_id": "synth:run-1:lc||running",
+                }
+                yield _event("tools", {"event": "tool-started", "tool_name": "ls"})
+                assert not slack_api.calls
+                yield _event("tools", {"event": "tool-started", "tool_name": tool_name})
+                if tool_name == "slack_no_reply_needed":
+                    complete.set()
+                yield {
+                    **_event("lifecycle", {"event": "completed"}),
+                    "event_id": "synth:run-1:lc||completed",
+                }
+
+            return iterator()
+
+    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
+    async with asyncio.timeout(2):
+        await slack_thinking.show_slack_thinking_status(
+            client=client,
+            thread_id="thread-1",
+            run_id="run-1",
+            channel_id="C1",
+            thread_ts="1.0",
+            defer_until_tool=True,
+        )
+
+    statuses = [params["status"] for method, params in slack_api.calls]
+    assert statuses == (["Thinking...", ""] if tool_name == "slack_add_reaction" else [""])
+
+
 async def test_status_wait_keeps_refreshing_after_repeated_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
