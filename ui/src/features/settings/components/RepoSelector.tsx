@@ -5,7 +5,19 @@ import {
   FolderIcon,
 } from "@phosphor-icons/react"
 
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Command,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { useRefreshRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import { useRecentRepos } from "@/lib/recentRepos"
@@ -178,6 +190,7 @@ function RepoSelect(
     )
   }, [repos, query, history, allowArchived, showArchived])
 
+
   return (
     <Popover
       open={open}
@@ -189,12 +202,12 @@ function RepoSelect(
       <div className={cn("min-w-0 shrink", className)}>
         <PopoverTrigger
           render={
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               disabled={disabled}
               aria-label={label}
               className={cn(
-                "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+                "h-auto max-w-[260px] justify-start gap-1 border-0 p-0 font-normal text-muted-foreground transition-opacity hover:bg-transparent hover:opacity-80 disabled:opacity-60 aria-expanded:bg-transparent",
                 triggerClassName
               )}
             />
