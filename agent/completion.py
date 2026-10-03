@@ -28,6 +28,7 @@ from agent.invocation import resolve_invocation_id, with_invocation_id
 from agent.linear.notifications import post_linear_notification
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
+from agent.review_guide.advance import top_up_after_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
@@ -460,6 +461,19 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
         )
 
 
+async def _top_up_review_guide(thread_id: str, metadata: object) -> None:
+    """After a review guide's turn, prepare its next chunks in the background."""
+    kind = metadata.get("kind") if isinstance(metadata, dict) else None
+    try:
+        await top_up_after_run(thread_id, kind if isinstance(kind, str) else "")
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not start preparing a review guide's next chunks",
+            exc_info=True,
+            extra={"run_completion": {"thread_id": thread_id}},
+        )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -483,6 +497,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
+        await _top_up_review_guide(thread_id, payload_metadata)
         return await _handle_successful_run(thread_id, run_id, payload)
     if (
         status in _TERMINAL_FAILURE_STATUSES
