@@ -201,6 +201,7 @@ export function buildProfileUpdate(
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
+    experimental_copilotkit_ui: current?.experimental_copilotkit_ui ?? null,
     experimental_background_callbacks:
       current?.experimental_background_callbacks ?? null,
     ...patch,
@@ -230,6 +231,10 @@ export function useDismissSlackOnboarding() {
     },
     onSettled: () => qc.invalidateQueries({ queryKey }),
   })
+}
+
+export function useExperimentalCopilotKitUi(): boolean {
+  return useProfile().data?.experimental_copilotkit_ui ?? false
 }
 
 export function useExperimentalAssistantUi(): boolean {

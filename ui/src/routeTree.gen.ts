@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
 import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -30,6 +31,8 @@ import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instruc
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
 import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
+import { Route as CopilotIndexRouteImport } from './routes/copilot/index'
+import { Route as CopilotThreadIdRouteImport } from './routes/copilot/$threadId'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
@@ -67,6 +70,11 @@ const AssistantRoute = AssistantRouteImport.update({
 const CloudAgentsRoute = CloudAgentsRouteImport.update({
   id: '/cloud-agents',
   path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CopilotRoute = CopilotRouteImport.update({
+  id: '/copilot',
+  path: '/copilot',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
@@ -149,6 +157,16 @@ const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AssistantRoute,
 } as any)
+const CopilotIndexRoute = CopilotIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CopilotRoute,
+} as any)
+const CopilotThreadIdRoute = CopilotThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => CopilotRoute,
+} as any)
 const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -223,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/copilot': typeof CopilotRouteWithChildren
   '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -237,11 +256,13 @@ export interface FileRoutesByFullPath {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
+  '/copilot/$threadId': typeof CopilotThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
+  '/copilot/': typeof CopilotIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -270,11 +291,13 @@ export interface FileRoutesByTo {
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
+  '/copilot/$threadId': typeof CopilotThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
   '/assistant': typeof AssistantIndexRoute
+  '/copilot': typeof CopilotIndexRoute
   '/incidents': typeof IncidentsIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -293,6 +316,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/copilot': typeof CopilotRouteWithChildren
   '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -307,11 +331,13 @@ export interface FileRoutesById {
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
+  '/copilot/$threadId': typeof CopilotThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
+  '/copilot/': typeof CopilotIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
   '/agents/automations/$scheduleId': typeof AgentsAutomationsScheduleIdRoute
@@ -331,6 +357,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/copilot'
     | '/feature-flags'
     | '/incidents'
     | '/integrations'
@@ -345,11 +372,13 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/assistant/$threadId'
+    | '/copilot/$threadId'
     | '/incidents/$incidentId'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents/'
     | '/assistant/'
+    | '/copilot/'
     | '/incidents/'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -378,11 +407,13 @@ export interface FileRouteTypes {
     | '/agents/instructions'
     | '/agents/workspaces'
     | '/assistant/$threadId'
+    | '/copilot/$threadId'
     | '/incidents/$incidentId'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents'
     | '/assistant'
+    | '/copilot'
     | '/incidents'
     | '/agents/$threadId/plan'
     | '/agents/automations/$scheduleId'
@@ -400,6 +431,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/copilot'
     | '/feature-flags'
     | '/incidents'
     | '/integrations'
@@ -414,11 +446,13 @@ export interface FileRouteTypes {
     | '/agents_/instructions'
     | '/agents_/workspaces'
     | '/assistant/$threadId'
+    | '/copilot/$threadId'
     | '/incidents/$incidentId'
     | '/review_/styles'
     | '/workspaces_/$slug'
     | '/agents/'
     | '/assistant/'
+    | '/copilot/'
     | '/incidents/'
     | '/agents/$threadId_/plan'
     | '/agents/automations/$scheduleId'
@@ -437,6 +471,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
+  CopilotRoute: typeof CopilotRouteWithChildren
   FeatureFlagsRoute: typeof FeatureFlagsRoute
   IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
@@ -489,6 +524,13 @@ declare module '@tanstack/react-router' {
       path: '/cloud-agents'
       fullPath: '/cloud-agents'
       preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/copilot': {
+      id: '/copilot'
+      path: '/copilot'
+      fullPath: '/copilot'
+      preLoaderRoute: typeof CopilotRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/feature-flags': {
@@ -602,6 +644,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/assistant/$threadId'
       preLoaderRoute: typeof AssistantThreadIdRouteImport
       parentRoute: typeof AssistantRoute
+    }
+    '/copilot/': {
+      id: '/copilot/'
+      path: '/'
+      fullPath: '/copilot/'
+      preLoaderRoute: typeof CopilotIndexRouteImport
+      parentRoute: typeof CopilotRoute
+    }
+    '/copilot/$threadId': {
+      id: '/copilot/$threadId'
+      path: '/$threadId'
+      fullPath: '/copilot/$threadId'
+      preLoaderRoute: typeof CopilotThreadIdRouteImport
+      parentRoute: typeof CopilotRoute
     }
     '/incidents/': {
       id: '/incidents/'
@@ -740,6 +796,19 @@ const AssistantRouteWithChildren = AssistantRoute._addFileChildren(
   AssistantRouteChildren,
 )
 
+interface CopilotRouteChildren {
+  CopilotThreadIdRoute: typeof CopilotThreadIdRoute
+  CopilotIndexRoute: typeof CopilotIndexRoute
+}
+
+const CopilotRouteChildren: CopilotRouteChildren = {
+  CopilotThreadIdRoute: CopilotThreadIdRoute,
+  CopilotIndexRoute: CopilotIndexRoute,
+}
+
+const CopilotRouteWithChildren =
+  CopilotRoute._addFileChildren(CopilotRouteChildren)
+
 interface IncidentsRouteChildren {
   IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
   IncidentsIndexRoute: typeof IncidentsIndexRoute
@@ -760,6 +829,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
+  CopilotRoute: CopilotRouteWithChildren,
   FeatureFlagsRoute: FeatureFlagsRoute,
   IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,

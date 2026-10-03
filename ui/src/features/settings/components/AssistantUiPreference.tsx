@@ -2,6 +2,7 @@ import { SettingsRow } from "@/components/AppShell"
 import { Switch } from "@/components/ui/switch"
 import {
   useExperimentalAssistantUi,
+  useExperimentalCopilotKitUi,
   useOptions,
   usePatchProfile,
   useProfile,
@@ -17,6 +18,7 @@ export function AssistantUiPreference() {
   const options = useOptions()
   const save = usePatchProfile()
   const enabled = useExperimentalAssistantUi()
+  const copilotKit = useExperimentalCopilotKitUi()
   const preferStream = useStreamPreference()
   const defaults = options.data
   const disabled = !profile.isSuccess || !defaults
@@ -47,7 +49,33 @@ export function AssistantUiPreference() {
             onCheckedChange={(value) => {
               if (!defaults) return
               save.patch(
-                { experimental_assistant_ui: value },
+                {
+                  experimental_assistant_ui: value,
+                  ...(value ? { experimental_copilotkit_ui: false } : {}),
+                },
+                defaults.default_agent_model,
+                defaults.default_agent_reasoning_effort
+              )
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="CopilotKit UI (experimental)"
+        htmlFor="experimental-copilotkit-ui"
+        description="Use the CopilotKit conversation interface, streamed over AG-UI, for your account."
+        control={
+          <Switch
+            id="experimental-copilotkit-ui"
+            checked={copilotKit}
+            disabled={disabled}
+            onCheckedChange={(value) => {
+              if (!defaults) return
+              save.patch(
+                {
+                  experimental_copilotkit_ui: value,
+                  ...(value ? { experimental_assistant_ui: false } : {}),
+                },
                 defaults.default_agent_model,
                 defaults.default_agent_reasoning_effort
               )

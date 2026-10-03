@@ -5,6 +5,7 @@ packages:
   - tests/e2e
 
 allowBuilds:
+  '@scarf/scarf': false
   electron: true
   electron-winstaller: false
   esbuild: true

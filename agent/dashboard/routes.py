@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
+from agent.agui.routes import router as ag_ui_router
 from agent.analytics.routes import router as analytics_router
 from agent.api_keys.routes import router as api_keys_router
 from agent.audit_logs.routes import router as audit_logs_router
@@ -64,6 +65,7 @@ router.include_router(analytics_router)
 router.include_router(audit_logs_router)
 router.include_router(schedules_router)
 router.include_router(threads_router)
+router.include_router(ag_ui_router)
 router.include_router(transcript_router)
 router.include_router(api_keys_router)
 router.include_router(bridge_router)
