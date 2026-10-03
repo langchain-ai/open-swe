@@ -1,9 +1,13 @@
 """Propose shared memory changes in the current Slack channel."""
 
+from difflib import unified_diff
+
 from agent.run_config import RunConfig
-from agent.slack.channel_memory import MEMORY_NAMESPACE, PROPOSAL_NAMESPACE, channel_member
+from agent.slack.blocks import block_payload, code_block, section
+from agent.slack.channel_memory import PROPOSAL_NAMESPACE, channel_member
+from agent.slack.channels import SlackChannel
 from agent.slack.client import fetch_slack_message_by_ts, post_slack_thread_reply_with_ts
-from agent.store import get_value, put_value
+from agent.store import put_value
 
 
 async def propose_channel_memory(memory: str) -> dict[str, object]:
@@ -21,17 +25,41 @@ async def propose_channel_memory(memory: str) -> dict[str, object]:
         return {"success": False, "error": "Memory must be at most 20,000 characters"}
     if not await channel_member(slack.channel_id, slack.triggering_user_id):
         return {"success": False, "error": "Only human channel members can propose memory"}
-    current = await get_value(MEMORY_NAMESPACE, slack.channel_id) or {}
+    current, revision = await SlackChannel.memory_file(slack.channel_id)
     text = memory.strip()
+    patch = "\n".join(
+        unified_diff(
+            current.splitlines(),
+            text.splitlines(),
+            fromfile="channel-memory.md",
+            tofile="channel-memory.md",
+            lineterm="",
+        )
+    )
+    if not patch:
+        return {"success": False, "error": "The proposed memory is unchanged"}
+    if len(code_block(patch)) > 2900:
+        return {
+            "success": False,
+            "error": "Patch is too large for one review card; propose a smaller edit",
+        }
     message_text = (
-        f"<@{slack.triggering_user_id}> proposes replacing this channel's memory with:\n"
-        f"{text or '(empty — clear channel memory)'}\n\n"
-        "A different human channel member must react 👍 to this message to apply this exact proposal."
+        f"<@{slack.triggering_user_id}> proposes this patch to channel-memory.md:\n"
+        f"```\n{patch}\n```\n\n"
+        "A different human channel member must react 👍 to this message to apply this exact patch."
+    )
+    blocks = block_payload(
+        [
+            section(f"*Channel memory patch*\nProposed by <@{slack.triggering_user_id}>"),
+            section(code_block(patch)),
+            section("React 👍 to second this exact patch. The proposer cannot second it."),
+        ]
     )
     timestamp, error = await post_slack_thread_reply_with_ts(
         slack.channel_id,
         slack.reply_thread_ts or slack.thread_ts,
         message_text,
+        blocks=blocks,
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -46,7 +74,9 @@ async def propose_channel_memory(memory: str) -> dict[str, object]:
         {
             "memory": text,
             "proposer": slack.triggering_user_id,
-            "base_revision": current.get("revision", 0),
+            "base_revision": revision,
+            "patch": patch,
+            "message_blocks": message.get("blocks", []),
             "message_text": message["text"],
             "status": "pending",
         },

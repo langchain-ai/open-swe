@@ -148,12 +148,10 @@ async def _slack_channel_identity(
     # Slack's own `description` is usually the topic and purpose run together.
     if not topic and not purpose and channel_context.description.strip():
         channel["description"] = channel_context.description.strip()
-    from agent.slack.channel_memory import MEMORY_NAMESPACE
-    from agent.store import get_value
+    from agent.slack.channels import SlackChannel
 
-    memory = await get_value(MEMORY_NAMESPACE, channel_id)
-    if memory and isinstance(memory.get("memory"), str):
-        channel["memory"] = memory["memory"]
+    memory, _ = await SlackChannel.memory_file(channel_id)
+    channel["memory"] = memory
     if repo is not None:
         channel["default_repo"] = repo.full_name
     dashboard_url = common.dashboard_thread_url(thread_id)

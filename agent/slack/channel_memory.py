@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     fetch_slack_message_by_ts,
     get_slack_user_info,
@@ -12,7 +13,6 @@ from agent.slack.http import SlackClient
 from agent.store import get_value, put_value
 from agent.utils.thread_ops import langgraph_client
 
-MEMORY_NAMESPACE = ["slack_channel_memory"]
 PROPOSAL_NAMESPACE = ["slack_channel_memory_proposals"]
 
 
@@ -64,10 +64,16 @@ async def approve_channel_memory(event: Mapping[str, object]) -> bool:
         if not isinstance(proposer, str) or not await channel_member(channel, proposer):
             return True
         message = await fetch_slack_message_by_ts(channel, timestamp)
-        if not message or message.get("text") != proposal.get("message_text"):
+        if (
+            not message
+            or message.get("text") != proposal.get("message_text")
+            or message.get("blocks", []) != proposal.get("message_blocks", [])
+        ):
             return True
-        current = await get_value(MEMORY_NAMESPACE, channel) or {}
-        if current.get("revision", 0) != proposal.get("base_revision"):
+        memory, revision = proposal.get("memory"), proposal.get("base_revision")
+        if not isinstance(memory, str) or not isinstance(revision, int):
+            raise ValueError("Invalid channel memory proposal")
+        if not await SlackChannel.patch_memory(channel, memory, revision):
             proposal["status"] = "stale"
             await put_value(PROPOSAL_NAMESPACE, key, proposal)
             await post_slack_thread_reply_with_ts(
@@ -76,16 +82,7 @@ async def approve_channel_memory(event: Mapping[str, object]) -> bool:
                 "Channel memory changed since this proposal. Please propose it again against the current memory.",
             )
             return True
-        await put_value(
-            MEMORY_NAMESPACE,
-            channel,
-            {
-                "memory": proposal["memory"],
-                "revision": int(current.get("revision", 0)) + 1,
-                "proposer": proposer,
-                "seconded_by": user,
-            },
-        )
+        proposal["seconded_by"] = user
         proposal["status"] = "applied"
         await put_value(PROPOSAL_NAMESPACE, key, proposal)
     await post_slack_thread_reply_with_ts(

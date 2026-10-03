@@ -10,7 +10,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,26 @@ class SlackChannel(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(server_default="", default="")
+    memory: Mapped[str] = mapped_column(server_default="", default="")
+    memory_revision: Mapped[int] = mapped_column(server_default="0", default=0)
+
+    @classmethod
+    async def memory_file(cls, channel_id: str) -> tuple[str, int]:
+        async with postgres.session() as session:
+            row = await session.get(cls, channel_id)
+            return (row.memory, row.memory_revision) if row else ("", 0)
+
+    @classmethod
+    async def patch_memory(cls, channel_id: str, memory: str, revision: int) -> bool:
+        async with postgres.session() as session:
+            result = await session.scalar(
+                update(cls)
+                .where(cls.id == channel_id, cls.memory_revision == revision)
+                .values(memory=memory, memory_revision=revision + 1)
+                .returning(cls.id)
+            )
+            return result is not None
+
     payload: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     fetched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 

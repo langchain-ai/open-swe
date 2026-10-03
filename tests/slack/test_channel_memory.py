@@ -40,6 +40,14 @@ async def test_memory_requires_other_member_and_current_revision(
     async def lock(*args, **kwargs):
         yield
 
+    async def patch_memory(channel, memory, base_revision):
+        row = records["slack_channel_memory"]
+        if row["revision"] != base_revision:
+            return False
+        row.update(memory=memory, revision=base_revision + 1)
+        return True
+
+    monkeypatch.setattr(channel_memory.SlackChannel, "patch_memory", patch_memory)
     monkeypatch.setattr(channel_memory, "get_value", get_value)
     monkeypatch.setattr(channel_memory, "put_value", put_value)
     monkeypatch.setattr(channel_memory, "slack_thread_mutation_lock", lock)
