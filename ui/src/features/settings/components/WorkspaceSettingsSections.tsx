@@ -163,6 +163,7 @@ export function DefaultRepoSection({
           control={
             <div className="w-56">
               <RepoSelector
+                autoSelect={false}
                 repos={repositories}
                 allowArchived
                 selectedRepo={settings.data?.default_repo ?? null}
