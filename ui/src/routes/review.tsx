@@ -8,6 +8,7 @@ import {
   SettingsNavRow,
   SettingsSection,
 } from "@/components/AppShell"
+import { Empty, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -98,10 +99,12 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
           </div>
         )}
         {!loading && grouped.length === 0 && (
-          <p className="px-4 py-3 text-xs text-muted-foreground">
-            No GitHub App installations found. Install the Open SWE GitHub App
-            on an account or org to manage repos here.
-          </p>
+          <Empty className="p-4">
+            <EmptyDescription>
+              No GitHub App installations found. Install the Open SWE GitHub App
+              on an account or org to manage repos here.
+            </EmptyDescription>
+          </Empty>
         )}
         {grouped.map(([owner, list]) => {
           const autoReviewCount = list.filter((r) =>
