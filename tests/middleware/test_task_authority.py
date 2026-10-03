@@ -337,7 +337,12 @@ async def test_abandoned_admissions_reclaimed_when_owner_session_ends(registry_d
 
 
 @pytest.mark.asyncio
-async def test_lost_owner_connection_only_cancels_fenced_tools(registry_db, monkeypatch):
+@pytest.mark.parametrize("connection_lost", [False, True])
+async def test_lost_owner_connection_only_cancels_fenced_tools(
+    registry_db, monkeypatch, connection_lost
+):
+    from contextvars import Context
+
     from agent import tasks
 
     monkeypatch.setattr(tasks, "_OWNER_GATE", asyncio.Lock())
@@ -354,15 +359,31 @@ async def test_lost_owner_connection_only_cancels_fenced_tools(registry_db, monk
     await asyncio.gather(*(event.wait() for event in entered.values()))
     owner = tasks._OWNER
     assert owner is not None
-    await owner.connection.close()
+    if connection_lost:
+        await owner.connection.close()
+    else:
+        connection_type = type(owner.connection)
+        execute = connection_type.execute
+
+        async def fail_health(connection, *args, **kwargs):
+            if connection is owner.connection:
+                raise TimeoutError
+            return await execute(connection, *args, **kwargs)
+
+        monkeypatch.setattr(connection_type, "execute", fail_health)
     for name in ("member", "transition"):
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(running[name], 3)
     assert not running["ordinary"].done()
-    with pytest.raises(PermissionError, match="owner lost"):
-        async with authority("new"):
-            pytest.fail("Lost ownership allowed admission")
-    release.set()
-    await running["ordinary"]
-    async with authority("thread"):
-        assert tasks._OWNER is not owner
+    async with authority("new", exclusive=False):
+        replacement = tasks._OWNER
+        assert replacement is not None and replacement is not owner
+        with pytest.raises(PermissionError, match="conflicts"):
+            await asyncio.create_task(
+                update_task("ordinary", ["ship"], False, ""), context=Context()
+            )
+        release.set()
+        await running["ordinary"]
+        assert tasks._OWNER is replacement
+        await asyncio.create_task(update_task("ordinary", ["ship"], False, ""), context=Context())
+    assert tasks._OWNER is None

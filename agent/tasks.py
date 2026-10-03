@@ -39,10 +39,12 @@ class _Owner:
 
 
 _OWNER: _Owner | None = None
+_OWNERS: dict[UUID, _Owner] = {}
 _OWNER_GATE = asyncio.Lock()
 
 
 async def _watch_owner(owner: _Owner) -> None:
+    global _OWNER
     try:
         while True:
             await asyncio.sleep(1)
@@ -51,6 +53,8 @@ async def _watch_owner(owner: _Owner) -> None:
         raise
     except Exception:
         owner.failed = True
+        if _OWNER is owner:
+            _OWNER = None
         logger.exception("Task admission owner connection lost")
         for task in tuple(owner.fenced_tasks):
             task.cancel()
@@ -80,6 +84,7 @@ async def admission_owner() -> AsyncIterator[_Owner]:
                 await conn.close()
                 raise
             _OWNER = _Owner(owner_id, conn, set(), set())
+            _OWNERS[owner_id] = _OWNER
             _OWNER.monitor = asyncio.create_task(_watch_owner(_OWNER))
         owner = _OWNER
         if owner.failed:
@@ -98,7 +103,9 @@ async def admission_owner() -> AsyncIterator[_Owner]:
                 try:
                     await owner.connection.close()
                 finally:
-                    _OWNER = None
+                    _OWNERS.pop(owner.id, None)
+                    if _OWNER is owner:
+                        _OWNER = None
 
 
 async def reclaim_admissions(conn: AsyncConnection, thread_id: str) -> None:
@@ -113,7 +120,7 @@ async def reclaim_admissions(conn: AsyncConnection, thread_id: str) -> None:
         .all()
     )
     for owner_id in owners:
-        if owner_id is None or (_OWNER is not None and _OWNER.id == owner_id):
+        if owner_id is None or owner_id in _OWNERS:
             continue
         abandoned = await conn.scalar(
             text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
