@@ -20,7 +20,7 @@ from agent.threads.runs import (
     _build_dashboard_configurable,
     create_dashboard_thread_record,
 )
-from agent.threads.summary import _assert_thread_postable
+from agent.threads.summary import _assert_thread_postable, thread_is_unlisted
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -229,7 +229,7 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 
 
 async def find_pr_threads(
-    owner: str, repo: str, number: int, login: str, email: str | None
+    owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
 ) -> list[Thread]:
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
@@ -242,6 +242,8 @@ async def find_pr_threads(
             continue
         metadata = thread_metadata(thread)
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
+            continue
+        if thread_is_unlisted(metadata) is not unlisted:
             continue
         try:
             _assert_thread_postable(metadata, login, email)
@@ -274,10 +276,11 @@ async def _find_or_create_pr_thread(
     *,
     prompt: str,
     title: str,
+    unlisted: bool = False,
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await find_pr_threads(owner, repo, number, login, email)
+    candidates = await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
@@ -291,7 +294,12 @@ async def _find_or_create_pr_thread(
     thread_id = str(thread["thread_id"])
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
+        metadata={
+            "pr_url": url,
+            "pr_number": number,
+            "source_context": {"pr_number": number},
+            "unlisted": unlisted,
+        },
     )
     await _link_pr_thread(owner, repo, number, thread_id)
     return thread_id
@@ -388,6 +396,7 @@ async def dispatch_pull_request_prompt(
     *,
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
+    unlisted: bool = False,
 ) -> str:
     """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
 
@@ -398,7 +407,7 @@ async def dispatch_pull_request_prompt(
     client = langgraph_client()
     async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
-            owner, repo, number, login, None, prompt=prompt, title=title
+            owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )
         await before_dispatch(thread_id)
         current = await client.threads.get(thread_id)
