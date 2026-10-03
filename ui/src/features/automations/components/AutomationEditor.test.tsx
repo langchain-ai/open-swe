@@ -2,13 +2,16 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useRecentRepos } from "@/lib/recentRepos"
 import { AutomationEditor } from "./AutomationEditor"
 import { useSession } from "@/lib/session"
 
 const mocks = vi.hoisted(() => ({
   createMutate: vi.fn(),
+  updateMutate: vi.fn(),
+  unsavedWarning: vi.fn<(dirty: boolean) => () => void>(() => vi.fn()),
   workspaces: [
     { slug: "default", name: "Default", repos: [], is_default: true },
     { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
@@ -34,7 +37,7 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useUpdateAgentSchedule: () => ({
     error: null,
     isPending: false,
-    mutate: vi.fn(),
+    mutate: mocks.updateMutate,
   }),
   useWorkspaceOptions: () => ({
     data: { default_slug: "default", workspaces: mocks.workspaces },
@@ -44,10 +47,11 @@ vi.mock("@/features/agents/lib/provider/useModelOptions", () => ({
   useModelOptions: () => ({ models: [], defaultSelection: null }),
 }))
 vi.mock("@/features/automations/lib/useUnsavedChangesWarning", () => ({
-  useUnsavedChangesWarning: () => vi.fn(),
+  useUnsavedChangesWarning: mocks.unsavedWarning,
 }))
 vi.mock("@/lib/profile", () => ({
-  useRepos: () => ({ data: { repositories: [] } }),
+  useRepos: () => ({ data: { repositories: [{ full_name: "acme/oss" }] } }),
+  useRefreshRepos: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
@@ -59,9 +63,6 @@ vi.mock("@/lib/slack-channels", async (importOriginal) => ({
     isLoading: false,
     isError: false,
   }),
-}))
-vi.mock("@/features/settings/components/RepoSelector", () => ({
-  RepoSelector: () => <div />,
 }))
 vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
@@ -91,6 +92,8 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => <div />,
 }))
 
+beforeEach(() => useRecentRepos.setState({ byAccount: {} }))
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -107,7 +110,7 @@ const TEMPLATE = {
 
 function signInAsAdmin() {
   vi.mocked(useSession).mockReturnValue({
-    data: { is_admin: true },
+    data: { is_admin: true, login: "alice" },
   } as unknown as ReturnType<typeof useSession>)
 }
 
@@ -174,6 +177,48 @@ describe("AutomationEditor", () => {
 
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
       workspace: "default",
+    })
+  })
+
+  it("preserves an existing repository-free automation when saving another edit", () => {
+    signInAsAdmin()
+    useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Check dependencies",
+          schedule: "0 9 * * *",
+          trigger: "schedule",
+          scope: "workspace",
+          workspace: "core",
+          repo: null,
+          slackNotificationMode: "always",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+    expect(mocks.unsavedWarning).toHaveBeenLastCalledWith(false)
+    fireEvent.change(screen.getByPlaceholderText("Untitled automation"), {
+      target: { value: "Updated nightly" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(mocks.updateMutate.mock.calls[0]?.[0]).toMatchObject({
+      body: { name: "Updated nightly", repo: "" },
+    })
+  })
+
+  it("defaults only new automations to a recent repository", () => {
+    signInAsAdmin()
+    useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
+    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
+      repo: "acme/oss",
     })
   })
 
