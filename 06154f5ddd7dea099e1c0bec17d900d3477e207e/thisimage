@@ -1,0 +1,142 @@
+import { Suspense, lazy, useEffect, useState } from "react"
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRouteWithContext,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router"
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
+import { TanStackDevtools } from "@tanstack/react-devtools"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
+
+import appCss from "../styles.css?url"
+import type { QueryClient } from "@tanstack/react-query"
+import { AppCommandProvider } from "@/lib/appCommands"
+import { resolveSessionOnServer } from "@/lib/session-ssr"
+import { Toaster } from "@/components/ui/sonner"
+<<<<<<<
+import { ConfirmProvider } from "@/components/ConfirmDialog"
+=======
+import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
+>>>>>>>
+import { ThemeSync } from "@/lib/ThemeSync"
+import { THEME_COLOR } from "@/lib/theme"
+import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
+import { isPerfHudEnabled } from "@/lib/perf/trace"
+
+const PerfHud = lazy(() => import("@/lib/perf/PerfHud"))
+
+/** Client-only: the flag lives in localStorage, so the server render never shows it. */
+function PerfHudMount() {
+  const [enabled, setEnabled] = useState(false)
+  // oxlint-disable-next-line react/set-state-in-effect
+  useEffect(() => setEnabled(isPerfHudEnabled()), [])
+  if (!enabled) return null
+  return (
+    <Suspense fallback={null}>
+      <PerfHud />
+    </Suspense>
+  )
+}
+
+const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
+
+export const Route = createRootRouteWithContext<{
+  queryClient: QueryClient
+}>()({
+  beforeLoad: ({ context, location }) =>
+    resolveSessionOnServer(context.queryClient, location.href),
+  head: () => ({
+    meta: [
+      { charSet: "utf-8" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1, maximum-scale=1",
+      },
+      { name: "theme-color", content: THEME_COLOR.light },
+      { title: "Open SWE" },
+    ],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      {
+        rel: "manifest",
+        href: `${import.meta.env.BASE_URL}manifest.webmanifest`,
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        href: `${import.meta.env.BASE_URL}favicon.png`,
+      },
+      {
+        rel: "apple-touch-icon",
+        href: `${import.meta.env.BASE_URL}apple-touch-icon.png`,
+      },
+    ],
+  }),
+  notFoundComponent: () => (
+    <main className="container mx-auto p-4 pt-16">
+      <h1 className="text-2xl font-medium">404</h1>
+      <p className="text-muted-foreground">
+        The requested page could not be found.
+      </p>
+    </main>
+  ),
+  shellComponent: RootDocument,
+})
+
+function RootDocument({ children }: { children: React.ReactNode }) {
+  const { queryClient } = useRouter().options.context
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const warmupScript = apiWarmupScript(pathname)
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        {warmupScript && (
+          <script dangerouslySetInnerHTML={{ __html: warmupScript }} />
+        )}
+        <HeadContent />
+      </head>
+      <body>
+        {typeof window !== "undefined" &&
+          window.openSweDesktop && (
+            // Rendered first so later no-drag elements carve out of it; the
+            // desktop preload styles it. Preload-injected DOM would be cleared
+            // when React takes over the document, so it lives here instead.
+            <div aria-hidden data-desktop-drag-strip="" />
+          )}
+        <ThemeSync />
+        <Toaster position="bottom-right" closeButton />
+        <QueryClientProvider client={queryClient}>
+<<<<<<<
+          <ConfirmProvider>
+            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+          </ConfirmProvider>
+=======
+          <VersionMismatchBanner />
+          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+>>>>>>>
+          <PerfHudMount />
+          {import.meta.env.VITE_DEVTOOLS !== "false" && (
+            <>
+              <TanStackDevtools
+                config={{ position: "bottom-right" }}
+                plugins={[
+                  {
+                    name: "Tanstack Router",
+                    render: <TanStackRouterDevtoolsPanel />,
+                  },
+                ]}
+              />
+              <ReactQueryDevtools initialIsOpen={false} />
+            </>
+          )}
+        </QueryClientProvider>
+        <Scripts />
+      </body>
+    </html>
+  )
+}

@@ -1,0 +1,130 @@
+import { createFileRoute } from "@tanstack/react-router"
+
+import { PageHeader } from "@/components/AppShell"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useQueryClient } from "@tanstack/react-query"
+import { api } from "@/lib/api"
+import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
+import { pageTitle } from "@/lib/pageTitle"
+import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+import { OpenPullRequests } from "@/features/reviews/OpenPullRequests"
+import { ReviewedPullRequests } from "@/features/reviews/ReviewedPullRequests"
+import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
+import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
+import {
+  parsePullRequestSelection,
+  validateReviewsSearch,
+  type ReviewsSearch,
+} from "@/features/reviews/search"
+
+export const Route = createFileRoute("/agents/reviews/")({
+  validateSearch: validateReviewsSearch,
+  head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
+  component: ReviewsPage,
+})
+
+const tabs = [
+  ["mine", "Mine"],
+  ["to-review", "To Review"],
+  ["all", "All Reviews"],
+] as const
+
+function ReviewsPage() {
+  const session = useSession()
+  const queryClient = useQueryClient()
+  const prefetch = (tab: string) => {
+    if (tab !== "all") return
+    void queryClient.prefetchQuery({
+      queryKey: ["reviews", false, 0],
+      queryFn: () => api.listReviews(0, false),
+      staleTime: BROWSER_CACHE_MAX_AGE_MS,
+    })
+  }
+  const filters = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const tab = filters.tab ?? "mine"
+  const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
+    void navigate({
+      search: (previous) => ({
+        ...previous,
+        ...changes,
+        ...(Object.keys(changes).some((key) =>
+          ["repo", "q", "status", "sort", "direction"].includes(key)
+        )
+          ? { page: undefined }
+          : {}),
+      }),
+      replace,
+    })
+  }
+  const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
+
+  return (
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 w-full flex-1 flex-col px-6 py-6">
+        <div
+          className={cn(
+            "mx-auto flex min-h-0 w-full flex-1 flex-col",
+            !selection && "max-w-6xl"
+          )}
+        >
+          <PageHeader
+            className="mb-0"
+            title="Pull Requests"
+            action={
+              <div className="flex items-center gap-3">
+                <Tabs
+                  value={tab}
+                  onValueChange={(value: "mine" | "to-review" | "all") =>
+                    changeFilters({
+                      tab: value === "mine" ? undefined : value,
+                      page: undefined,
+                      pr: undefined,
+                    })
+                  }
+                >
+                  <TabsList>
+                    {tabs.map(([value, label]) => (
+                      <TabsTrigger
+                        key={value}
+                        value={value}
+                        onPointerEnter={() => prefetch(value)}
+                        onFocus={() => prefetch(value)}
+                      >
+                        {label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+                <OpenPullRequestInput />
+                <ReviewBookmarklet />
+                <span className="hidden text-xs text-muted-foreground lg:inline">
+                  Drag to your bookmarks bar
+                </span>
+              </div>
+            }
+          />
+
+          {session.data &&
+            (tab === "all" ? (
+              <ReviewedPullRequests
+                page={filters.page ?? 0}
+                onPageChange={(page) =>
+                  changeFilters({ page: page || undefined })
+                }
+              />
+            ) : (
+              <OpenPullRequests
+                key={tab}
+                login={session.data.login}
+                scope={tab === "mine" ? "mine" : "review-requested"}
+                filters={filters}
+                onFiltersChange={changeFilters}
+              />
+            ))}
+        </div>
+      </div>
+    </main>
+  )
+}
