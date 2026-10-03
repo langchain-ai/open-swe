@@ -377,6 +377,35 @@ async def restore_slack_thinking_status(channel_id: str, thread_ts: str) -> bool
     )
 
 
+async def _wait_for_slack_work(client: LangGraphClient, thread_id: str, run_id: str) -> bool:
+    active = False
+    try:
+        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+            async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                lifecycle = root_lifecycle(event)
+                if lifecycle is not None:
+                    active = lifecycle == (run_id, "running")
+                    if lifecycle[0] == run_id and lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                        return False
+                parsed = _event_data(event)
+                if active and parsed is not None:
+                    _, data = parsed
+                    name = data.get("tool_name")
+                    if (
+                        data.get("event") == "tool-started"
+                        and isinstance(name, str)
+                        and name in {"slack_reply", "slack_add_reaction", "slack_start_new_thread"}
+                    ):
+                        return True
+    except Exception:
+        logger.warning(
+            "Could not observe Slack work decision",
+            extra={"agent_thread_id": thread_id, "run_id": run_id},
+            exc_info=True,
+        )
+    return False
+
+
 async def show_slack_thinking_status(
     *,
     client: LangGraphClient,
@@ -384,6 +413,7 @@ async def show_slack_thinking_status(
     run_id: str,
     channel_id: str,
     thread_ts: str,
+    defer_until_tool: bool = False,
 ) -> None:
     """Refresh Slack's status while waiting for this run's completion.
 
@@ -391,7 +421,7 @@ async def show_slack_thinking_status(
     began, without depending on thread lifecycle history or completion webhook
     delivery.
     """
-    if not await restore_slack_thinking_status(channel_id, thread_ts):
+    if not defer_until_tool and not await restore_slack_thinking_status(channel_id, thread_ts):
         return
 
     home = (channel_id, thread_ts)
@@ -413,6 +443,14 @@ async def show_slack_thinking_status(
             )
 
     async def refresh() -> None:
+        nonlocal last_known
+        if defer_until_tool:
+            if not await _wait_for_slack_work(client, thread_id, run_id):
+                return
+            location = await _current_slack_location(client, thread_id, unbound=home)
+            last_known = location or last_known
+            if not is_code_channel_session(last_known[1]):
+                await restore_slack_thinking_status(*last_known)
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
             await publish_status()
