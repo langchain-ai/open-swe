@@ -32,8 +32,8 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
         "store_thread_settings",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
-    for name in ("_admin_thread", "_bridged_thread"):
-        monkeypatch.setattr(server, name, AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "_admin_thread", AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "_bridge_client", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "resolve_access", AsyncMock(return_value=Access()))
     for name in ("_mcp_tools_for", "_notion_tools_for"):
         monkeypatch.setattr(server, name, AsyncMock(return_value=[]))

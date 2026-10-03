@@ -510,9 +510,7 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     # bypassed and the call still needs a real OpenAI credential.
     if gateway_enabled and gateway_overrides(pair[0]) is not None:
         return pair
-    from agent.utils.openai_oauth import desktop_openai_oauth_available
-
-    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
+    if ENV.OPENAI_API_KEY.optional():
         return pair
     if not ENV.ANTHROPIC_API_KEY.optional():
         return pair

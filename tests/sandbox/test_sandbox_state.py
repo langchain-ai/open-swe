@@ -41,7 +41,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         assert requested_thread_id == thread_id
         return "sandbox-1"
 
-    async def create_sandbox(sandbox_id: str):
+    async def connect_sandbox(sandbox_id: str, *, thread_id: str | None = None):
         created.append(sandbox_id)
         await asyncio.sleep(0)
         return _FakeSandboxBackend()
@@ -50,7 +50,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         "agent.sandboxes.state.get_sandbox_id_from_metadata",
         get_sandbox_id_from_metadata,
     )
-    monkeypatch.setattr("agent.sandboxes.state.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.connect.connect_sandbox", connect_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     assert SANDBOX_BACKENDS[thread_id] is proxy
