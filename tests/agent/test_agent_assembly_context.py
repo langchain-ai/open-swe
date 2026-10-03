@@ -720,10 +720,13 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert prepare._requested_models is None
 
 
-async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
+async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
+    registry_db: None,
+) -> None:
     from langchain_core.messages import convert_to_messages
     from langgraph.store.memory import InMemoryStore
 
+    from agent.message_queue import QueuedMessage
     from agent.middleware.check_message_queue import (
         LinearNotifyState,
         check_message_queue_before_model,
@@ -737,14 +740,9 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
     store = InMemoryStore()
-    namespace = ("queue", "thread-ctx")
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
-    await store.aput(
-        namespace,
-        "pending_messages",
-        {"messages": [{"content": {"text": "Explain this", "image_urls": [url]}}]},
-    )
+    await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
     with (
         patch("agent.middleware.check_message_queue.get_config", return_value=config),
         patch("agent.middleware.check_message_queue.get_store", return_value=store),
@@ -768,4 +766,4 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
     )
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
-    assert await store.aget(namespace, "pending_messages") is None
+    assert await QueuedMessage.for_thread("thread-ctx") == []

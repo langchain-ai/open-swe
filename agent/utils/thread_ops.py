@@ -2,23 +2,21 @@
 
 The webhook triggers (Slack / Linear / GitHub) dispatch through
 ``agent.dispatch.dispatch_agent_run`` with ``multitask_strategy="interrupt"``,
-so they no longer need a busy-check or an in-process lock. The store-queue
-below is retained for the dashboard's deliberate "inject a follow-up into a
-run that's already in flight" path (``threads.api.send_dashboard_message``).
+so they no longer need a busy-check or an in-process lock. The follow-up queue
+(``agent.message_queue``) is retained for the dashboard's deliberate "inject a
+follow-up into a run that's already in flight" path.
 """
 
 import logging
-from typing import Any
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel
 
 from agent.config import ENV
+from agent.message_queue import QueuedContent, QueuedMessage
 
 logger = logging.getLogger(__name__)
-
-MAX_QUEUED_MESSAGES = 100
 
 
 def langgraph_url() -> str:
@@ -62,53 +60,21 @@ async def get_thread_active_status(thread_id: str) -> bool | None:
         return None
 
 
-async def queue_message_for_thread(
-    thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
-) -> bool:
-    """Queue a follow-up message for a busy thread (FIFO store namespace).
+async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:
+    """Queue a follow-up message for a busy thread's next model call.
 
     Used by the dashboard to inject a follow-up into a run that's already in
     flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
     """
-    client = langgraph_client()
+    queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None
     try:
-        namespace = ("queue", thread_id)
-        key = "pending_messages"
-        new_message = {"content": message_content}
-
-        existing_messages: list[dict[str, Any]] = []
-        try:
-            existing_item = await client.store.get_item(namespace, key)
-            if existing_item and existing_item.get("value"):
-                existing_messages = existing_item["value"].get("messages", [])
-        except Exception:  # noqa: BLE001
-            logger.debug("No existing queued messages for thread %s", thread_id)
-
-        queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None
-        if isinstance(queue_id, str) and any(
-            isinstance(existing.get("content"), dict)
-            and existing["content"].get("queue_id") == queue_id
-            for existing in existing_messages
-        ):
-            return True
-
-        existing_messages.append(new_message)
-        if len(existing_messages) > MAX_QUEUED_MESSAGES:
-            existing_messages = existing_messages[-MAX_QUEUED_MESSAGES:]
-            logger.warning(
-                "Thread %s queue capped at %d messages (dropped oldest)",
-                thread_id,
-                MAX_QUEUED_MESSAGES,
-            )
-        await client.store.put_item(namespace, key, {"messages": existing_messages})
+        await QueuedMessage.put(
+            thread_id, message_content, queue_id=queue_id if isinstance(queue_id, str) else None
+        )
         from agent.thread_feedback import note_feedback_activity
 
-        await note_feedback_activity(thread_id, client=client)
-        logger.info(
-            "Queued message for thread %s (total queued: %d)",
-            thread_id,
-            len(existing_messages),
-        )
+        await note_feedback_activity(thread_id, client=langgraph_client())
+        logger.info("Queued message for thread %s", thread_id)
         return True
     except Exception:
         logger.exception("Failed to queue message for thread %s", thread_id)

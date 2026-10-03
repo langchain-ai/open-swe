@@ -19,6 +19,7 @@ from agent.input_messages import (
     system_input,
     system_introduction,
 )
+from agent.message_queue import QueuedMessage
 from agent.prompts import prompt
 from agent.slack.client import (
     post_slack_thread_reply_with_ts,
@@ -145,12 +146,14 @@ async def queued_context_count(thread_id: str) -> int:
     invisible here).
     """
     try:
-        item = await store_client().store.get_item(("queue", thread_id), "pending_messages")
+        kv_count = len(await QueuedMessage.for_thread(thread_id))
     except Exception:  # noqa: BLE001
-        item = None
-    value = item.get("value") if isinstance(item, dict) else None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    kv_count = len(messages) if isinstance(messages, list) else 0
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"incident": {"thread_id": thread_id}},
+        )
+        kv_count = 0
     return kv_count + len(await _runs(thread_id, "pending"))
 
 

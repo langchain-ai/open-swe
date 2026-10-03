@@ -549,20 +549,12 @@ async def control_repo_file(request: Request) -> JSONResponse:
 async def control_queued(thread_id: str = "") -> JSONResponse:
     """Count the follow-ups parked on a busy thread's message queue.
 
-    While the agent is busy, debounced follow-ups accumulate here (namespace
-    ``("queue", thread_id)``) until the active run drains them together at its
+    While the agent is busy, debounced follow-ups accumulate in
+    ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
-    from langgraph_sdk import get_client
+    from agent.message_queue import QueuedMessage
 
-    value: Any = None
-    try:
-        client = get_client(url=os.environ["LANGGRAPH_URL"])
-        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
-        value = item.get("value") if item else None
-    except Exception:  # noqa: BLE001
-        value = None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+    return JSONResponse({"queued_count": len(await QueuedMessage.for_thread(thread_id))})
 
 
 _MAPPINGS_SEEDED = False
