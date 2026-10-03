@@ -317,6 +317,7 @@ export function AutomationEditor({
           <RepoSelector
             repos={reposQuery.data?.repositories}
             selectedRepo={repo}
+            autoSelect={mode === "create"}
             onRepoChange={setRepo}
             placeholder="No repository"
             triggerClassName="text-muted-foreground"
