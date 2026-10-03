@@ -352,10 +352,12 @@ async def set_view(
     head_branch: str = "",
     name: str = "",
     csp: dict[str, list[str]] | None = None,
+    agent_content_hash: str = "",
 ) -> tuple[dict[str, Any] | None, str | None]:
     if view_type not in {"html", "diff", "block_kit", "canvas"}:
         return None, "invalid_view_type"
-    if view_type != "diff" and not 1 <= len(view_key) <= 256:
+    # A diff view may go unkeyed; every other view needs a key.
+    if (view_type != "diff" or view_key) and not 1 <= len(view_key) <= 256:
         return None, "invalid_view_key"
     if name and len(name) > 256:
         return None, "invalid_name"
@@ -376,10 +378,12 @@ async def set_view(
             return None, "invalid_access_level"
         payload.update({"canvas_id": canvas_id, "access_level": access_level})
 
-    if view_type != "diff":
+    if view_key:
         payload["view_key"] = view_key
     if name:
         payload["name"] = name
+    if agent_content_hash:
+        payload["agent_content_hash"] = agent_content_hash
     if view_type == "diff":
         if len(base_branch) > 255 or len(head_branch) > 255:
             return None, "invalid_branch_name"

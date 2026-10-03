@@ -19,8 +19,8 @@ async def test_sandbox_content_reader_enforces_source_and_size(
         AsyncMock(return_value=(backend, "/workspace/plan.md", "/workspace")),
     )
 
-    content, error = await manage_tool._resolve_content("", "plan.md")
-    conflict_content, conflict_error = await manage_tool._resolve_content("inline", "plan.md")
+    content, error = await manage_tool.resolve_view_content("", "plan.md")
+    conflict_content, conflict_error = await manage_tool.resolve_view_content("inline", "plan.md")
 
     assert (content, error) == ("# Plan", None)
     assert conflict_content == ""
@@ -29,7 +29,7 @@ async def test_sandbox_content_reader_enforces_source_and_size(
     backend.adownload_files.return_value = [
         SimpleNamespace(content=b"x" * (manage_tool.VIEW_CONTENT_MAX_BYTES + 1))
     ]
-    _, size_error = await manage_tool._resolve_content("", "large.html")
+    _, size_error = await manage_tool.resolve_view_content("", "large.html")
     assert size_error == "file_path exceeds Slack's 1 MB view limit"
 
 
