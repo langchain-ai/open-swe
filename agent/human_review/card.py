@@ -41,11 +41,17 @@ def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> 
 
 
 def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Block]:
-    reviewers = request.reviewers
-    if not reviewers:
-        return []
-    lines = "\n".join(_reviewer_line(reviewer, states) for reviewer in reviewers)
-    return [section(f"*Reviewers*\n{lines}")]
+    blocks: list[Block] = []
+    if reviewers := request.reviewers:
+        lines = "\n".join(_reviewer_line(reviewer, states) for reviewer in reviewers)
+        blocks.append(section(f"*Reviewers*\n{lines}"))
+    if picks := request.picks:
+        lines = "\n".join(
+            f"• {pick.slack_mention} — :hourglass_flowing_sand: waiting for them to accept"
+            for pick in picks
+        )
+        blocks.append(section(f"*Picked by Open SWE*\n{lines}"))
+    return blocks
 
 
 def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
@@ -75,6 +81,17 @@ def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> s
     if requester is not None and requester != author:
         parts.append(f"Requested by {requester}")
     return "  ·  ".join(parts)
+
+
+def accept_button(request: HumanReviewRequest) -> ButtonElement:
+    """What a picked reviewer clicks to take the review; anyone else clicking signs up instead."""
+    return button(
+        "Accept",
+        action_id="open_swe_option_select_accept",
+        value=_button_value("review", request),
+        url=request.pull_request.url,
+        style="primary",
+    )
 
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:

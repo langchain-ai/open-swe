@@ -69,6 +69,7 @@ type ReviewRequest = {
   slack_message_ts: string;
   slack_broadcast: boolean;
   reviewers: Array<{ github_login: string; assigned_by_agent: boolean }>;
+  picks: Array<string>;
 };
 
 type PullRequest = {
@@ -617,16 +618,17 @@ test.describe("Human review in Slack", () => {
     );
 
     // 2. Thirty minutes pass with nobody signed up: Alice's thread for the PR
-    //    is woken and the agent picks Bob.
+    //    is woken and the agent picks Bob, who has yet to accept.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
     });
     await expect
-      .poll(async () => (await latestRequest(request)).reviewers, {
+      .poll(async () => (await latestRequest(request)).picks, {
         timeout: 90_000,
       })
-      .toEqual([{ github_login: "bob", assigned_by_agent: true }]);
+      .toEqual(["bob"]);
+    expect((await latestRequest(request)).reviewers).toEqual([]);
     expect((await latestRequest(request)).thread_id).not.toBe("");
     await expect
       .poll(
@@ -635,7 +637,7 @@ test.describe("Human review in Slack", () => {
       .toEqual(["bob"]);
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
-      .toContain("picked by Open SWE");
+      .toContain("waiting for them to accept");
 
     // Tagged in the card's thread...
     const replies = await channelMessages(
@@ -662,6 +664,35 @@ test.describe("Human review in Slack", () => {
     expect(JSON.stringify(await state.json())).toContain(
       "picked you to review",
     );
+    await shootCard(page, "picked");
+
+    // 3. Bob accepts from his DM and becomes the reviewer.
+    const accept = (picked!.blocks ?? [])
+      .filter((block) => block.type === "actions")
+      .flatMap((block) => block.elements ?? [])
+      .find(
+        (element) =>
+          (typeof element.text === "string"
+            ? element.text
+            : element.text?.text) === "Accept",
+      );
+    expect(accept, "the DM should offer Accept").toBeTruthy();
+    await control(request, "/mock/slack/action", {
+      action: accept,
+      channel: "D_BOB",
+      message_ts: picked!.ts,
+      thread_ts: picked!.thread_ts,
+      user: BOB.slack,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).reviewers, {
+        timeout: 30_000,
+      })
+      .toEqual([{ github_login: "bob", assigned_by_agent: true }]);
+    expect((await latestRequest(request)).picks).toEqual([]);
+    await expect
+      .poll(async () => cardText(await reviewCard(request, posted)))
+      .toContain("picked by Open SWE");
     await shootCard(page, "assigned");
 
     await loginAs(page, BOB);
@@ -703,7 +734,114 @@ test.describe("Human review in Slack", () => {
       }),
     ).toHaveCount(0);
 
-    // 3. Bob is the only reviewer, so his approval merges it at once.
+    // 4. Bob is the only reviewer, so his approval merges it at once.
+    await approveOnGitHub(request, seeded.number, BOB.login);
+    await expect
+      .poll(async () => (await pull(request, seeded.number)).merged, {
+        timeout: 30_000,
+      })
+      .toBe(true);
+    expect((await latestRequest(request)).state).toBe("merged");
+  });
+
+  test("nobody signs up, so Open SWE picks the code owner without an agent; they accept from their DM and their approval merges it", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+    await setReviewChannel(request);
+    // Alice owns everything but wrote the PR; Bob owns the directory it changes.
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob\n" },
+    });
+
+    // 1. Alice asks from the dashboard.
+    await loginAs(page, ALICE);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Greet in French",
+      author: ALICE.login,
+      body: "Says bonjour.",
+      files: { "greeting/hello.py": 'print("Bonjour")\n' },
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    await page
+      .getByRole("listitem")
+      .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
+      .getByRole("button", { name: "Request review in Slack" })
+      .click();
+    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+      timeout: 30_000,
+    });
+    const posted = await latestRequest(request);
+
+    // 2. Nobody signs up: Open SWE picks Bob from CODEOWNERS itself, with no agent run.
+    await control(request, "/control/human-review-deadline", {
+      request_id: posted.id,
+      step: "unclaimed",
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).picks, {
+        timeout: 30_000,
+      })
+      .toEqual(["bob"]);
+    expect((await latestRequest(request)).thread_id).toBe("");
+    expect((await latestRequest(request)).reviewers).toEqual([]);
+    await expect
+      .poll(
+        async () => (await pull(request, seeded.number)).requested_reviewers,
+      )
+      .toEqual(["bob"]);
+    await expect
+      .poll(async () => cardText(await reviewCard(request, posted)))
+      .toContain("waiting for them to accept");
+    const replies = await channelMessages(
+      request,
+      REVIEW_CHANNEL,
+      posted.slack_message_ts,
+    );
+    expect(
+      replies.some(
+        (m) =>
+          m.is_bot &&
+          m.text.includes(`<@${BOB.slack}>`) &&
+          m.text.includes("You own 1 of the 1 changed file"),
+      ),
+      "the pick should say why Bob was chosen",
+    ).toBe(true);
+
+    // 3. Bob accepts from his DM.
+    const picked = (await channelMessages(request, "D_BOB")).find(
+      (m) => m.is_bot && m.text.includes("picked you to review"),
+    );
+    expect(picked, "Bob should get a DM").toBeTruthy();
+    const accept = (picked!.blocks ?? [])
+      .filter((block) => block.type === "actions")
+      .flatMap((block) => block.elements ?? [])
+      .find(
+        (element) =>
+          (typeof element.text === "string"
+            ? element.text
+            : element.text?.text) === "Accept",
+      );
+    expect(accept, "the DM should offer Accept").toBeTruthy();
+    await control(request, "/mock/slack/action", {
+      action: accept,
+      channel: "D_BOB",
+      message_ts: picked!.ts,
+      thread_ts: picked!.thread_ts,
+      user: BOB.slack,
+    });
+    await expect
+      .poll(async () => (await latestRequest(request)).reviewers, {
+        timeout: 30_000,
+      })
+      .toEqual([{ github_login: "bob", assigned_by_agent: true }]);
+    expect((await latestRequest(request)).picks).toEqual([]);
+
+    // 4. Bob is the only reviewer, so his approval merges it.
     await approveOnGitHub(request, seeded.number, BOB.login);
     await expect
       .poll(async () => (await pull(request, seeded.number)).merged, {

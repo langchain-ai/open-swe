@@ -435,6 +435,11 @@ function UsageAnalyticsPeriod({
           </Empty>
         )}
       </SettingsSection>
+      <PointsLeaderboardSection
+        period={activePeriod}
+        login={login}
+        isAdmin={isAdmin}
+      />
       <AnalyticsCoverage
         reports={metadata}
         reportPayload={report.data?.payload ?? null}
@@ -1289,7 +1294,6 @@ function usageColumns(
       } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
-    { key: "feedback_given", label: "# Feedback Given", align: "right" },
   ]
 }
 
@@ -1604,11 +1608,112 @@ function CounterList({
   )
 }
 
+function PointsLeaderboardSection({
+  period,
+  login,
+  isAdmin,
+}: {
+  period: UsageLeaderboardPeriod
+  login: string
+  isAdmin: boolean
+}) {
+  const leaderboard = useQuery({
+    queryKey: ["pointsLeaderboard", period, login, isAdmin],
+    queryFn: () => api.pointsLeaderboard(period),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: (count, error) =>
+      !(error instanceof ApiError && error.status >= 400) && count < 2,
+  })
+  const data = leaderboard.data
+  const outsideTop =
+    data?.current_user &&
+    !data.rows.some((row) => row.rank === data.current_user?.rank)
+      ? data.current_user
+      : null
+
+  return (
+    <SettingsSection
+      title="Points leaderboard"
+      description="+1 for each pull request you review on GitHub; −1 when Open SWE picks you to review and you don't accept in time."
+    >
+      {leaderboard.isLoading ? (
+        <div className="space-y-2 p-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : leaderboard.isError ? (
+        <div className="space-y-2 p-4 text-xs" role="alert">
+          <p className="text-destructive">
+            Could not load the points leaderboard.
+          </p>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => leaderboard.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : !data?.rows.length ? (
+        <div className="p-6 text-center text-xs text-muted-foreground">
+          No points have been awarded for {PERIOD_LABELS[period].toLowerCase()}{" "}
+          yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-xs">
+            <thead className="border-b border-border text-xs text-muted-foreground">
+              <tr>
+                <th className="w-14 py-2 pl-4 text-left font-medium">Rank</th>
+                <th className="px-2 py-2 text-left font-medium">Reviewer</th>
+                <th className="px-2 py-2 text-right font-medium">Points</th>
+                <th className="px-2 py-2 text-right font-medium">
+                  PRs reviewed
+                </th>
+                <th className="py-2 pr-4 text-right font-medium">
+                  Missed picks
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {[...data.rows, ...(outsideTop ? [outsideTop] : [])].map(
+                (row) => (
+                  <tr
+                    key={row.rank}
+                    className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
+                  >
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {row.rank}
+                    </td>
+                    <td className="px-2 py-3">
+                      <UserCell row={row} isCurrentUser={row.is_current} />
+                    </td>
+                    <td className="px-2 py-3 text-right font-medium tabular-nums">
+                      {formatNumber(row.points)}
+                    </td>
+                    <td className="px-2 py-3 text-right tabular-nums">
+                      {formatNumber(row.reviewed)}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {formatNumber(row.missed_picks)}
+                    </td>
+                  </tr>
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SettingsSection>
+  )
+}
+
 function UserCell({
   row,
   isCurrentUser,
 }: {
-  row: UsageLeaderboardRow
+  row: Pick<UsageLeaderboardRow, "user">
   isCurrentUser: boolean
 }) {
   const initials = initialsFor(row.user.name)
@@ -1654,19 +1759,6 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
-          {row.is_top_feedback_contributor && (
-            <Tooltip>
-              <TooltipTrigger
-                aria-label="Top feedback contributor"
-                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <span aria-hidden="true">🏆</span>
-              </TooltipTrigger>
-              <TooltipPopup>
-                Most feedback given in the selected date range.
-              </TooltipPopup>
-            </Tooltip>
-          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You

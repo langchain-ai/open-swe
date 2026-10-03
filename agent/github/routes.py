@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
 from agent.review_guide.launch import notify_pr_updated
+from agent.points.github import award_review
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
@@ -171,6 +172,7 @@ async def github_webhook(
         background_tasks.add_task(service.settle_human_reviews, payload)
         if payload.get("action") == "submitted":
             background_tasks.add_task(service.announce_human_review, payload)
+            background_tasks.add_task(award_review, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

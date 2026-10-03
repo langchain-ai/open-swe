@@ -24,6 +24,7 @@ from agent.incidents.routes import router as incidents_router
 from agent.langsmith_connection.routes import router as langsmith_connection_router
 from agent.mcp.cli_tools import router as cli_mcp_tools_router
 from agent.mcp.routes import router as mcp_router
+from agent.points.routes import router as points_router
 from agent.review.conversation import router as review_conversation_router
 from agent.review.routes import router as review_router
 from agent.schedules.routes import router as schedules_router
@@ -58,6 +59,7 @@ router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)
 router.include_router(human_review_router)
+router.include_router(points_router)
 router.include_router(review_router)
 router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
