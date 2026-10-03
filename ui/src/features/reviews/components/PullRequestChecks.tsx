@@ -1,3 +1,8 @@
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import type { OpenPullRequest } from "@/lib/api"
 
 const inlineLimit = 3
@@ -19,26 +24,32 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
         </p>
       )}
       {overflow.length > 0 && (
-        <details className="text-destructive">
-          <summary className="cursor-pointer">+{overflow.length} more</summary>
-          <ul className="mt-1 space-y-1">
-            {overflow.map((name, index) => (
-              <li key={`${name}-${index}`}>{name}</li>
-            ))}
-          </ul>
-        </details>
+        <Collapsible className="text-destructive">
+          <CollapsibleTrigger className="cursor-pointer">
+            +{overflow.length} more
+          </CollapsibleTrigger>
+          <CollapsibleContent keepMounted>
+            <ul className="mt-1 space-y-1">
+              {overflow.map((name, index) => (
+                <li key={`${name}-${index}`}>{name}</li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       )}
       {pr.pendingChecks.length > 0 && (
-        <details className="text-muted-foreground">
-          <summary className="cursor-pointer">
+        <Collapsible className="text-muted-foreground">
+          <CollapsibleTrigger className="cursor-pointer">
             {pr.pendingChecks.length} pending
-          </summary>
-          <ul className="mt-1">
-            {pr.pendingChecks.map((name, index) => (
-              <li key={`${name}-${index}`}>{name}</li>
-            ))}
-          </ul>
-        </details>
+          </CollapsibleTrigger>
+          <CollapsibleContent keepMounted>
+            <ul className="mt-1">
+              {pr.pendingChecks.map((name, index) => (
+                <li key={`${name}-${index}`}>{name}</li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   )
