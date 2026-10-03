@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from agent.database import postgres
 from agent.tools.access import Policy, access
+from agent.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def _json_value(value: object) -> object:
     return str(value)
 
 
+@expose_mcp(access="admin")
 @access(Policy(trusted="admin_surface", actor="admin"))
 async def read_only_sql(query: str) -> dict[str, object]:
     """Run one read-only PostgreSQL query on a private admin surface."""

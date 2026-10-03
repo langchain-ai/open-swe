@@ -2,6 +2,7 @@
 
 from typing import Literal
 
+from agent.audit_logs.tools import audit_tool
 from agent.dashboard.feature_flags import feature_flag_names
 from agent.dashboard.workspace_settings import (
     INSTANCE_SETTINGS_KEY,
@@ -15,6 +16,7 @@ from agent.dashboard.workspace_settings import (
 )
 from agent.store import get_value
 from agent.tools.access import Policy, access, ack
+from agent.tools.mcp_exposure import expose_mcp
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
@@ -22,6 +24,8 @@ _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope", "workspace"))
 
 
+@audit_tool(skip_read=True)
+@expose_mcp(access="admin")
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_feature_flags(
     action: Literal["read", "set"],

@@ -203,8 +203,8 @@ function LangSmithRow() {
       label="LangSmith"
       description={
         connected
-          ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can use LangSmith as you, such as for managed MCP servers in your private threads.`
-          : "Sign in with LangSmith so Open SWE can use it as you, such as for the managed MCP servers you connected there."
+          ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can call LangSmith as you in your private threads.`
+          : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
       }
       control={
         <div className="flex items-center gap-2">

@@ -101,11 +101,6 @@ def _require_bound_kitchen_channels(kitchen: list[str], channels: list[str]) -> 
         )
 
 
-def _require_bound_breakout_channel(channel: str | None, channels: list[str]) -> None:
-    if channel is not None and channel not in channels:
-        raise ValueError("breakout channel must be a Slack channel bound to this workspace")
-
-
 class _ChannelBindings(NamedTuple):
     channels: list[str]
     kitchen: list[str]
@@ -434,7 +429,6 @@ class WorkspaceCreate(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
-    breakout_channel_id: str | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -470,11 +464,6 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
-    @field_validator("breakout_channel_id")
-    @classmethod
-    def _check_breakout_channel_id(cls, v: str | None) -> str | None:
-        return None if v is None else normalize_slack_channel_id(v)
-
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
@@ -488,7 +477,6 @@ class WorkspaceCreate(BaseModel):
     @model_validator(mode="after")
     def _check_kitchen_channels_bound(self) -> Self:
         _require_bound_kitchen_channels(self.kitchen_channel_ids, self.slack_channel_ids)
-        _require_bound_breakout_channel(self.breakout_channel_id, self.slack_channel_ids)
         return self
 
 
@@ -504,7 +492,6 @@ class WorkspaceUpdate(BaseModel):
     repos: list[str] | None = None
     slack_channel_ids: list[str] | None = None
     kitchen_channel_ids: list[str] | None = None
-    breakout_channel_id: str | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -534,11 +521,6 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
-
-    @field_validator("breakout_channel_id")
-    @classmethod
-    def _check_breakout_channel_id(cls, v: str | None) -> str | None:
-        return None if v is None else normalize_slack_channel_id(v)
 
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
@@ -597,7 +579,6 @@ class Workspace(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
-    breakout_channel_id: str | None = None
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -636,11 +617,6 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
-    @field_validator("breakout_channel_id")
-    @classmethod
-    def _check_breakout_channel_id(cls, v: str | None) -> str | None:
-        return None if v is None else normalize_slack_channel_id(v)
-
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
@@ -660,7 +636,6 @@ class Workspace(BaseModel):
             repos=create.repos,
             slack_channel_ids=create.slack_channel_ids,
             kitchen_channel_ids=create.kitchen_channel_ids,
-            breakout_channel_id=create.breakout_channel_id,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -731,7 +706,6 @@ class Workspace(BaseModel):
             "repos": list(self.repos),
             "slack_channel_ids": list(self.slack_channel_ids),
             "kitchen_channel_ids": list(self.kitchen_channel_ids),
-            "breakout_channel_id": self.breakout_channel_id,
             "is_default": self.slug == DEFAULT_WORKSPACE_SLUG,
             "has_snapshot": self.ready_snapshot_id is not None,
             "refresh_status": self.refresh_status,
@@ -833,7 +807,6 @@ class WorkspaceStore:
         With ``definition_only`` the snapshot and refresh state already stored
         is kept, and the returned record carries it.
         """
-        _require_bound_breakout_channel(record.breakout_channel_id, record.slack_channel_ids)
         try:
             async with postgres.session() as session:
                 row = (
@@ -1505,11 +1478,6 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         record.kitchen_channel_ids = [
             channel for channel in record.kitchen_channel_ids if channel in record.slack_channel_ids
         ]
-    if "breakout_channel_id" in update.model_fields_set:
-        _require_bound_breakout_channel(update.breakout_channel_id, record.slack_channel_ids)
-        record.breakout_channel_id = update.breakout_channel_id
-    elif record.breakout_channel_id not in record.slack_channel_ids:
-        record.breakout_channel_id = None
     if update.setup_script is not None:
         record.setup_script = update.setup_script
     if update.update_script is not None:
