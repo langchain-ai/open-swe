@@ -1,9 +1,9 @@
-"""Approval criteria from a repository's ``.open-swe/APPROVALS.md`` and its approval mode.
+"""Approval criteria from a repository's ``.open-swe/APPROVALS.md``.
 
-The file supplies the criteria; the mode on the repository's review style record
-decides whether a positive assessment only comments (``dry_run``) or submits a
-GitHub approval (``approve``). Callers read the file at the pull request's base
-commit so a pull request cannot rewrite the policy it is judged by.
+The file supplies the criteria a review assesses against; publication is
+always an advisory comment and never a GitHub approval. Callers read the
+file at the pull request's base commit so a pull request cannot rewrite
+the policy it is judged by.
 """
 
 import logging
@@ -30,7 +30,7 @@ async def fetch_approvals_md(
 
 
 async def approval_mode_for(owner: str, repo: str) -> ApprovalMode:
-    """The repository's approval mode; a failed lookup is ``dry_run``, which never approves."""
+    """The repository's stored mode, kept for gating; any mode publishes a comment."""
     try:
         record = await REVIEW_STYLES.get(f"{owner}/{repo}")
     except Exception:
