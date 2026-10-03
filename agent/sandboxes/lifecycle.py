@@ -17,6 +17,7 @@ from langgraph_sdk import get_client
 from agent.bridge.backend import BridgeSandboxBackend
 from agent.bridge.store import Bridge
 from agent.config import ENV
+from agent.github.app import PermissionMap
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
@@ -176,6 +177,7 @@ async def _create_sandbox_with_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
     owner_login: str | None = None,
@@ -192,8 +194,12 @@ async def _create_sandbox_with_proxy(
         if ENV.SANDBOX_TYPE.get() == "langsmith":
             async with aphase(thread_id, "sandbox.proxy_token"):
                 access = await workspace_token(
-                    workspace_slug, repositories=github_proxy_repositories
+                    workspace_slug,
+                    repositories=github_proxy_repositories,
+                    permissions=github_proxy_permissions,
                 )
+            if github_proxy_permissions is not None and access.token and not access.expires_at:
+                raise RuntimeError("Scoped sandbox permissions require GitHub App credentials")
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
                 await _configure_proxy(
@@ -206,6 +212,7 @@ async def _create_sandbox_with_proxy(
                 thread_id,
                 access.expires_at,
                 repositories=github_proxy_repositories,
+                permissions=github_proxy_permissions,
                 workspace_slug=workspace_slug,
                 base_proxy_config=proxy_config,
             )
@@ -252,6 +259,7 @@ async def _refresh_github_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
 ) -> None:
@@ -260,8 +268,14 @@ async def _refresh_github_proxy(
         return
 
     async with aphase(thread_id, "sandbox.proxy_token"):
-        access = await workspace_token(workspace_slug, repositories=github_proxy_repositories)
+        access = await workspace_token(
+            workspace_slug,
+            repositories=github_proxy_repositories,
+            permissions=github_proxy_permissions,
+        )
 
+    if github_proxy_permissions is not None and access.token and not access.expires_at:
+        raise RuntimeError("Scoped sandbox permissions require GitHub App credentials")
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
         await _configure_proxy(
@@ -274,6 +288,7 @@ async def _refresh_github_proxy(
         thread_id,
         access.expires_at,
         repositories=github_proxy_repositories,
+        permissions=github_proxy_permissions,
         workspace_slug=workspace_slug,
         base_proxy_config=base_proxy_config,
     )
@@ -285,6 +300,8 @@ async def _refresh_github_proxy_or_fail(
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
+    *,
+    github_proxy_permissions: PermissionMap | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -292,6 +309,11 @@ async def _refresh_github_proxy_or_fail(
             sandbox_backend,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
+            **(
+                {"github_proxy_permissions": github_proxy_permissions}
+                if github_proxy_permissions is not None
+                else {}
+            ),
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
         )
@@ -346,6 +368,7 @@ async def _connect_existing_sandbox(
     cached: SandboxBackendProtocol | None,
     sandbox_id: str | None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
 ) -> SandboxBackendProtocol:
@@ -375,6 +398,11 @@ async def _connect_existing_sandbox(
             github_proxy_repositories,
             base_proxy_config,
             workspace_slug,
+            **(
+                {"github_proxy_permissions": github_proxy_permissions}
+                if github_proxy_permissions is not None
+                else {}
+            ),
         )
     return refreshed
 
@@ -383,6 +411,7 @@ async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
 ) -> SandboxBackendProtocol:
@@ -416,6 +445,14 @@ async def ensure_sandbox_for_thread(
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
+    if github_proxy_permissions is None:
+        saved_permissions = sandbox_metadata.get("github_proxy_permissions")
+        if isinstance(saved_permissions, dict):
+            github_proxy_permissions = {
+                key: value
+                for key, value in saved_permissions.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     bridge_id = Bridge.bridge_id_of(sandbox_id)
@@ -446,6 +483,11 @@ async def ensure_sandbox_for_thread(
         sandbox_backend = await _create_sandbox_with_proxy(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
+            **(
+                {"github_proxy_permissions": github_proxy_permissions}
+                if github_proxy_permissions is not None
+                else {}
+            ),
             workspace_slug=workspace_slug,
             owner_login=owner_login,
         )
@@ -459,6 +501,11 @@ async def ensure_sandbox_for_thread(
                 cached=SANDBOX_CONNECTIONS.get(sandbox_id),
                 sandbox_id=sandbox_id,
                 github_proxy_repositories=github_proxy_repositories,
+                **(
+                    {"github_proxy_permissions": github_proxy_permissions}
+                    if github_proxy_permissions is not None
+                    else {}
+                ),
                 base_proxy_config=base_proxy_config,
                 workspace_slug=workspace_slug,
             )
@@ -476,6 +523,11 @@ async def ensure_sandbox_for_thread(
                 sandbox_backend = await _create_sandbox_with_proxy(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
+                    **(
+                        {"github_proxy_permissions": github_proxy_permissions}
+                        if github_proxy_permissions is not None
+                        else {}
+                    ),
                     workspace_slug=workspace_slug,
                     owner_login=owner_login,
                 )
@@ -500,6 +552,8 @@ async def ensure_sandbox_for_thread(
     # rather than adopting a half-built box.
     if created:
         bind_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
+        if github_proxy_permissions is not None:
+            bind_metadata["github_proxy_permissions"] = dict(github_proxy_permissions)
         if created_proxy_config is not None:
             bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
         async with aphase(thread_id, "sandbox.bind_thread"):
@@ -573,6 +627,11 @@ async def recreate_sandbox_for_thread(
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
         github_proxy_repositories=await thread_token_repositories(thread_id),
+        **(
+            {"github_proxy_permissions": metadata["github_proxy_permissions"]}
+            if "github_proxy_permissions" in metadata
+            else {}
+        ),
         workspace_slug=workspace_slug,
         source=source,
         owner_login=_owner_login(metadata),

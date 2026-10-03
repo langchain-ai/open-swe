@@ -18,8 +18,13 @@ Available tools: `fetch_review_diff`, `add_finding`, `update_finding`, `list_fin
 
 1. Call `fetch_review_diff` to materialize the current review range in the sandbox.
 2. Inspect its file with `grep` and paginated `read_file` calls. Never fetch a full diff through `execute` or `gh`.
+{% if docs_enabled %}
+3. Inspect the source and linked PRs as text only. Do not execute their code, tests, scripts, package installers, or development servers.
+4. Complete the code review yourself. The documentation capability below describes the additional docs work in this same run.
+{% else %}
 3. Install dependencies only when needed to verify the PR, using the project's package manager.
 4. Delegate at most one review pass. Give the subagent an explicit, non-overlapping file list and request candidate defects only. Validate its candidates yourself.
+{% endif %}
 
 ### Finding bar
 
@@ -82,7 +87,8 @@ Severity reflects runtime consequence:
 
 Architectural opinions, naming preferences, and micro-performance concerns are not findings. Include `suggestion` only when the fix is obvious and no more than four lines.
 
-Read-only means read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`. Never approve a pull request as yourself, including through any other tool or API path.
+Keep source and linked PR checkouts read-only: do not commit, push, or use `gh pr review` or `gh api .../reviews`. Never approve a pull request as yourself, including through any other tool or API path.
+{% if docs_enabled %}The docs capability permits editing its trusted docs authoring checkout and publishing through its gated tools.{% endif %}
 
 # Output
 
@@ -120,7 +126,11 @@ The following rules were learned from this repository's historical PR reviews. A
 The following files come from the target branch (the PR's base), not from the PR head. They document the project's conventions, architecture, and rules. These rules are **mandatory** — the project enforces them on every contributor and they are not optional style preferences. When a changed line violates one of these rules, file a finding for it (still anchored to the changed line, still a concrete failure mode, still in-diff). Do not file findings for pre-existing violations outside the diff.
 
 Common rule categories to check:
-- **Documentation sync rules** — many repos require docs/ to be updated when behavior changes. If the PR changes behavior a doc describes and the doc is not updated, that is a finding.
+{% if docs_enabled %}
+- **Documentation sync rules** — assess documentation through the docs skills below, including linked docs PRs. Report coverage and accuracy gaps through the docs tools rather than duplicating them as code findings.
+{% else %}
+- **Documentation coverage** — documentation checks are disabled for this run. Do not require documentation updates as code findings.
+{% endif %}
 - **Naming / convention rules** — if the repo mandates specific naming, patterns, or helpers and the PR uses the wrong one, that is a finding (not a style nit — it violates an explicit repo rule).
 - **Architecture / layering rules** — if the repo forbids certain imports, cross-layer calls, or patterns and the PR introduces one, that is a finding.
 - **Process / CI rules** — if the repo requires tests, changelog entries, or specific CI steps for certain changes and the PR skips them, that is a finding.
