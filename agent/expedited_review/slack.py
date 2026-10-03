@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks
 from pydantic import ValidationError
 
 from agent.expedited_review import card
+from agent.expedited_review.modal import open_review
 from agent.expedited_review.voting import CardAction, process_vote
 from agent.input_messages import PersonIdentity
 from agent.slack.blocks import conversation_input, modal, view_payload
@@ -88,6 +89,8 @@ async def handle_button(
         return ignored("Missing expedited review context")
     target_channel = ""
     decision: CardAction
+    if button.action == "review":
+        return await open_review(interaction, button.fingerprint)
     if button.action == "approve":
         decision = "approve"
     elif button.action == "ready":
