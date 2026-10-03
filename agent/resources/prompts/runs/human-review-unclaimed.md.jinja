@@ -2,7 +2,9 @@
 
 1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
 2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
-3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
-4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. It tags them {% if posted %}in a reply to the Slack post{% else %}on the review card{% endif %} and messages them directly.
+3. Choose one person with write access who is not the author ({{ author_identity }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams — Open SWE itself can never be picked.
+4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. Write the reason addressed to them ("you …"), because it is delivered to the person being picked, not about them. It tags them {% if posted %}in a reply to the Slack post{% else %}on the review card{% endif %} and messages them directly.
+
+The pull request's author is @{{ author }}; neither they nor Open SWE itself may review it. Pick a human, never a bot.
 
 If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request is already approved: then stop. Do not post anything else in Slack and do not change the pull request.
