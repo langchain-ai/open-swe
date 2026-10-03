@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption, ProfileUpdate } from "@/lib/api"
 import {
-  AppShell,
+  AuthedAppShell,
   SettingsNavRow,
   SettingsRow,
   SettingsSection,
-} from "@/components/AppShell"
+} from "@/components/AuthedAppShell"
 import { Button } from "@/components/ui/button"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { Input } from "@/components/ui/input"
@@ -149,11 +149,11 @@ function CloudAgentsPage() {
   }
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Open SWE Agent"
       description="Personal defaults for Open SWE Agent runs you trigger. These settings only apply to your account."
     >
+      {() => (<>
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">
           <SettingsRow
@@ -376,6 +376,7 @@ function CloudAgentsPage() {
           description="Per-repo custom instructions injected into the agent's system prompt."
         />
       </SettingsSection>
-    </AppShell>
+      </>)}
+    </AuthedAppShell>
   )
 }
