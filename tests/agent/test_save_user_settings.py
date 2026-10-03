@@ -277,6 +277,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "human_review_requests": False,
                 "review_channel_watch": False,
                 "pr_review_links": False,
+                "approved_pr_dm_reminders": False,
             },
             "preferences": {
                 "default_workspace": "mine",
