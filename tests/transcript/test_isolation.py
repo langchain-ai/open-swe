@@ -211,7 +211,9 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
 
     await _readable_transcript(thread_id, stranger)
 
-    await mirror_thread_metadata(thread_id, {"visibility": "private", "title": "Renamed"})
+    await mirror_thread_metadata(
+        thread_id, {"visibility": "private", "title": "Renamed", "title_locked": True}
+    )
 
     with pytest.raises(HTTPException) as refused:
         await _readable_transcript(thread_id, stranger)
@@ -220,6 +222,9 @@ async def test_a_visibility_flip_reaches_the_transcript_read_path(registry_db: N
     snapshot = await load_snapshot(thread_id)
     assert snapshot is not None
     assert snapshot.thread.title == "Renamed"
+    access = await load_access(thread_id)
+    assert access is not None
+    assert access["title_locked"] is True
 
 
 async def test_a_live_stream_ends_when_its_reader_loses_access(registry_db: None) -> None:
