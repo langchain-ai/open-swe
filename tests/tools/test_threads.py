@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from agent.bridge.store import Bridge
+
 threads_tool = importlib.import_module("agent.tools.threads")
 
 
@@ -350,6 +352,7 @@ async def test_manage_thread_queues_message_for_busy_thread(
         AsyncMock(return_value={"id": "thread-1", "status": "running", "messages": []}),
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(threads_tool, "get_sandbox_metadata", AsyncMock(return_value={}))
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
@@ -362,7 +365,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proxy = AsyncMock(
-        return_value=(200, b'{"type":"success","run_id":"run-1"}', "application/json")
+        return_value=(200, b'{"type":"success","result":{"run_id":"run-1"}}', "application/json")
     )
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
@@ -376,6 +379,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
         AsyncMock(side_effect=HTTPException(409, "thread is idle")),
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(threads_tool, "get_sandbox_metadata", AsyncMock(return_value={}))
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
@@ -387,6 +391,86 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert isinstance(command["id"], int)
     assert command["method"] == "run.start"
     assert "plan_mode" not in command["params"]["config"]["configurable"]
+
+
+@pytest.mark.parametrize("bridge", [None, SimpleNamespace(is_alive=False)])
+async def test_manage_thread_rejects_disconnected_bridge(
+    monkeypatch: pytest.MonkeyPatch, bridge: object | None
+) -> None:
+    send = AsyncMock()
+    proxy = AsyncMock()
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "planMode": False}),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"sandbox_id": Bridge.sandbox_id_for("bridge-1")}),
+    )
+    monkeypatch.setattr(threads_tool.BridgeStore, "load", AsyncMock(return_value=bridge))
+    monkeypatch.setattr(threads_tool, "send_dashboard_message", send)
+    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+
+    result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
+
+    assert result == {
+        "success": False,
+        "error": "This thread's sandbox is a CLI bridge that has disconnected, so it cannot run new messages. Do the work here or use start_thread.",
+    }
+    send.assert_not_awaited()
+    proxy.assert_not_awaited()
+
+
+async def test_manage_thread_sends_to_live_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
+    send = AsyncMock(return_value={"id": "thread-1", "status": "running", "messages": []})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "planMode": False}),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"sandbox_id": Bridge.sandbox_id_for("bridge-1")}),
+    )
+    monkeypatch.setattr(
+        threads_tool.BridgeStore,
+        "load",
+        AsyncMock(return_value=SimpleNamespace(is_alive=True)),
+    )
+    monkeypatch.setattr(threads_tool, "send_dashboard_message", send)
+
+    result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
+
+    assert result["success"] is True
+    send.assert_awaited_once()
+
+
+async def test_manage_thread_rejects_proxy_success_without_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = AsyncMock(return_value=(200, b'{"type":"success"}', "application/json"))
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "thread-1", "planMode": True}),
+    )
+    monkeypatch.setattr(threads_tool, "get_sandbox_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        threads_tool,
+        "send_dashboard_message",
+        AsyncMock(side_effect=HTTPException(409, "thread is idle")),
+    )
+    monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+
+    result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
+
+    assert result == {"success": False, "error": "Thread run started without a run ID"}
 
 
 async def test_manage_thread_rejects_plan_format_conversion(

@@ -497,7 +497,7 @@ async def start_sandbox_guest_run(
     return str(run["run_id"])
 
 
-def _extract_run_id_from_command_response(payload: Any) -> str | None:
+def extract_run_id_from_command_response(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None
     for candidate in (

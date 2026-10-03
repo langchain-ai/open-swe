@@ -23,8 +23,8 @@ from agent.threads.runs import (
     QUEUED_BY_KEY,
     _enrich_run_start_command,
     _enrich_system_run_start_command,
-    _extract_run_id_from_command_response,
     _notify_slack_web_handoff,
+    extract_run_id_from_command_response,
     offload_requested,
     queue_follow_up_run,
     steer_running_thread,
@@ -266,7 +266,7 @@ async def proxy_dashboard_thread_commands(
         response_payload = json.loads(response.content) if response.content else None
     except json.JSONDecodeError:
         response_payload = None
-    run_id = _extract_run_id_from_command_response(response_payload)
+    run_id = extract_run_id_from_command_response(response_payload)
     run_start_succeeded = (
         parsed.get("method") == "run.start"
         and response.status_code in {200, 202, 204}

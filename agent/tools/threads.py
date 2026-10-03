@@ -13,12 +13,14 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from agent.bridge.store import Bridge, BridgeStore
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
+from agent.sandboxes.state import get_sandbox_metadata
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from agent.threads import plan_api, workflow_approval_api
@@ -32,7 +34,11 @@ from agent.threads.handlers import (
 from agent.threads.listing import list_dashboard_threads_page
 from agent.threads.plan_store import get_plan_content, list_plan_comments
 from agent.threads.proxy import proxy_dashboard_thread_commands
-from agent.threads.runs import ThreadMessageBody, start_dashboard_thread
+from agent.threads.runs import (
+    ThreadMessageBody,
+    extract_run_id_from_command_response,
+    start_dashboard_thread,
+)
 from agent.threads.summary import thread_is_owner
 from agent.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -841,6 +847,15 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
+    sandbox_metadata = await get_sandbox_metadata(thread_id)
+    bridge_id = Bridge.bridge_id_of(sandbox_metadata.get("sandbox_id"))
+    if bridge_id is not None:
+        bridge = await BridgeStore.load(bridge_id)
+        if bridge is None or not bridge.is_alive:
+            return _failure(
+                "This thread's sandbox is a CLI bridge that has disconnected, so it cannot "
+                "run new messages. Do the work here or use start_thread."
+            )
     body = ThreadMessageBody(
         content=message,
         model_id=model_id,
@@ -882,11 +897,13 @@ async def _send_message(
             detail if isinstance(detail, str) else "Could not start thread run",
             status_code=status_code,
         )
-    run_id = payload.get("run_id") if isinstance(payload, Mapping) else None
+    run_id = extract_run_id_from_command_response(payload)
+    if not isinstance(run_id, str):
+        return _failure("Thread run started without a run ID")
     return {
         "success": True,
         "mode": "started",
-        "run_id": run_id if isinstance(run_id, str) else None,
+        "run_id": run_id,
     }
 
 
