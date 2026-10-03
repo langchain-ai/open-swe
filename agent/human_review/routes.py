@@ -18,8 +18,11 @@ from agent.github.pull_request_status import (
     OpenPullRequests,
     pull_request_identity,
 )
+from agent.github.ci import fetch_pr
+from agent.github.repo_files import RepoSettings
 from agent.human_review.card import mention
 from agent.human_review.lifecycle import dismiss_by
+from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, RequestResult, request_review
 from agent.slack.client import GitHubPrRef
@@ -141,6 +144,31 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
         number=number,
         url=f"https://github.com/{owner}/{repo}/pull/{number}",
     )
+
+
+class HumanReviewAvailability(BaseModel):
+    available: bool
+
+
+@router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
+async def api_human_review_availability(
+    owner: str, repo: str, number: int, session: dict[str, Any] = SESSION_DEP
+) -> HumanReviewAvailability:
+    _pr_ref(owner, repo, number)
+    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
+    token = await repo_token(owner, repo)
+    if token is None:
+        raise HTTPException(503, "Repository installation is unavailable")
+    pr = await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token)
+    if pr is None:
+        raise HTTPException(404, "Pull request is unavailable")
+    head = pr.get("head")
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if not isinstance(sha, str):
+        raise HTTPException(503, "Pull request head is unavailable")
+    settings = await RepoSettings.fetch(owner, repo, token=token, ref=sha)
+    channel = await settings.channel_for_pr(owner, repo, number, token=token)
+    return HumanReviewAvailability(available=bool(channel))
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")
