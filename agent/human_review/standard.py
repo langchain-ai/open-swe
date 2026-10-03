@@ -736,6 +736,7 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
         text,
         title=f"Pick a reviewer for {pr.repo}#{pr.number}",
         before_dispatch=record_thread,
+        unlisted=True,
     )
     return True
 

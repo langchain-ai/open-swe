@@ -138,6 +138,32 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     ) == pr_fixes.PullRequestThreadRun(thread_id="new")
 
 
+async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
+    thread_id = await pr_fixes.dispatch_pull_request_prompt(
+        "acme",
+        "app",
+        12,
+        "alice",
+        "Pick a reviewer",
+        title="Reviewer assignment",
+        before_dispatch=AsyncMock(),
+        unlisted=True,
+    )
+    assert thread_id == "new"
+    metadata = setup.client.threads.update.call_args.kwargs["metadata"]
+    assert metadata["unlisted"] is True
+    assert setup.threads["existing"]["metadata"].get("unlisted") is None
+    setup.threads["new"]["metadata"].update(metadata)
+    FakeRegistry.thread_ids.append("new")
+    assert [
+        t["thread_id"] for t in await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None)
+    ] == ["existing"]
+    assert [
+        t["thread_id"]
+        for t in await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
+    ] == ["new"]
+
+
 async def test_denied_repo_never_reads_or_starts_threads(setup):
     pr_fixes.require_repo_access_for_user.side_effect = HTTPException(403, "denied")
     with pytest.raises(HTTPException):
