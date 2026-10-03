@@ -73,7 +73,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     }
     prefs = {
         "default_visibility": "public",
-        "local_tracing_project": "keep-project",
+        "follow_up_behavior": "queue",
         "default_workspace": "keep-workspace",
     }
     fake_store.seed(["profiles"], "Alice", profile)
@@ -227,10 +227,10 @@ async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: F
     assert profile["auto_fix_ci"] is False
     assert "default_model" not in profile
     assert "reasoning_effort" not in profile
-    await patch_personal_settings("alice", {"local_tracing_project": "  project  "})
+    await patch_personal_settings("alice", {"follow_up_behavior": "queue"})
     prefs = fake_store.values(["user_preferences"])["alice"]
     assert prefs["default_visibility"] == "private"
-    assert prefs["local_tracing_project"] == "project"
+    assert prefs["follow_up_behavior"] == "queue"
 
 
 async def test_preference_read_failure_does_not_overwrite_saved_defaults(
@@ -262,7 +262,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         {
             "default_workspace": "mine",
             "default_visibility": "private",
-            "local_tracing_project": "tracing",
         },
     )
     fake_store.seed(["profiles"], "bob", {"default_repo": "org/bob"})
@@ -282,7 +281,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "preferences": {
                 "default_workspace": "mine",
                 "default_visibility": "private",
-                "local_tracing_project": "tracing",
                 "follow_up_behavior": "steer",
             },
             "instructions": "",

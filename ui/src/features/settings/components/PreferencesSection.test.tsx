@@ -28,8 +28,6 @@ it("keeps preference labels when closed and saves workspace values, not labels",
     default_visibility: "private",
     default_workspace: null,
     follow_up_behavior: "queue",
-    local_tracing_project: null,
-    default_local_tracing_project: "shared",
   }
   vi.spyOn(api, "getMyPreferences").mockImplementation(async () => stored)
   vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
@@ -56,14 +54,13 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const { rerender } = render(
+  render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
         <PreferencesSection />
       </ConfirmProvider>
     </QueryClientProvider>
   )
-  expect(screen.queryByText("Local tracing project")).toBeNull()
   const workspace = screen.getAllByRole("combobox")[2]!
 
   await waitFor(() => expect(workspace.hasAttribute("disabled")).toBe(false))
@@ -115,17 +112,4 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   await waitFor(() =>
     expect(workspace.textContent).toContain("Workspace default")
   )
-
-  Object.defineProperty(window, "openSweDesktop", {
-    configurable: true,
-    value: {},
-  })
-  rerender(
-    <QueryClientProvider client={client}>
-      <ConfirmProvider>
-        <PreferencesSection />
-      </ConfirmProvider>
-    </QueryClientProvider>
-  )
-  expect(screen.getByText("Local tracing project")).toBeTruthy()
 })

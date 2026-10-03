@@ -149,7 +149,7 @@ def _on_notify(
 
 
 async def _prune_forever() -> None:
-    """Close bridges that stopped heartbeating, and fail what they never answered."""
+    """Rotate request partitions, then close bridges that stopped heartbeating."""
     # Imported here because the store notifies through this module.
     from agent.bridge.store import BridgeStore
 
@@ -160,6 +160,12 @@ async def _prune_forever() -> None:
             pass
         if _STOP.is_set():
             return
+        try:
+            await BridgeStore.ensure_partitions()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning("Rotating sandbox bridge request partitions failed", exc_info=True)
         try:
             pruned = await BridgeStore.prune_stale()
         except asyncio.CancelledError:

@@ -1,4 +1,4 @@
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
@@ -47,7 +47,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
-import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
+import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -61,7 +61,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import { reportError } from "@/lib/errorReporting"
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -234,7 +233,6 @@ export function SidebarThreadRow({
   compact = false,
   indent = false,
   onNavigate,
-  onDeleteLocal,
   onTogglePin,
   onToggleArchived,
 }: {
@@ -247,17 +245,14 @@ export function SidebarThreadRow({
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   onNavigate?: () => void
-  onDeleteLocal: (threadId?: string) => void
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
+  const localThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const marquee = useTitleMarquee()
   const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
@@ -268,7 +263,7 @@ export function SidebarThreadRow({
       select: (search) => search.subagent,
     }) ?? null
 
-  const thread = item.location === "cloud" ? item.thread : null
+  const thread = item.thread
   const subagents = (item.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
@@ -292,16 +287,11 @@ export function SidebarThreadRow({
   // optimistic cache patch, which a list refetch can overwrite.
   const unread = !item.viewed && !isActive
   const isDeleting =
-    deletingLocal ||
-    (item.location === "cloud" &&
-      deleteThread.isPending &&
-      deleteThread.variables === item.id)
+    deleteThread.isPending && deleteThread.variables === item.id
 
   const markViewed = () => {
     if (item.reviewPage) markReviewViewed(queryClient, item.reviewPage, item.id)
-    else if (item.location === "cloud")
-      markAgentThreadViewed(queryClient, item.id)
-    else markLocalViewed(item.id)
+    else markAgentThreadViewed(queryClient, item.id)
   }
 
   // Covers every way a row becomes active — click, command palette, keyboard
@@ -311,27 +301,9 @@ export function SidebarThreadRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, item.viewed])
 
-  const onConfirmDelete = async () => {
+  const onConfirmDelete = () => {
     if (isDeleting) return
-    if (item.location === "cloud") {
-      deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
-      return
-    }
-    setDeletingLocal(true)
-    try {
-      const deleted =
-        (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
-      if (!deleted) throw new Error("Local Open SWE thread not found")
-      onDeleteLocal(item.id)
-      setDeleteOpen(false)
-      if (isActive) {
-        onNavigate?.()
-        void navigate({ to: "/agents" })
-      }
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
-    }
-    setDeletingLocal(false)
+    deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
   const onArchiveClick = (event: React.MouseEvent) => {
@@ -472,18 +444,10 @@ export function SidebarThreadRow({
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
     />
-  ) : item.location === "cloud" ? (
+  ) : (
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
-      onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
-    />
-  ) : (
-    <Link
-      to="/agents/local/$sessionId"
-      params={{ sessionId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}
       className={rowClassName}
@@ -516,7 +480,6 @@ export function SidebarThreadRow({
         <ContextMenuPopup>
           <ThreadMenuItems
             thread={thread}
-            localThread={item.location === "local" ? item.thread : undefined}
             pinned={pinned}
             archived={archived}
             isDeleting={isDeleting}
@@ -546,11 +509,11 @@ export function SidebarThreadRow({
         onOpenChange={setDeleteOpen}
         threadTitle={item.title}
         isDeleting={isDeleting}
-        onConfirm={() => void onConfirmDelete()}
+        onConfirm={onConfirmDelete}
         detail={
-          item.location !== "local"
+          !localThread
             ? undefined
-            : item.thread.ownedWorktrees?.length
+            : localThread.ownedWorktrees.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -634,9 +597,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const LocationIcon =
-    item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const onAMac = runsOnAMac(item.thread)
+  const LocationIcon = onAMac ? IoLaptopOutline : IoCloudOutline
+  const locationLabel = onAMac ? "This Mac" : "Cloud"
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -644,7 +607,7 @@ function ThreadHoverCard({
         <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {item.title}
         </span>
-        {item.location === "cloud" && item.thread.visibility === "private" && (
+        {item.thread.visibility === "private" && (
           <LockIcon
             className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
             aria-label="Private thread"

@@ -22,6 +22,7 @@ from agent.bridge.constants import (
     HEARTBEAT_INTERVAL_SECONDS,
     MAX_CLAIM_LIMIT,
     MAX_POLL_WAIT_SECONDS,
+    BridgeClient,
 )
 from agent.bridge.protocol import JsonObject
 from agent.bridge.store import BridgeInUseError, BridgeStore, ClaimedRequest
@@ -37,6 +38,7 @@ MAX_HELD_REQUESTS = 1024
 
 
 class BridgeOpenBody(BaseModel):
+    client: BridgeClient = "cli"
     root_path: str
     hostname: str
     label: str | None = None
@@ -98,6 +100,7 @@ async def api_open_bridge(
     try:
         bridge = await BridgeStore.register(
             owner_id=principal.sender_id,
+            client=body.client,
             hostname=body.hostname,
             root_path=body.root_path,
             label=body.label,
@@ -112,6 +115,7 @@ async def api_open_bridge(
         extra={
             "bridge_id": bridge.bridge_id,
             "bridge_owner": bridge.owner_id,
+            "bridge_client": bridge.client,
             "bridge_reopened": body.bridge_id is not None,
         },
     )

@@ -383,7 +383,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
             )
 
     patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
-    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "connect_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")

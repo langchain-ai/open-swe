@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
 import type { AgentThread } from "./types"
 import {
-  applyRepoKeyAliases,
-  cloudRepoKeysByLabel,
   cloudSidebarThread,
-  groupSidebarThreadsByRepo,
-  groupSidebarThreadsByWorkspace,
-  localSidebarThread,
-  sidebarRepoOptions,
+  groupRepoGroupsByWorkspace,
   sortSidebarThreads,
 } from "./sidebarThreads"
 
@@ -30,83 +24,13 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
   }
 }
 
-function localThread(
-  overrides: Partial<DesktopLocalThreadSummary> = {}
-): DesktopLocalThreadSummary {
-  return {
-    id: "same-id",
-    cwd: "/Users/example/open-swe",
-    worktreePath: null,
-    title: "Local thread",
-    viewed: true,
-    createdAt: 10,
-    updatedAt: 30,
-    modelId: "gpt-5",
-    effort: "medium",
-    ...overrides,
-  }
-}
-
-const checkout: DesktopProject = {
-  cwd: "/Users/example/open-swe",
-  name: "open-swe",
-  addedAt: 1,
-  scopeId: "project-open-swe",
-}
-
 describe("sidebar thread adapters", () => {
-  it("retains registered local folders without visible chats when requested", () => {
-    const repos = sidebarRepoOptions([], [checkout])
-    expect(groupSidebarThreadsByRepo([], repos, "updated", true).repos).toEqual(
-      [{ ...repos[0], threads: [] }]
-    )
-  })
-
   it("uses short repository names and namespaced identities", () => {
-    const cloud = cloudSidebarThread(cloudThread())
-    const local = localSidebarThread(localThread(), checkout, undefined)
-
-    expect(cloud).toMatchObject({
+    expect(cloudSidebarThread(cloudThread())).toMatchObject({
       key: "cloud:same-id",
       repoKey: "repo:langchain-ai/open-swe",
       repoLabel: "open-swe",
     })
-    expect(local).toMatchObject({
-      key: "local:same-id",
-      repoKey: "repo:/users/example/open-swe",
-      repoLabel: "open-swe",
-    })
-  })
-
-  it("normalizes local activity into shared statuses", () => {
-    expect(localSidebarThread(localThread(), checkout, "running").status).toBe(
-      "running"
-    )
-    expect(localSidebarThread(localThread(), checkout, "error").status).toBe(
-      "error"
-    )
-    expect(
-      localSidebarThread(localThread({ viewed: false }), checkout, undefined)
-        .status
-    ).toBe("finished")
-    expect(localSidebarThread(localThread(), checkout, undefined).status).toBe(
-      "idle"
-    )
-  })
-
-  it("merges a local checkout into the cloud repository of the same name", () => {
-    const cloud = [cloudSidebarThread(cloudThread())]
-    const threads = [
-      ...cloud,
-      ...applyRepoKeyAliases(
-        [localSidebarThread(localThread(), checkout, undefined)],
-        cloudRepoKeysByLabel(cloud)
-      ),
-    ]
-
-    expect(sidebarRepoOptions(threads, [])).toEqual([
-      { key: "repo:langchain-ai/open-swe", label: "open-swe" },
-    ])
   })
 
   it("keeps same-named repositories from different owners apart", () => {
@@ -118,22 +42,6 @@ describe("sidebar thread adapters", () => {
     )
 
     expect(acme.repoKey).not.toBe(other.repoKey)
-    expect(sidebarRepoOptions([acme, other], [])).toHaveLength(2)
-    // The label is ambiguous, so a local "api" must not be folded into either.
-    const local = localSidebarThread(
-      localThread({ cwd: "/Users/example/api" }),
-      {
-        cwd: "/Users/example/api",
-        name: "api",
-        addedAt: 1,
-        scopeId: "project-api",
-      },
-      undefined
-    )
-    const aliases = cloudRepoKeysByLabel([acme, other])
-    expect(applyRepoKeyAliases([local], aliases)[0]?.repoKey).toBe(
-      local.repoKey
-    )
   })
 })
 
@@ -159,66 +67,7 @@ describe("sortSidebarThreads", () => {
   })
 })
 
-describe("groupSidebarThreadsByRepo", () => {
-  it("buckets threads per repository and ranks repositories by their freshest thread", () => {
-    const alphaOld = cloudSidebarThread(
-      cloudThread({
-        id: "alpha-old",
-        repo: "alpha",
-        repoFullName: "acme/alpha",
-        updatedAt: 5,
-      })
-    )
-    const alphaNew = cloudSidebarThread(
-      cloudThread({
-        id: "alpha-new",
-        repo: "alpha",
-        repoFullName: "acme/alpha",
-        updatedAt: 40,
-      })
-    )
-    const beta = cloudSidebarThread(
-      cloudThread({
-        id: "beta",
-        repo: "beta",
-        repoFullName: "acme/beta",
-        updatedAt: 50,
-      })
-    )
-    const items = [alphaOld, alphaNew, beta]
-
-    const grouped = groupSidebarThreadsByRepo(
-      items,
-      sidebarRepoOptions(items, [])
-    )
-
-    expect(grouped.repos.map((group) => group.label)).toEqual(["beta", "alpha"])
-    expect(grouped.repos[1]?.threads.map((thread) => thread.id)).toEqual([
-      "alpha-new",
-      "alpha-old",
-    ])
-    expect(grouped.recents).toEqual([])
-  })
-
-  it("sends threads with no known repository to Recents", () => {
-    const orphan = cloudSidebarThread(
-      cloudThread({ id: "orphan", repo: "", repoFullName: "" })
-    )
-    const known = cloudSidebarThread(
-      cloudThread({ id: "known", repo: "alpha", repoFullName: "acme/alpha" })
-    )
-
-    const grouped = groupSidebarThreadsByRepo(
-      [orphan, known],
-      sidebarRepoOptions([known], [])
-    )
-
-    expect(grouped.repos).toHaveLength(1)
-    expect(grouped.recents.map((thread) => thread.id)).toEqual(["orphan"])
-  })
-})
-
-describe("groupSidebarThreadsByWorkspace", () => {
+describe("groupRepoGroupsByWorkspace", () => {
   it("nests repository groups under their owning workspace, defaulting the rest", () => {
     const alpha = cloudSidebarThread(
       cloudThread({
@@ -244,7 +93,11 @@ describe("groupSidebarThreadsByWorkspace", () => {
         updatedAt: 30,
       })
     )
-    const threads = [alpha, beta, gamma]
+    const groups = [alpha, beta, gamma].map((thread) => ({
+      key: thread.repoKey ?? "",
+      label: thread.repoLabel ?? "",
+      threads: [thread],
+    }))
     const repos = [
       { key: "repo:acme/alpha", label: "alpha", workspace: "oss" },
       { key: "repo:acme/beta", label: "beta", workspace: "oss" },
@@ -256,11 +109,10 @@ describe("groupSidebarThreadsByWorkspace", () => {
       { slug: "default", name: "Default" },
     ]
 
-    const grouped = groupSidebarThreadsByWorkspace(threads, repos, workspaces)
+    const grouped = groupRepoGroupsByWorkspace(groups, repos, workspaces)
 
-    expect(grouped.recents).toEqual([])
     expect(
-      grouped.workspaces.map((workspace) => [
+      grouped.map((workspace) => [
         workspace.slug,
         workspace.name,
         workspace.repos.map((repo) => repo.key).sort(),
@@ -271,7 +123,7 @@ describe("groupSidebarThreadsByWorkspace", () => {
         ["default", "Default", ["repo:acme/gamma"]],
       ])
     )
-    expect(grouped.workspaces).toHaveLength(2)
+    expect(grouped).toHaveLength(2)
   })
 
   it("falls back to the slug as a display name for an unknown workspace", () => {
@@ -280,9 +132,13 @@ describe("groupSidebarThreadsByWorkspace", () => {
     )
     const repos = [{ key: "repo:acme/solo", label: "solo", workspace: "ghost" }]
 
-    const grouped = groupSidebarThreadsByWorkspace([thread], repos, [])
+    const grouped = groupRepoGroupsByWorkspace(
+      [{ key: "repo:acme/solo", label: "solo", threads: [thread] }],
+      repos,
+      []
+    )
 
-    expect(grouped.workspaces).toEqual([
+    expect(grouped).toEqual([
       {
         slug: "ghost",
         name: "ghost",
