@@ -3,7 +3,22 @@ import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { MCPOAuthUpdate } from "@/lib/api"
+
+type AuthMethod = NonNullable<MCPOAuthUpdate["token_endpoint_auth_method"]>
+
+const AUTH_METHODS: AuthMethod[] = ["client_secret_post", "client_secret_basic"]
+const AUTH_METHOD_LABELS: Record<AuthMethod, string> = {
+  client_secret_post: "Credentials in request body",
+  client_secret_basic: "HTTP Basic",
+}
 
 export function MCPOAuthFields({
   value,
@@ -98,26 +113,28 @@ export function MCPOAuthFields({
           Use the scope names and separator required by your provider.
         </span>
       </label>
-      <label className="block text-sm">
-        Client authentication
-        <select
-          aria-label="Client authentication"
-          className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+      <div className="space-y-1 text-sm">
+        <p>Client authentication</p>
+        <Select<AuthMethod>
+          items={AUTH_METHOD_LABELS}
           value={value.token_endpoint_auth_method ?? "client_secret_post"}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              token_endpoint_auth_method: event.target
-                .value as MCPOAuthUpdate["token_endpoint_auth_method"],
-            })
-          }
+          onValueChange={(method) => {
+            if (method)
+              onChange({ ...value, token_endpoint_auth_method: method })
+          }}
         >
-          <option value="client_secret_post">
-            Credentials in request body
-          </option>
-          <option value="client_secret_basic">HTTP Basic</option>
-        </select>
-      </label>
+          <SelectTrigger aria-label="Client authentication" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AUTH_METHODS.map((method) => (
+              <SelectItem key={method} value={method}>
+                {AUTH_METHOD_LABELS[method]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   )
 }

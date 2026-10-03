@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
+import { ConfirmProvider } from "@/components/ConfirmDialog"
 import { api, type UserPreferences } from "@/lib/api"
 import { PreferencesSection } from "./PreferencesSection"
 
@@ -57,7 +58,9 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   })
   const { rerender } = render(
     <QueryClientProvider client={client}>
-      <PreferencesSection />
+      <ConfirmProvider>
+        <PreferencesSection />
+      </ConfirmProvider>
     </QueryClientProvider>
   )
   expect(screen.queryByText("Local tracing project")).toBeNull()
@@ -119,7 +122,9 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   })
   rerender(
     <QueryClientProvider client={client}>
-      <PreferencesSection />
+      <ConfirmProvider>
+        <PreferencesSection />
+      </ConfirmProvider>
     </QueryClientProvider>
   )
   expect(screen.getByText("Local tracing project")).toBeTruthy()

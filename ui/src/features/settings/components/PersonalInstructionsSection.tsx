@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
+import { useConfirm } from "@/components/ConfirmDialog"
 import { Button } from "@/components/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -9,6 +10,7 @@ import { api, type UserInstructions } from "@/lib/api"
 
 export function PersonalInstructionsSection() {
   const qc = useQueryClient()
+  const confirm = useConfirm()
   const instructions = useQuery({
     queryKey: ["myInstructions"],
     queryFn: api.getMyInstructions,
@@ -43,11 +45,14 @@ export function PersonalInstructionsSection() {
   })
   const mutating = save.isPending || clear.isPending
 
-  const onClear = () => {
+  const onClear = async () => {
     if (
-      !window.confirm(
-        "Clear your personal instructions? This cannot be undone."
-      )
+      !(await confirm({
+        title: "Clear your personal instructions?",
+        description: "This cannot be undone.",
+        confirmLabel: "Clear",
+        destructive: true,
+      }))
     ) {
       return
     }
