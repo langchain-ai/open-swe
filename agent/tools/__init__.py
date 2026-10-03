@@ -8,6 +8,7 @@ _TOOL_MODULES = {
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
+    "code_channel_set_view": ".code_channel_set_view",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
@@ -72,6 +73,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_reply": "agent.slack.tools.reply",
     "slack_start_new_thread": "agent.slack.tools.start_new_thread",
+    "slack_start_review_channel": "agent.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
@@ -85,6 +87,7 @@ __all__ = [
     "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
+    "code_channel_set_view",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
@@ -149,6 +152,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_reply",
     "slack_start_new_thread",
+    "slack_start_review_channel",
     "submit_thread_feedback",
     "trigger_automation",
     "update_automation",
@@ -175,6 +179,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
     from agent.slack.tools.start_new_thread import slack_start_new_thread
+    from agent.slack.tools.start_review_channel import slack_start_review_channel
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (
         create_automation,
@@ -185,6 +190,7 @@ if TYPE_CHECKING:
     )
     from agent.tools.background_execute import background_execute
     from agent.tools.background_task import background_task
+    from agent.tools.code_channel_set_view import code_channel_set_view
     from agent.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from agent.tools.expedite_pr_approval import expedite_pr_approval
     from agent.tools.expose_port import expose_port

@@ -154,7 +154,7 @@ async def manage_code_channel(
         data, error = await set_commands(channel_id, commands)
         return _result(action, channel_id, data, error)
     if action == "view":
-        resolved_content, content_error = await _resolve_content(content, file_path)
+        resolved_content, content_error = await resolve_view_content(content, file_path)
         if content_error:
             return {"success": False, "error": content_error}
         if suggestions is not None:
@@ -203,7 +203,7 @@ async def manage_code_channel(
         data, error = await get_canvas(channel_id, canvas_id, include_resolved=include_resolved)
         return _result(action, channel_id, data, error)
     if action == "set_canvas":
-        resolved_content, content_error = await _resolve_content(content, file_path)
+        resolved_content, content_error = await resolve_view_content(content, file_path)
         if content_error:
             return {"success": False, "error": content_error}
         data, error = await set_canvas_content(channel_id, canvas_id, resolved_content)
@@ -252,7 +252,7 @@ def _result(
     return result
 
 
-async def _resolve_content(content: str, file_path: str) -> tuple[str, str | None]:
+async def resolve_view_content(content: str, file_path: str) -> tuple[str, str | None]:
     if content and file_path:
         return "", "Pass content or file_path, not both"
     if not file_path:
