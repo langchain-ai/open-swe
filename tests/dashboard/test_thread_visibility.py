@@ -9,6 +9,7 @@ from agent.threads import (
     blobs,
     handlers,
     listing,
+    participants,
     plan_api,
     summary,
     workflow_approval_api,
@@ -71,6 +72,7 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     "operation",
     [
         handlers.get_dashboard_thread_state,
+        participants.get_thread_participants,
         handlers.get_dashboard_terminal_sandbox,
         handlers.delete_dashboard_thread,
         handlers.cancel_dashboard_thread,
