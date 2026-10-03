@@ -89,6 +89,7 @@ class HumanReviewRequest(Base):
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
     tldr: Mapped[str] = mapped_column(server_default="", default="")
+    screenshot_body: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")
     detail: Mapped[str] = mapped_column(server_default="", default="")
     slack_channel_id: Mapped[str] = mapped_column(server_default="", default="")

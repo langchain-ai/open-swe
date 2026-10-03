@@ -2,7 +2,8 @@
 
 import json
 
-from agent.expedited_review.eligibility import ChangedFile
+from agent.expedited_review.eligibility import ChangedFile, needs_modal
+from agent.expedited_review.screenshots import screenshots
 from agent.human_review.requests import ChannelChoice, HumanReviewRequest
 from agent.slack.blocks import (
     SECTION_TEXT_MAX_CHARS,
@@ -97,11 +98,11 @@ def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
     return [context(heading + "\n".join(lines))]
 
 
-def _vote_buttons(approval: HumanReviewRequest) -> list[ButtonElement]:
+def _vote_buttons(approval: HumanReviewRequest, *, paginated: bool = False) -> list[ButtonElement]:
     approve = button(
-        "Approve",
+        "Review files" if paginated else "Approve",
         action_id="open_swe_option_select_approve",
-        value=_button_value("approve", approval),
+        value=_button_value("review" if paginated else "approve", approval),
         style="primary",
     )
     return [approve, _dismiss_button(approval)]
@@ -181,10 +182,31 @@ def _voting_diff(
     """The diff voters read; an approved card no longer needs it."""
     if approval.approved:
         return []
+    evidence = screenshots(approval.screenshot_body)
+    if evidence:
+        return [
+            section(
+                "*Visual change* · Screenshots supplied by the author; inspect the code before approving."
+            ),
+            *evidence,
+            context(f"{len(files)} files · Code diff available in Review files."),
+            divider(),
+        ]
+    if needs_modal(files):
+        return [
+            context(f"{len(files)} files · Review each file in the modal before approving."),
+            divider(),
+        ]
     return [*_diff_sections(files, diff_image_id), divider()]
 
 
-def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
+def _status(
+    approval: HumanReviewRequest,
+    author: str,
+    choices: list[ChannelChoice],
+    *,
+    paginated: bool = False,
+) -> list[Block]:
     if approval.awaiting_ready:
         return [
             section(f"*Draft.* Waiting for {author} to mark it ready for review."),
@@ -192,7 +214,7 @@ def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoi
         ]
     return [
         section(_vote_summary(approval, author)),
-        actions(*_vote_buttons(approval)),
+        actions(*_vote_buttons(approval, paginated=paginated)),
         *_send_controls(approval, choices),
     ]
 
@@ -227,7 +249,12 @@ def open_card(
         *header,
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        *_status(approval, author, [] if thread_url is not None else choices or []),
+        *_status(
+            approval,
+            author,
+            [] if thread_url is not None else choices or [],
+            paginated=needs_modal(files) or bool(screenshots(approval.screenshot_body)),
+        ),
     ]
     text = f"Expedited review requested for {pr.url}"
     return text, blocks

@@ -72,6 +72,7 @@
         </div>
       </main>
     </div>
+    <dialog id="review-modal" style="width: min(850px, 90vw); border: 0; border-radius: 12px; box-shadow: 0 12px 60px #0006; padding: 24px;"><h2 id="modal-title"></h2><div id="modal-body" style="max-height: 65vh; overflow: auto;"></div><div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;"><button id="modal-close">Cancel</button><button class="send" id="modal-submit">Next file</button></div></dialog>
     <script>
       const $ = (id) => document.getElementById(id);
       const userNames = {};
@@ -254,9 +255,34 @@
       }
 
       async function poll() {
-        try { await pollState(); await pollMessages(); } catch (_) {}
+        try { await pollState(); await pollMessages(); await pollModal(); } catch (_) {}
       }
 
+      async function pollModal() {
+        const view = await (await fetch(`/mock/slack/modal?user=${$("user").value}`)).json();
+        const dialog = $("review-modal");
+        if (!view) { if (dialog.open) dialog.close(); return; }
+        $("modal-title").textContent = view.title.text;
+        $("modal-body").replaceChildren();
+        for (const block of view.blocks) {
+          const el = document.createElement(block.type === "rich_text" ? "pre" : "p");
+          el.style.whiteSpace = "pre-wrap";
+          el.style.overflowWrap = "anywhere";
+          el.textContent = block.text?.text || (block.elements || []).map(e => e.text || (e.elements || []).map(t => t.text || "").join("")).join("\n");
+          $("modal-body").appendChild(el);
+        }
+        $("modal-submit").hidden = !view.submit;
+        $("modal-submit").textContent = view.submit?.text || "";
+        if (!dialog.open) dialog.showModal();
+      }
+      $("modal-submit").addEventListener("click", async () => {
+        await fetch("/mock/slack/modal", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({user:$("user").value})});
+        await pollModal();
+      });
+      $("modal-close").addEventListener("click", async () => {
+        await fetch(`/mock/slack/modal?user=${$("user").value}`, {method:"DELETE"});
+        await pollModal();
+      });
       $("send").addEventListener("click", async () => {
         await fetch("/mock/slack/send", {
           method: "POST",
