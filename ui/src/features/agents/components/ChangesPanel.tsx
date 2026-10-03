@@ -12,6 +12,7 @@ import type { PanelFile } from "@/features/agents/components/DiffFilesView"
 import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button"
 
 export type ChangesStatus = "ready" | "missing" | "error"
 
@@ -137,33 +138,37 @@ export function ChangesPanel({
   const actions = useMemo(
     () => (
       <>
-        <button
-          type="button"
-          aria-label="Refresh changes"
-          title="Refresh changes"
+        <TooltipIconButton
+          label="Refresh changes"
+          size="icon"
           onClick={onRefresh}
           disabled={isFetching}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
           <RefreshCwIcon
             className={isFetching ? "size-3.5 animate-spin" : "size-3.5"}
           />
-        </button>
+        </TooltipIconButton>
         {extraActions}
         {pr && (
-          <a
-            href={pr.url}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="View PR"
-            title="View PR"
-            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
-          >
-            <GitPullRequestIcon className="size-3.5 shrink-0" />
-            <span className="whitespace-nowrap @max-[680px]:hidden">
-              View PR
-            </span>
-          </a>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <a
+                  href={pr.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="View PR"
+                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
+                />
+              }
+            >
+              <GitPullRequestIcon className="size-3.5 shrink-0" />
+              <span className="whitespace-nowrap @max-[680px]:hidden">
+                View PR
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup>View PR</TooltipPopup>
+          </Tooltip>
         )}
       </>
     ),
