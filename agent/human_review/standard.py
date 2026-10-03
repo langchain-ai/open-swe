@@ -47,7 +47,8 @@ from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
-from agent.slack.blocks import escape
+from agent.slack.blocks import block_payload, escape, section
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
@@ -482,9 +483,11 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
+        text = f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}"
         await send_dm(
             user.slack_user_id,
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
+            text,
+            blocks=block_payload([section(text), *await origin_footer(added.thread_id)]),
         )
     return RequestResult(
         success=True,

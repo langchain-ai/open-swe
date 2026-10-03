@@ -42,8 +42,8 @@ from agent.human_review.requests import (
     RequestState,
 )
 from agent.run_config import RunConfig
-from agent.slack.blocks import Block, block_payload, escape
-from agent.slack.cards import repost_thread_card
+from agent.slack.blocks import Block, block_payload, escape, section
+from agent.slack.cards import origin_footer, repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
@@ -207,8 +207,11 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
     )
-    payload = block_payload(blocks)
-    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    dm_location = await send_dm_with_location(
+        author.slack_user_id,
+        text,
+        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+    )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
@@ -285,6 +288,15 @@ async def _render_standard(
 
 
 async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
+) -> tuple[str, list[Block]]:
+    text, blocks = await _render(request, outcome, copy=copy)
+    if copy or dm or (request.kind == "standard" and not request.slack_thread_ts):
+        blocks.extend(await origin_footer(request.thread_id))
+    return text, blocks
+
+
+async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
@@ -733,10 +745,14 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
         )
         await _unrequest_github_review(request, reviewer.github_login, token)
         if reviewer.user.slack_user_id:
+            text = (
+                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+                "Open SWE removed you as a reviewer."
+            )
             await send_dm(
                 reviewer.user.slack_user_id,
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                text,
+                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
             )
     current = await HumanReviewRequest.get(request.id) or request
     if current.state == "open":
