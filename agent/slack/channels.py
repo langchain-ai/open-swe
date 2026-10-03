@@ -14,6 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from agent.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogRow
 from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
@@ -47,7 +48,17 @@ class SlackChannel(Base):
             return (row.memory, row.memory_revision) if row else ("", 0)
 
     @classmethod
-    async def patch_memory(cls, channel_id: str, memory: str, revision: int) -> bool:
+    async def patch_memory(
+        cls,
+        channel_id: str,
+        memory: str,
+        revision: int,
+        *,
+        patch: str,
+        proposed_by: str,
+        approved_by: str,
+        proposal_ts: str,
+    ) -> bool:
         async with postgres.session() as session:
             result = await session.scalar(
                 update(cls)
@@ -55,7 +66,33 @@ class SlackChannel(Base):
                 .values(memory=memory, memory_revision=revision + 1)
                 .returning(cls.id)
             )
-            return result is not None
+            if result is None:
+                return False
+            entry = AuditLog(
+                operation_name="slack.channel_memory.apply_patch",
+                operation_succeeded=True,
+                enrichments=AuditLogEnrichments(
+                    actor_kind="person",
+                    resource_ids=[channel_id, proposal_ts],
+                    channel_memory_patch=patch,
+                    proposed_by_slack_user_id=proposed_by,
+                    approved_by_slack_user_id=approved_by,
+                    channel_memory_revision=revision + 1,
+                ),
+            )
+            session.add(
+                AuditLogRow(
+                    id=entry.id,
+                    request_time=entry.request_time,
+                    operation_name=entry.operation_name,
+                    operation_succeeded=True,
+                    api_key_id=None,
+                    user_id=None,
+                    workspace_id=None,
+                    enrichments=entry.enrichments.model_dump(mode="json", exclude_none=True),
+                )
+            )
+            return True
 
     payload: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
     fetched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)

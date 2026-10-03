@@ -20,4 +20,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise NotImplementedError
+    op.drop_column("slack_channel", "memory_revision")
+    op.drop_column("slack_channel", "memory")

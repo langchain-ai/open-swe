@@ -73,7 +73,18 @@ async def approve_channel_memory(event: Mapping[str, object]) -> bool:
         memory, revision = proposal.get("memory"), proposal.get("base_revision")
         if not isinstance(memory, str) or not isinstance(revision, int):
             raise ValueError("Invalid channel memory proposal")
-        if not await SlackChannel.patch_memory(channel, memory, revision):
+        patch = proposal.get("patch")
+        if not isinstance(patch, str):
+            raise ValueError("Invalid channel memory patch")
+        if not await SlackChannel.patch_memory(
+            channel,
+            memory,
+            revision,
+            patch=patch,
+            proposed_by=proposer,
+            approved_by=user,
+            proposal_ts=timestamp,
+        ):
             proposal["status"] = "stale"
             await put_value(PROPOSAL_NAMESPACE, key, proposal)
             await post_slack_thread_reply_with_ts(

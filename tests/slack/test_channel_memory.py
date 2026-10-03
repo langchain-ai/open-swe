@@ -22,6 +22,7 @@ async def test_memory_requires_other_member_and_current_revision(
     records = {
         "slack_channel_memory_proposals": {
             "memory": "New memory",
+            "patch": "-Old memory\n+New memory",
             "proposer": "author",
             "base_revision": 0,
             "message_text": "Exact proposal",
@@ -40,7 +41,13 @@ async def test_memory_requires_other_member_and_current_revision(
     async def lock(*args, **kwargs):
         yield
 
-    async def patch_memory(channel, memory, base_revision):
+    async def patch_memory(channel, memory, base_revision, **audit):
+        assert audit == {
+            "patch": "-Old memory\n+New memory",
+            "proposed_by": "author",
+            "approved_by": approver,
+            "proposal_ts": "1.0",
+        }
         row = records["slack_channel_memory"]
         if row["revision"] != base_revision:
             return False
