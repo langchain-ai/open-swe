@@ -472,7 +472,17 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    from agent.tasks.delivery import handle_worker_completion
+
+    if await handle_worker_completion(thread_id, run_id, status, error=payload.get("error")):
+        return {"status": "ok", "reason": "worker result recorded for coordinator"}
     payload_metadata = payload.get("metadata")
+    if run_id and isinstance(payload_metadata, dict) and payload_metadata.get("task_dispatch_key"):
+        from agent.tasks.service import is_duplicate_task_dispatch
+
+        run = await langgraph_client().runs.get(thread_id, run_id)
+        if await is_duplicate_task_dispatch(thread_id, run):
+            return {"status": "ignored", "reason": "duplicate task dispatch"}
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
     if status == "success" and not (

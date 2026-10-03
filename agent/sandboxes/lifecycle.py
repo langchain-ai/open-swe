@@ -33,7 +33,11 @@ from agent.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
-from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from agent.sandboxes.tool_access import (
+    SANDBOX_HOST_THREAD_KEY,
+    SANDBOX_PROXY_CONFIG_METADATA_KEY,
+)
+from agent.tasks import store as task_store
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -379,6 +383,66 @@ async def _connect_existing_sandbox(
     return refreshed
 
 
+async def _shared_task_sandbox(
+    thread_id: str,
+    task: task_store.TaskRecord,
+    github_proxy_repositories: Sequence[str] | None,
+) -> SandboxBackendProtocol:
+    host_thread_id = task.coordinator_thread_id
+    metadata = await get_sandbox_metadata(host_thread_id)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or not sandbox_id:
+        raise SandboxUnreachableError(
+            thread_id,
+            None,
+            "The shared task sandbox binding is missing; human remediation is required",
+        )
+    bridge_id = Bridge.bridge_id_of(sandbox_id)
+    if bridge_id is not None:
+        backend = await BridgeSandboxBackend.connect(host_thread_id, bridge_id)
+    else:
+        proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+        repositories = narrowed_repositories(
+            github_proxy_repositories, await thread_token_repositories(host_thread_id)
+        )
+        try:
+            backend = await _connect_existing_sandbox(
+                host_thread_id,
+                cached=SANDBOX_CONNECTIONS.get(sandbox_id),
+                sandbox_id=sandbox_id,
+                github_proxy_repositories=repositories,
+                base_proxy_config=proxy_config
+                if isinstance(proxy_config, dict)
+                else get_recorded_proxy_base_config(host_thread_id),
+                workspace_slug=task.workspace,
+            )
+        except SandboxGoneError as exc:
+            raise SandboxUnreachableError(
+                thread_id,
+                sandbox_id,
+                "The shared task sandbox was deleted; human remediation is required",
+            ) from exc
+    from agent.sandboxes.tool_access import provision_tool_url
+
+    if thread_id != host_thread_id:
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"sandbox_id": sandbox_id, SANDBOX_HOST_THREAD_KEY: host_thread_id},
+        )
+    if bridge_id is None:
+        await provision_tool_url(host_thread_id, backend)
+    return set_sandbox_backend(thread_id, backend)
+
+
+async def _require_unshared_sandbox(thread_id: str) -> None:
+    task = await task_store.task_for_thread(thread_id)
+    if task is not None and (task.delegated or task.coordinator_thread_id != thread_id):
+        raise PermissionError(
+            "A delegated task's shared sandbox cannot be created or replaced independently; "
+            "human remediation is required"
+        )
+
+
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
@@ -414,6 +478,9 @@ async def ensure_sandbox_for_thread(
     lose their ``--global`` config, and Vercel preview deploys reject commits
     whose author email can't be resolved to a GitHub account.
     """
+    task = await task_store.task_for_thread(thread_id)
+    if task is not None and (task.delegated or task.coordinator_thread_id != thread_id):
+        return await _shared_task_sandbox(thread_id, task, github_proxy_repositories)
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
@@ -442,6 +509,7 @@ async def ensure_sandbox_for_thread(
         )
 
     if sandbox_id is None:
+        await _require_unshared_sandbox(thread_id)
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             thread_id=thread_id,
@@ -466,6 +534,7 @@ async def ensure_sandbox_for_thread(
             gone = isinstance(exc, SandboxGoneError)
             if not (gone or allow_replacement):
                 raise
+            await _require_unshared_sandbox(thread_id)
             logger.warning(
                 "Replacing %s sandbox %s for thread %s",
                 "deleted" if gone else "unreachable",
@@ -529,6 +598,7 @@ async def recreate_sandbox_for_thread(
     source: SandboxSource = "workspace",
 ) -> tuple[str, str, str | None]:
     """Best-effort stop the old sandbox and bind the thread to a fresh one."""
+    await _require_unshared_sandbox(thread_id)
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = metadata.get("sandbox_id")

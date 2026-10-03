@@ -54,6 +54,7 @@ from agent.slack.client import (
     update_slack_trace_reply_for_web_handoff,
 )
 from agent.source_context import SourceContext
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.access import (
     _ensure_dashboard_github_token,
     agent_version_metadata,
@@ -767,6 +768,7 @@ async def _enrich_run_start_command(
     creating: bool = False,
     email: str | None = None,
 ) -> dict[str, Any]:
+    await require_user_facing_thread(thread_id)
     if command.get("method") != "run.start":
         return command
 
@@ -1071,6 +1073,7 @@ async def steer_running_thread(
     before its next model call. The reply mirrors the protocol's success
     envelope so the caller cannot tell a steer from a start.
     """
+    await require_user_facing_thread(thread_id)
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
@@ -1476,6 +1479,7 @@ async def _enrich_system_run_start_command(
     the workspace's own thread and run config and leaves the rest of the command
     pipeline — forwarding, streaming, run bookkeeping — shared.
     """
+    await require_user_facing_thread(thread_id)
     if command.get("method") != "run.start":
         raise HTTPException(403, "a machine principal may only start runs")
 

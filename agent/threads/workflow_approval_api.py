@@ -8,6 +8,7 @@ from langgraph_sdk.schema import Run
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dispatch import dispatch_agent_run
 from agent.source_context import SourceContext
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.plan_api import fetch_thread_metadata
 from agent.threads.summary import (
     repo_config_from_metadata,
@@ -50,6 +51,7 @@ async def approve_workflow_push(
     metadata = await fetch_thread_metadata(thread_id)
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(thread_id)
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
@@ -72,6 +74,7 @@ async def reject_workflow_push(
     metadata = await fetch_thread_metadata(thread_id)
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(thread_id)
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )

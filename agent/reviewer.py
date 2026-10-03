@@ -59,6 +59,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.task_role import NonTaskGraphMiddleware
 from agent.prompts import apply_tool_descriptions, load_prompt, prompt
 from agent.review.approvals import approval_policy_for_review
 from agent.review.diff import (
@@ -90,6 +91,7 @@ from agent.runtime import (
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 from agent.sandboxes.state import SandboxUnreachableError
+from agent.tasks.ingress import assert_non_task_graph
 from agent.tools import (
     add_finding,
     fetch_review_diff,
@@ -919,6 +921,8 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
 
+    if thread_id is not None:
+        await assert_non_task_graph(thread_id)
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
@@ -1004,6 +1008,7 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                NonTaskGraphMiddleware(thread_id),
                 PrepareReviewerRunMiddleware(
                     thread_id=thread_id,
                     config=config,

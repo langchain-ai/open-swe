@@ -110,6 +110,10 @@ async def reconcile_stale_runs(*, max_age_seconds: int = 1800) -> dict[str, int]
             break
         offset += _SEARCH_PAGE_SIZE
 
+    from agent.tasks.delivery import reconcile_tasks
+
+    task_counts = await reconcile_tasks()
+    logger.info("Task reconciliation complete", extra=task_counts)
     counts = {
         "threads_checked": threads_checked,
         "stale_runs": stale_runs,

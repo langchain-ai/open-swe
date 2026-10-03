@@ -49,6 +49,7 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.task_role import NonTaskGraphMiddleware
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -57,6 +58,7 @@ from agent.runtime import (
     bindable_config,
     graph_loaded_for_execution,
 )
+from agent.tasks.ingress import assert_non_task_graph
 from agent.tools import (
     fetch_url,
     list_review_findings,
@@ -161,6 +163,8 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
     config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
     cfg = RunConfig.parse(configurable)
 
+    if cfg.thread_id is not None:
+        await assert_non_task_graph(cfg.thread_id)
     if cfg.thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
@@ -193,6 +197,7 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                NonTaskGraphMiddleware(cfg.thread_id),
                 PrepareChatRunMiddleware(config=config),
                 ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),

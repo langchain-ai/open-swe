@@ -1,0 +1,1 @@
+Explicitly send a follow-up assignment to one worker belonging to this coordinator's task. Returns without waiting for the result. The message is enqueued without interrupting the worker's current invocation. User follow-ups to the coordinator do not automatically change worker instructions.

@@ -1,0 +1,1 @@
+Create or update this thread's bounded task and explicit acceptance criteria. The current thread becomes its permanent coordinator. Workers cannot change task criteria. Call before spawning any workers. Updating criteria does not restore implementation permissions after delegation.

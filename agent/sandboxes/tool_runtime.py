@@ -151,6 +151,7 @@ async def load_tool_surface(
             **context.configurable,
             "thread_id": thread_id,
             "__is_for_execution__": True,
+            "_task_sandbox_capability": True,
         },
     }
     surface = ToolSurface()

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import prompt
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.plan_store import (
     PLAN_STATUS_SHARED,
@@ -121,6 +122,7 @@ async def update_plan(
     metadata = await fetch_thread_metadata(thread_id)
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(thread_id)
     content = await get_plan_content(thread_id) or {}
     if body.dismissed:
         if not content:
@@ -174,6 +176,7 @@ async def post_plan_comment(
     metadata = await fetch_thread_metadata(thread_id)
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(thread_id)
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
@@ -194,6 +197,7 @@ async def submit_plan_comments(
     metadata = await fetch_thread_metadata(thread_id)
     login = session["sub"]
     _assert_thread_postable(metadata, login, session.get("email"))
+    await require_user_facing_thread(thread_id)
     comments = await list_plan_comments(thread_id, raise_on_error=True)
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")
@@ -218,6 +222,7 @@ async def remove_plan_comment(
     metadata = await fetch_thread_metadata(thread_id)
     if not thread_is_promptable(metadata, session["sub"]):
         raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(thread_id)
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:

@@ -1,0 +1,1 @@
+Explicitly request cancellation of the selected worker's running and queued invocations. Only its permanent coordinator may cancel it. Other workers are unaffected. Cancellation does not restore the coordinator's implementation permissions or complete the task.

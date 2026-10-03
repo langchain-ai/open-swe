@@ -36,6 +36,7 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
+from agent.middleware.task_role import NonTaskGraphMiddleware
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.author_guidance import SteeringHistory
@@ -52,6 +53,7 @@ from agent.runtime import (
     graph_loaded_for_execution,
 )
 from agent.sandboxes.repo_prep import prepare_review_repo
+from agent.tasks.ingress import assert_non_task_graph
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
 from agent.tools.record_human_input import record_human_input
 from agent.utils.deferred_model import make_deferred_error_model
@@ -233,6 +235,8 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
 
+    if thread_id is not None:
+        await assert_non_task_graph(thread_id)
     if thread_id is None or not graph_loaded_for_execution(config):
         return create_deep_agent(system_prompt="", tools=[]).with_config(bindable_config(config))
 
@@ -263,6 +267,7 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
         middleware=cast(
             list[AgentMiddleware[Any, Any, Any]],
             [
+                NonTaskGraphMiddleware(thread_id),
                 PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
                 ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),

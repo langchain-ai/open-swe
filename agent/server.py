@@ -137,6 +137,8 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.task_dispatch import TaskDispatchMiddleware
+from agent.middleware.task_role import TaskRoleMiddleware
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -246,6 +248,15 @@ from agent.tools.admin_gate import (
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.tools.tasks import (
+    cancel_worker,
+    complete_task,
+    get_task,
+    message_worker,
+    report_worker_progress,
+    set_task,
+    spawn_worker,
+)
 from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
@@ -1355,6 +1366,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return create_deep_agent(
             system_prompt="",
             tools=[],
+            middleware=[TaskDispatchMiddleware(thread_id), TaskRoleMiddleware(thread_id)]
+            if thread_id is not None
+            else [],
         ).with_config(bindable_config(config))
 
     from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
@@ -1677,6 +1691,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_start_new_thread,
     ]
     static_tools = [
+        set_task,
+        get_task,
+        spawn_worker,
+        message_worker,
+        cancel_worker,
+        report_worker_progress,
+        complete_task,
         http_request,
         fetch_url,
         web_search,
@@ -1982,6 +2003,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             middleware=cast(
                 list[AgentMiddleware[Any, Any, Any]],
                 [
+                    TaskDispatchMiddleware(thread_id),
+                    TaskRoleMiddleware(
+                        thread_id,
+                        client_tool_names=client_tool_names,
+                        sandbox_capability=configurable.get("_task_sandbox_capability") is True,
+                    ),
                     FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True

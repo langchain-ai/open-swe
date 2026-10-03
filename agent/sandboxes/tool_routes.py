@@ -15,6 +15,7 @@ from agent.sandboxes.tool_access import (
     authenticate_tool_access,
 )
 from agent.sandboxes.tool_models import ToolArguments, ToolDescription, ToolResult
+from agent.tasks.ingress import require_sandbox_tool_access
 
 logger = logging.getLogger(__name__)
 MAX_REQUEST_BYTES = 1024 * 1024
@@ -102,12 +103,15 @@ async def invoke_tool(
 ) -> ToolResult:
     from agent.sandboxes.tool_runtime import load_tool_surface
 
-    surface, config, state = await load_tool_surface(access.thread_id)
     try:
+        await require_sandbox_tool_access(access.thread_id, tool_name, arguments.root)
+        surface, config, state = await load_tool_surface(access.thread_id)
         result = await surface.invoke(access.thread_id, config, state, tool_name, arguments.root)
         return ToolResult.model_validate(result)
     except HTTPException:
         raise
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except Exception:
         logger.exception("Sandbox tool invocation failed", extra={"tool_name": tool_name})
         raise HTTPException(

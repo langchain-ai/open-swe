@@ -47,6 +47,7 @@ from agent.input_messages import (
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
+from agent.tasks.ingress import assert_user_facing_thread
 from agent.threads.creation import ensure_titled_thread
 from agent.users import User
 
@@ -303,12 +304,15 @@ async def create_durable_run(
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    task_worker_dispatch: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
     means the caller already created and titled the thread.
     """
+    if not task_worker_dispatch:
+        await assert_user_facing_thread(thread_id)
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
@@ -382,6 +386,7 @@ async def dispatch_agent_run(
     contract. ``source`` is for logging/metadata only; ``assistant_id`` selects
     the graph (``"agent"`` or ``"reviewer"``).
     """
+    await assert_user_facing_thread(thread_id)
     if input is not None and any(
         value is not None for value in (content, context, channels, systems)
     ):

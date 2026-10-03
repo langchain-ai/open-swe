@@ -17,6 +17,7 @@ from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
+from agent.tasks.ingress import require_user_facing_thread
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
@@ -206,6 +207,7 @@ async def send_dashboard_message(
 
     metadata = thread_metadata(thread)
     _assert_thread_postable(metadata, login, email)
+    await require_user_facing_thread(thread_id)
 
     prompt = body.content.strip()
     now_ms = _now_ms()
@@ -361,6 +363,7 @@ async def cancel_dashboard_thread(
 
     metadata = thread_metadata(thread)
     _assert_thread_postable(metadata, login, email)
+    await require_user_facing_thread(thread_id)
 
     try:
         cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
@@ -401,6 +404,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     principal.assert_can_post(thread_metadata(thread))
+    await require_user_facing_thread(thread_id)
     try:
         cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
     except Exception as exc:  # noqa: BLE001
@@ -430,6 +434,7 @@ async def admin_cancel_dashboard_thread(
 
     if thread_metadata(thread).get("visibility", "public") != "public":
         assert_thread_readable(thread_metadata(thread), login, email)
+    await require_user_facing_thread(thread_id)
 
     try:
         cancelled_run_ids, _ = await _cancel_active_thread_runs(client, thread_id)
@@ -455,6 +460,7 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
 
     metadata = thread_metadata(thread)
     _assert_thread_postable(metadata, login, email)
+    await require_user_facing_thread(thread_id)
 
     run_id = metadata.get("latest_run_id")
     if isinstance(run_id, str) and run_id:
@@ -561,6 +567,7 @@ async def continue_thread_privately(
     """Copy a collaborative transcript into a new private thread owned by the caller."""
     client = langgraph_client()
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
+    await require_user_facing_thread(thread_id)
     if metadata.get("visibility", "public") != "public":
         raise HTTPException(409, "thread is already private")
     state = as_json_object(await client.threads.get_state(thread_id))
