@@ -8,22 +8,8 @@ import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
-
-function StatusPill({ connected }: { connected: boolean }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-        connected
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
-      )}
-    >
-      {connected ? "Connected" : "Not connected"}
-    </span>
-  )
-}
+import { LangSmithConnection } from "./LangSmithConnection"
+import { StatusPill } from "./StatusPill"
 
 function SlackRow({ user }: { user: SessionUser }) {
   const qc = useQueryClient()
@@ -150,6 +136,7 @@ export function ConnectionsSection({ user }: { user: SessionUser }) {
     >
       <SlackRow user={user} />
       <NotionRow />
+      <LangSmithConnection />
     </SettingsSection>
   )
 }
