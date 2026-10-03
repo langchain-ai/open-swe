@@ -61,6 +61,7 @@ _TOOL_MODULES = {
     "search_pull_requests": ".search_pull_requests",
     "search_repo_code": "agent.github.tools.search_repo_code",
     "start_thread": ".threads",
+    "slack_open_modal": "agent.slack.tools.open_modal",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
     "slack_attach_html": "agent.slack.tools.attach_html",
     "slack_list_channel_members": "agent.slack.tools.channels",
@@ -138,6 +139,7 @@ __all__ = [
     "search_pull_requests",
     "search_repo_code",
     "start_thread",
+    "slack_open_modal",
     "slack_add_reaction",
     "slack_attach_html",
     "slack_list_channel_members",
@@ -170,6 +172,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.manage_code_channel import manage_code_channel
     from agent.slack.tools.move_thread import slack_move_thread
     from agent.slack.tools.no_reply_needed import slack_no_reply_needed
+    from agent.slack.tools.open_modal import slack_open_modal
     from agent.slack.tools.read_channel_messages import slack_read_channel_messages
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
