@@ -23,7 +23,7 @@ from agent.threads.access import (
     _readable_thread_metadata,
 )
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
-from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
+from agent.threads.creation import create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
@@ -52,6 +52,7 @@ from agent.threads.summary import (
     thread_is_owner,
     thread_source,
 )
+from agent.threads.titles import update_thread_title
 from agent.transcript.engine import delete_transcript
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.transcript.subagents import attach_subagents
@@ -481,13 +482,13 @@ async def rename_dashboard_thread(
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        metadata_update = await update_thread_title(
+            client, thread_id, {"title": title}, manual=True
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not rename thread", extra={"thread_id": thread_id}, exc_info=True)
         raise HTTPException(502, "failed to update thread") from exc
-    await mirror_thread_metadata(thread_id, metadata_update)
     thread = {
         **as_thread_dict(thread),
         "metadata": {**thread_metadata(thread), **metadata_update},

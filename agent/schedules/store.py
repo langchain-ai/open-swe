@@ -37,6 +37,7 @@ from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_lock_thread, create_thread
+from agent.threads.titles import update_thread_title
 from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -832,7 +833,7 @@ async def _launch_agent_schedule_record(
     await create_thread(
         client, thread_id, title=metadata["title"], metadata=metadata, if_exists="do_nothing"
     )
-    await client.threads.update(thread_id=thread_id, metadata=metadata)
+    await update_thread_title(client, thread_id, metadata)
     input_context: InputMessageContext = {
         "sender_id": f"system:schedule:{schedule_id}",
         "surface": "automation",
