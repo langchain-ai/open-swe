@@ -35,6 +35,12 @@ _FLUSH_INTERVAL_SECONDS = 1.0
 _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
+_LOADING_MESSAGES = [
+    "Reading your request...",
+    "Preparing the workspace...",
+    "Working through the steps...",
+    "Putting the answer together...",
+]
 _STATUS_REFRESH_SECONDS = 90.0
 _LOCATION_CHECK_SECONDS = 15.0
 _STATUS_RETRY_DELAYS = (1.0, 2.0)
@@ -331,7 +337,9 @@ async def stream_slack_thinking_steps(
 
 async def restore_slack_thinking_status(channel_id: str, thread_ts: str) -> bool:
     """Restore the status Slack clears when the assistant posts a reply."""
-    return await set_slack_thread_status(channel_id, thread_ts, _THINKING_STATUS)
+    return await set_slack_thread_status(
+        channel_id, thread_ts, _THINKING_STATUS, loading_messages=_LOADING_MESSAGES
+    )
 
 
 async def show_slack_thinking_status(
@@ -353,19 +361,60 @@ async def show_slack_thinking_status(
 
     home = (channel_id, thread_ts)
     last_known = home
+    current_status = _THINKING_STATUS
+    status_lock = asyncio.Lock()
+
+    async def publish_status() -> None:
+        nonlocal last_known
+        async with status_lock:
+            location = await _current_slack_location(client, thread_id, unbound=home)
+            if location is None or is_code_channel_session(location[1]):
+                return
+            last_known = location
+            await set_slack_thread_status(
+                *location,
+                current_status,
+                loading_messages=_LOADING_MESSAGES if current_status == _THINKING_STATUS else None,
+            )
 
     async def refresh() -> None:
-        nonlocal last_known
         while True:
             await asyncio.sleep(_STATUS_REFRESH_SECONDS)
-            location = await _current_slack_location(client, thread_id, unbound=home)
-            if location is None:
-                continue
-            last_known = location
-            if not is_code_channel_session(last_known[1]):
-                await restore_slack_thinking_status(*last_known)
+            await publish_status()
+
+    async def observe_tools() -> None:
+        nonlocal current_status
+        try:
+            active = False
+            async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+                async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                    lifecycle = root_lifecycle(event)
+                    if lifecycle is not None and lifecycle[0] == run_id:
+                        if lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                            return
+                        active = lifecycle[1] == "running"
+                    parsed = _event_data(event) if active else None
+                    if parsed is None or parsed[0]:
+                        continue
+                    data = parsed[1]
+                    name = data.get("tool_name")
+                    if data.get("event") != "tool-started" or not isinstance(name, str):
+                        continue
+                    if name in {"slack_reply", "slack_no_reply_needed", "write_todos"}:
+                        continue
+                    title = _tool_step(name, data.get("input"))[0][:256]
+                    if title != current_status:
+                        current_status = title
+                        await publish_status()
+        except Exception:
+            logger.warning(
+                "Slack tool status observer failed",
+                extra={"agent_thread_id": thread_id, "run_id": run_id},
+                exc_info=True,
+            )
 
     refresher = asyncio.create_task(refresh())
+    tool_observer = asyncio.create_task(observe_tools())
     try:
         for attempt, delay in enumerate(
             chain((0.0, *_STATUS_RETRY_DELAYS), repeat(_DEFAULT_RETRY_SECONDS))
@@ -387,8 +436,9 @@ async def show_slack_thinking_status(
                 )
     finally:
         refresher.cancel()
+        tool_observer.cancel()
         try:
-            results = await asyncio.gather(refresher, return_exceptions=True)
+            results = await asyncio.gather(refresher, tool_observer, return_exceptions=True)
             error = results[0]
             if isinstance(error, Exception):
                 logger.warning(
