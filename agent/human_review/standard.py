@@ -15,9 +15,10 @@ approved reaction, and once its pull request has sat green and unapproved for
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
     latest_review_states,
+    review_authors,
 )
 from agent.github.ci import fetch_pr
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
@@ -50,7 +52,12 @@ from agent.prompts import prompt
 from agent.slack.blocks import block_payload, escape, section
 from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
-from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
+from agent.slack.client import (
+    GitHubPrRef,
+    get_slack_permalink,
+    get_slack_user_info,
+    post_slack_thread_reply_with_ts,
+)
 from agent.slack.dm import send_dm
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
 from agent.users import User
@@ -174,7 +181,25 @@ async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
 
-async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: timedelta) -> bool:
+def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
+    """Add two hours within local weekday 9am–6pm windows."""
+    cursor = start.astimezone(timezone)
+    remaining = timedelta(hours=2)
+    while True:
+        opening = datetime.combine(cursor.date(), time(9), timezone)
+        closing = datetime.combine(cursor.date(), time(18), timezone)
+        if cursor.weekday() >= 5 or cursor >= closing:
+            cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+            continue
+        cursor = max(cursor, opening)
+        available = closing - cursor
+        if remaining <= available:
+            return (cursor + remaining).astimezone(UTC)
+        remaining -= available
+        cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+
+
+async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
     try:
         await langgraph_client().runs.create(
             None,
@@ -496,6 +521,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
             text,
             blocks=block_payload([section(text), *await origin_footer(added.thread_id)]),
         )
+    await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
         success=True,
         request_id=str(added.id),
@@ -714,6 +740,105 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
     return True
 
 
+async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        return "invalid_reviewer"
+    if (
+        participant is None
+        or participant.decision != "review"
+        or not participant.assigned_by_agent
+        or participant.joined_at is None
+        or not participant.user.slack_user_id
+    ):
+        return "not_assigned"
+    marker = f"review_reminded:{user_id}:{participant.joined_at.isoformat()}"
+    if request.run_config.get(marker):
+        return "already_reminded"
+    info = await get_slack_user_info(participant.user.slack_user_id)
+    timezone_name = info.get("tz") if info else None
+    try:
+        timezone = ZoneInfo(timezone_name) if isinstance(timezone_name, str) else None
+    except ZoneInfoNotFoundError:
+        timezone = None
+    if timezone is None:
+        logger.warning(
+            "Reviewer timezone unavailable",
+            extra={"request_id": str(request.id), "user_id": user_id},
+        )
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    now = datetime.now(UTC)
+    due = review_reminder_at(participant.joined_at, timezone)
+    local_now = now.astimezone(timezone)
+    if now >= due and (local_now.weekday() >= 5 or not time(9) <= local_now.time() < time(18)):
+        due = review_reminder_at(now, timezone) - timedelta(hours=2)
+    remaining = due - now
+    if remaining > timedelta(0):
+        await _schedule(request, f"remind:{user_id}", remaining)
+        return "scheduled"
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    details = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
+    if details is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if details.get("state") != "open" or details.get("merged"):
+        return "closed"
+    async with github_client(token=token) as client:
+        authors = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if authors is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if participant.github_login.lower() in authors:
+        return "reviewed"
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        current = row.participant(participant.user_id) if row else None
+        if (
+            row is None
+            or row.state != "open"
+            or current is None
+            or not current.assigned_by_agent
+            or current.joined_at != participant.joined_at
+            or row.run_config.get(marker)
+        ):
+            return "inactive"
+        waited_minutes = max(
+            0,
+            int(
+                (datetime.now(UTC) - (request.created_at or participant.joined_at)).total_seconds()
+                // 60
+            ),
+        )
+        days, minutes = divmod(waited_minutes, 1440)
+        hours, minutes = divmod(minutes, 60)
+        waited = (
+            ", ".join(
+                f"{value} {unit}{'s' if value != 1 else ''}"
+                for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
+                if value
+            )
+            or "less than a minute"
+        )
+        sent = await send_dm(
+            participant.user.slack_user_id,
+            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+            f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
+            f"has been waiting {waited} since the review request was opened. "
+            "Please submit your review on GitHub.",
+        )
+        if sent:
+            row.run_config = {**row.run_config, marker: True}
+    if not sent:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    return "reminded"
+
+
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     """Scheduler entry point for the unclaimed and auto-merge deadlines."""
     try:
@@ -722,6 +847,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step.startswith("remind:"):
+        return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
     if step == "unclaimed":
         if request.reviewers:
             return {"status": "claimed"}
