@@ -740,6 +740,14 @@ async def _attributed_run_messages(
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
+    review_chat_pr_url = metadata.get("review_chat_pr_url")
+    if isinstance(review_chat_pr_url, str):
+        notices.append(
+            (
+                _PULL_REQUEST_THREAD_SYSTEM,
+                prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
+            )
+        )
     structured = build_input_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},
