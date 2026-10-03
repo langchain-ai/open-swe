@@ -71,22 +71,22 @@ class ManagedServer(BaseModel):
 
 
 class ManagedSelection(BaseModel):
-    """A server one user turned on for their private runs, with the tools they allowed."""
+    """A server one user added for their private runs; every tool not turned off is offered."""
 
     server_id: str
     name: str
     upstream_url: str
     enabled: bool = True
-    allowed_tools: list[str] = Field(default_factory=list)
+    disabled_tools: list[str] = Field(default_factory=list)
     revision: str
     updated_at: str
 
 
 class ManagedSelectionUpdate(BaseModel):
     enabled: bool = True
-    allowed_tools: list[str] = Field(default_factory=list)
+    disabled_tools: list[str] = Field(default_factory=list)
 
-    @field_validator("allowed_tools")
+    @field_validator("disabled_tools")
     @classmethod
     def _tools(cls, value: list[str]) -> list[str]:
         if any(not name.strip() or len(name) > 128 for name in value):
@@ -308,7 +308,7 @@ async def save_managed_selection(
         name=server.name,
         upstream_url=server.upstream_url,
         enabled=update.enabled,
-        allowed_tools=update.allowed_tools,
+        disabled_tools=update.disabled_tools,
         revision=uuid4().hex,
         updated_at=now_iso(),
     )
@@ -321,12 +321,24 @@ async def delete_managed_selection(login: str, server_id: str) -> None:
 
 
 class _ManagedConnection(MCPConnection):
-    """An LMT route carrying the caller's current token in memory, never stored."""
+    """An LMT route carrying the caller's current token in memory, never stored.
+
+    It offers every tool the server lists except the ones the person turned off, so
+    tools a provider adds later are available without re-adding the server.
+    """
 
     headers: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    disabled_tools: frozenset[str] = Field(default_factory=frozenset, exclude=True)
 
     def connection_headers(self) -> dict[str, str]:
         return self.headers
+
+    def allows_tool(self, name: str) -> bool:
+        return name not in self.disabled_tools
+
+    @property
+    def offers_tools(self) -> bool:
+        return True
 
 
 def _connection_name(selection: ManagedSelection) -> str:
@@ -339,7 +351,7 @@ def _as_connection(headers: dict[str, str], selection: ManagedSelection) -> MCPC
         name=_connection_name(selection),
         url=_mcp_url(selection.server_id),
         enabled=selection.enabled,
-        allowed_tools=selection.allowed_tools,
+        disabled_tools=frozenset(selection.disabled_tools),
         revision=selection.revision,
         updated_at=selection.updated_at,
         headers=headers,

@@ -71,7 +71,7 @@ async def test_user_without_langsmith_sign_in_gets_no_catalog_or_tools(fake_stor
             "server_id": SERVER_ID,
             "name": "Notion",
             "upstream_url": "https://mcp.notion.com/mcp",
-            "allowed_tools": ["notion-search"],
+            "disabled_tools": [],
             "revision": "r",
             "updated_at": "2026-10-02T00:00:00Z",
         },
@@ -80,17 +80,22 @@ async def test_user_without_langsmith_sign_in_gets_no_catalog_or_tools(fake_stor
     assert requests == []
 
 
-async def test_enabled_server_loads_only_for_the_private_owner(fake_store, monkeypatch):
+async def test_added_server_offers_tools_not_turned_off_only_to_the_private_owner(
+    fake_store, monkeypatch
+):
     catalog_client(monkeypatch)
     await managed.save_managed_selection(
-        "alice", SERVER_ID, managed.ManagedSelectionUpdate(allowed_tools=["notion-search"])
+        "alice", SERVER_ID, managed.ManagedSelectionUpdate(disabled_tools=["notion-delete"])
     )
     stored = next(iter(fake_store.values(["user_managed_mcps", "alice"]).values()))
     assert "alice-langsmith-token" not in str(stored)
 
     async def discover(record, namespace):
         assert record.connection_headers()["Authorization"] == "Bearer alice-langsmith-token"
-        return [Tool(name="notion-search", inputSchema={"type": "object"})]
+        return [
+            Tool(name=name, inputSchema={"type": "object"})
+            for name in ("notion-search", "notion-delete", "notion-added-later")
+        ]
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
     metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
@@ -106,6 +111,9 @@ async def test_enabled_server_loads_only_for_the_private_owner(fake_store, monke
         lambda: {"configurable": {"thread_id": "t", "github_login": "alice"}},
     )
     tools = await runtime.load_mcp_tools(managed.managed_mcp_source("alice"))
-    assert len(tools) == 1
+    assert sorted(tool.metadata["mcp_tool_name"] for tool in tools) == [
+        "notion-added-later",
+        "notion-search",
+    ]
     metadata["visibility"] = "public"
     assert "MCP call failed" in await tools[0].ainvoke({})

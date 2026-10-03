@@ -390,7 +390,8 @@ export interface ManagedSelection {
   name: string
   upstream_url: string
   enabled: boolean
-  allowed_tools: string[]
+  /** Tools the person turned off; every other tool the server lists is offered. */
+  disabled_tools: string[]
   revision: string
   updated_at: string
 }
@@ -1650,7 +1651,7 @@ export const api = {
     ),
   saveMyManagedMCP: (
     serverId: string,
-    body: { enabled: boolean; allowed_tools: string[] }
+    body: { enabled: boolean; disabled_tools: string[] }
   ) =>
     request<ManagedSelection>(
       `/my-managed-mcps/${encodeURIComponent(serverId)}`,

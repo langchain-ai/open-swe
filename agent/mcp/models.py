@@ -146,6 +146,13 @@ class MCPConnection(MCPConnectionPublic):
     def public(self) -> dict[str, Any]:
         return self.model_dump(exclude={"encrypted_headers", "encrypted_client_secret"})
 
+    def allows_tool(self, name: str) -> bool:
+        return name in self.allowed_tools
+
+    @property
+    def offers_tools(self) -> bool:
+        return bool(self.allowed_tools)
+
     def connection_headers(self) -> dict[str, str]:
         if not self.encrypted_headers:
             return {}

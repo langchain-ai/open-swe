@@ -95,13 +95,8 @@ function useEnable(server: ManagedServer) {
   const qc = useQueryClient()
   return useMutation({
     meta: { errorTitle: `Couldn't add ${server.name}` },
-    mutationFn: async () => {
-      const tools = await api.discoverMyManagedMCP(server.id)
-      return api.saveMyManagedMCP(server.id, {
-        enabled: true,
-        allowed_tools: tools.map((tool) => tool.name),
-      })
-    },
+    mutationFn: () =>
+      api.saveMyManagedMCP(server.id, { enabled: true, disabled_tools: [] }),
     onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
 }
@@ -136,7 +131,7 @@ function SelectionRow({
     mutationFn: () =>
       api.saveMyManagedMCP(selection.server_id, {
         enabled: !selection.enabled,
-        allowed_tools: selection.allowed_tools,
+        disabled_tools: selection.disabled_tools,
       }),
     onMutate: async () => ({
       undo: await optimisticUpdate<ManagedToolsView>(
@@ -171,6 +166,7 @@ function SelectionRow({
     onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
 
+  const [showTools, setShowTools] = useState(false)
   const needsConnection =
     server !== undefined && server.kind === "oauth" && !server.connected
   const busy = toggle.isPending || remove.isPending
@@ -187,7 +183,9 @@ function SelectionRow({
             <ManagedBadge />
             <span className="font-normal text-muted-foreground">
               {selection.enabled ? "Enabled" : "Disabled"} ·{" "}
-              {selection.allowed_tools.length} tools
+              {selection.disabled_tools.length
+                ? `${selection.disabled_tools.length} tools off`
+                : "All tools"}
               {needsConnection ? " · Not connected" : ""}
             </span>
           </p>
@@ -208,6 +206,15 @@ function SelectionRow({
           <Button
             size="sm"
             variant="outline"
+            onClick={() => setShowTools(!showTools)}
+            aria-expanded={showTools}
+            aria-label={`${showTools ? "Hide" : "Show"} ${selection.name} tools`}
+          >
+            {showTools ? "Hide tools" : "Tools"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             disabled={busy}
             onClick={() => toggle.mutate()}
             aria-label={`${selection.enabled ? "Disable" : "Enable"} ${selection.name}`}
@@ -225,7 +232,83 @@ function SelectionRow({
           </Button>
         </div>
       </div>
+      {showTools ? <ToolToggles selection={selection} /> : null}
     </section>
+  )
+}
+
+/** Every tool the server lists, on unless the person turned it off. */
+function ToolToggles({ selection }: { selection: ManagedSelection }) {
+  const qc = useQueryClient()
+  const tools = useQuery({
+    queryKey: ["myManagedMCPTools", selection.server_id],
+    queryFn: () => api.discoverMyManagedMCP(selection.server_id),
+    retry: false,
+  })
+  const save = useMutation({
+    meta: { errorTitle: `Couldn't update ${selection.name} tools` },
+    mutationFn: (disabled: string[]) =>
+      api.saveMyManagedMCP(selection.server_id, {
+        enabled: selection.enabled,
+        disabled_tools: disabled,
+      }),
+    onMutate: async (disabled) => ({
+      undo: await optimisticUpdate<ManagedToolsView>(qc, QUERY_KEY, (view) => ({
+        ...view,
+        selections: view.selections.map((item) =>
+          item.server_id === selection.server_id
+            ? { ...item, disabled_tools: disabled }
+            : item
+        ),
+      })),
+    }),
+    onError: (_e, _v, ctx) => ctx?.undo(),
+    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+  })
+  const off = new Set(selection.disabled_tools)
+
+  if (tools.isLoading)
+    return (
+      <p className="px-3 pb-3 text-xs text-muted-foreground">Loading tools…</p>
+    )
+  if (tools.isError)
+    return (
+      <p role="alert" className="px-3 pb-3 text-xs text-destructive">
+        {tools.error.message}
+      </p>
+    )
+  return (
+    <div
+      role="region"
+      aria-label={`${selection.name} tools`}
+      className="mx-3 mb-3 max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-md border p-3"
+    >
+      {(tools.data ?? []).map((tool) => (
+        <label key={tool.name} className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1 shrink-0"
+            aria-label={`Allow ${tool.name}`}
+            checked={!off.has(tool.name)}
+            onChange={(event) =>
+              save.mutate(
+                event.target.checked
+                  ? selection.disabled_tools.filter(
+                      (name) => name !== tool.name
+                    )
+                  : [...selection.disabled_tools, tool.name]
+              )
+            }
+          />
+          <span className="min-w-0 break-words">
+            {tool.name}
+            <span className="block text-xs text-muted-foreground">
+              {tool.description}
+            </span>
+          </span>
+        </label>
+      ))}
+    </div>
   )
 }
 
