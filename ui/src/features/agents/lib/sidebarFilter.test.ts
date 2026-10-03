@@ -64,6 +64,45 @@ describe("filterThreads", () => {
     ).toEqual([automation])
   })
 
+  it("hides only Slack threads known to have neither edits nor a PR", () => {
+    const question = makeThread({ source: "slack", hasEdits: false })
+    const edited = makeThread({ source: "slack", hasEdits: true })
+    const linked = makeThread({
+      source: "slack",
+      hasEdits: false,
+      pullRequests: [
+        {
+          number: 1,
+          title: "PR",
+          state: "open",
+          headRef: "feature",
+          baseRef: "main",
+          url: "https://github.com/acme/repo/pull/1",
+          repoFullName: "acme/repo",
+          author: null,
+          authorAvatarUrl: null,
+          createdAt: null,
+          diffStats: { files: 0, additions: 0, deletions: 0 },
+        },
+      ],
+    })
+    const unknown = makeThread({ source: "slack" })
+    const dashboard = makeThread({ hasEdits: false })
+    const threads = [question, edited, linked, unknown, dashboard]
+    expect(filterThreads(threads, filters())).toEqual([
+      edited,
+      linked,
+      unknown,
+      dashboard,
+    ])
+    expect(
+      filterThreads(threads, filters({ hideSlackWithoutCodeChanges: false }))
+    ).toEqual(threads)
+    expect(filterThreads(threads, filters({ hideSlackThreads: true }))).toEqual(
+      [dashboard]
+    )
+  })
+
   it("filters by source, defaulting missing source to dashboard", () => {
     const gh = makeThread({ source: "github" })
     const noSource = makeThread({ source: undefined })

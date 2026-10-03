@@ -130,6 +130,8 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   sortBy?: ThreadSortBy
+  hideSlackWithoutCodeChanges?: boolean
+  hideSlackThreads?: boolean
 }
 
 export interface ThreadsPage {
@@ -247,6 +249,13 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.sortBy) search.set("sort_by", params.sortBy)
+  if (params.hideSlackWithoutCodeChanges != null)
+    search.set(
+      "hide_slack_without_code_changes",
+      String(params.hideSlackWithoutCodeChanges)
+    )
+  if (params.hideSlackThreads != null)
+    search.set("hide_slack_threads", String(params.hideSlackThreads))
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -254,6 +263,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
+  hideSlackWithoutCodeChanges?: boolean
+  hideSlackThreads?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -261,6 +272,13 @@ function buildReposQuery(params: {
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
+  if (params.hideSlackWithoutCodeChanges != null)
+    search.set(
+      "hide_slack_without_code_changes",
+      String(params.hideSlackWithoutCodeChanges)
+    )
+  if (params.hideSlackThreads != null)
+    search.set("hide_slack_threads", String(params.hideSlackThreads))
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -310,6 +328,8 @@ export const agentsApi = {
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
+      hideSlackWithoutCodeChanges?: boolean
+      hideSlackThreads?: boolean
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(

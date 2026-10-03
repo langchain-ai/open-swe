@@ -912,6 +912,82 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     assert [item["id"] for item in result["items"]] == ["t2"]
 
 
+async def test_slack_code_filter_pages_past_questions_and_counts_subagent_edits(
+    monkeypatch, registry_db: None
+) -> None:
+    from agent.transcript.engine import Command, append
+    from agent.transcript.events import ThreadCreated, ToolStarted
+
+    threads = _make_threads(thread_listing._THREADS_SEARCH_PAGE + 4, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"]).update(
+            source="slack", transcript="v2", latest_run_status="success"
+        )
+    edited, linked, dashboard, legacy = threads[-4:]
+    edited["thread_id"] = str(uuid7())
+    await append(
+        str(edited["thread_id"]),
+        [
+            Command(
+                command_id="created",
+                event=ThreadCreated(
+                    title="Edited", source="slack", owner_login="octocat", metadata={}
+                ),
+                actor_kind="user",
+            ),
+            Command(
+                command_id="edit",
+                event=ToolStarted(
+                    turn_id=uuid7(),
+                    tool_call_id="nested-edit",
+                    name="edit_file",
+                    namespace=["task:child"],
+                ),
+                actor_kind="agent",
+            ),
+        ],
+    )
+    cast(dict[str, object], linked["metadata"])["pr_number"] = 1
+    cast(dict[str, object], dashboard["metadata"])["source"] = "dashboard"
+    cast(dict[str, object], legacy["metadata"]).pop("transcript")
+
+    class FakeThreads:
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+            return threads[offset : offset + limit]
+
+        async def get_state(self, thread_id: str, *, subgraphs: bool):
+            assert thread_id == legacy["thread_id"]
+            return {"values": {"messages": [{"tool_calls": [{"name": "write_file"}]}]}}
+
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=FakeThreads())
+    )
+    page = await thread_listing.list_dashboard_threads_page(
+        "octocat", limit=2, hide_slack_without_code_changes=True
+    )
+    assert [item["id"] for item in page["items"]] == [edited["thread_id"], linked["thread_id"]]
+    assert page["items"][0]["hasEdits"] is True
+    assert page["hasMore"] is True
+    next_page = await thread_listing.list_dashboard_threads_page(
+        "octocat", limit=2, offset=2, hide_slack_without_code_changes=True
+    )
+    assert [item["id"] for item in next_page["items"]] == [
+        dashboard["thread_id"],
+        legacy["thread_id"],
+    ]
+    assert next_page["hasMore"] is False
+    without_slack = await thread_listing.list_dashboard_threads_page(
+        "octocat", limit=2, hide_slack_threads=True
+    )
+    assert [item["id"] for item in without_slack["items"]] == [dashboard["thread_id"]]
+    assert without_slack["hasMore"] is False
+    unfiltered = await thread_listing.list_dashboard_threads_page("octocat", limit=2)
+    assert [item["id"] for item in unfiltered["items"]] == [
+        threads[0]["thread_id"],
+        threads[1]["thread_id"],
+    ]
+
+
 async def test_pin_dashboard_thread_rejects_unreadable_thread(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id):

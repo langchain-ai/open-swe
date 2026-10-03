@@ -26,6 +26,8 @@ function warmApiRequests(
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
+    let hideSlackWithoutCodeChanges = true
+    let hideSlackThreads = false
     let repoMode = true
     let sortByCreated = true
     try {
@@ -40,6 +42,9 @@ function warmApiRequests(
           (Array.isArray(filters.sources) &&
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
+        hideSlackThreads = filters.hideSlackThreads === true
+        hideSlackWithoutCodeChanges =
+          filters.hideSlackWithoutCodeChanges !== false
       }
     } catch {
       // An unreadable preference just means the default (false).
@@ -53,6 +58,11 @@ function warmApiRequests(
     search.set("scope", includeAutomations ? "all" : "interactive")
     if (repoMode) search.set("ownerless", "true")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
+    search.set(
+      "hide_slack_without_code_changes",
+      String(hideSlackWithoutCodeChanges)
+    )
+    search.set("hide_slack_threads", String(hideSlackThreads))
     targets.push(sidebarPath + "?" + search.toString())
   }
 

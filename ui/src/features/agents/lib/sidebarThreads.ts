@@ -22,6 +22,8 @@ interface SidebarThreadItemBase {
   repoLabel: string | null
   model: string
   source?: AgentSource
+  hasEdits?: AgentThread["hasEdits"]
+  pullRequests?: AgentThread["pullRequests"]
   threadCategory?: string
   status: AgentStatus
   viewed: boolean
@@ -109,6 +111,8 @@ export function cloudSidebarThread(
     repoLabel,
     model: thread.model,
     source: thread.source,
+    hasEdits: thread.hasEdits,
+    pullRequests: thread.pullRequests,
     threadCategory: thread.threadCategory,
     status: thread.status,
     viewed: thread.viewed,

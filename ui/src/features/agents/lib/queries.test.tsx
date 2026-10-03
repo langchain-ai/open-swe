@@ -380,27 +380,32 @@ describe("sidebar queries", () => {
     )
 
     await waitFor(() =>
-      expect(listThreads).toHaveBeenCalledWith({
-        limit: SIDEBAR_PAGE_SIZE,
-        offset: 0,
-        resolved: false,
-        scope: "interactive",
-        ownerless: true,
-        sortBy: "created_at",
-      })
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: SIDEBAR_PAGE_SIZE,
+          offset: 0,
+          resolved: false,
+          scope: "interactive",
+          ownerless: true,
+          sortBy: "created_at",
+        })
+      )
     )
 
     rerender({ repoMode: false })
 
     await waitFor(() =>
-      expect(listThreads).toHaveBeenCalledWith({
-        limit: SIDEBAR_PAGE_SIZE,
-        offset: 0,
-        resolved: false,
-        scope: "interactive",
-        sortBy: "created_at",
-      })
+      expect(listThreads).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: SIDEBAR_PAGE_SIZE,
+          offset: 0,
+          resolved: false,
+          scope: "interactive",
+          sortBy: "created_at",
+        })
+      )
     )
+    expect(listThreads.mock.lastCall?.[0]).not.toHaveProperty("ownerless")
   })
 
   it("paginates each repository through an independent query", async () => {
