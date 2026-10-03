@@ -81,7 +81,11 @@ async def _record_in_concierge_thread(channel_id: str, text: str) -> None:
     try:
         thread = await client.threads.get(thread_id)
         if thread.get("status") == "busy":
-            logger.info("Concierge thread is busy; DM not recorded", extra={"thread_id": thread_id})
+            if not await queue_message_for_thread(thread_id, [{"type": "text", "text": text}]):
+                logger.warning(
+                    "Could not queue a DM for the concierge thread",
+                    extra={"thread_id": thread_id},
+                )
             return
         await client.threads.update_state(thread_id, values={"messages": [AIMessage(content=text)]})
     except Exception:
