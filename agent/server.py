@@ -136,7 +136,11 @@ from agent.middleware.require_user_reply import (
     WEB_REPLY_SURFACE,
     ReplySurface,
 )
-from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.sandbox_circuit_breaker import (
+    post_sandbox_notification,
+    post_sandbox_unreachable_notification,
+    sandbox_config_rejected_message,
+)
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -158,6 +162,7 @@ from agent.sandboxes.lifecycle import (
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
+from agent.sandboxes.providers.registry import SandboxProxyConfigError
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 from agent.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from agent.sandboxes.state import (
@@ -1175,6 +1180,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             await post_sandbox_unreachable_notification(
                 self._config or {},
                 sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
+            )
+            raise
+        except SandboxProxyConfigError as exc:
+            await post_sandbox_notification(
+                self._config or {}, sandbox_config_rejected_message(str(exc))
             )
             raise
         del github_token
