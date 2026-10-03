@@ -121,6 +121,8 @@ async def api_resolve_all_threads(
 async def api_list_thread_repos(
     include_resolved: bool = False,
     include_automations: bool = False,
+    hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     all: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
@@ -131,6 +133,8 @@ async def api_list_thread_repos(
         email=session.get("email"),
         include_resolved=include_resolved,
         include_automations=include_automations,
+        hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
         include_all=all,
     )
 
@@ -175,6 +179,8 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
+    hide_slack_without_code_changes: bool = False,
+    hide_slack_threads: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -202,6 +208,8 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         sort_by=sort_by,
+        hide_slack_without_code_changes=hide_slack_without_code_changes,
+        hide_slack_threads=hide_slack_threads,
     )
 
 

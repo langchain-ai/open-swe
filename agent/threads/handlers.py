@@ -23,6 +23,7 @@ from agent.threads.access import (
     _readable_thread_metadata,
 )
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
+from agent.threads.code_changes import with_code_changes
 from agent.threads.creation import create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
@@ -186,6 +187,7 @@ async def get_dashboard_thread(
         thread = {**as_thread_dict(thread), "metadata": metadata}
 
     with phase(record, "summary"):
+        thread = (await with_code_changes(client, [thread]))[0]
         summary = await _thread_summary(
             thread,
             latest_run_status=latest_run_status,
