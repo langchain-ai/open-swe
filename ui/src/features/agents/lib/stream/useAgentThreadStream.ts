@@ -3,6 +3,7 @@ import { useChannelEffect, useStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "@/features/agents/lib/api"
+import { orderRunStarts } from "@/features/agents/lib/runStartOrder"
 import {
   agentThreadKeys,
   invalidateAgentThreadLists,
@@ -51,7 +52,10 @@ export function useAgentThreadStream({
   const client = useMemo(
     () =>
       cloud
-        ? createDashboardClient(agentsApi.langGraphApiUrl, runAcceptance.fetch)
+        ? createDashboardClient(
+            agentsApi.langGraphApiUrl,
+            orderRunStarts(runAcceptance.fetch)
+          )
         : createLocalGraphClient(),
     [cloud, runAcceptance]
   )

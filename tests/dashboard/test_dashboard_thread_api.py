@@ -21,7 +21,9 @@ from agent.threads import handlers
 from agent.threads import listing as thread_listing
 from agent.threads import proxy as thread_proxy
 from agent.threads import runs as thread_runs
+from agent.threads.summary import TRANSCRIPT_VERSION
 from agent.transcript.engine import AppendResult
+from agent.transcript.turns import OpenTurn
 from agent.users import User
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
@@ -623,6 +625,59 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
     ]
 
 
+@pytest.mark.parametrize("open_turn", [True, False])
+async def test_proxy_commands_steers_into_the_open_turn_or_waits_for_an_ending_run(
+    monkeypatch, open_turn: bool
+) -> None:
+    """A run that has closed its turn but not ended has nothing left to steer into."""
+
+    class BusyThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "status": "busy",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "owner",
+                    "transcript": TRANSCRIPT_VERSION,
+                    "latest_run_id": "run-0",
+                },
+            }
+
+    class BusyClient:
+        threads = BusyThreads()
+
+    turn = OpenTurn(turn_id=uuid7(), run_id="run-1") if open_turn else None
+    handled: list[tuple[str, OpenTurn | None]] = []
+
+    async def fake_steer_target(thread_id: str) -> OpenTurn | None:
+        return turn
+
+    async def fake_steer(*args: object, turn: OpenTurn | None, **kwargs: object) -> dict[str, str]:
+        handled.append(("steer", turn))
+        return {}
+
+    async def fake_queue(*args: object, **kwargs: object) -> dict[str, str]:
+        handled.append(("queue", None))
+        return {}
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: BusyClient())
+    monkeypatch.setattr(thread_proxy, "steer_target", fake_steer_target)
+    monkeypatch.setattr(thread_proxy, "steer_running_thread", fake_steer)
+    monkeypatch.setattr(thread_proxy, "queue_follow_up_run", fake_queue)
+
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "and this", "id": "m1"}]}},
+    }
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid", "owner", json.dumps(command).encode()
+    )
+
+    assert status_code == 200
+    assert handled == ([("steer", turn)] if open_turn else [("queue", None)])
+
+
 async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -1140,13 +1195,8 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         appended.extend(commands)
         return AppendResult(versions=[1], events=[])
 
-    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
-        assert run_id == "run-1"
-        return turn
-
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "append", fake_append)
-    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
     monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
     monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
 
@@ -1165,9 +1215,11 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         metadata={
             "source": "dashboard",
             "transcript": "v2",
-            "latest_run_id": "run-1",
+            # Stale: the proxy has not yet recorded the run that owns the turn.
+            "latest_run_id": "run-0",
             "model": "openai:gpt-5",
         },
+        turn=OpenTurn(turn_id=turn, run_id="run-1"),
         email="teammate@example.com",
     )
 

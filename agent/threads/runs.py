@@ -82,7 +82,7 @@ from agent.transcript.events import (
     TurnQueued,
     TurnRequested,
 )
-from agent.transcript.turns import open_turn_id, recorded_turn_id
+from agent.transcript.turns import OpenTurn, recorded_turn_id
 from agent.users import User
 from agent.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from agent.utils.json_types import JsonObject, as_thread_dict, thread_metadata
@@ -1062,14 +1062,15 @@ async def steer_running_thread(
     command: dict[str, Any],
     *,
     metadata: dict[str, Any],
+    turn: OpenTurn | None,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
-    The message joins the active turn instead of opening a new one: it is
-    recorded on the transcript right away and left for the run to pick up
-    before its next model call. The reply mirrors the protocol's success
-    envelope so the caller cannot tell a steer from a start.
+    The message joins ``turn`` instead of opening a new one: it is recorded on
+    the transcript right away and left for the run to pick up before its next
+    model call. The reply mirrors the protocol's success envelope so the caller
+    cannot tell a steer from a start.
     """
     params = command.get("params")
     if not isinstance(params, dict):
@@ -1081,7 +1082,10 @@ async def steer_running_thread(
 
     client = langgraph_client()
     latest_run_id = metadata.get("latest_run_id")
-    live_run_id = latest_run_id if isinstance(latest_run_id, str) and latest_run_id else None
+    # A turn learns its run id only once the run starts or is queued.
+    live_run_id = turn.run_id if turn is not None else None
+    if live_run_id is None and isinstance(latest_run_id, str) and latest_run_id:
+        live_run_id = latest_run_id
     # The run keeps the model it started with, so images are held to it. Thread
     # metadata may already name the model of a follow-up queued behind it.
     run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
@@ -1107,13 +1111,8 @@ async def steer_running_thread(
     )
     structured[-1]["id"] = message_id
 
-    # The live run's own turn, never a follow-up queued behind it.
-    turn_id = (
-        await open_turn_id(thread_id, live_run_id)
-        if metadata.get("transcript") == TRANSCRIPT_VERSION
-        else None
-    )
-    if turn_id is not None:
+    if turn is not None:
+        turn_id = turn.turn_id
         attachments, pending = _transcript_attachments(command_images, message_id)
         await append(
             thread_id,
