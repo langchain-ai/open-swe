@@ -13,6 +13,7 @@ from agent.act_as import slack as act_as
 from agent.expedited_review import slack as expedited_review
 from agent.human_review import slack as human_review
 from agent.human_review.posted import watch_post
+from agent.slack import forms as slack_forms
 from agent.slack import webhook as service
 from agent.slack.allowed_bots import resolve_allowed_slack_bot
 from agent.slack.ask import (
@@ -38,6 +39,7 @@ from agent.slack.payloads import (
     SlackEventEnvelope,
     SlackInteraction,
     SlackInteractionMessage,
+    SlackViewSubmission,
     parse_json_object,
 )
 from agent.slack.pr_links import SlackPullRequestLink
@@ -813,6 +815,13 @@ async def slack_interactivity(
     if payload is None:
         common.logger.warning("Failed to parse Slack interactivity payload")
         return {"status": "error", "message": "Invalid payload"}
+    if slack_forms.is_form_submission(payload):
+        submission = SlackViewSubmission.parse(payload)
+        return (
+            await slack_forms.handle_submission(submission, background_tasks)
+            if submission
+            else ignored("Invalid form submission")
+        )
     if is_slack_feedback_payload(payload):
         return await handle_slack_feedback_interaction(payload, background_tasks)
     if is_run_feedback_submission(payload):
@@ -867,6 +876,15 @@ async def slack_interactivity(
             event_ts=event_ts,
             explicit_request=True,
         )
+
+    form_action = next(
+        (a for a in interaction.actions if a.action_id == slack_forms.ACTION_ID), None
+    )
+    if form_action is not None:
+        value = SlackButtonValue.parse(parse_json_object((form_action.value or "{}").encode()))
+        if value is None or value.type != slack_forms.CALLBACK_ID:
+            return ignored("Invalid form button")
+        return await slack_forms.handle_button(interaction, form_action, value)
 
     action = _first_option_action(interaction.actions)
     if action is None:
