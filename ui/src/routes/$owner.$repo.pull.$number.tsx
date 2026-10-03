@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -182,15 +182,7 @@ function ReviewLinkCard({
           {loading && <Skeleton className="mt-4 h-2 w-full" />}
         </CardContent>
         <CardFooter className="flex flex-wrap gap-2">
-          {onRetry && (
-            <button
-              type="button"
-              className={buttonVariants()}
-              onClick={onRetry}
-            >
-              Try again
-            </button>
-          )}
+          {onRetry && <Button onClick={onRetry}>Try again</Button>}
           {stableReviewPath && (
             <Link
               to="/agents/reviews/$owner/$repo/$number"

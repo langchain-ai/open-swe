@@ -8,7 +8,7 @@ import type {
   ReviewerEvalStartRequest,
   ReviewerEvalStatus,
 } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import { AuthedAppShell, SettingsRow, SettingsSection } from "@/components/AuthedAppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -45,15 +45,16 @@ function ReviewerEvalPage() {
   if (!session.data.is_admin) return <Navigate to="/my-settings" />
 
   return (
-    <AppShell
-      user={session.data}
+    <AuthedAppShell
       title="Reviewer eval"
       description="Runs the reviewer benchmark in a LangSmith sandbox against this deployment. Progress streams here live."
     >
+      {() => (<>
       <ReviewerEvalRunConfigSection />
       <ReviewerEvalStatusSection />
       <ReviewerEvalLogs />
-    </AppShell>
+      </>)}
+    </AuthedAppShell>
   )
 }
 
