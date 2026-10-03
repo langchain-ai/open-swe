@@ -159,11 +159,22 @@ class PlainTextInput(TypedDict):
     placeholder: NotRequired[PlainText]
 
 
+class CheckboxOption(TypedDict):
+    text: PlainText
+    value: str
+
+
+class CheckboxesElement(TypedDict):
+    type: Literal["checkboxes"]
+    action_id: str
+    options: list[CheckboxOption]
+
+
 class InputBlock(TypedDict):
     type: Literal["input"]
     block_id: str
     label: PlainText
-    element: PlainTextInput | ConversationsSelect
+    element: PlainTextInput | CheckboxesElement | ConversationsSelect
     optional: NotRequired[bool]
 
 
@@ -320,6 +331,27 @@ def conversation_input(
     }
 
 
+def checkboxes(
+    *, block_id: str, label: str, action_id: str, options: Sequence[str], optional: bool = False
+) -> InputBlock:
+    block: InputBlock = {
+        "type": "input",
+        "block_id": block_id,
+        "label": plain_text(label),
+        "element": {
+            "type": "checkboxes",
+            "action_id": action_id,
+            "options": [
+                {"text": plain_text(option[:75]), "value": str(index)}
+                for index, option in enumerate(options)
+            ],
+        },
+    }
+    if optional:
+        block["optional"] = True
+    return block
+
+
 def text_input(
     *,
     block_id: str,
@@ -330,7 +362,10 @@ def text_input(
     placeholder: str | None = None,
     optional: bool = False,
 ) -> InputBlock:
-    element: PlainTextInput = {"type": "plain_text_input", "action_id": action_id}
+    element: PlainTextInput | CheckboxesElement = {
+        "type": "plain_text_input",
+        "action_id": action_id,
+    }
     if multiline:
         element["multiline"] = True
     if max_length is not None:
