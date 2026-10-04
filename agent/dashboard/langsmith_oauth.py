@@ -175,14 +175,20 @@ async def _email(access_token: str) -> str | None:
 
 
 async def _save_tokens(
-    login: str, data: dict[str, object], *, client_id: str, token_endpoint: str
+    login: str,
+    data: dict[str, object],
+    *,
+    client_id: str,
+    token_endpoint: str,
+    new_grant: bool = False,
 ) -> None:
     access_token = data.get("access_token")
     if not isinstance(access_token, str) or not access_token:
         raise LangSmithOAuthError(502, "LangSmith OAuth returned no access token")
     refresh_token = data.get("refresh_token")
     previous = await get_value(_credentials(login), LANGSMITH_KEY) or {}
-    email = previous.get("email") or await _email(access_token)
+    # A new sign-in may be a different LangSmith account; a refresh keeps the same one.
+    email = (None if new_grant else previous.get("email")) or await _email(access_token)
     await put_value(
         _credentials(login),
         LANGSMITH_KEY,
@@ -191,6 +197,8 @@ async def _save_tokens(
             "encrypted_refresh_token": (
                 encrypt_token(refresh_token)
                 if isinstance(refresh_token, str) and refresh_token
+                else None
+                if new_grant
                 else previous.get("encrypted_refresh_token")
             ),
             "token_expires_at": _expires_at(data),
@@ -224,7 +232,13 @@ async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> No
             "resource": langsmith_issuer(),
         },
     )
-    await _save_tokens(login, data, client_id=str(flow["client_id"]), token_endpoint=token_endpoint)
+    await _save_tokens(
+        login,
+        data,
+        client_id=str(flow["client_id"]),
+        token_endpoint=token_endpoint,
+        new_grant=True,
+    )
 
 
 async def langsmith_status(login: str) -> dict[str, object]:

@@ -12,21 +12,39 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from agent.database import postgres
 
 _local_locks: dict[str, asyncio.Lock] = {}
+_lock_engines: dict[str, AsyncEngine] = {}
+
+
+def _lock_engine(uri: str) -> AsyncEngine:
+    """Unpooled: the lock is held across a provider's HTTP call, so it must not occupy
+    a connection from the app's shared pool."""
+    engine = _lock_engines.get(uri)
+    if engine is None:
+        engine = create_async_engine(
+            uri,
+            poolclass=NullPool,
+            connect_args={"server_settings": {"application_name": "open-swe-oauth-refresh"}},
+        )
+        _lock_engines[uri] = engine
+    return engine
 
 
 @asynccontextmanager
 async def refresh_guard(provider: str, login: str) -> AsyncIterator[None]:
     key = f"oauth-refresh:{provider}:{login.strip().lower()}"
-    # The in-process lock keeps same-worker waiters from each holding a database connection.
+    # The in-process lock keeps same-worker waiters from each opening a database connection.
     async with _local_locks.setdefault(key, asyncio.Lock()):
-        if not postgres.configured():
+        uri = postgres.uri()
+        if uri is None:
             yield
             return
-        async with postgres.transaction() as conn:
+        async with _lock_engine(uri).begin() as conn:
             await conn.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
                 {"subject": key},

@@ -57,3 +57,23 @@ async def test_revoked_grant_disconnects_instead_of_failing_every_call(fake_stor
     monkeypatch.setattr(langsmith_oauth, "_post", post)
     assert await langsmith_oauth.langsmith_access_token("alice") is None
     assert (await langsmith_oauth.langsmith_status("alice"))["connected"] is False
+
+
+async def test_reconnecting_as_another_account_replaces_the_old_identity(fake_store, monkeypatch):
+    seed_expired(fake_store)
+
+    async def email(access_token):
+        return "bob@example.com"
+
+    monkeypatch.setattr(langsmith_oauth, "_email", email)
+    await langsmith_oauth._save_tokens(
+        "alice",
+        {"access_token": "bob-access", "expires_in": 300},
+        client_id="lsc_open_swe",
+        token_endpoint=TOKEN_ENDPOINT,
+        new_grant=True,
+    )
+    stored = fake_store.values(["user_credentials", "alice"])["langsmith"]
+    assert stored["email"] == "bob@example.com"
+    # The previous account's refresh token must not be paired with the new grant.
+    assert stored["encrypted_refresh_token"] is None
