@@ -114,7 +114,7 @@ async def api_create_session(
             session["sub"],
             json.dumps(
                 {
-                    "id": thread_id,
+                    "id": 1,
                     "method": "run.start",
                     "params": {"input": {"messages": [{"type": "human", "content": body.prompt}]}},
                 }
