@@ -209,3 +209,43 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     pr_fixes.dispatch_agent_run.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
     setup.client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("intent", [OPEN, FIX, ADDRESS_COMMENTS, None])
+async def test_worker_link_routes_pr_actions_to_authorized_coordinator(
+    setup: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    intent: pr_fixes.PullRequestThreadIntent | None,
+) -> None:
+    from agent.tasks import store
+
+    task = store.TaskRecord(
+        "task", "coordinator", "default", "Fix build", ["CI passes"], True, "active", None
+    )
+
+    async def membership(thread_id: str) -> store.Membership:
+        return store.Membership(
+            "task", thread_id, "worker" if thread_id == "worker" else "coordinator"
+        )
+
+    monkeypatch.setattr(store.postgres, "configured", lambda: False)
+    monkeypatch.setattr(store, "task_for_thread", AsyncMock(return_value=task))
+    monkeypatch.setattr(store, "membership_for_thread", membership)
+    FakeRegistry.thread_ids = ["worker"]
+    setup.threads["coordinator"] = {
+        "thread_id": "coordinator",
+        "status": "idle",
+        "metadata": {"source": "dashboard", "visibility": "private", "owner_login": "alice"},
+    }
+    if intent is None:
+        result = await pr_fixes.dispatch_pull_request_prompt(
+            "acme", "app", 12, "alice", "Repair CI", title="Fix build", before_dispatch=AsyncMock()
+        )
+        assert result == "coordinator"
+    else:
+        result = await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
+        assert result.thread_id == "coordinator"
+    if intent is None or intent.dispatches_run:
+        assert pr_fixes.dispatch_agent_run.await_args.args[0] == "coordinator"
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()
+    assert await pr_fixes._find_pr_threads("acme", "app", 12, "other-user", None) == []

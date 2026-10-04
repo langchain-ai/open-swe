@@ -15,7 +15,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.pull_requests import PullRequest
 from agent.prompts import prompt
-from agent.tasks.ingress import require_user_facing_thread
+from agent.tasks.ingress import require_user_facing_thread, user_facing_thread_id
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
@@ -234,7 +234,8 @@ async def _find_pr_threads(
 ) -> list[Thread]:
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
-    for thread_id in await _pr_thread_ids(owner, repo, number):
+    for linked_thread_id in await _pr_thread_ids(owner, repo, number):
+        thread_id = await user_facing_thread_id(linked_thread_id)
         if thread_id in candidates:
             continue
         try:
