@@ -70,6 +70,15 @@ def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:
     )
 
 
+def _draft_next_step(pr_url: str) -> str:
+    """Tell the agent how to complete a DM-only draft nomination."""
+    return (
+        "Nothing was posted in the Slack thread. Send `slack_reply` with the pull request URL "
+        f"({pr_url}) and a one-line summary, telling the requester that the author must mark "
+        "the PR ready from the DM card. Keep a `/baby-sit` watch on the PR."
+    )
+
+
 async def _discard(approval: HumanReviewRequest) -> None:
     async with HumanReviewRequest.locked(approval.id) as (session, row):
         if row is not None:
@@ -208,9 +217,10 @@ async def expedite_pr_approval(
             "head_sha": head_sha,
             "approvers": active.approvers,
             "slack_channel_id": active.slack_channel_id,
+            "thread_card_posted": False,
             "next": readiness_warning
             or (
-                "The full draft card is in the author's DM; no thread card is posted until ready."
+                _draft_next_step(pr_ref.url)
                 if active.awaiting_ready
                 else _next_step(
                     reused=True,
@@ -278,8 +288,8 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "slack_channel_id": channel_id,
-            "next": "The full draft card was sent only to the author by DM. The thread card "
-            "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
+            "thread_card_posted": False,
+            "next": _draft_next_step(pr_ref.url),
         }
     try:
         message_ts, error = await post_card(approval, title=payload.title, files=files)
@@ -307,6 +317,8 @@ async def expedite_pr_approval(
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
         "slack_channel_id": channel_id,
+        "thread_card_posted": bool(own_thread)
+        and (channel_id, thread_ts) == (own_channel, own_thread),
         "next": readiness_warning
         or _next_step(
             reused=False,
