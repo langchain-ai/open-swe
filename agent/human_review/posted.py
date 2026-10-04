@@ -32,7 +32,7 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
     if pr_ref is None:
         return
     user = await User.for_identity("slack", slack_user_id)
-    if user is None or not user.typed_preferences.review_channel_watch:
+    if user is None:
         return
     extra = {
         "pr_repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
