@@ -301,6 +301,20 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
+# On MCP-tools-in-sandbox threads these large-result tools are reachable only
+# through the sandbox tools endpoint, so their output can be filtered before it
+# reaches the context; ``http_request`` is dropped in favor of curl.
+SANDBOX_ONLY_TOOLS = frozenset(
+    {
+        "get_thread",
+        "list_threads",
+        "search_pull_requests",
+        "slack_list_channel_members",
+        "slack_list_channels",
+        "slack_read_thread_messages",
+    }
+)
+SANDBOX_MODE_DROPPED_TOOLS = frozenset({"http_request"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -1795,6 +1809,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
+    if mcp_tools_in_sandbox:
+        static_tools = [
+            tool
+            for tool in static_tools
+            if _registered_tool_name(tool) not in SANDBOX_MODE_DROPPED_TOOLS
+        ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
@@ -1805,6 +1825,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    sandbox_only_tools = (
+        SANDBOX_ONLY_TOOLS if mcp_tools_in_sandbox and not stop_summary_mode else frozenset()
+    )
+    excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
@@ -1970,7 +1994,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[tool for tool in static_tools if tool is not save_user_settings],
+                    tools=[
+                        tool
+                        for tool in static_tools
+                        if tool is not save_user_settings
+                        and _registered_tool_name(tool) not in sandbox_only_tools
+                    ],
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
