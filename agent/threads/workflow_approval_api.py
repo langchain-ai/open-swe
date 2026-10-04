@@ -7,8 +7,9 @@ from langgraph_sdk.schema import Run
 
 from agent.dashboard.oauth import require_same_origin_for_mutations, require_session
 from agent.dispatch import dispatch_agent_run
+from agent.prompts import prompt
 from agent.source_context import SourceContext
-from agent.tasks.ingress import require_user_facing_thread
+from agent.tasks.ingress import require_user_facing_thread, user_facing_thread_id
 from agent.threads.plan_api import fetch_thread_metadata
 from agent.threads.summary import (
     repo_config_from_metadata,
@@ -30,6 +31,19 @@ workflow_approval_router = APIRouter(
 _SESSION_DEP = Depends(require_session)
 
 
+async def _approval_context(thread_id: str, login: str) -> tuple[str, dict[str, object]]:
+    metadata = await fetch_thread_metadata(thread_id)
+    if not thread_is_promptable(metadata, login):
+        raise HTTPException(404, "thread not found")
+    coordinator_id = await user_facing_thread_id(thread_id)
+    if coordinator_id != thread_id:
+        metadata = await fetch_thread_metadata(coordinator_id)
+    if not thread_is_promptable(metadata, login):
+        raise HTTPException(404, "thread not found")
+    await require_user_facing_thread(coordinator_id)
+    return coordinator_id, metadata
+
+
 @workflow_approval_router.get("/{thread_id}")
 async def list_workflow_push_approvals(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
@@ -48,19 +62,20 @@ async def list_workflow_push_approvals(
 async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
-    await require_user_facing_thread(thread_id)
+    coordinator_id, metadata = await _approval_context(thread_id, session["sub"])
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
     await dispatch_followup(
-        thread_id,
+        coordinator_id,
         metadata,
-        "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
+        prompt(
+            "tasks/workflow_approval",
+            worker_thread_id=thread_id if coordinator_id != thread_id else None,
+            approved=True,
+        ),
         github_login=session["sub"],
         user_email=session.get("email"),
     )
@@ -71,15 +86,20 @@ async def approve_workflow_push(
 async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
-    metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
-    await require_user_facing_thread(thread_id)
+    coordinator_id, metadata = await _approval_context(thread_id, session["sub"])
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
+    if coordinator_id != thread_id:
+        await dispatch_followup(
+            coordinator_id,
+            metadata,
+            prompt("tasks/workflow_approval", worker_thread_id=thread_id, approved=False),
+            github_login=session["sub"],
+            user_email=session.get("email"),
+        )
     return {"status": "rejected", "fingerprint": fingerprint}
 
 

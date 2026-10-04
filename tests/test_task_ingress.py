@@ -199,3 +199,60 @@ async def test_task_identity_cannot_switch_to_an_unguarded_graph(
                 await get_scheduler(config).ainvoke({"task": "reconcile"})
             else:
                 await factories[graph_name](config)
+
+
+@pytest.mark.parametrize("approved", [True, False])
+async def test_worker_workflow_decision_resumes_coordinator(
+    monkeypatch: pytest.MonkeyPatch, worker_task: store.TaskRecord, approved: bool
+) -> None:
+    from agent.threads import workflow_approval, workflow_approval_api
+
+    metadata: dict[str, dict[str, object]] = {
+        thread_id: {"owner_login": "mason", "visibility": "private", "source": "dashboard"}
+        for thread_id in ("worker", "coordinator")
+    }
+
+    async def get(thread_id: str) -> dict[str, object]:
+        return {"metadata": metadata[thread_id]}
+
+    async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
+        current = await get(thread_id)
+        current["metadata"].update(metadata)
+
+    async def fetch(thread_id: str) -> dict[str, object]:
+        return metadata[thread_id]
+
+    resumed: list[str] = []
+
+    async def dispatch_run(
+        thread_id: str, content: str, config: object, **kwargs: object
+    ) -> dict[str, str]:
+        await ingress.assert_user_facing_thread(thread_id)
+        resumed.append(thread_id)
+        return {"run_id": "continuation"}
+
+    client = SimpleNamespace(threads=SimpleNamespace(get=get, update=update))
+    monkeypatch.setattr(workflow_approval, "get_client", lambda: client)
+    monkeypatch.setattr(workflow_approval_api, "fetch_thread_metadata", fetch)
+    monkeypatch.setattr(workflow_approval_api, "dispatch_agent_run", dispatch_run)
+    await workflow_approval.ensure_workflow_push_pending(
+        "worker",
+        fingerprint="fp",
+        repo="owner/repo",
+        branch="fix",
+        base_sha="base",
+        head_sha="head",
+        files=[".github/workflows/ci.yml"],
+    )
+    decide = (
+        workflow_approval_api.approve_workflow_push
+        if approved
+        else workflow_approval_api.reject_workflow_push
+    )
+    with pytest.raises(HTTPException) as denied:
+        await decide("worker", "fp", {"sub": "another-user"})
+    assert denied.value.status_code == 404
+    assert resumed == []
+    await decide("worker", "fp", {"sub": "mason"})
+    assert await workflow_approval.workflow_push_approved("worker", "fp") is approved
+    assert resumed == ["coordinator"]

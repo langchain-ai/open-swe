@@ -29,6 +29,15 @@ async def require_user_facing_thread(thread_id: str) -> None:
         raise HTTPException(403, str(exc)) from exc
 
 
+async def user_facing_thread_id(thread_id: str) -> str:
+    policy = await policy_for_thread(thread_id)
+    if policy.role == "worker":
+        if policy.coordinator_thread_id is None:
+            raise TaskPermissionError("Worker has no permanent coordinator")
+        return policy.coordinator_thread_id
+    return thread_id
+
+
 async def require_sandbox_guest_access(host_thread_id: str) -> None:
     policy = await policy_for_thread(host_thread_id)
     if policy.role != "unregistered":

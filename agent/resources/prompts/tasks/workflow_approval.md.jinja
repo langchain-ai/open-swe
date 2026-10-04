@@ -1,0 +1,10 @@
+{% if worker_thread_id %}
+The workflow-file push approval for worker {{ worker_thread_id }} was {{ "approved" if approved else "rejected" }}.
+{% if approved %}
+Use message_worker to instruct that worker to retry the blocked git push without altering workflow files before pushing.
+{% else %}
+Use message_worker to inform that worker that the workflow-file push was rejected and must not be retried without a new approval.
+{% endif %}
+{% else %}
+The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.
+{% endif %}
