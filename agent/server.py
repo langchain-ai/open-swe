@@ -249,6 +249,7 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -304,20 +305,6 @@ DEEP_AGENT_TOOL_NAMES = {
     "write_file",
 }
 DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
-# On prefer-tools-in-sandbox threads these large-result tools are reachable only
-# through the sandbox tools endpoint, so their output can be filtered before it
-# reaches the context; ``http_request`` is dropped in favor of curl.
-SANDBOX_ONLY_TOOLS = frozenset(
-    {
-        "get_thread",
-        "list_threads",
-        "search_pull_requests",
-        "slack_list_channel_members",
-        "slack_list_channels",
-        "slack_read_thread_messages",
-    }
-)
-SANDBOX_MODE_DROPPED_TOOLS = frozenset({"http_request"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
@@ -1819,9 +1806,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     if prefer_tools_in_sandbox:
         static_tools = [
-            tool
-            for tool in static_tools
-            if _registered_tool_name(tool) not in SANDBOX_MODE_DROPPED_TOOLS
+            tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
         ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
@@ -1834,7 +1819,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
     sandbox_only_tools = (
-        SANDBOX_ONLY_TOOLS if prefer_tools_in_sandbox and not stop_summary_mode else frozenset()
+        frozenset(SANDBOX_ONLY_TOOLS)
+        if prefer_tools_in_sandbox and not stop_summary_mode
+        else frozenset()
     )
     excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
