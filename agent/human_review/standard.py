@@ -53,6 +53,7 @@ from agent.human_review.requests import HumanReviewParticipant, HumanReviewReque
 from agent.points.ledger import POINTS, PickExpired, Point
 from agent.prompts import prompt
 from agent.slack.blocks import actions, block_payload, escape, section
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
@@ -529,7 +530,11 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
-        await send_dm(user.slack_user_id, dm_text, blocks=block_payload([section(dm_text), accept]))
+        await send_dm(
+            user.slack_user_id,
+            dm_text,
+            blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]),
+        )
     return RequestResult(
         success=True,
         request_id=str(added.id),

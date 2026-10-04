@@ -41,8 +41,9 @@ from agent.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
-from agent.slack.blocks import Block, block_payload, escape
-from agent.slack.cards import repost_thread_card
+from agent.run_config import RunConfig
+from agent.slack.blocks import Block, block_payload, escape, section
+from agent.slack.cards import origin_footer, repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
@@ -138,6 +139,12 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
     return file_id
 
 
+def _requester_login(request: HumanReviewRequest) -> str:
+    if request.requested_by is not None:
+        return request.requested_by.github_login
+    return RunConfig.parse(request.run_config).github_login or ""
+
+
 async def post_card(
     approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
@@ -167,6 +174,7 @@ async def post_card(
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
+        login=_requester_login(approval),
     )
 
 
@@ -199,8 +207,11 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
     )
-    payload = block_payload(blocks)
-    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    dm_location = await send_dm_with_location(
+        author.slack_user_id,
+        text,
+        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+    )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
@@ -220,11 +231,12 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
             blocks=block_payload(blocks),
             agent_thread_id=request.thread_id or None,
             reply_broadcast=True,
+            login=_requester_login(request),
         )
     channel = await SlackChannel.load(request.slack_channel_id)
     if channel is None:
         return None, "channel_not_found"
-    return await channel.post(text, blocks=block_payload(blocks))
+    return await channel.post(text, blocks=block_payload(blocks), login=_requester_login(request))
 
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
@@ -278,6 +290,15 @@ async def _render_standard(
 
 
 async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
+) -> tuple[str, list[Block]]:
+    text, blocks = await _render(request, outcome, copy=copy)
+    if copy or dm or (request.kind == "standard" and not request.slack_thread_ts):
+        blocks.extend(await origin_footer(request.thread_id))
+    return text, blocks
+
+
+async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
@@ -390,7 +411,11 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         return
     text, blocks = await render(request, outcome)
     ok, error = await update_slack_message(
-        request.slack_channel_id, request.slack_message_ts, text, blocks=block_payload(blocks)
+        request.slack_channel_id,
+        request.slack_message_ts,
+        text,
+        blocks=block_payload(blocks),
+        login=_requester_login(request),
     )
     if not ok:
         logger.warning(
@@ -399,7 +424,9 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         )
     if outcome is None and (copy := request.slack_copy) is not None:
         text, blocks = await render(request, None, copy=True)
-        ok, error = await update_slack_message(*copy, text, blocks=block_payload(blocks))
+        ok, error = await update_slack_message(
+            *copy, text, blocks=block_payload(blocks), login=_requester_login(request)
+        )
         if not ok:
             logger.warning(
                 "Failed to update the copy of a human review card",
@@ -441,6 +468,7 @@ async def _repost(
         broadcast=broadcast,
         agent_thread_id=request.thread_id or None,
         adopt=adopt,
+        login=_requester_login(request),
     )
 
 
@@ -454,7 +482,9 @@ async def broadcast_card(approval: HumanReviewRequest) -> bool:
 async def copy_card(approval: HumanReviewRequest, channel: SlackChannel) -> str | None:
     """Post the open card at the top of another channel; why it was not, or ``None``."""
     text, blocks = await render(approval, None, copy=True)
-    message_ts, error = await channel.post(text, blocks=block_payload(blocks))
+    message_ts, error = await channel.post(
+        text, blocks=block_payload(blocks), login=_requester_login(approval)
+    )
     if not message_ts:
         logger.warning(
             "Could not copy an expedited review card to another channel",
@@ -717,10 +747,14 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
         )
         await _unrequest_github_review(request, reviewer.github_login, token)
         if reviewer.user.slack_user_id:
+            text = (
+                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+                "Open SWE removed you as a reviewer."
+            )
             await send_dm(
                 reviewer.user.slack_user_id,
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                text,
+                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
             )
     current = await HumanReviewRequest.get(request.id) or request
     if current.state == "open":
@@ -750,7 +784,11 @@ async def drop_picks(
         if token is not None:
             await _unrequest_github_review(request, pick.github_login, token)
         if pick.user.slack_user_id:
-            await send_dm(pick.user.slack_user_id, message)
+            await send_dm(
+                pick.user.slack_user_id,
+                message,
+                blocks=block_payload([section(message), *await origin_footer(request.thread_id)]),
+            )
     if token is None:
         logger.warning(
             "No GitHub App token to withdraw review requests for dropped picks",

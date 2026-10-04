@@ -3566,6 +3566,17 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "pr_review_links": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Review Links"
+          },
           "preserve_sandbox_memory": {
             "anyOf": [
               {
