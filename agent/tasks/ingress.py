@@ -2,6 +2,7 @@ from collections.abc import Mapping
 
 from fastapi import HTTPException
 
+from agent.tasks import store
 from agent.tasks.policy import TaskPermissionError, policy_for_thread, tool_denial
 
 
@@ -36,6 +37,15 @@ async def user_facing_thread_id(thread_id: str) -> str:
             raise TaskPermissionError("Worker has no permanent coordinator")
         return policy.coordinator_thread_id
     return thread_id
+
+
+async def require_deletable_thread(thread_id: str) -> None:
+    await require_user_facing_thread(thread_id)
+    policy = await policy_for_thread(thread_id)
+    if policy.delegated and (policy.status != "completed" or await store.pending_events(thread_id)):
+        raise HTTPException(
+            409, "Complete the task and deliver worker results before deleting its coordinator."
+        )
 
 
 async def require_sandbox_guest_access(host_thread_id: str) -> None:

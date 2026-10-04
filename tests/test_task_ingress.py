@@ -256,3 +256,49 @@ async def test_worker_workflow_decision_resumes_coordinator(
     await decide("worker", "fp", {"sub": "mason"})
     assert await workflow_approval.workflow_push_approved("worker", "fp") is approved
     assert resumed == ["coordinator"]
+
+
+@pytest.mark.parametrize("completed,pending_result", [(False, False), (True, True), (True, False)])
+async def test_coordinator_deletion_waits_for_task_and_worker_results(
+    monkeypatch: pytest.MonkeyPatch,
+    worker_task: store.TaskRecord,
+    completed: bool,
+    pending_result: bool,
+) -> None:
+    from dataclasses import replace
+
+    task = replace(worker_task, status="completed" if completed else "active")
+    monkeypatch.setattr(store, "task_for_thread", AsyncMock(return_value=task))
+    monkeypatch.setattr(
+        store,
+        "pending_events",
+        AsyncMock(
+            return_value=[
+                store.TaskEvent("event", task.id, "worker", "completed", "Tests pass", False)
+            ]
+            if pending_result
+            else []
+        ),
+    )
+    client = SimpleNamespace(threads=AsyncMock(), runs=AsyncMock())
+    client.threads.get.return_value = {
+        "metadata": {
+            "owner_login": "mason",
+            "visibility": "private",
+            "latest_run_id": "run",
+        }
+    }
+    transcript_delete = AsyncMock()
+    monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "delete_transcript", transcript_delete)
+    if not completed or pending_result:
+        with pytest.raises(HTTPException) as error:
+            await handlers.delete_dashboard_thread("coordinator", "mason")
+        assert error.value.status_code == 409
+        client.runs.cancel.assert_not_awaited()
+        client.threads.delete.assert_not_awaited()
+        transcript_delete.assert_not_awaited()
+    else:
+        await handlers.delete_dashboard_thread("coordinator", "mason")
+        client.threads.delete.assert_awaited_once_with("coordinator")
+        transcript_delete.assert_awaited_once_with("coordinator")

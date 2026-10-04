@@ -17,7 +17,8 @@ from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
-from agent.tasks.ingress import require_user_facing_thread
+from agent.tasks import store as task_store
+from agent.tasks.ingress import require_deletable_thread, require_user_facing_thread
 from agent.threads.access import (
     _authorized_thread,
     _github_token_for_login,
@@ -452,34 +453,37 @@ async def admin_cancel_dashboard_thread(
 
 
 async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
-    client = langgraph_client()
-    try:
-        thread = await client.threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
-    await require_user_facing_thread(thread_id)
-
-    run_id = metadata.get("latest_run_id")
-    if isinstance(run_id, str) and run_id:
+    async with task_store.thread_lock(thread_id):
+        client = langgraph_client()
         try:
-            await client.runs.cancel(thread_id, run_id, wait=False)
-        except Exception:
-            logger.debug("Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True)
+            thread = await client.threads.get(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(404, "thread not found") from exc
 
-    await client.threads.delete(thread_id)
-    # The mirrored transcript outlives the LangGraph thread otherwise, and the
-    # read path authorizes against the mirror rather than against LangGraph.
-    try:
-        await delete_transcript(thread_id)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Could not delete the thread transcript",
-            exc_info=True,
-            extra={"transcript": {"thread_id": thread_id}},
-        )
+        metadata = thread_metadata(thread)
+        _assert_thread_postable(metadata, login, email)
+        await require_deletable_thread(thread_id)
+
+        run_id = metadata.get("latest_run_id")
+        if isinstance(run_id, str) and run_id:
+            try:
+                await client.runs.cancel(thread_id, run_id, wait=False)
+            except Exception:
+                logger.debug(
+                    "Could not cancel run %s for thread %s", run_id, thread_id, exc_info=True
+                )
+
+        await client.threads.delete(thread_id)
+        # The mirrored transcript outlives the LangGraph thread otherwise, and the
+        # read path authorizes against the mirror rather than against LangGraph.
+        try:
+            await delete_transcript(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not delete the thread transcript",
+                exc_info=True,
+                extra={"transcript": {"thread_id": thread_id}},
+            )
 
 
 async def rename_dashboard_thread(
