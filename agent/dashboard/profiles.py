@@ -59,8 +59,6 @@ class ProfileUpdate(BaseModel):
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
-    human_review_requests: bool | None = None
-    review_channel_watch: bool | None = None
     pr_review_links: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -450,8 +448,6 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
-            human_review_requests=update.human_review_requests,
-            review_channel_watch=update.review_channel_watch,
             pr_review_links=update.pr_review_links,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
@@ -463,8 +459,6 @@ async def put_my_profile(
     if preferences is None and (
         update.concierge_mode
         or update.preserve_sandbox_memory
-        or update.human_review_requests
-        or update.review_channel_watch
         or update.pr_review_links
         or update.experimental_act_as_approval
     ):
