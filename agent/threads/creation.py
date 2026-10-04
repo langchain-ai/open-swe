@@ -6,10 +6,8 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.threads.tools_in_sandbox import (
-    PREFER_TOOLS_IN_SANDBOX_KEY,
-    owner_prefers_tools_in_sandbox,
-)
+from agent.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread, OsweThreadMetadata
+from agent.users import User
 from agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -24,6 +22,18 @@ def _require_title(title: str) -> str:
     return title
 
 
+async def _owner_prefers_tools_in_sandbox(owner_login: str) -> bool:
+    try:
+        return (await User.preferences_for_login(owner_login)).prefer_tools_in_sandbox
+    except Exception:
+        logger.warning(
+            "Could not load tools-in-sandbox preference",
+            exc_info=True,
+            extra={"owner_login": owner_login},
+        )
+        return False
+
+
 async def create_thread(
     client: LangGraphClient,
     thread_id: str,
@@ -35,16 +45,13 @@ async def create_thread(
     """Create a thread people can open; with ``do_nothing`` an existing thread keeps its metadata."""
     stamped = {**(metadata or {}), "title": _require_title(title)}
     stamped.pop(PREFER_TOOLS_IN_SANDBOX_KEY, None)
-    owner_login = stamped.get("owner_login")
-    if (
-        isinstance(owner_login, str)
-        and owner_login.strip()
-        and await owner_prefers_tools_in_sandbox(owner_login.strip())
-    ):
+    owner_login = (OsweThreadMetadata.model_validate(stamped).owner_login or "").strip()
+    if owner_login and await _owner_prefers_tools_in_sandbox(owner_login):
         stamped[PREFER_TOOLS_IN_SANDBOX_KEY] = True
     thread = await client.threads.create(thread_id=thread_id, if_exists=if_exists, metadata=stamped)
-    if stamped.get(PREFER_TOOLS_IN_SANDBOX_KEY) and (
-        thread_metadata(thread).get(PREFER_TOOLS_IN_SANDBOX_KEY) is True
+    if (
+        stamped.get(PREFER_TOOLS_IN_SANDBOX_KEY)
+        and OsweThread.from_sdk(thread).metadata.prefer_tools_in_sandbox
     ):
         logger.info(
             "Thread created preferring tools in the sandbox",

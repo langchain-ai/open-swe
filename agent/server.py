@@ -170,12 +170,9 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.blobs import blob_namespace
+from agent.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
-from agent.threads.tools_in_sandbox import (
-    PREFER_TOOLS_IN_SANDBOX_KEY,
-    thread_prefers_tools_in_sandbox,
-)
 from agent.tool_loaders.notion_mcp import load_notion_tools
 from agent.tools import (
     assign_human_reviewer,
@@ -1417,7 +1414,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         prefer_tools_in_sandbox = (
             not local_run
             and tools_endpoint_configured()
-            and await thread_prefers_tools_in_sandbox(client, thread_id)
+            and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
             and not await _bridged_thread(thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
