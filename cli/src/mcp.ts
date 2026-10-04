@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { mcpInputSchema } from "./mcp-catalog.ts"
 import { isRecord } from "./json.ts"
+import { createSessionArgs, createSessionResult } from "./session.ts"
 
 import { ApiClient, ApiError } from "./api.ts"
 import { readConfig } from "./config.ts"
@@ -65,6 +66,29 @@ export async function createMcpServer(
       const result = listThreadsResultFrom(page, (id) =>
         api.dashboardUrl(`/agents/${encodeURIComponent(id)}`)
       )
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      }
+    }
+  )
+  server.registerTool(
+    "create_session",
+    {
+      title: "Create an Open SWE session",
+      description:
+        "Create a fresh Open SWE session from a prompt, without uploading a local transcript. Starts the agent immediately by default; set start=false to create an idle session. Uses the signed-in person's dashboard defaults and repository access.",
+      inputSchema: createSessionArgs,
+      outputSchema: createSessionResult,
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async (args) => {
+      const api = await client()
+      const threadId = await api.createSession(args).catch(rejectedSession(api))
+      const result = {
+        thread_id: threadId,
+        url: api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`),
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result,

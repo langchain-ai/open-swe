@@ -198,6 +198,12 @@ filters: `repo` (owner/name) or `no_repo`, `include_archived`,
 `source`, `query`, `limit` and `offset`. Archived threads and automation runs
 are left out unless asked for.
 
+`create_session` creates a fresh cloud session from `prompt` and immediately
+starts the agent. Set `start=false` to create an idle session instead. Optional
+`repo` (owner/name), `workspace` (slug), and `visibility` (`public` or `private`)
+use your saved dashboard defaults and workspace routing when omitted. It returns
+`thread_id` and the dashboard `url`; no local transcript or sandbox bridge is used.
+
 `upload_session` moves a local coding session into a new Open SWE thread. It
 takes `type` (`claude`), `transcript_path` (the session's JSONL, sent verbatim),
 where the working directory was pushed — `repo` and `branch`, or `pr_url` — and

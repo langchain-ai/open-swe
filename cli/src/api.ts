@@ -24,6 +24,7 @@ import {
 import { uploadedThreadSchema } from "./upload.ts"
 import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
 import * as z from "zod"
+import { createdSessionSchema, type CreateSessionArgs } from "./session.ts"
 
 export class ApiError extends Error {
   constructor(
@@ -207,6 +208,15 @@ export class ApiClient {
     return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
       body: args,
     })
+  }
+
+  async createSession(args: CreateSessionArgs): Promise<string> {
+    const parsed = createdSessionSchema.safeParse(
+      await this.json("POST", "/threads", { body: args })
+    )
+    if (!parsed.success)
+      throw new ProtocolError("create session response is malformed")
+    return parsed.data.thread_id
   }
 
   /** Create a thread from a gzipped JSONL session upload; returns its id. */

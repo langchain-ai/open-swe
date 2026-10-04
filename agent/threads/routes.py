@@ -1,5 +1,6 @@
 """HTTP API for dashboard threads."""
 
+import json
 import logging
 from time import perf_counter
 from typing import Annotated, Any, Literal
@@ -63,8 +64,10 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_stream_events,
 )
 from agent.threads.runs import (
+    SessionCreateBody,
     ThreadRenameBody,
     ThreadResolveBody,
+    create_dashboard_session,
 )
 from agent.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -97,6 +100,45 @@ async def api_list_threads(
     if all and not principal.admin:
         raise HTTPException(403, "admin only")
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
+
+
+@router.post("/threads", status_code=201)
+async def api_create_session(
+    body: SessionCreateBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str]:
+    thread_id = await create_dashboard_session(body, session["sub"], email=session.get("email"))
+    if body.start:
+        status, content, _ = await proxy_dashboard_thread_commands(
+            thread_id,
+            session["sub"],
+            json.dumps(
+                {
+                    "id": thread_id,
+                    "method": "run.start",
+                    "params": {"input": {"messages": [{"type": "human", "content": body.prompt}]}},
+                }
+            ).encode(),
+            email=session.get("email"),
+        )
+        try:
+            result: object = json.loads(content)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(
+                502, detail={"thread_id": thread_id, "error": "invalid run response"}
+            ) from exc
+        if (
+            status >= 400
+            or not isinstance(result, dict)
+            or result.get("type") != "success"
+            or not isinstance(result.get("result"), dict)
+            or not result["result"].get("run_id")
+        ):
+            raise HTTPException(
+                status if status >= 400 else 502,
+                detail={"thread_id": thread_id, "error": result},
+            )
+    return {"thread_id": thread_id}
 
 
 @router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
