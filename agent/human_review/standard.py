@@ -267,7 +267,10 @@ async def request_review(
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers := request_blockers(readiness.snapshot):
         return _failure(
-            "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
+            "The pull request cannot be put up for review: "
+            + "; ".join(blockers)
+            + ". "
+            + prompt("tools/human-review-blocked")
         )
 
     target = await _target_channel(pr_ref, channel, token)
