@@ -9375,6 +9375,63 @@
         ]
       }
     },
+    "/dashboard/api/live/events": {
+      "get": {
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "operationId": "api_live_events_dashboard_api_live_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Live Events",
+        "tags": [
+          "dashboard",
+          "live"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",

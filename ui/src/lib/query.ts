@@ -1,6 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
 
 import { reportError } from "@/lib/errorReporting"
+import type { LiveTopic } from "@/lib/live/topics"
 
 type DashboardMutationMeta = {
   /** Toast title when the mutation fails, e.g. "Couldn't pin thread". */
@@ -9,9 +10,15 @@ type DashboardMutationMeta = {
   silent?: boolean
 }
 
+type DashboardQueryMeta = Record<string, unknown> & {
+  /** Change topics this query reads; see `lib/live/topics.ts`. */
+  live?: readonly LiveTopic[]
+}
+
 declare module "@tanstack/react-query" {
   interface Register {
     mutationMeta: DashboardMutationMeta
+    queryMeta: DashboardQueryMeta
   }
 }
 

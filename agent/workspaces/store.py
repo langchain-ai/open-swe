@@ -57,6 +57,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent.config import ENV
 from agent.database import postgres
 from agent.github.repositories import Repository
+from agent.live.outbox import publish as publish_change
+from agent.live.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
 from agent.workspaces.rows import (
@@ -834,6 +836,7 @@ class WorkspaceStore:
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
+                await publish_change(session, WORKSPACES_TOPIC)
                 if definition_only:
                     await session.refresh(row)
                     return to_workspace(
@@ -878,6 +881,7 @@ class WorkspaceStore:
     async def delete(self, slug: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            await publish_change(session, WORKSPACES_TOPIC)
 
     async def owner_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository belongs to, if any."""
@@ -1082,6 +1086,7 @@ class WorkspaceStore:
             record.updated_at = now_iso()
             apply_state(row, record)
             stamp_updated(row, record)
+            await publish_change(session, WORKSPACES_TOPIC)
             return record
 
     async def assert_publishable(

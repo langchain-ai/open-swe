@@ -20,6 +20,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
 import { PageTracking } from "@/lib/PageTracking"
+import { LiveEvents } from "@/lib/live/LiveEvents"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
 import { isPerfHudEnabled } from "@/lib/perf/trace"
@@ -109,6 +110,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <PageTracking />
+          <LiveEvents />
           <VersionMismatchBanner />
           <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
           <PerfHudMount />
