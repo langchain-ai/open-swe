@@ -65,32 +65,12 @@ _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _SLACK_CHANNEL_ID_RE = re.compile(r"^[CGUW][A-Z0-9]{8,}$")
 SlackNotificationMode = Literal["always", "on_action"]
-# A single-trigger shorthand the dashboard edits; ``triggers`` is the full list.
-AutomationTrigger = Literal[
-    "schedule",
-    "github_issue_opened",
-    "github_pull_request_opened",
-    "github_pull_request_closed",
-    "github_pull_request_merged",
-]
 GitHubEvent = Literal[
     "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
 ]
 _DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
-_DEFAULT_AUTOMATION_TRIGGER: AutomationTrigger = "schedule"
-_SHORTHAND_EVENTS: dict[str, GitHubEvent] = {
-    "github_issue_opened": "issues.opened",
-    "github_pull_request_opened": "pull_request.opened",
-    "github_pull_request_closed": "pull_request.closed",
-    "github_pull_request_merged": "pull_request.merged",
-}
-_EVENT_SHORTHANDS: dict[str, AutomationTrigger] = {
-    "issues.opened": "github_issue_opened",
-    "pull_request.opened": "github_pull_request_opened",
-    "pull_request.closed": "github_pull_request_closed",
-    "pull_request.merged": "github_pull_request_merged",
-}
-_EVENT_DESCRIPTIONS: dict[str, str] = {
+# How a run's prompt names each GitHub event; "closed" also fires for merges.
+GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
     "issues.opened": "an issue was opened",
     "pull_request.opened": "a pull request was opened",
     "pull_request.closed": "a pull request was closed",
@@ -142,12 +122,27 @@ TriggerConfig = Annotated[ScheduleTrigger | GitHubTrigger, Field(discriminator="
 _TRIGGERS = TypeAdapter(list[TriggerConfig])
 
 
-def _shorthand_triggers(trigger: AutomationTrigger, schedule: str | None) -> list[TriggerConfig]:
-    if trigger == "schedule":
-        if schedule is None:
-            raise ValueError("schedule is required for scheduled automations")
-        return [ScheduleTrigger(cron=schedule)]
-    return [GitHubTrigger(events=[_SHORTHAND_EVENTS[trigger]])]
+def _provider_triggers(
+    current: Sequence[TriggerConfig],
+    *,
+    schedule: str | None,
+    clear_schedule: bool,
+    github_events: list[GitHubEvent] | None,
+) -> list[TriggerConfig]:
+    """``current`` with each named provider's trigger replaced; others are kept.
+
+    An empty ``github_events`` removes the GitHub trigger.
+    """
+    triggers: list[TriggerConfig] = list(current)
+    if schedule is not None or clear_schedule:
+        triggers = [t for t in triggers if not isinstance(t, ScheduleTrigger)]
+        if schedule is not None:
+            triggers.insert(0, ScheduleTrigger(cron=schedule))
+    if github_events is not None:
+        triggers = [t for t in triggers if not isinstance(t, GitHubTrigger)]
+        if github_events:
+            triggers.append(GitHubTrigger(events=github_events))
+    return triggers
 
 
 def _require_repo_for_github(triggers: Sequence[TriggerConfig], repo: str | None) -> None:
@@ -157,9 +152,9 @@ def _require_repo_for_github(triggers: Sequence[TriggerConfig], repo: str | None
 
 class ScheduleCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
+    # One field per provider; ``triggers`` is the full list and overrides them.
     schedule: str | None = Field(default=None, min_length=1, max_length=120)
-    trigger: AutomationTrigger = _DEFAULT_AUTOMATION_TRIGGER
-    # Every trigger, any of which fires the automation; overrides trigger/schedule.
+    github_events: list[GitHubEvent] | None = None
     triggers: list[TriggerConfig] | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, max_length=120)
     repo: str | None = None
@@ -179,7 +174,11 @@ class ScheduleCreateBody(BaseModel):
     @model_validator(mode="after")
     def _valid_trigger_configuration(self) -> ScheduleCreateBody:
         if self.triggers is None:
-            self.triggers = _shorthand_triggers(self.trigger, self.schedule)
+            self.triggers = _provider_triggers(
+                [], schedule=self.schedule, clear_schedule=False, github_events=self.github_events
+            )
+        if not self.triggers:
+            raise ValueError("an automation needs a schedule or GitHub events to trigger on")
         _require_repo_for_github(self.triggers, self.repo)
         return self
 
@@ -191,8 +190,11 @@ class ScheduleCreateBody(BaseModel):
 
 class ScheduleUpdateBody(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=20_000)
+    # Each provider field replaces only that provider's trigger, and an empty
+    # ``github_events`` removes it; ``triggers`` replaces them all.
     schedule: str | None = Field(default=None, min_length=1, max_length=120)
-    trigger: AutomationTrigger | None = None
+    clear_schedule: bool = False
+    github_events: list[GitHubEvent] | None = None
     triggers: list[TriggerConfig] | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, max_length=120)
     repo: str | None = None
@@ -208,6 +210,12 @@ class ScheduleUpdateBody(BaseModel):
     @classmethod
     def _valid_schedule(cls, value: str | None) -> str | None:
         return normalize_cron_schedule(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _one_schedule_change(self) -> ScheduleUpdateBody:
+        if self.clear_schedule and self.schedule is not None:
+            raise ValueError("clear_schedule cannot be combined with schedule")
+        return self
 
     @field_validator("slack_channel_id")
     @classmethod
@@ -265,30 +273,19 @@ def _repo_full_name(repo: dict[str, str] | None) -> str | None:
     return f"{owner}/{name}" if owner and name else None
 
 
-def _trigger_shorthand(triggers: Sequence[dict[str, Any]]) -> tuple[AutomationTrigger, str | None]:
-    """The single-trigger view the dashboard edits: a schedule wins, else the first event."""
-    for trigger in triggers:
-        config = trigger.get("config") or {}
-        if trigger.get("kind") == "schedule":
-            return "schedule", config.get("cron")
-    for trigger in triggers:
-        events = (trigger.get("config") or {}).get("events") or []
-        if trigger.get("kind") == "github" and events:
-            return _EVENT_SHORTHANDS.get(events[0], _DEFAULT_AUTOMATION_TRIGGER), None
-    return _DEFAULT_AUTOMATION_TRIGGER, None
-
-
 def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     triggers = record.get("triggers") or []
-    shorthand, schedule = _trigger_shorthand(triggers)
+    schedule = next(
+        ((t.get("config") or {}).get("cron") for t in triggers if t.get("kind") == "schedule"),
+        None,
+    )
     cron_ids = [t["cron_id"] for t in triggers if t.get("cron_id")]
     return {
         "id": record.get("id"),
         "name": record.get("name"),
         "prompt": record.get("prompt"),
         "schedule": schedule,
-        "trigger": shorthand,
         "triggers": [{"id": t["id"], **(t.get("config") or {})} for t in triggers],
         "scope": "workspace",
         "workspace": _record_workspace(record),
@@ -709,12 +706,15 @@ async def update_agent_schedule(
     triggers = current_triggers
     if body.triggers is not None:
         triggers = body.triggers
-    elif body.trigger is not None or body.schedule is not None:
-        shorthand, schedule = _trigger_shorthand(existing.get("triggers") or [])
-        try:
-            triggers = _shorthand_triggers(body.trigger or shorthand, body.schedule or schedule)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    else:
+        triggers = _provider_triggers(
+            current_triggers,
+            schedule=body.schedule,
+            clear_schedule=body.clear_schedule,
+            github_events=body.github_events,
+        )
+    if not triggers:
+        raise HTTPException(422, "an automation needs a schedule or GitHub events to trigger on")
     try:
         _require_repo_for_github(triggers, _repo_full_name(repo))
     except ValueError as exc:
@@ -795,14 +795,16 @@ async def delete_workspace_automations(workspace: str) -> int:
 
 
 def _legacy_triggers(record: dict[str, Any]) -> tuple[list[TriggerConfig], str | None]:
-    trigger = record.get("trigger") or _DEFAULT_AUTOMATION_TRIGGER
+    trigger = record.get("trigger") or "schedule"
     if trigger == "schedule":
         schedule = record.get("schedule")
         return ([ScheduleTrigger(cron=schedule)] if isinstance(schedule, str) else []), (
             record.get("cron_id") if isinstance(record.get("cron_id"), str) else None
         )
-    event = _SHORTHAND_EVENTS.get(trigger)
-    return ([GitHubTrigger(events=[event])] if event else []), None
+    # Older releases only had this one event trigger.
+    if trigger == "github_issue_opened":
+        return [GitHubTrigger(events=["issues.opened"])], None
+    return [], None
 
 
 async def import_store_automations() -> int:
@@ -1236,7 +1238,7 @@ async def _launch_agent_schedule_record(
     }
 
 
-def _github_events(event_type: str, payload: dict[str, Any]) -> set[str]:
+def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]:
     """The trigger events one GitHub delivery stands for."""
     action = payload.get("action")
     if event_type == "issues" and action == "opened":
@@ -1253,7 +1255,7 @@ def _github_events(event_type: str, payload: dict[str, Any]) -> set[str]:
 
 
 async def _github_event_prompt(
-    record: dict[str, Any], event_type: str, payload: dict[str, Any], event: str
+    record: dict[str, Any], event_type: str, payload: dict[str, Any], event: GitHubEvent
 ) -> str:
     subject_value = payload.get("issue" if event_type == "issues" else "pull_request")
     subject: dict[str, Any] = subject_value if isinstance(subject_value, dict) else {}
@@ -1279,14 +1281,14 @@ async def _github_event_prompt(
     return prompt(
         "runs/github-automation-event",
         prompt=record["prompt"],
-        event_description=_EVENT_DESCRIPTIONS[event],
+        event_description=GITHUB_EVENT_DESCRIPTIONS[event],
         event_context=fence_github_comment_body(context, registered=registered),
     )
 
 
 async def _github_trigger_matches(
-    repo_full_name: str, events: set[str]
-) -> list[tuple[dict[str, Any], str]]:
+    repo_full_name: str, events: set[GitHubEvent]
+) -> list[tuple[dict[str, Any], GitHubEvent]]:
     """Enabled automations with a GitHub trigger on this repository for one of ``events``."""
     async with transaction() as conn:
         records = await _load_records(
@@ -1295,15 +1297,15 @@ async def _github_trigger_matches(
             "WHERE kind = 'github' AND match_key = :repo)",
             {"repo": repo_full_name},
         )
-    matches: list[tuple[dict[str, Any], str]] = []
+    matches: list[tuple[dict[str, Any], GitHubEvent]] = []
     for record in records:
-        fired = [
+        configured = {
             event
             for trigger in record.get("triggers") or []
             if trigger.get("kind") == "github"
             for event in (trigger.get("config") or {}).get("events") or []
-            if event in events
-        ]
+        }
+        fired = sorted(event for event in events if event in configured)
         if fired:
             # The most specific event names the run: a merge over a plain close.
             matches.append(

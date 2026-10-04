@@ -5,10 +5,10 @@ import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
-  AutomationTrigger,
+  GitHubTriggerEvent,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
-import { AUTOMATION_TRIGGER_LABELS } from "@/features/agents/lib/types"
+import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -32,6 +32,11 @@ import {
   isDescribableCron,
 } from "@/features/automations/lib/cron"
 import {
+  buildTriggers,
+  githubEvents,
+  scheduleCron,
+} from "@/features/automations/lib/triggers"
+import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
   useUpdateAgentSchedule,
@@ -44,10 +49,9 @@ import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 
-const TRIGGER_ITEMS = (
-  Object.entries(AUTOMATION_TRIGGER_LABELS) as Array<
-    [AutomationTrigger, string]
-  >
+const GITHUB = AUTOMATION_EVENT_PROVIDERS.github
+const GITHUB_EVENT_ITEMS = (
+  Object.entries(GITHUB.events) as Array<[GitHubTriggerEvent, string]>
 ).map(([value, label]) => ({ value, label }))
 
 const NOTIFICATION_ITEMS: Array<{
@@ -93,9 +97,11 @@ export function AutomationEditor({
   const updateSchedule = useUpdateAgentSchedule()
   const deleteSchedule = useDeleteAgentSchedule()
 
-  const initialCron = schedule?.schedule ?? template?.schedule ?? null
-  const initialTrigger = schedule?.trigger ?? "schedule"
-  const [trigger, setTrigger] = useState<AutomationTrigger>(initialTrigger)
+  const initialCron = schedule
+    ? scheduleCron(schedule)
+    : (template?.schedule ?? null)
+  const initialEvents = githubEvents(schedule)
+  const [events, setEvents] = useState<Array<GitHubTriggerEvent>>(initialEvents)
   const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
@@ -146,7 +152,7 @@ export function AutomationEditor({
     canManage &&
     (name !== (schedule?.name ?? template?.name ?? "") ||
       prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
-      trigger !== initialTrigger ||
+      events.join() !== initialEvents.join() ||
       cron !== initialCron ||
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
@@ -166,7 +172,15 @@ export function AutomationEditor({
     prompt.trim().length > 0 &&
     workspace !== null &&
     !savedWorkspaceMissing &&
-    (trigger === "schedule" ? !!cron : !!repo)
+    buildTriggers(cron, events).length > 0 &&
+    (events.length === 0 || !!repo)
+
+  const toggleEvent = (event: GitHubTriggerEvent, checked: boolean) =>
+    setEvents((current) =>
+      GITHUB_EVENT_ITEMS.map((item) => item.value).filter((value) =>
+        value === event ? checked : current.includes(value)
+      )
+    )
 
   const onPickTrigger = (value: string | null) => {
     if (value === null) {
@@ -189,8 +203,7 @@ export function AutomationEditor({
         {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: trigger === "schedule" ? cron?.trim() : null,
-          trigger,
+          triggers: buildTriggers(cron, events),
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -215,8 +228,7 @@ export function AutomationEditor({
         body: {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: trigger === "schedule" ? cron?.trim() : null,
-          trigger,
+          triggers: buildTriggers(cron, events),
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -343,26 +355,8 @@ export function AutomationEditor({
 
         <SectionLabel>Triggers</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-1.5">
-          <Select
-            items={TRIGGER_ITEMS}
-            value={trigger}
-            onValueChange={(value) =>
-              value && setTrigger(value as AutomationTrigger)
-            }
-            disabled={!canManage}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TRIGGER_ITEMS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {trigger === "schedule" && cron && (
+          <TriggerGroupLabel>Schedule</TriggerGroupLabel>
+          {cron && (
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
               <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
               {customMode ? (
@@ -384,7 +378,7 @@ export function AutomationEditor({
                   setCron(null)
                   setCustomMode(false)
                 }}
-                aria-label="Remove trigger"
+                aria-label="Remove schedule"
                 disabled={!canManage}
                 className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
               >
@@ -392,14 +386,43 @@ export function AutomationEditor({
               </button>
             </div>
           )}
-          {trigger === "schedule" && cron && (
-            <div className="mx-3 h-px bg-border/60" />
-          )}
-          {canManage && trigger === "schedule" && (
+          {canManage && (
             <ScheduleTriggerPicker
               onSelect={onPickTrigger}
-              triggerLabel={cron ? "Change trigger" : "Add Trigger"}
+              triggerLabel={cron ? "Change schedule" : "Add schedule"}
             />
+          )}
+          <div className="mx-3 my-1.5 h-px bg-border/60" />
+          <TriggerGroupLabel>{GITHUB.label}</TriggerGroupLabel>
+          <div className="grid gap-0.5 px-1.5 pb-1.5 sm:grid-cols-2">
+            {GITHUB_EVENT_ITEMS.map((item) => (
+              <label
+                key={item.value}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm text-foreground hover:bg-accent/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={events.includes(item.value)}
+                  onChange={(e) => toggleEvent(item.value, e.target.checked)}
+                  disabled={!canManage}
+                  className="size-4"
+                />
+                {item.label}
+              </label>
+            ))}
+          </div>
+          {events.length > 0 && (
+            <p
+              className={
+                repo
+                  ? "px-3 pb-2 text-xs text-muted-foreground/70"
+                  : "px-3 pb-2 text-xs text-destructive"
+              }
+            >
+              {repo
+                ? `Runs on these events in ${repo}. Closed also fires for merged pull requests.`
+                : "Pick a repository: GitHub events fire for the automation's repository."}
+            </p>
           )}
         </div>
 
@@ -514,6 +537,14 @@ export function AutomationEditor({
         )}
       </div>
     </div>
+  )
+}
+
+function TriggerGroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="px-3 pt-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+      {children}
+    </h3>
   )
 }
 

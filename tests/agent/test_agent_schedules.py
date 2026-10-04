@@ -279,6 +279,37 @@ async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) ->
     assert stored["admin_thread"] is False
 
 
+async def test_each_provider_field_replaces_only_its_own_trigger(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Triage",
+            schedule="0 9 * * *",
+            github_events=["pull_request.closed"],
+            repo="langchain-ai/open-swe",
+        ),
+    )
+    assert [t["kind"] for t in created["triggers"]] == ["schedule", "github"]
+    assert created["cronId"] == "cron_1"
+
+    without_github = await schedules.update_agent_schedule(
+        created["id"], "alice", ScheduleUpdateBody(github_events=[])
+    )
+    assert without_github["triggers"] == [
+        {"id": without_github["triggers"][0]["id"], "kind": "schedule", "cron": "0 9 * * *"}
+    ]
+    assert without_github["cronId"] is not None
+
+    with pytest.raises(HTTPException) as refused:
+        await schedules.update_agent_schedule(
+            created["id"], "alice", ScheduleUpdateBody(clear_schedule=True)
+        )
+    assert refused.value.status_code == 422
+
+
 async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -295,11 +326,13 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     monkeypatch.setattr(fake_client.crons, "delete", cron_delete)
 
     updated = await schedules.update_agent_schedule(
-        created["id"], "alice", ScheduleUpdateBody(trigger="github_issue_opened")
+        created["id"],
+        "alice",
+        ScheduleUpdateBody(clear_schedule=True, github_events=["issues.opened"]),
     )
     tick = await schedules.launch_scheduled_agent_run(created["id"])
 
-    assert updated["trigger"] == "github_issue_opened"
+    assert [t["kind"] for t in updated["triggers"]] == ["github"]
     assert updated["enabled"] is True
     assert updated["cronId"] is None
     assert tick["status"] == "trigger_mismatch"
@@ -410,7 +443,7 @@ async def test_issue_delivery_stays_claimed_after_dispatched_run_bookkeeping_fai
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage issues",
-            trigger="github_issue_opened",
+            github_events=["issues.opened"],
             repo="langchain-ai/open-swe",
             slack_channel_id="C0123456789",
         ),
@@ -449,7 +482,7 @@ async def test_issue_delivery_can_retry_failed_dispatch(
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage issues",
-            trigger="github_issue_opened",
+            github_events=["issues.opened"],
             repo="langchain-ai/open-swe",
         ),
     )
@@ -476,7 +509,7 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         ScheduleCreateBody(
             workspace="default",
             prompt="Summarize the closed PR",
-            trigger="github_pull_request_closed",
+            github_events=["pull_request.closed"],
             repo="langchain-ai/open-swe",
         ),
     )
@@ -485,7 +518,7 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         ScheduleCreateBody(
             workspace="default",
             prompt="Write release notes",
-            trigger="github_pull_request_merged",
+            github_events=["pull_request.merged"],
             repo="langchain-ai/open-swe",
         ),
     )
@@ -1032,7 +1065,7 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
 def test_a_new_automation_must_name_its_workspace() -> None:
     with pytest.raises(ValidationError):
         ScheduleCreateBody.model_validate(
-            {"prompt": "Triage this issue", "trigger": "github_issue_opened", "repo": "a/b"}
+            {"prompt": "Triage this issue", "github_events": ["issues.opened"], "repo": "a/b"}
         )
 
 
@@ -1043,7 +1076,7 @@ async def test_a_new_automation_keeps_the_workspace_it_names(
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     body = ScheduleCreateBody(
         prompt="Triage this issue",
-        trigger="github_issue_opened",
+        github_events=["issues.opened"],
         repo="langchain-ai/open-swe",
         workspace="Core",
     )
@@ -1057,7 +1090,7 @@ async def test_an_automation_cannot_name_a_missing_workspace(
     fake_client, auth, registry_db
 ) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
-        prompt="Triage", trigger="github_issue_opened", repo="a/b", workspace="gone"
+        prompt="Triage", github_events=["issues.opened"], repo="a/b", workspace="gone"
     )
 
     with pytest.raises(HTTPException) as refused:

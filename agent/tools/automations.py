@@ -49,7 +49,7 @@ async def create_automation(
     prompt: str,
     workspace: str,
     schedule: str | None = None,
-    trigger: schedules.AutomationTrigger = "schedule",
+    github_events: list[schedules.GitHubEvent] | None = None,
     name: str | None = None,
     repo: str | None = None,
     model_id: str | None = None,
@@ -69,7 +69,7 @@ async def create_automation(
             schedules.ScheduleCreateBody(
                 prompt=prompt,
                 schedule=schedule,
-                trigger=trigger,
+                github_events=github_events,
                 name=name,
                 repo=repo,
                 model_id=model_id,
@@ -94,7 +94,8 @@ async def update_automation(
     automation_id: str,
     prompt: str | None = None,
     schedule: str | None = None,
-    trigger: schedules.AutomationTrigger | None = None,
+    clear_schedule: bool = False,
+    github_events: list[schedules.GitHubEvent] | None = None,
     name: str | None = None,
     repo: str | None = None,
     clear_repo: bool = False,
@@ -121,7 +122,7 @@ async def update_automation(
     values: dict[str, Any] = {
         "prompt": prompt,
         "schedule": schedule,
-        "trigger": trigger,
+        "github_events": github_events,
         "name": name,
         "model_id": model_id,
         "effort": effort,
@@ -131,6 +132,8 @@ async def update_automation(
         "workspace": workspace,
     }
     values = {key: value for key, value in values.items() if value is not None}
+    if clear_schedule:
+        values["clear_schedule"] = True
     if repo is not None or clear_repo:
         values["repo"] = repo or ""
     if slack_channel_id is not None or clear_slack_channel:

@@ -233,28 +233,38 @@ export interface LocalRepo {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger =
-  | "schedule"
-  | "github_issue_opened"
-  | "github_pull_request_opened"
-  | "github_pull_request_closed"
-  | "github_pull_request_merged"
+export type GitHubTriggerEvent =
+  | "issues.opened"
+  | "pull_request.opened"
+  | "pull_request.closed"
+  | "pull_request.merged"
 
-/** Labels for each trigger, shared by the editor and the list. */
-export const AUTOMATION_TRIGGER_LABELS: Record<AutomationTrigger, string> = {
-  schedule: "Schedule",
-  github_issue_opened: "GitHub issue opened",
-  github_pull_request_opened: "GitHub pull request opened",
-  github_pull_request_closed: "GitHub pull request closed",
-  github_pull_request_merged: "GitHub pull request merged",
-}
+/** One way an automation fires; `kind` names the provider. */
+export type AutomationTriggerConfig =
+  | { kind: "schedule"; cron: string }
+  | { kind: "github"; events: Array<GitHubTriggerEvent> }
+
+export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
+
+/** The event providers an automation can run on, each with its events' labels. */
+export const AUTOMATION_EVENT_PROVIDERS = {
+  github: {
+    label: "GitHub",
+    events: {
+      "issues.opened": "Issue opened",
+      "pull_request.opened": "Pull request opened",
+      "pull_request.closed": "Pull request closed",
+      "pull_request.merged": "Pull request merged",
+    } satisfies Record<GitHubTriggerEvent, string>,
+  },
+} as const
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
   schedule: string | null
-  trigger: AutomationTrigger
+  triggers: Array<AutomationTriggerConfig & { id: string }>
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string

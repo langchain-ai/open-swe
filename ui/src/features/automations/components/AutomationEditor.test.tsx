@@ -9,6 +9,7 @@ import { useSession } from "@/lib/session"
 
 const mocks = vi.hoisted(() => ({
   createMutate: vi.fn(),
+  updateMutate: vi.fn(),
   workspaces: [
     { slug: "default", name: "Default", repos: [], is_default: true },
     { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
@@ -34,7 +35,7 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useUpdateAgentSchedule: () => ({
     error: null,
     isPending: false,
-    mutate: vi.fn(),
+    mutate: mocks.updateMutate,
   }),
   useWorkspaceOptions: () => ({
     data: { default_slug: "default", workspaces: mocks.workspaces },
@@ -147,7 +148,7 @@ describe("AutomationEditor", () => {
           name: "Nightly",
           prompt: "Check dependencies",
           schedule: "0 9 * * *",
-          trigger: "schedule",
+          triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
           scope: "workspace",
           workspace: "core",
           repo: "acme/oss",
@@ -203,7 +204,9 @@ describe("AutomationEditor", () => {
             name: "Nightly",
             prompt: "Check dependencies",
             schedule: "0 9 * * *",
-            trigger: "schedule",
+            triggers: [
+              { id: "trigger_1", kind: "schedule", cron: "0 9 * * *" },
+            ],
             scope: "workspace",
             workspace: "gone",
             repo: null,
@@ -221,5 +224,40 @@ describe("AutomationEditor", () => {
     } finally {
       mocks.workspaces = previous
     }
+  })
+
+  it("saves GitHub events as one GitHub trigger beside the schedule", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Check dependencies",
+          schedule: "0 9 * * *",
+          triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
+          scope: "workspace",
+          workspace: "default",
+          repo: "acme/oss",
+          slackNotificationMode: "always",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Pull request merged"))
+    fireEvent.click(screen.getByLabelText("Pull request closed"))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
+      { kind: "schedule", cron: "0 9 * * *" },
+      {
+        kind: "github",
+        events: ["pull_request.closed", "pull_request.merged"],
+      },
+    ])
   })
 })
