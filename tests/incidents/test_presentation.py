@@ -25,6 +25,17 @@ def test_investigation_bounds_untrusted_sections_without_mentions_or_unsafe_link
     assert "\n4. " not in text
 
 
+def test_answer_renders_labelled_markdown_links_without_notifying_mentions():
+    report = IncidentReport(
+        summary="**Slow requests**: [Logs](https://example.com/logs?x=1&y=2) <@U1>",
+        evidence=[Evidence(id="Logs", source="logs", summary="Logs", url="https://example.com")],
+    )
+    text, blocks = report_message(report, report.summary, None, reason="answer")
+    assert "*Slow requests*: <https://example.com/logs?x=1&amp;y=2|Logs>" in text
+    assert "&lt;@U1&gt;" in blocks[0]["text"]["text"]
+    assert "Sources:" not in text
+
+
 @pytest.mark.parametrize("character", ["&", "<", ">"])
 def test_escaping_cannot_exceed_slack_block_limits(character):
     report = IncidentReport(summary=character * 10000)

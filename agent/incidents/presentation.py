@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from agent.incidents.models import IncidentReport
+from agent.slack.markdown import markdown_to_mrkdwn
 
 # The investigation format responders read top to bottom, with a per-section character
 # budget that keeps the whole message inside Slack's block limits.
@@ -66,19 +67,31 @@ def report_message(
             cited.extend(item for item in ids if item in evidence)
             return ""
 
-        value = re.sub(r"\[([^\[\]]+)\]", citation, value)
+        value = re.sub(r"\[([^\[\]]+)\](?!\()", citation, value)
         value = re.sub(r"\s+([.,;:])", r"\1", " ".join(value.split()))
-        # Count escaped characters without cutting through entities.
-        if len(html.escape(value, quote=False)) > limit:
-            remaining = limit - 1
-            prefix = []
-            for character in value:
-                remaining -= len(html.escape(character, quote=False))
-                if remaining < 0:
-                    break
-                prefix.append(character)
-            value = "".join(prefix).rsplit(" ", 1)[0].rstrip(".,;:") + "…"
-        return html.escape(value, quote=False)
+
+        def render(source: str) -> str:
+            return re.sub(
+                r"<[@#!][^<>]*>",
+                lambda match: html.escape(match.group(0), quote=False),
+                markdown_to_mrkdwn(source) or html.escape(source, quote=False),
+            )
+
+        rendered = render(value)
+        if len(rendered) > limit:
+            low, high = 0, len(value)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if len(render(value[:middle])) < limit:
+                    low = middle
+                else:
+                    high = middle - 1
+            value = value[:low].rsplit(" ", 1)[0].rstrip(".,;:")
+            rendered = render(value) + "…"
+            while len(rendered) > limit:
+                value = value[: len(value) // 2]
+                rendered = render(value) + "…"
+        return rendered
 
     heading = {
         "answer": "Investigation answer",
