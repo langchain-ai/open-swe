@@ -38,7 +38,9 @@ _CHANGED_SINCE = text(
     WHERE live_event.created_at >= clock_timestamp() - make_interval(secs => wanted.age)
     """
 ).bindparams(bindparam("topics", type_=ARRAY(Text)), bindparam("ages", type_=ARRAY(Float)))
-_PRUNE = text("DELETE FROM live_event WHERE created_at < clock_timestamp() - :retention")
+_PRUNE = text(
+    "DELETE FROM live_event WHERE created_at < clock_timestamp() - make_interval(secs => :seconds)"
+).bindparams(bindparam("seconds", type_=Float))
 
 
 async def publish(conn: AsyncConnection | AsyncSession, *topics: str) -> None:
@@ -95,7 +97,7 @@ async def changed_since(ages: Mapping[str, float]) -> set[str]:
 
 async def prune() -> int:
     async with postgres.transaction() as conn:
-        result = await conn.execute(_PRUNE, {"retention": RETENTION})
+        result = await conn.execute(_PRUNE, {"seconds": RETENTION.total_seconds()})
         return result.rowcount
 
 

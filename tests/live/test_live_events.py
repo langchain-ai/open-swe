@@ -38,6 +38,13 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
     assert await outbox.changed_since({WORKSPACES: 60}) == set()
     assert await outbox.changed_since({WORKSPACES: 3600}) == {WORKSPACES}
 
+    assert await outbox.prune() == 0
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE live_event SET created_at = created_at - interval '2 days'")
+        )
+    assert await outbox.prune() == 1
+
 
 async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:
     await hub.start()
