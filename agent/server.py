@@ -1500,6 +1500,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
+    if cfg.source == "incidents_agent":
+        adaptive_model_routing = False
+        if not cfg.agent_model_id:
+            model_id, profile_effort = routing_defaults["performance"]
+            subagent_model_id, subagent_effort = routing_defaults["performance"]
+
     # Auto never falls back outside its tiers: an uncertain route uses Fast.
     if adaptive_model_routing and not slack_ask_mode:
         if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
