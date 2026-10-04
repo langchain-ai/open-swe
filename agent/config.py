@@ -332,8 +332,13 @@ ENV.var(
 )
 ENV.var(
     "LANGSMITH_OAUTH_CLIENT_ID",
-    "Public OAuth application registered in the LangSmith organization (Settings > OAuth "
-    "applications) for personal LangSmith connections. Unset hides the connection.",
+    "Confidential OAuth application registered in the LangSmith organization (Settings > "
+    "OAuth applications) for personal LangSmith connections. Unset hides the connection.",
+)
+ENV.var(
+    "LANGSMITH_OAUTH_CLIENT_SECRET",
+    "Client secret of the LANGSMITH_OAUTH_CLIENT_ID application. Unset hides the connection.",
+    secret=True,
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")

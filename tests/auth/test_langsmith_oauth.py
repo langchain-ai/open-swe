@@ -12,6 +12,8 @@ TOKEN_ENDPOINT = "https://api.smith.langchain.com/oauth/token"
 @pytest.fixture(autouse=True)
 def encryption(monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "lsc_open_swe")
+    monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_SECRET", "open-swe-secret")
 
 
 def seed_expired(fake_store, login="alice"):
@@ -43,6 +45,7 @@ async def test_expired_token_is_refreshed_and_kept_for_the_next_call(fake_store,
     assert len(calls) == 1
     assert calls[0][1]["grant_type"] == "refresh_token"
     assert calls[0][1]["resource"] == "https://api.smith.langchain.com"
+    assert calls[0][1]["client_secret"] == "open-swe-secret"
     stored = fake_store.values(["user_credentials", "alice"])["langsmith"]
     # A refresh response without a new refresh token keeps the one already stored.
     assert decrypt_token(stored["encrypted_refresh_token"]) == "old-refresh"

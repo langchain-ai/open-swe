@@ -1,8 +1,8 @@
 """A person's own LangSmith connection (Sign in with LangSmith), for any feature that
 calls LangSmith as them. ``langsmith_access_token`` is the entry point for callers.
 
-LangSmith is an OAuth 2.1 authorization server. Open SWE uses a public PKCE client
-registered in the LangSmith organization (self-registered clients can only reach
+LangSmith is an OAuth 2.1 authorization server. Open SWE uses a confidential client,
+with PKCE, registered in the LangSmith organization (self-registered clients can only reach
 LangSmith's MCP resource, not its API), keeps each user's tokens encrypted under
 ``user_credentials/<login>/langsmith`` and refreshes them on demand.
 """
@@ -109,15 +109,23 @@ async def _metadata() -> dict[str, str]:
 
 
 def langsmith_oauth_configured() -> bool:
-    return ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set()
+    return ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set() and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
 
 
 def _client_id() -> str:
     """An org-registered client: LangSmith limits self-registered (DCR) ones to its MCP resource."""
     client_id = ENV.LANGSMITH_OAUTH_CLIENT_ID.optional()
-    if not client_id:
+    if not client_id or not langsmith_oauth_configured():
         raise LangSmithOAuthError(503, "Sign in with LangSmith is not configured")
     return client_id
+
+
+def _client_secret() -> str:
+    """Confidential client: a leaked code or refresh token is useless without this secret."""
+    secret = ENV.LANGSMITH_OAUTH_CLIENT_SECRET.optional()
+    if not secret:
+        raise LangSmithOAuthError(503, "Sign in with LangSmith is not configured")
+    return secret
 
 
 async def start_langsmith_oauth(
@@ -227,6 +235,7 @@ async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> No
             "grant_type": "authorization_code",
             "code": code,
             "client_id": flow["client_id"],
+            "client_secret": _client_secret(),
             "redirect_uri": flow["redirect_uri"],
             "code_verifier": verifier,
             "resource": langsmith_issuer(),
@@ -296,6 +305,7 @@ async def langsmith_access_token(login: str) -> str | None:
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": record["client_id"],
+                    "client_secret": _client_secret(),
                     "resource": langsmith_issuer(),
                 },
             )
