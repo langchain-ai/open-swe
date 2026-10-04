@@ -170,6 +170,7 @@ from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESP
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.blobs import blob_namespace
+from agent.threads.mcp_tools_mode import MCP_TOOLS_IN_SANDBOX_KEY, thread_has_mcp_tools_in_sandbox
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -869,8 +870,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
+        mcp_tools_in_sandbox: bool = False,
     ) -> None:
         self._saved_requested_model = saved_requested_model
+        self._mcp_tools_in_sandbox = mcp_tools_in_sandbox
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -1327,6 +1330,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                mcp_tools_in_sandbox=self._mcp_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 recent_thread_context=recent_thread_context,
@@ -1403,6 +1407,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
+        )
+        mcp_tools_in_sandbox = not local_run and await thread_has_mcp_tools_in_sandbox(
+            client, thread_id
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1583,6 +1590,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        MCP_TOOLS_IN_SANDBOX_KEY: mcp_tools_in_sandbox,
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1818,6 +1826,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+            model_visible=not mcp_tools_in_sandbox,
         )
         if candidate.has_groups:
             dynamic_tool_middleware = candidate
@@ -2011,6 +2020,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),
+                        mcp_tools_in_sandbox=mcp_tools_in_sandbox,
                     ),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),

@@ -1,11 +1,15 @@
 """The only place LangGraph threads are created, so every thread a person can open has a title."""
 
+import logging
 from collections.abc import Mapping
 from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
+from agent.threads.mcp_tools_mode import MCP_TOOLS_IN_SANDBOX_KEY, owner_wants_mcp_tools_in_sandbox
 from agent.utils.json_types import thread_metadata
+
+logger = logging.getLogger(__name__)
 
 # Set when a person renames a thread, so system-generated titles stop replacing theirs.
 TITLE_LOCKED_KEY = "title_locked"
@@ -26,11 +30,23 @@ async def create_thread(
     metadata: Mapping[str, object] | None = None,
 ) -> None:
     """Create a thread people can open; with ``do_nothing`` an existing thread keeps its metadata."""
-    await client.threads.create(
-        thread_id=thread_id,
-        if_exists=if_exists,
-        metadata={**(metadata or {}), "title": _require_title(title)},
-    )
+    stamped = {**(metadata or {}), "title": _require_title(title)}
+    stamped.pop(MCP_TOOLS_IN_SANDBOX_KEY, None)
+    owner_login = stamped.get("owner_login")
+    if (
+        isinstance(owner_login, str)
+        and owner_login.strip()
+        and await owner_wants_mcp_tools_in_sandbox(owner_login.strip())
+    ):
+        stamped[MCP_TOOLS_IN_SANDBOX_KEY] = True
+    thread = await client.threads.create(thread_id=thread_id, if_exists=if_exists, metadata=stamped)
+    if stamped.get(MCP_TOOLS_IN_SANDBOX_KEY) and (
+        thread_metadata(thread).get(MCP_TOOLS_IN_SANDBOX_KEY) is True
+    ):
+        logger.info(
+            "Thread created with MCP tools only in the sandbox",
+            extra={"thread_id": thread_id, "owner_login": owner_login},
+        )
 
 
 async def ensure_titled_thread(client: LangGraphClient, thread_id: str, *, title: str) -> None:
