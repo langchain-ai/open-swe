@@ -74,6 +74,21 @@ async def settle_run_turn(
     return turn_id
 
 
+async def fail_unstarted_turn(thread_id: str, turn_id: UUID, *, error: str) -> None:
+    """Close a turn no run will ever start; left open, it reads as queued forever."""
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{turn_id}:failed",
+                event=TurnFailed(turn_id=turn_id, error=error),
+                actor_kind="system",
+                turn_id=turn_id,
+            )
+        ],
+    )
+
+
 @dataclass(frozen=True)
 class OpenTurn:
     turn_id: UUID
@@ -83,6 +98,8 @@ class OpenTurn:
 async def steer_target(thread_id: str) -> OpenTurn | None:
     """The turn a follow-up joins: the running one, else the newest still waiting to start.
 
+    Only turns requested after the thread's newest closed one count: an older
+    open turn was stranded by a start that never ran or a settlement that failed.
     Modeled in ``docs/tla/SteerRace.tla`` as ``JoinTarget``.
     """
     if not postgres.configured():
@@ -92,7 +109,16 @@ async def steer_target(thread_id: str) -> OpenTurn | None:
             text(
                 """
                 SELECT turn_id, run_id FROM thread_turn
-                WHERE thread_id = :thread_id AND state IN ('requested', 'running')
+                WHERE thread_id = :thread_id
+                  AND state IN ('requested', 'running')
+                  AND requested_at > COALESCE(
+                      (
+                          SELECT max(requested_at) FROM thread_turn
+                          WHERE thread_id = :thread_id
+                            AND state NOT IN ('requested', 'running')
+                      ),
+                      '-infinity'
+                  )
                 ORDER BY state = 'running' DESC, requested_at DESC, turn_id DESC
                 LIMIT 1
                 """

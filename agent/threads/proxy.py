@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -36,7 +37,7 @@ from agent.threads.summary import (
     _now_ms,
     _thread_is_busy,
 )
-from agent.transcript.turns import steer_target
+from agent.transcript.turns import fail_unstarted_turn, steer_target
 from agent.utils.json_types import thread_metadata
 from agent.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
 from agent.utils.thread_ops import langgraph_client, langgraph_url
@@ -295,6 +296,8 @@ async def proxy_dashboard_thread_commands(
         requeued = await _queue_if_thread_turned_busy(thread_id, login, requeueable, email=email)
         if requeued is not None:
             return 200, json.dumps(requeued).encode(), "application/json"
+        if response.status_code >= 400:
+            await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating:
         try:
             await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
@@ -355,6 +358,23 @@ async def _queue_if_thread_turned_busy(
     return await queue_follow_up_run(
         thread_id, login, command, metadata=thread_metadata(thread), email=email
     )
+
+
+async def _fail_requested_turn(thread_id: str, enriched: dict[str, Any]) -> None:
+    """Close the turn a refused start requested, so no later follow-up joins it."""
+    turn_id = enriched["params"]["config"]["configurable"].get("transcript_turn_id")
+    if not isinstance(turn_id, str):
+        return
+    try:
+        await fail_unstarted_turn(
+            thread_id, uuid.UUID(turn_id), error="the message could not be started"
+        )
+    except Exception:
+        logger.warning(
+            "Could not close the turn of a refused start",
+            exc_info=True,
+            extra={"start": {"thread_id": thread_id, "turn_id": turn_id}},
+        )
 
 
 async def proxy_dashboard_thread_history(
