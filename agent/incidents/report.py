@@ -25,6 +25,7 @@ class Claim(BaseModel):
 
 
 class ReportDraft(BaseModel):
+    slack_message: str = Field(default="", max_length=10000)
     summary: list[Claim] = Field(default_factory=list, max_length=6)
     problem: list[Claim] = Field(default_factory=list, max_length=4)
     previous_occurrence: list[Claim] = Field(default_factory=list, max_length=4)
@@ -137,6 +138,7 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
     headline = summary or problem
     return IncidentReport(
         summary=headline or "No evidence-backed conclusion was established.",
+        slack_message=redact(draft.slack_message, 10000) if not dropped else "",
         problem=problem,
         # A skipped recurrence check is worth showing: it is the section responders rely on
         # most, and an empty one would otherwise read as "this has never happened before".
