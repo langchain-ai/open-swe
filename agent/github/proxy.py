@@ -20,6 +20,7 @@ from agent.github.app import (
 )
 from agent.github.sandbox_access import workspace_token
 from agent.sandboxes.state import SANDBOX_BACKENDS, unwrap_sandbox_backend
+from agent.tasks import store as task_store
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
@@ -197,7 +198,12 @@ async def maybe_refresh_proxy_token(thread_id: str | None, *, now: datetime | No
     Returns True when a refresh was performed. Only applies to LangSmith
     sandboxes; other providers don't use the proxy.
     """
-    if not thread_id or not proxy_token_needs_refresh(thread_id, now=now):
+    if not thread_id:
+        return False
+    task = await task_store.task_for_thread(thread_id)
+    if task is not None:
+        thread_id = task.coordinator_thread_id
+    if not proxy_token_needs_refresh(thread_id, now=now):
         return False
     refreshed = await refresh_proxy_token(thread_id)
     if refreshed:

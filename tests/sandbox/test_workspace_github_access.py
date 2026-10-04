@@ -599,3 +599,48 @@ async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
 
     assert injected_auth(github) == ["x-access-token:repos:11,22", "x-access-token:repos:11"]
     assert listing_calls(github_requests) == 1
+
+
+async def test_worker_refreshes_shared_host_credentials_without_broadening_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    from agent.sandboxes import state, tool_access
+    from agent.tasks import store
+
+    task = store.TaskRecord(
+        "task", "host", "workspace", "Fix build", ["CI passes"], True, "active", None
+    )
+    custom = {"name": "external", "match_hosts": ["example.com"]}
+    monkeypatch.setattr(store, "task_for_thread", AsyncMock(return_value=task))
+    monkeypatch.setattr(
+        lifecycle,
+        "get_sandbox_metadata",
+        AsyncMock(
+            return_value={
+                "sandbox_id": "shared-sandbox",
+                tool_access.SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [custom]},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(return_value=["acme/api"])
+    )
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+    monkeypatch.setattr(tool_access, "provision_tool_url", AsyncMock())
+    monkeypatch.setattr(proxy, "SANDBOX_BACKENDS", {})
+    monkeypatch.setattr(lifecycle, "SANDBOX_CONNECTIONS", {})
+    monkeypatch.setattr(state, "SANDBOX_BACKENDS", proxy.SANDBOX_BACKENDS)
+    monkeypatch.setattr(state, "SANDBOX_CONNECTIONS", {})
+    backend = await lifecycle.ensure_sandbox_for_thread(
+        "worker", github_proxy_repositories=["acme/api", "acme/internal"]
+    )
+    assert backend.id == proxy.SANDBOX_BACKENDS["host"].id
+    assert await proxy.maybe_refresh_proxy_token(
+        "worker", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+    assert injected_auth(github) == ["x-access-token:repos:11", "x-access-token:repos:11"]
+    config = github[-1]["proxy_config"]
+    assert isinstance(config, dict)
+    assert custom in config["rules"]
+    assert proxy._PROXY_WORKSPACES["host"] == "workspace"

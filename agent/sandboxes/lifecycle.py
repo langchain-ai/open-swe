@@ -431,6 +431,7 @@ async def _shared_task_sandbox(
         )
     if bridge_id is None:
         await provision_tool_url(host_thread_id, backend)
+    set_sandbox_backend(host_thread_id, backend)
     return set_sandbox_backend(thread_id, backend)
 
 
