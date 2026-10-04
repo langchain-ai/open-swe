@@ -248,7 +248,7 @@ export interface Profile {
   human_review_requests?: boolean
   review_channel_watch?: boolean
   pr_review_links?: boolean
-  mcp_tools_in_sandbox?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -275,7 +275,7 @@ export interface ProfileUpdate {
   human_review_requests?: boolean
   review_channel_watch?: boolean
   pr_review_links?: boolean
-  mcp_tools_in_sandbox?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null

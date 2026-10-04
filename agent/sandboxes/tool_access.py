@@ -55,6 +55,10 @@ async def sandbox_host_thread_id(thread_id: str) -> str:
     return host if isinstance(host, str) and host else thread_id
 
 
+def tools_endpoint_configured() -> bool:
+    return bool(ENV.DASHBOARD_JWT_SECRET.optional() and tools_base_url())
+
+
 async def issue_tool_access(thread_id: str, sandbox_id: str) -> tuple[str, str] | None:
     secret = ENV.DASHBOARD_JWT_SECRET.optional()
     url = tools_base_url()

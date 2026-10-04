@@ -277,7 +277,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "human_review_requests": False,
                 "review_channel_watch": False,
                 "pr_review_links": False,
-                "mcp_tools_in_sandbox": False,
+                "prefer_tools_in_sandbox": False,
             },
             "preferences": {
                 "default_workspace": "mine",

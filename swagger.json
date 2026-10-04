@@ -3443,17 +3443,6 @@
             ],
             "title": "Human Review Requests"
           },
-          "mcp_tools_in_sandbox": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mcp Tools In Sandbox"
-          },
           "model_routing_enabled": {
             "anyOf": [
               {
@@ -3475,6 +3464,17 @@
               }
             ],
             "title": "Pr Review Links"
+          },
+          "prefer_tools_in_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefer Tools In Sandbox"
           },
           "preserve_sandbox_memory": {
             "anyOf": [

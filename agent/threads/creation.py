@@ -6,7 +6,10 @@ from typing import Literal
 
 from langgraph_sdk.client import LangGraphClient
 
-from agent.threads.mcp_tools_mode import MCP_TOOLS_IN_SANDBOX_KEY, owner_wants_mcp_tools_in_sandbox
+from agent.threads.tools_in_sandbox import (
+    PREFER_TOOLS_IN_SANDBOX_KEY,
+    owner_prefers_tools_in_sandbox,
+)
 from agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -31,20 +34,20 @@ async def create_thread(
 ) -> None:
     """Create a thread people can open; with ``do_nothing`` an existing thread keeps its metadata."""
     stamped = {**(metadata or {}), "title": _require_title(title)}
-    stamped.pop(MCP_TOOLS_IN_SANDBOX_KEY, None)
+    stamped.pop(PREFER_TOOLS_IN_SANDBOX_KEY, None)
     owner_login = stamped.get("owner_login")
     if (
         isinstance(owner_login, str)
         and owner_login.strip()
-        and await owner_wants_mcp_tools_in_sandbox(owner_login.strip())
+        and await owner_prefers_tools_in_sandbox(owner_login.strip())
     ):
-        stamped[MCP_TOOLS_IN_SANDBOX_KEY] = True
+        stamped[PREFER_TOOLS_IN_SANDBOX_KEY] = True
     thread = await client.threads.create(thread_id=thread_id, if_exists=if_exists, metadata=stamped)
-    if stamped.get(MCP_TOOLS_IN_SANDBOX_KEY) and (
-        thread_metadata(thread).get(MCP_TOOLS_IN_SANDBOX_KEY) is True
+    if stamped.get(PREFER_TOOLS_IN_SANDBOX_KEY) and (
+        thread_metadata(thread).get(PREFER_TOOLS_IN_SANDBOX_KEY) is True
     ):
         logger.info(
-            "Thread created with MCP tools only in the sandbox",
+            "Thread created preferring tools in the sandbox",
             extra={"thread_id": thread_id, "owner_login": owner_login},
         )
 
