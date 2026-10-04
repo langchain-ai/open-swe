@@ -5,8 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain.tools import ToolRuntime
+from langchain_core.messages import HumanMessage
 
 from agent.tasks import delivery, service, store
+from agent.tools import tasks
 
 COORDINATOR = "coordinator"
 WORKER = "worker"
@@ -178,19 +181,38 @@ async def test_worker_cannot_control_sibling_even_with_user_credentials(
     dispatch.assert_not_awaited()
 
 
+@pytest.mark.parametrize("operation", ["spawn", "message"])
 async def test_public_thread_participant_cannot_launch_with_owner_credentials(
-    client: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    client: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     persist = AsyncMock()
     monkeypatch.setattr(store, "create_delegation", persist)
+    runtime = ToolRuntime(
+        state={
+            "messages": [
+                HumanMessage(
+                    content='<input-message sender="github:another-user" kind="human">Help</input-message>'
+                )
+            ]
+        },
+        context=None,
+        config={
+            "configurable": {
+                "thread_id": COORDINATOR,
+                "github_login": "mason",
+                "user_email": "mason@example.com",
+            }
+        },
+        stream_writer=lambda _: None,
+        tool_call_id="call",
+        store=None,
+    )
+    assert tasks._actor(runtime).email is None
     with pytest.raises(PermissionError, match="owner"):
-        await service.spawn_worker(
-            service.Actor(COORDINATOR, "another-user"),
-            instructions="Fix login",
-            model=MODEL,
-            effort="high",
-            request_id="call",
-        )
+        if operation == "spawn":
+            await tasks.spawn_worker("Fix login", runtime, model=MODEL, effort="high")
+        else:
+            await tasks.message_worker(WORKER, "Fix login", runtime)
     persist.assert_not_awaited()
 
 

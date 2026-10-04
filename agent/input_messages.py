@@ -182,6 +182,26 @@ def message_sender_id(content: object, *, kind: MessageKind | None = None) -> st
     return None
 
 
+def latest_state_github_login(state: Mapping[str, object] | None) -> str | None:
+    messages = state.get("messages") if state is not None else None
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        if isinstance(message, BaseMessage):
+            kind, content = message.type, message.content
+        elif isinstance(message, dict):
+            kind, content = message.get("type") or message.get("role"), message.get("content")
+        else:
+            continue
+        if not isinstance(kind, str) or kind.lower() not in {"human", "user"}:
+            continue
+        sender_id = message_sender_id(content)
+        if sender_id and sender_id.startswith("github:"):
+            return sender_id.removeprefix("github:").strip() or None
+        return None
+    return None
+
+
 def _envelope_body(message: ElementTree.Element) -> str:
     """The authored text of an envelope, accepting the stored ``<content>`` shape."""
     return (message.text or "").strip() or (message.findtext("content") or "").strip()

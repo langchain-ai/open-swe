@@ -1,15 +1,22 @@
 from langchain.agents import AgentState
 from langchain.tools import ToolRuntime
 
+from agent.input_messages import latest_state_github_login
 from agent.run_config import RunConfig
 from agent.tasks import service, store
 
 
 def _actor(runtime: ToolRuntime[None, AgentState]) -> service.Actor:
     cfg = RunConfig.from_config(runtime.config)
-    if not cfg.thread_id or not cfg.github_login:
+    login = latest_state_github_login(runtime.state) or cfg.github_login
+    if not cfg.thread_id or not login:
         raise PermissionError("A verified thread and triggering user are required")
-    return service.Actor(cfg.thread_id, cfg.github_login, cfg.user_email)
+    email = (
+        cfg.user_email
+        if cfg.github_login and login.casefold() == cfg.github_login.casefold()
+        else None
+    )
+    return service.Actor(cfg.thread_id, login, email)
 
 
 def _task(task: store.TaskRecord) -> dict[str, object]:
