@@ -7,7 +7,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from agent.incidents.models import IncidentReport
-from agent.slack.markdown import markdown_to_mrkdwn
+from agent.slack.blocks import block_payload
+from agent.slack.markdown import markdown_blocks
 
 # The investigation format responders read top to bottom, with a per-section character
 # budget that keeps the whole message inside Slack's block limits.
@@ -37,14 +38,14 @@ def _safe_url(value: str) -> bool:
 def _investigation(report: IncidentReport, compact: Callable[[str, int], str]) -> list[str]:
     """The named investigation sections, skipping any the turn had nothing to say about."""
     sections = [
-        f"*{label}*\n{value}"
+        f"**{label}**\n{value}"
         for field, label, limit in _SECTIONS
         if (value := compact(getattr(report, field), limit))
     ]
     steps = [step for step in (compact(item, 300) for item in report.next_steps[:3]) if step]
     if steps:
         sections.append(
-            "*Steps to solve*\n" + "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
+            "**Steps to solve**\n" + "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
         )
     return sections
 
@@ -70,28 +71,14 @@ def report_message(
         value = re.sub(r"\[([^\[\]]+)\](?!\()", citation, value)
         value = re.sub(r"\s+([.,;:])", r"\1", " ".join(value.split()))
 
-        def render(source: str) -> str:
-            return re.sub(
-                r"<[@#!][^<>]*>",
-                lambda match: html.escape(match.group(0), quote=False),
-                markdown_to_mrkdwn(source) or html.escape(source, quote=False),
-            )
-
-        rendered = render(value)
-        if len(rendered) > limit:
-            low, high = 0, len(value)
-            while low < high:
-                middle = (low + high + 1) // 2
-                if len(render(value[:middle])) < limit:
-                    low = middle
-                else:
-                    high = middle - 1
-            value = value[:low].rsplit(" ", 1)[0].rstrip(".,;:")
-            rendered = render(value) + "…"
-            while len(rendered) > limit:
-                value = value[: len(value) // 2]
-                rendered = render(value) + "…"
-        return rendered
+        value = re.sub(
+            r"<[@#!][^<>]*>",
+            lambda match: html.escape(match.group(0), quote=False),
+            value,
+        )
+        if len(value) > limit:
+            value = value[: limit - 1].rsplit(" ", 1)[0].rstrip(".,;:") + "…"
+        return value
 
     heading = {
         "answer": "Investigation answer",
@@ -102,31 +89,23 @@ def report_message(
         # Without a problem section the headline is the only statement of the finding; the
         # fallback previous-occurrence and impact sections must not stand in for it.
         summary = "" if report.problem else compact(text, 800)
-        sections = [f"*{heading}*\n{summary}" if summary else f"*{heading}*"]
+        sections = [f"**{heading}**\n{summary}" if summary else f"**{heading}**"]
         sections.extend(_investigation(report, compact))
     else:
         summary = compact(text, 2400 if reason == "answer" else 800)
-        sections = [f"*{heading}*\n{summary or 'No evidence-backed conclusion was established.'}"]
-    blocks: list[dict[str, Any]] = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": section, "verbatim": True}}
-        for section in sections
-    ]
+        sections = [f"**{heading}**\n{summary or 'No evidence-backed conclusion was established.'}"]
     footer = []
     urls = list(
         dict.fromkeys(evidence[item].url for item in cited if _safe_url(evidence[item].url))
     )[:3]
     if urls:
         footer.append(
-            "Sources: "
-            + " ".join(f"<{html.escape(url, quote=False)}|[{i}]>" for i, url in enumerate(urls, 1))
+            "Sources: " + " ".join(f"[Source {i}]({url})" for i, url in enumerate(urls, 1))
         )
     if incident_url and _safe_url(incident_url):
-        footer.append(f"<{html.escape(incident_url, quote=False)}|View investigation>")
-    if footer:
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": " · ".join(footer), "verbatim": True}],
-            }
-        )
-    return "\n\n".join([*sections, *footer]), blocks
+        footer.append(f"[View investigation]({incident_url})")
+    message = "\n\n".join([*sections, *footer])
+    blocks = markdown_blocks(message)
+    if blocks is None:
+        raise ValueError("Incident report exceeds Slack block limits")
+    return message, block_payload(blocks)
