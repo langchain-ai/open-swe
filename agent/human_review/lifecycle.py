@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-import httpx2
+from githubkit.auth import TokenAuthStrategy
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
@@ -30,9 +30,10 @@ from agent.expedited_review.readiness import (
 )
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
 from agent.github.repo_files import RepoSettings
+from agent.github.sdk import github_sdk
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
 from agent.human_review.requests import (
@@ -693,22 +694,18 @@ def idle_picks(
 
 async def _unrequest_github_review(request: HumanReviewRequest, login: str, token: str) -> None:
     pr = request.pull_request
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/requested_reviewers"
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "DELETE", url, json={"reviewers": [login]})
-    except httpx2.HTTPError:
+        async with github_sdk(TokenAuthStrategy(token)) as client:
+            await client.rest.pulls.async_remove_requested_reviewers(
+                pr.owner, pr.repo, pr.number, data={"reviewers": [login]}
+            )
+    except Exception:
         logger.warning(
             "GitHub review request removal did not complete",
             extra={"request_id": str(request.id)},
             exc_info=True,
         )
         return
-    if response.status_code != 200:
-        logger.warning(
-            "GitHub refused to remove a review request",
-            extra={"request_id": str(request.id), "status_code": response.status_code},
-        )
 
 
 async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
@@ -739,6 +736,9 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
             row.participants.remove(reviewer)
     if not released:
         return request
+    current = await HumanReviewRequest.get(request.id) or request
+    if current.state == "open":
+        await refresh_card(current)
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     for reviewer in released:
         logger.info(
@@ -756,10 +756,7 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
                 text,
                 blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
             )
-    current = await HumanReviewRequest.get(request.id) or request
-    if current.state == "open":
-        await refresh_card(current)
-    return current
+    return await HumanReviewRequest.get(request.id) or current
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:
