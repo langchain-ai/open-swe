@@ -23,6 +23,16 @@ from pydantic import BaseModel, TypeAdapter
 
 CONFLICT_LIMIT = 10
 PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
+FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
+FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
+TYPECHECK_STEPS: tuple[tuple[str, ...], ...] = (
+    ("pnpm", "install", "--frozen-lockfile", "--ignore-scripts", "--ignore-pnpmfile"),
+    ("pnpm", "--filter", "open-swe-dashboard", "run", "typecheck"),
+)
+TYPECHECK_ENV = frozenset({"PATH", "HOME", "LANG", "TMPDIR"})
+TYPECHECK_OUTPUT_LIMIT = 20_000
+FAILED_REF = "refs/preview-failed"
+PUBLISHED_REF = "refs/preview-published"
 MERGED_LINE = re.compile(r"merged:((?: \d+)*)")
 LEFT_OUT_LINE = re.compile(r"#(\d+): (.+)")
 AGENT_INTERRUPT_GRACE_SECONDS = 60
@@ -230,6 +240,11 @@ class RerereCache:
             await git("read-tree", RERERE_REF, env=env)
             await git("checkout-index", "-a", "-f", f"--prefix={RERERE_DIR}/", env=env)
 
+    def discard(self) -> None:
+        if RERERE_DIR.is_dir():
+            shutil.rmtree(RERERE_DIR)
+        self.restored_tree = None
+
     async def save(self) -> None:
         if not RERERE_DIR.is_dir():
             return
@@ -318,19 +333,13 @@ class AgentReport:
         return cls(frozenset(int(number) for number in head.group(1).split()), reasons)
 
 
-async def resolve_with_agent(
-    prompt: str, pending: list[Pending], timeout: float
-) -> AgentReport | None:
-    """Hand every conflicting PR to one oswe run and return what it reports doing."""
-    before = await rev_parse("HEAD")
-    listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
-    print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
+async def run_agent(prompt: str, stdin: str, timeout: float) -> Completed:
     env = {name: value for name, value in os.environ.items() if name in AGENT_ENV}
     proc = await asyncio.create_subprocess_exec(
         "oswe", "run", prompt, stdin=PIPE, stdout=PIPE, env=env
     )
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(listing.encode()), timeout)
+        stdout, _ = await asyncio.wait_for(proc.communicate(stdin.encode()), timeout)
     except TimeoutError:
         warn(f"oswe ran past {timeout:.0f}s; interrupting it")
         proc.send_signal(signal.SIGINT)
@@ -343,13 +352,50 @@ async def resolve_with_agent(
     report = stdout.decode()
     print(report, file=sys.stderr, flush=True)
     await discard_uncommitted()
-    if parsed := AgentReport.parse(report):
+    return Completed(await proc.wait(), report, "")
+
+
+async def resolve_with_agent(
+    prompt: str, pending: list[Pending], timeout: float
+) -> AgentReport | None:
+    """Hand every conflicting PR to one oswe run and return what it reports doing."""
+    before = await rev_parse("HEAD")
+    listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
+    print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
+    result = await run_agent(prompt, listing, timeout)
+    if parsed := AgentReport.parse(result.stdout):
         return parsed
-    warn(
-        f"oswe exited {proc.returncode} without a report in the required format; discarding its work"
-    )
+    warn(f"oswe exited {result.code} without a report in the required format; discarding its work")
     await restore_head(before)
     return None
+
+
+async def typecheck() -> str | None:
+    """Errors from typechecking the dashboard in the working tree, or None when it is clean.
+
+    The Docker build installs and bundles the UI the same way but swallows failures, so this
+    is the only place a broken UI stops the preview instead of shipping without a dashboard.
+    """
+    env = {name: value for name, value in os.environ.items() if name in TYPECHECK_ENV}
+    env["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
+    for step in TYPECHECK_STEPS:
+        result = await run(*step, check=False, env=env)
+        if result.code != 0:
+            output = f"$ {' '.join(step)}\n{result.stdout}{result.stderr}"
+            return output[-TYPECHECK_OUTPUT_LIMIT:]
+    return None
+
+
+async def fix_with_agent(prompt: str, errors: str, timeout: float) -> None:
+    """Let oswe commit a fix for ``errors`` on HEAD, squashed into one fix-up commit."""
+    before = await rev_parse("HEAD")
+    print("fixing the preview typecheck with oswe", file=sys.stderr, flush=True)
+    await run_agent(prompt, errors, timeout)
+    if await rev_parse("HEAD^{tree}") == await rev_parse(f"{before}^{{tree}}"):
+        await restore_head(before)
+        return
+    await git("reset", "-q", "--soft", before)
+    await git("commit", "-q", "-m", FIXUP_MESSAGE)
 
 
 def conflict_marker(sha: str, paths: tuple[str, ...]) -> str:
@@ -579,20 +625,67 @@ The preview resets to plain `main` every {s.reset_days} days, in the
         if self.conflicted:
             summary("", "### Getting a conflicting change in", "", self.manual_instructions())
 
-    async def publish(self) -> None:
-        branch = self.settings.branch
-        assembled = await rev_parse("HEAD^{tree}")
-        published = None
+    async def fetch_published(self) -> str | None:
+        """Tree of the deployed preview branch, kept at ``PUBLISHED_REF``; None when there is none."""
         fetched = await git(
             "fetch",
             "--no-tags",
             "--force",
             "origin",
-            f"{branch}:refs/preview-published",
+            f"{self.settings.branch}:{PUBLISHED_REF}",
             check=False,
         )
-        if fetched.code == 0:
-            published = await rev_parse("refs/preview-published^{tree}")
+        return await rev_parse(f"{PUBLISHED_REF}^{{tree}}") if fetched.code == 0 else None
+
+    async def reuse_fixup(self) -> None:
+        """Replay the published oswe fix-up when it sits on exactly the tree just assembled."""
+        subject = (await git("log", "-1", "--format=%s", PUBLISHED_REF)).stdout.strip()
+        if subject != FIXUP_MESSAGE:
+            return
+        if await rev_parse(f"{PUBLISHED_REF}^^{{tree}}") != await rev_parse("HEAD^{tree}"):
+            return
+        await git("cherry-pick", PUBLISHED_REF)
+
+    async def assemble(self, prompt: str | None) -> None:
+        self.included.clear()
+        self.skipped.clear()
+        self.conflicted = False
+        await restore_head("origin/main")
+        await self.merge_manual_branch()
+        pending = await self.merge_pulls(defer_conflicts=prompt is not None)
+        if prompt is not None and pending:
+            await self.merge_pending(prompt, pending)
+
+    async def verify(self, prompt: str | None, rerere: RerereCache) -> str | None:
+        """Typecheck errors left in the tree about to publish, after a reassembly without
+        the rerere cache and an oswe fix-up have each had a go; None when it is clean."""
+        if await remote_refs(FAILED_REF):
+            await git("fetch", "--no-tags", "--force", "origin", f"{FAILED_REF}:{FAILED_REF}")
+            if await rev_parse(f"{FAILED_REF}^{{tree}}") == await rev_parse("HEAD^{tree}"):
+                return "Unchanged since an earlier run failed typecheck on this exact tree; see that run."
+        errors = await typecheck()
+        if errors and prompt is not None and rerere.restored_tree is not None:
+            warn("the preview tree fails typecheck; reassembling it without the rerere cache")
+            rerere.discard()
+            await self.assemble(prompt)
+            errors = await typecheck()
+        assembled = await rev_parse("HEAD")
+        if errors and prompt is not None:
+            await fix_with_agent(
+                FIX_PROMPT_PATH.read_text(), errors, self.settings.agent_timeout_seconds
+            )
+            errors = await typecheck()
+        if errors:
+            marked = await git(
+                "push", "--force", "origin", f"{assembled}:{FAILED_REF}", check=False
+            )
+            if marked.code != 0:
+                warn(f"could not record the failed preview tree: {marked.first_line}")
+        return errors
+
+    async def publish(self, published: str | None) -> None:
+        branch = self.settings.branch
+        assembled = await rev_parse("HEAD^{tree}")
         if assembled == published and not self.settings.force:
             summary("", f"Preview tree unchanged (`{assembled[:7]}`) — nothing published.")
             set_output("changed", "false")
@@ -618,13 +711,19 @@ The preview resets to plain `main` every {s.reset_days} days, in the
         prompt = PROMPT_PATH.read_text() if shutil.which("oswe") else None
         rerere = RerereCache()
         await rerere.restore()
-        await self.merge_manual_branch()
-        pending = await self.merge_pulls(defer_conflicts=prompt is not None)
-        if prompt is not None and pending:
-            await self.merge_pending(prompt, pending)
+        published = await self.fetch_published()
+        await self.assemble(prompt)
+        if published is not None:
+            await self.reuse_fixup()
+        errors = None
+        if self.settings.force or await rev_parse("HEAD^{tree}") != published:
+            errors = await self.verify(prompt, rerere)
         await rerere.save()
         self.write_summary(base_sha)
-        await self.publish()
+        if errors:
+            summary("", "### Typecheck failed — nothing published", "", "```", errors, "```")
+            raise PreviewError("the preview tree fails typecheck; nothing was published")
+        await self.publish(published)
 
     async def reset(self) -> None:
         s = self.settings

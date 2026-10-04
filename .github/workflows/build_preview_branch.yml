@@ -42,6 +42,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
       - name: Reset the preview to main when due
         if: github.event_name == 'schedule'
         env:
