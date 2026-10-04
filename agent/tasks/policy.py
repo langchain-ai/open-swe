@@ -89,7 +89,7 @@ class TaskPolicy:
 
 
 async def policy_for_thread(thread_id: str) -> TaskPolicy:
-    async with store.thread_lock(thread_id):
+    async with store.thread_lock(thread_id, shared=True):
         task = await store.task_for_thread(thread_id)
         membership = await store.membership_for_thread(thread_id)
         if task is None and membership is None:
@@ -159,7 +159,7 @@ async def authorize_tool(
         )
     if not thread_id:
         raise TaskPermissionError("A persisted thread identity is required to execute tools.")
-    async with store.thread_lock(thread_id):
+    async with store.thread_lock(thread_id, shared=tool_name not in TASK_MUTATION_TOOLS):
         policy = await policy_for_thread(thread_id)
         denied = tool_denial(
             policy,

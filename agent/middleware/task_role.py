@@ -49,7 +49,7 @@ class NonTaskGraphMiddleware(OpenSWEMiddleware[AgentState]):
         if request.tool_call["name"] == "task":
             await assert_non_task_graph(self._thread_id)
             return await handler(request)
-        async with store.thread_lock(self._thread_id):
+        async with store.thread_lock(self._thread_id, shared=True):
             await assert_non_task_graph(self._thread_id)
             return await handler(request)
 

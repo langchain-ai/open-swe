@@ -155,10 +155,17 @@ async def test_first_delegation_waits_for_admitted_implementation(registry_db: N
         )
 
     async with asyncio.timeout(5):
-        async with store.thread_lock("coordinator"):
+        async with store.thread_lock("coordinator", shared=True):
             child = asyncio.create_task(delegate())
             await attempted.wait()
             assert not child.done()
+
+            async def nested_read() -> None:
+                async with store.thread_lock("coordinator", shared=True):
+                    assert not child.done()
+
+            await asyncio.sleep(0.1)
+            await asyncio.create_task(nested_read())
             current = await store.task_for_thread("coordinator")
             assert current is not None and not current.delegated
         await child

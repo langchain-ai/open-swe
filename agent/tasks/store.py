@@ -76,26 +76,37 @@ class TaskEvent:
 class _HeldLock:
     key: str
     owner: object
+    shared: bool
 
 
 _HELD_LOCKS: ContextVar[tuple[_HeldLock, ...]] = ContextVar("task_store_locks", default=())
 
 
 @asynccontextmanager
-async def _distributed_lock(key: str) -> AsyncIterator[None]:
+async def _distributed_lock(key: str, *, shared: bool = False) -> AsyncIterator[None]:
     owner = asyncio.current_task()
     held = _HELD_LOCKS.get()
-    if any(lock.key == key and lock.owner is owner for lock in held):
+    current = next((lock for lock in held if lock.key == key and lock.owner is owner), None)
+    if current is not None:
+        if current.shared and not shared:
+            raise RuntimeError("Cannot upgrade an active shared task lock")
         yield
         return
     lock_engine = create_async_engine(postgres.engine().url, poolclass=NullPool)
     try:
         async with lock_engine.begin() as conn:
-            await conn.execute(
-                text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 0))"),
-                {"subject": key},
+            statement = text(
+                "SELECT pg_try_advisory_xact_lock_shared(hashtextextended(:subject, 0))"
+                if shared
+                else "SELECT pg_try_advisory_xact_lock(hashtextextended(:subject, 0))"
             )
-            token = _HELD_LOCKS.set((*held, _HeldLock(key, owner)))
+            # A queued exclusive lock would block nested readers behind their own caller.
+            while not await conn.scalar(
+                statement,
+                {"subject": key},
+            ):
+                await asyncio.sleep(0.05)
+            token = _HELD_LOCKS.set((*held, _HeldLock(key, owner, shared)))
             try:
                 yield
             finally:
@@ -105,12 +116,12 @@ async def _distributed_lock(key: str) -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def thread_lock(thread_id: str) -> AsyncIterator[None]:
-    """Serialize all effects on a thread, including its first task/delegation transition."""
+async def thread_lock(thread_id: str, *, shared: bool = False) -> AsyncIterator[None]:
+    """Exclude task transitions from effects, allowing nested effects to share admission."""
     if not postgres.configured():
         yield
         return
-    async with _distributed_lock(f"task-thread:{thread_id}"):
+    async with _distributed_lock(f"task-thread:{thread_id}", shared=shared):
         yield
 
 

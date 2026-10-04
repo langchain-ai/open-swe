@@ -40,21 +40,26 @@ class _TaskStore:
             "coordinator": _Membership("coordinator", "coordinator"),
             "worker": _Membership("worker", "worker"),
         }
-        self.locks: dict[str, asyncio.Lock] = {}
-        self.owners: dict[str, asyncio.Task[object] | None] = {}
+        self.condition = asyncio.Condition()
+        self.owners: dict[str, dict[asyncio.Task[object] | None, bool]] = {}
 
     @asynccontextmanager
-    async def thread_lock(self, thread_id: str) -> AsyncIterator[None]:
+    async def thread_lock(self, thread_id: str, *, shared: bool = False) -> AsyncIterator[None]:
         task = asyncio.current_task()
-        if thread_id in self.owners and self.owners[thread_id] is task:
+        owners = self.owners.setdefault(thread_id, {})
+        if task in owners:
+            assert not owners[task] or shared
             yield
             return
-        async with self.locks.setdefault(thread_id, asyncio.Lock()):
-            self.owners[thread_id] = task
-            try:
-                yield
-            finally:
-                del self.owners[thread_id]
+        async with self.condition:
+            await self.condition.wait_for(lambda: not owners or (shared and all(owners.values())))
+            owners[task] = shared
+        try:
+            yield
+        finally:
+            async with self.condition:
+                del owners[task]
+                self.condition.notify_all()
 
     async def task_for_thread(self, thread_id: str) -> _Task | None:
         return self.task if thread_id in self.members else None
@@ -347,3 +352,47 @@ async def test_alternate_graph_rechecks_permission_before_resumed_tool_effect(
     with pytest.raises(policy.TaskPermissionError, match="ordinary agent graph"):
         await middleware.awrap_tool_call(_tool_request("execute"), handler)
     assert effects == ["executed"]
+
+
+async def test_nested_sandbox_tool_finishes_while_delegation_waits(
+    task_store: _TaskStore,
+) -> None:
+    from agent.tasks.ingress import require_sandbox_tool_access
+
+    attempted = asyncio.Event()
+    effects: list[str] = []
+
+    async def delegate() -> None:
+        attempted.set()
+        async with policy.authorize_tool("coordinator", "set_task", {}):
+            effects.append("delegated")
+
+    async def nested_request() -> ToolMessage | Command:
+        await require_sandbox_tool_access("coordinator", "read_file", {})
+
+        async def read_file(request: ToolCallRequest) -> ToolMessage:
+            effects.append("read")
+            return ToolMessage(content="file contents", tool_call_id="call-1")
+
+        return await TaskRoleMiddleware("coordinator", sandbox_capability=True).awrap_tool_call(
+            _tool_request("read_file"), read_file
+        )
+
+    async def execute(request: ToolCallRequest) -> ToolMessage | Command:
+        writer = asyncio.create_task(delegate())
+        try:
+            await attempted.wait()
+            await asyncio.sleep(0.1)
+            result = await asyncio.create_task(nested_request())
+            assert effects == ["read"]
+            return result
+        finally:
+            writer.cancel()
+            await asyncio.gather(writer, return_exceptions=True)
+
+    async with asyncio.timeout(5):
+        result = await TaskRoleMiddleware("coordinator").awrap_tool_call(
+            _tool_request("execute"), execute
+        )
+    assert isinstance(result, ToolMessage)
+    assert result.content == "file contents"
