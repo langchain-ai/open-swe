@@ -7,7 +7,6 @@ LangSmith's MCP resource, not its API), keeps each user's tokens encrypted under
 ``user_credentials/<login>/langsmith`` and refreshes them on demand.
 """
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
@@ -16,6 +15,7 @@ import httpx2
 
 from agent.config import ENV
 from agent.dashboard.notion_oauth import code_challenge_for_verifier, generate_code_verifier
+from agent.dashboard.oauth_refresh import refresh_guard
 from agent.dashboard.user_credentials import USER_CREDENTIALS_NAMESPACE
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
@@ -28,7 +28,6 @@ LANGSMITH_OAUTH_FLOW_NAMESPACE = ["langsmith_oauth_flows"]
 _METADATA_PATH = "/.well-known/oauth-authorization-server"
 _HTTP_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 _EXPIRY_SKEW = timedelta(minutes=2)
-_refresh_locks: dict[str, asyncio.Lock] = {}
 
 
 class LangSmithOAuthError(Exception):
@@ -263,8 +262,7 @@ async def langsmith_access_token(login: str) -> str | None:
         return None
     if not _expired(record.get("token_expires_at")):
         return decrypt_token(record.get("encrypted_access_token", "")) or None
-    lock = _refresh_locks.setdefault(login, asyncio.Lock())
-    async with lock:
+    async with refresh_guard("langsmith", login):
         record = await get_value(namespace, LANGSMITH_KEY)
         if not isinstance(record, dict):
             return None
@@ -288,11 +286,17 @@ async def langsmith_access_token(login: str) -> str | None:
                 },
             )
         except LangSmithOAuthError as exc:
-            if exc.error_code == "invalid_grant":
-                await delete_value(namespace, LANGSMITH_KEY)
-                logger.info("LangSmith grant revoked; user must reconnect", extra={"login": login})
-                return None
-            raise
+            if exc.error_code != "invalid_grant":
+                raise
+            # The connect callback does not take the guard; keep a grant it wrote meanwhile.
+            latest = await get_value(namespace, LANGSMITH_KEY)
+            if isinstance(latest, dict) and latest.get("encrypted_refresh_token") != record.get(
+                "encrypted_refresh_token"
+            ):
+                return decrypt_token(latest.get("encrypted_access_token", "")) or None
+            await delete_value(namespace, LANGSMITH_KEY)
+            logger.info("LangSmith grant revoked; user must reconnect", extra={"login": login})
+            return None
         await _save_tokens(
             login, data, client_id=str(record["client_id"]), token_endpoint=token_endpoint
         )

@@ -24,6 +24,7 @@ from agent.dashboard.oauth import (
     refresh_user_access_token,
     require_session,
 )
+from agent.dashboard.oauth_refresh import refresh_guard
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
@@ -218,17 +219,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
     return value
 
 
-_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _refresh_lock(login: str) -> asyncio.Lock:
-    lock = _refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _refresh_locks[login] = lock
-    return lock
-
-
 def _token_expired(expires_at: str | None, *, skew_seconds: int = 300) -> bool:
     if not isinstance(expires_at, str) or not expires_at:
         return False
@@ -363,7 +353,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
     if not _decrypt_refresh_token(record):
         return access_token
 
-    async with _refresh_lock(login):
+    async with refresh_guard("github", login):
         record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
         if not record:
             return None
