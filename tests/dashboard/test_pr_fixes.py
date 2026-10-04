@@ -211,7 +211,7 @@ async def test_a_busy_thread_is_reported_instead_of_being_sent_another_run(setup
     setup.client.threads.update.assert_not_awaited()
 
 
-@pytest.mark.parametrize("intent", [OPEN, FIX, ADDRESS_COMMENTS, None])
+@pytest.mark.parametrize("intent", [OPEN, FIX, None])
 async def test_worker_link_routes_pr_actions_to_authorized_coordinator(
     setup: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,

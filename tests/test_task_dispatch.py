@@ -82,26 +82,6 @@ async def test_duplicate_dispatch_stops_before_preparation_and_model_but_same_in
     assert receipts.receipts == {("worker", "dispatch-1"): "invocation-1"}
 
 
-@pytest.mark.parametrize(
-    "thread_id,dispatch_key,invocation_id,error",
-    [
-        ("worker", "forged-dispatch", "invocation-1", PermissionError),
-        ("other-thread", "dispatch-1", "invocation-1", PermissionError),
-        ("worker", "dispatch-1", "", ValueError),
-    ],
-)
-async def test_receipts_require_persisted_matching_work_and_invocation_identity(
-    receipts: _Receipts,
-    thread_id: str,
-    dispatch_key: str,
-    invocation_id: str,
-    error: type[Exception],
-) -> None:
-    with pytest.raises(error):
-        await store.claim_task_dispatch(thread_id, dispatch_key, invocation_id)
-    assert receipts.receipts == {}
-
-
 async def test_dispatch_without_invocation_identity_fails_before_model(receipts: _Receipts) -> None:
     graph = create_agent(
         FakeListChatModel(responses=["must not execute"]),

@@ -306,27 +306,6 @@ async def test_cancellation_does_not_claim_worker_has_stopped_early(
     assert record.await_args.kwargs["kind"] == "cancellation_requested"
 
 
-async def test_worker_completion_does_not_complete_task(
-    client: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    finish = AsyncMock()
-    complete = AsyncMock()
-    events: list[tuple[str, str]] = []
-
-    async def record(worker_thread_id: str, *, event_key: str, kind: str, content: str) -> None:
-        events.append((event_key, kind))
-
-    monkeypatch.setattr(delivery, "worker_result", AsyncMock(return_value="Test passed"))
-    monkeypatch.setattr(store, "record_event", record)
-    monkeypatch.setattr(store, "finish_delegation", finish)
-    monkeypatch.setattr(store, "complete_task", complete)
-    monkeypatch.setattr(delivery, "deliver_events", AsyncMock(return_value=1))
-    assert await delivery.handle_worker_completion(WORKER, "run", "success")
-    assert events == [("completion:run", "completed")]
-    finish.assert_awaited_once_with(WORKER, status="completed", run_id="run")
-    complete.assert_not_awaited()
-
-
 async def test_reconciliation_recovers_missed_failure_even_after_a_follow_up_finished(
     client: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

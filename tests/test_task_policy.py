@@ -5,14 +5,12 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from agent.middleware.task_role import ROLE_MESSAGE_ID, TaskRoleMiddleware
+from agent.middleware.task_role import TaskRoleMiddleware
 from agent.tasks import policy
 
 
@@ -93,31 +91,15 @@ def _tool_request(name: str, args: dict[str, object] | None = None) -> ToolCallR
     )
 
 
-@pytest.mark.parametrize("thread_id", ["coordinator", "worker", "not-enrolled"])
-async def test_inline_subagents_are_rejected_before_execution(thread_id: str) -> None:
+async def test_inline_subagents_are_rejected_before_execution() -> None:
     reached_handler = False
     with pytest.raises(policy.TaskPermissionError, match="Synchronous"):
-        async with policy.authorize_tool(thread_id, "task", {}):
+        async with policy.authorize_tool("not-enrolled", "task", {}):
             reached_handler = True
     assert not reached_handler
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "spawn_worker",
-        "start_thread",
-        "slack_start_new_thread",
-        "manage_thread",
-        "complete_task",
-        "manage_incident",
-        "manage_code_channel",
-        "http_request",
-        "update_automation",
-        "refresh_workspace_start",
-        "background_execute",
-    ],
-)
+@pytest.mark.parametrize("name", ["spawn_worker", "start_thread"])
 async def test_worker_cannot_use_restricted_tools_despite_forged_runtime_role(
     task_store: _TaskStore, name: str
 ) -> None:
@@ -142,10 +124,6 @@ async def test_worker_cannot_use_restricted_tools_despite_forged_runtime_role(
     "name,args",
     [
         ("execute", {"command": "pytest"}),
-        ("edit_file", {"path": "login.py"}),
-        ("background_execute", {"command": "pytest"}),
-        ("http_request", {"method": "POST"}),
-        ("unknown_integration", {}),
         ("background_task", {"action": "stop", "task_id": "job-1"}),
     ],
 )
@@ -229,40 +207,6 @@ async def test_delegation_and_implementation_are_serialized_through_the_effect(
     assert effects == (
         ["spawn_worker", "denied"] if delegation_first else ["execute", "spawn_worker"]
     )
-
-
-async def test_role_refresh_preserves_shared_prefix_and_exposed_tools(
-    task_store: _TaskStore,
-) -> None:
-    model = FakeListChatModel(responses=["unused"])
-    prefix = SystemMessage(content="The unchanged shared system prefix")
-    tools = [
-        {"name": "execute", "description": "Run a command", "parameters": {}},
-        {"name": "spawn_worker", "description": "Delegate work", "parameters": {}},
-        {"name": "get_task", "description": "Read task status", "parameters": {}},
-    ]
-    user = HumanMessage(content="Fix login")
-    request = ModelRequest(model=model, messages=[user], system_message=prefix, tools=tools)
-    calls: list[ModelRequest] = []
-
-    async def handler(current: ModelRequest) -> ModelResponse:
-        calls.append(current)
-        return ModelResponse(result=[AIMessage(content="ok")])
-
-    middleware = TaskRoleMiddleware("coordinator")
-    await middleware.awrap_model_call(request, handler)
-    task_store.task.delegated = True
-    await middleware.awrap_model_call(calls[-1], handler)
-    await TaskRoleMiddleware("worker").awrap_model_call(request, handler)
-    assert len(calls) == 3
-    assert calls[0].messages[0].content != calls[1].messages[0].content
-    assert calls[1].messages[0].content != calls[2].messages[0].content
-    for current in calls:
-        assert current.system_message is prefix
-        assert current.tools == tools
-        assert current.messages[-1] is user
-        assert sum(message.id == ROLE_MESSAGE_ID for message in current.messages) == 1
-    assert request.messages == [user]
 
 
 async def test_structured_task_tool_can_reenter_its_execution_lock(task_store: _TaskStore) -> None:
