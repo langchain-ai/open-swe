@@ -16,6 +16,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from agent.review.walkthrough import FileLines, LineRange, StepDraft
 
 GIT_TIMEOUT_SECONDS = 300
+_SCRIPT_CHUNK_BYTES = 64_000
 SCOUT_KIND_TRAILER = "Scout-Kind"
 OTHER_TITLE = "Other changes"
 
@@ -55,6 +56,33 @@ async def _run(backend: SandboxBackendProtocol, repo_dir: str, script: str) -> s
     if result.exit_code not in (0, None):
         raise ScoutGitError(result.output.strip()[-2000:])
     return result.output
+
+
+def _script_chunks(repo_dir: str, lines: list[str]) -> list[str]:
+    prefix = f"set -e\ncd {shlex.quote(repo_dir)}\n"
+    prefix_bytes = len(prefix.encode())
+    chunks: list[str] = []
+    current: list[str] = []
+    current_bytes = prefix_bytes
+    for line in lines:
+        line_bytes = len(line.encode()) + (1 if current else 0)
+        if current and current_bytes + line_bytes > _SCRIPT_CHUNK_BYTES:
+            chunks.append("\n".join(current))
+            current = []
+            current_bytes = prefix_bytes
+            line_bytes = len(line.encode())
+        current.append(line)
+        current_bytes += line_bytes
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+async def _run_lines(backend: SandboxBackendProtocol, repo_dir: str, lines: list[str]) -> str:
+    output: list[str] = []
+    for script in _script_chunks(repo_dir, lines):
+        output.append(await _run(backend, repo_dir, script))
+    return "".join(output)
 
 
 def _require_sha(value: str) -> str:
@@ -178,11 +206,14 @@ async def _commits(backend: SandboxBackendProtocol, repo_dir: str, mb: str) -> l
                 is_other=kind.strip() == "other",
             )
         )
-    touched = await _run(
+    touched = await _run_lines(
         backend,
         repo_dir,
-        "for c in " + " ".join(c.sha for c in commits) + f'; do printf "{_RECORD}%s\\n" "$c"; '
-        'git diff-tree -r -z --no-commit-id --name-only --no-renames "$c"; done',
+        [
+            f'printf "{_RECORD}{commit.sha}\\n"; '
+            f'git diff-tree -r -z --no-commit-id --name-only --no-renames "{commit.sha}"'
+            for commit in commits
+        ],
     )
     by_sha = {c.sha: c for c in commits}
     for record in touched.split(_RECORD)[1:]:
@@ -247,7 +278,7 @@ async def _blame(
                 f"git blame --incremental --reverse {mb}..HEAD -- {shlex.quote(file.old_path)}"
                 f" | {grep} || true"
             )
-    output = await _run(backend, repo_dir, "\n".join(lines)) if lines else ""
+    output = await _run_lines(backend, repo_dir, lines)
     position = {c.sha: i for i, c in enumerate(commits)}
     last = len(commits) - 1
     added: _Attribution = {}
@@ -290,7 +321,7 @@ async def _pr_changed_lines(
         paths = " ".join(shlex.quote(p) for p in {file.old_path, file.new_path} if p)
         lines.append(f'printf "{_RECORD}{index}\\n"')
         lines.append(f"git diff -U0 --no-color --no-ext-diff -M {mb} HEAD -- {paths}")
-    raw = await _run(backend, repo_dir, "\n".join(lines)) if lines else ""
+    raw = await _run_lines(backend, repo_dir, lines)
     added: dict[str, set[int]] = {}
     deleted: dict[str, set[int]] = {}
     for record in raw.split(_RECORD)[1:]:

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -9,6 +10,11 @@ import pytest
 from agent.review.walkthrough import FileLines, StepDraft
 from agent.review_scout.git import (
     OTHER_TITLE,
+    _blame,
+    _ChangedFile,
+    _Commit,
+    _commits,
+    _pr_changed_lines,
     commit_staged,
     committed_kinds,
     finalize,
@@ -35,6 +41,35 @@ class _LocalShell:
         )
         stdout, _ = await process.communicate()
         return _Result(stdout.decode(), process.returncode or 0)
+
+
+class _ParsedLimitedShell:
+    def __init__(self, commits: list[_Commit], limit: int = 131_072) -> None:
+        self.commits = commits
+        self.limit = limit
+        self.commands: list[str] = []
+
+    async def aexecute(self, command: str, timeout: int | None = None) -> _Result:  # noqa: ARG002
+        if len(command.encode()) > self.limit:
+            raise AssertionError("command exceeded sandbox argument limit")
+        self.commands.append(command)
+        if "git log --first-parent" in command:
+            output = "".join(
+                f"\x1e{commit.sha}\x1f{commit.title}\x1f{commit.summary}\x1f\n"
+                for commit in self.commits
+            )
+            return _Result(output, 0)
+        if "git diff-tree" in command:
+            shas = re.findall(r'diff-tree[^\n]+"([0-9a-f]{40})"', command)
+            return _Result("".join(f"\x1e{sha}\nfile-{sha}\0" for sha in shas), 0)
+        records = re.findall(r'printf "(\x1e[AD]\d+)\\n"', command)
+        if records:
+            output = ""
+            for record in records:
+                output += f"{record}\n{self.commits[0].sha} 1 1\n"
+            return _Result(output, 0)
+        records = re.findall(r'printf "(\x1e\d+)\\n"', command)
+        return _Result("".join(f"{record}\n@@ -1 +1 @@\n" for record in records), 0)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -201,3 +236,37 @@ async def test_paths_with_spaces_keep_their_lines(tmp_path: Path) -> None:
             title="Edit", files=[FileLines(path="foo bar.txt", added=[(2, 2)], deleted=[(2, 2)])]
         )
     ]
+
+
+async def test_large_blame_and_diff_scripts_are_chunked() -> None:
+    sha = "a" * 40
+    files = [
+        _ChangedFile(old_path=None, new_path=f"{'x' * 100}/{index:04d}.py") for index in range(1000)
+    ]
+    commits = [_Commit(sha=sha, title="Step", summary="", is_other=False)]
+    shell = _ParsedLimitedShell(commits)
+
+    added, deleted = await _blame(shell, "/repo", sha, commits, files)
+    pr_added, pr_deleted = await _pr_changed_lines(shell, "/repo", sha, files)
+
+    assert len(shell.commands) >= 4
+    assert not deleted
+    assert not pr_deleted
+    assert len(added) == len(files)
+    assert len(pr_added) == len(files)
+    assert all(owners == {0: [1]} for owners in added.values())
+    assert all(lines == {1} for lines in pr_added.values())
+
+
+async def test_large_commit_touched_scripts_are_chunked() -> None:
+    commits = [
+        _Commit(sha=f"{index:040x}", title=f"Step {index}", summary="", is_other=False)
+        for index in range(1000)
+    ]
+    shell = _ParsedLimitedShell(commits)
+
+    parsed = await _commits(shell, "/repo", "b" * 40)
+
+    assert len(shell.commands) >= 4
+    assert [commit.sha for commit in parsed] == [commit.sha for commit in commits]
+    assert all(commit.touched == [f"file-{commit.sha}"] for commit in parsed)

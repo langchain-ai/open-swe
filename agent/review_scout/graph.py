@@ -19,6 +19,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from langsmith.sandbox import SandboxOperationError
 
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -192,7 +193,7 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             return
         try:
             steps = await finalize(backend, repo_dir, merge_base=merge_base, head_sha=cfg.head_sha)
-        except ScoutGitError:
+        except SandboxOperationError, ScoutGitError:
             logger.exception("Review scout could not finalize its walkthrough", extra=extra)
             return
         if not any(not step.is_other for step in steps):
