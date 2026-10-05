@@ -5,6 +5,7 @@ import type {
 } from "@/features/agents/lib/stream/connection"
 import type {
   QueuedTurn,
+  StaleWorkspace,
   SubagentToolCall,
   TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
@@ -90,6 +91,8 @@ export interface TranscriptThreadSource extends ThreadSourceShared {
   subagentMessages: (namespace: ReadonlyArray<string>) => Array<Message>
   /** The `task` call that spawned a subagent, or null when there is none. */
   subagentTask: (toolCallId: string) => TranscriptToolCallState | null
+  /** The newest turn's sandbox booted from an out-of-date workspace image. */
+  workspaceStale: StaleWorkspace | null
 }
 
 export type ThreadSource = StreamThreadSource | TranscriptThreadSource

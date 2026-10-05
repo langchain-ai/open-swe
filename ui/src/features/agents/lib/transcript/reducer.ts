@@ -775,6 +775,24 @@ export function routedNotice(
   }
 }
 
+export interface StaleWorkspace {
+  workspaceName: string
+  capturedAt: string | null
+}
+
+export function staleWorkspaceNotice(
+  state: TranscriptState
+): StaleWorkspace | null {
+  const notice = state.notices["workspace_stale"]
+  if (!notice) return null
+  const name = notice.data["workspace_name"]
+  const capturedAt = notice.data["captured_at"]
+  return {
+    workspaceName: typeof name === "string" ? name : "workspace",
+    capturedAt: typeof capturedAt === "string" ? capturedAt : null,
+  }
+}
+
 export function isOffloading(state: TranscriptState): boolean {
   const notice = state.notices["conversation_offloading"]
   return notice?.data["status"] === "started"

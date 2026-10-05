@@ -56,6 +56,7 @@ from agent.transcript.events import (
     MessageCompleted,
     MessageSender,
     MessageUsage,
+    NoticeKind,
     RunNotice,
     ThreadCreated,
     ToolCompleted,
@@ -187,6 +188,13 @@ class RunState:
 
 
 _runs: dict[str, RunState] = {}
+_pending_notices: dict[str, list[tuple[NoticeKind, JsonObject]]] = {}
+
+
+def queue_run_notice(thread_id: str, kind: NoticeKind, data: JsonObject) -> None:
+    """Record a notice raised before this middleware starts the run's turn."""
+    _pending_notices.setdefault(thread_id, []).append((kind, data))
+
 
 DISABLED = RunState(thread_id="", run_id="", turn_id=uuid.uuid7(), enabled=False)
 
@@ -648,6 +656,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         key = _run_key(ids.thread_id, ids.run_id)
         if key in _runs:
             return
+        pending_notices = _pending_notices.pop(ids.thread_id, [])
 
         messages = cast(Sequence[BaseMessage], state.get("messages") or [])
         transcribed = await _has_transcript(ids.thread_id)
@@ -727,6 +736,16 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and isinstance(message.id, str)
             and message.id
             and not _is_dynamic_context(message)
+        )
+        commands.extend(
+            Command(
+                command_id=str(uuid.uuid7()),
+                event=RunNotice(type="run.notice", turn_id=turn_id, kind=kind, data=data),
+                actor_kind="system",
+                run_id=ids.run_id,
+                turn_id=turn_id,
+            )
+            for kind, data in pending_notices
         )
         run_state.enqueue(*commands)
 

@@ -30,7 +30,10 @@ export type MessageRole = "human" | "ai"
 
 export type ToolCallStatus = "in_progress" | "completed" | "error"
 
-export type NoticeKind = "model_routed" | "conversation_offloading"
+export type NoticeKind =
+  | "model_routed"
+  | "conversation_offloading"
+  | "workspace_stale"
 
 /**
  * A file attached to a message. The log stores metadata only — never base64

@@ -14,12 +14,9 @@ its capture lands:
   ``UPDATE_INTERVAL_SECONDS`` enqueues one in the background, so the image
   converges and later creations skip the work.
 
-Creating a sandbox from a stale snapshot *also* runs the update script in that
-sandbox, before the first model call — see ``SandboxCreateConfig.run_update_script``.
-The background capture alone is not enough: it never helps the run that
-triggered it, and when runs are sparse every run is a triggering run, so the
-first one after a quiet spell would work against a checkout as old as the last
-nightly rebuild.
+A run whose sandbox boots from a stale snapshot never waits on the update: it
+starts on the image as captured and warns its requester that checkouts may be
+behind.
 
 The outcome — status, kind, timestamps, a capped log — lands on the workspace
 record for the dashboard. A failed refresh of either kind leaves the previous

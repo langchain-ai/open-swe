@@ -35,13 +35,14 @@ import {
   prependTurns,
   routedNotice,
   queuedTurns,
+  staleWorkspaceNotice,
   toMessages,
 } from "./reducer"
 import type { StreamConnection } from "@/features/agents/lib/stream/connection"
 import type { RunTracker } from "@/lib/perf/streaming"
 import type { Message } from "@/features/agents/lib/types"
 import type { TranscriptEventStream } from "./api"
-import type { TranscriptState, QueuedTurn } from "./reducer"
+import type { TranscriptState, QueuedTurn, StaleWorkspace } from "./reducer"
 
 const CACHE_TTL_MS = 5 * 60_000
 
@@ -95,6 +96,7 @@ export interface ThreadTranscript {
   isRunning: boolean
   isOffloading: boolean
   routed: { route?: string; modelId?: string | null } | null
+  workspaceStale: StaleWorkspace | null
   error: unknown
   connection: StreamConnection
   /** Turns older than the loaded window remain on the server. */
@@ -312,6 +314,7 @@ export function useThreadTranscript(
     isRunning: state?.status === "running",
     isOffloading: state ? offloadingFromState(state) : false,
     routed: state ? routedNotice(state) : null,
+    workspaceStale: state ? staleWorkspaceNotice(state) : null,
     error,
     connection,
     hasOlder: state?.olderCursor != null,

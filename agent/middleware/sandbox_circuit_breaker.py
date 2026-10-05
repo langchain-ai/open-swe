@@ -68,7 +68,7 @@ def extract_sandbox_id(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def _get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
+async def get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
@@ -120,7 +120,7 @@ async def post_sandbox_unreachable_notification(
         replacement_attempted=replacement_attempted,
     )
 
-    slack_target = await _get_slack_target(cfg)
+    slack_target = await get_slack_target(cfg)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
         if cfg.thread_id:

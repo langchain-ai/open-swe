@@ -137,6 +137,7 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.stale_workspace import warn_stale_workspace
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -155,6 +156,7 @@ from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
+    take_stale_boot,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
@@ -1164,6 +1166,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
+        if stale_workspace := take_stale_boot(self._thread_id):
+            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
