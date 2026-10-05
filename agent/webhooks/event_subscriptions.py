@@ -36,7 +36,7 @@ from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-_OWN_GITHUB_LOGINS = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
+_OWN_GITHUB_LOGINS = frozenset({"open-swe[bot]", "open-swe-preview[bot]", "openswe-dev[bot]"})
 _TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
@@ -51,11 +51,20 @@ class _GitHubRepository(BaseModel):
     full_name: str = ""
 
 
+class _GitHubApp(BaseModel):
+    id: int | None = None
+
+
 class _GitHubText(BaseModel):
     number: int | None = None
     body: str | None = None
     html_url: str = ""
     state: str = ""
+    performed_via_github_app: _GitHubApp | None = None
+
+    def authored_by_app(self, app_id: str) -> bool:
+        app = self.performed_via_github_app
+        return bool(app_id) and app is not None and str(app.id) == app_id
 
 
 class _GitHubPullRequestRef(BaseModel):
@@ -195,7 +204,11 @@ class EventSummary(BaseModel):
             status=status,
             body=body or "",
             trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
-            from_open_swe=sender in _OWN_GITHUB_LOGINS and event.event_type not in _CI_EVENT_TYPES,
+            from_open_swe=(
+                sender in _OWN_GITHUB_LOGINS
+                or (commented is not None and commented.authored_by_app(ENV.GITHUB_APP_ID.get()))
+            )
+            and event.event_type not in _CI_EVENT_TYPES,
             pull_request_numbers=sorted(
                 {
                     number
