@@ -31,6 +31,26 @@ export function HumanReviewPreference() {
           />
         }
       />
+      <SettingsRow
+        label="React to failing PR checks in Slack"
+        htmlFor="pr-failure-reactions"
+        description="Add ❌ to watched pull request posts in Slack when checks fail on a PR you own. Off by default."
+        control={
+          <Switch
+            id="pr-failure-reactions"
+            checked={profile.data?.pr_failure_reactions ?? false}
+            disabled={disabled}
+            onCheckedChange={(value) => {
+              if (!defaults) return
+              save.patch(
+                { pr_failure_reactions: value },
+                defaults.default_agent_model,
+                defaults.default_agent_reasoning_effort
+              )
+            }}
+          />
+        }
+      />
       {(profile.error || options.error) && (
         <p role="alert" className="px-4 py-2 text-xs text-destructive">
           Could not load the human review preference. Please try again.
