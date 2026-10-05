@@ -19,6 +19,7 @@ from agent.slack.blocks import (
     MESSAGE_MAX_BLOCKS,
     SECTION_TEXT_MAX_CHARS,
     block_payload,
+    option_actions,
     section,
 )
 from agent.slack.client import (
@@ -495,26 +496,6 @@ def _reply_blocks(
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None
     return [*block_payload(body), *actions]
-
-
-def option_actions(options: list[str] | None) -> list[dict[str, Any]]:
-    clean_options = [option.strip() for option in options or [] if option.strip()]
-    if not clean_options:
-        return []
-    return [
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": option[:75], "emoji": True},
-                    "value": json.dumps({"type": "open_swe_option", "response": option}),
-                    "action_id": f"open_swe_option_select_{index}",
-                }
-                for index, option in enumerate(clean_options[:5])
-            ],
-        }
-    ]
 
 
 def build_workflow_approval_blocks(message: str, fingerprint: str) -> list[dict[str, Any]]:

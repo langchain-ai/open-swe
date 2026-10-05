@@ -15,11 +15,10 @@ from agent.review_guide.buttons import CONTINUE
 from agent.review_guide.diff import ChangedLine
 from agent.review_guide.sessions import ReviewGuideSession
 from agent.review_guide.walk import Walk, summary
-from agent.slack.blocks import block_payload, context
+from agent.slack.blocks import block_payload, context, option_actions
 from agent.slack.client import post_slack_top_level_message_with_ts, update_slack_message
 from agent.slack.code_channels import set_summary_message
 from agent.slack.markdown import markdown_blocks
-from agent.slack.tools.reply import option_actions
 from agent.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
