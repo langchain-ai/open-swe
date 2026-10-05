@@ -132,7 +132,6 @@ export function Conversation({
     queryKey: ["copilot-threads", threadId],
     queryFn: () => agentsApi.getThread(threadId),
     enabled: !isNew,
-    refetchInterval: running ? 3000 : false,
   })
   const metadata = thread.data
   const refetchThread = thread.refetch
@@ -174,6 +173,7 @@ export function Conversation({
     const subscription = agent.subscribe({
       onRunStartedEvent: () => {
         setRunning(true)
+        void refetchThread()
         setConfigurable((current) =>
           current?.model_selection_changed
             ? { ...current, model_selection_changed: false }

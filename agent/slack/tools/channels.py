@@ -15,6 +15,7 @@ from agent.slack.client import (
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.payloads import SlackChannelPayload
+from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class SlackMessageReceipt(TypedDict):
     message_ts: str
 
 
+@sandbox_only
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
     """List a page of public and private channels the Open SWE bot belongs to."""
     try:
@@ -104,6 +106,7 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
     return {"success": True, "channels": channels, "next_cursor": next_cursor}
 
 
+@sandbox_only
 async def slack_list_channel_members(
     channel_id: str, cursor: str | None = None
 ) -> SlackChannelMemberList | SlackChannelError:
