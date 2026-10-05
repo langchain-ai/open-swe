@@ -24,6 +24,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from agent.config import ENV
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -478,6 +479,10 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
+    if auto_assign_disabled():
+        return _failure(
+            "Reviewer auto-assignment is turned off on this deployment. Do not pick anyone."
+        )
     if approvers := await _github_approvers(request):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -699,9 +704,14 @@ async def settle_repository(owner: str, repo: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class AutoAssignResult:
-    status: Literal["picked", "waiting", "woken", "failed"]
+    status: Literal["picked", "waiting", "woken", "failed", "disabled"]
     reviewer: str = ""
     at: datetime | None = None
+
+
+def auto_assign_disabled() -> bool:
+    """Preview shares GitHub and Slack with production, so it never picks reviewers itself."""
+    return ENV.OPENSWE_ENV.optional() == "preview"
 
 
 async def start_auto_assign(
@@ -711,7 +721,11 @@ async def start_auto_assign(
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
-    result = await _auto_assign(request, asked=asked)
+    result = (
+        AutoAssignResult("disabled")
+        if auto_assign_disabled()
+        else await _auto_assign(request, asked=asked)
+    )
     logger.info(
         "Auto-assign finished",
         extra={
@@ -789,6 +803,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
 
     Reviewing on GitHub counts as accepting.
     """
+    if auto_assign_disabled():
+        return "disabled"
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
     stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
