@@ -644,6 +644,15 @@
             ],
             "title": "Bridge Id"
           },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
+          },
           "hostname": {
             "title": "Hostname",
             "type": "string"
@@ -3534,17 +3543,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "human_review_requests": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Human Review Requests"
-          },
           "model_routing_enabled": {
             "anyOf": [
               {
@@ -3556,6 +3554,17 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "pr_failure_reactions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Failure Reactions"
+          },
           "pr_review_links": {
             "anyOf": [
               {
@@ -3566,6 +3575,17 @@
               }
             ],
             "title": "Pr Review Links"
+          },
+          "prefer_tools_in_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefer Tools In Sandbox"
           },
           "preserve_sandbox_memory": {
             "anyOf": [
@@ -3586,17 +3606,6 @@
             "default": false,
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
-          },
-          "review_channel_watch": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Channel Watch"
           },
           "review_draft_prs": {
             "anyOf": [
@@ -6220,6 +6229,11 @@
             ],
             "title": "Fs Capacity Bytes"
           },
+          "inherit_default_sandbox": {
+            "default": false,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
+          },
           "kitchen_channel_ids": {
             "items": {
               "type": "string"
@@ -6517,6 +6531,11 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "default": true,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
           },
           "kitchen_channel_ids": {
             "items": {
@@ -7083,6 +7102,17 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherit Default Sandbox"
           },
           "kitchen_channel_ids": {
             "anyOf": [
@@ -9544,6 +9574,148 @@
         ]
       }
     },
+    "/dashboard/api/langsmith/callback": {
+      "get": {
+        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_description",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Description"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Langsmith Callback",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
+    "/dashboard/api/langsmith/login": {
+      "get": {
+        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Langsmith Login",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -10043,6 +10215,62 @@
         "tags": [
           "dashboard",
           "user-preferences"
+        ]
+      }
+    },
+    "/dashboard/api/my-credentials/langsmith": {
+      "delete": {
+        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Disconnect My Langsmith",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      },
+      "get": {
+        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get My Langsmith Status",
+        "tags": [
+          "dashboard",
+          "langsmith"
         ]
       }
     },
@@ -18421,6 +18649,63 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/ui-invalidations": {
+      "get": {
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Ui Invalidations",
+        "tags": [
+          "dashboard",
+          "ui-invalidations"
         ]
       }
     },

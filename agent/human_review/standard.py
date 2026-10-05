@@ -24,7 +24,6 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from agent.config import ENV
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -60,6 +59,7 @@ from agent.slack.dm import send_dm
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
 from agent.users import User
 from agent.utils.json_types import JsonObject
+from agent.utils.preview import skip_on_preview
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -194,9 +194,17 @@ async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: time
 
 async def _existing(active: HumanReviewRequest) -> RequestResult:
     if active.kind == "expedited":
-        return _failure(
-            "This pull request has an open expedited review card. Dismiss it before "
-            "asking for a standard review."
+        permalink = await _permalink(active)
+        return RequestResult(
+            success=False,
+            error=(
+                "This pull request has an open expedited review card. Dismiss it before "
+                "asking for a standard review."
+                + (f" Open in Slack: {permalink}" if permalink else "")
+            ),
+            request_id=str(active.id),
+            channel=active.slack_channel_id,
+            permalink=permalink,
         )
     return RequestResult(
         success=True,
@@ -272,7 +280,10 @@ async def request_review(
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers := request_blockers(readiness.snapshot):
         return _failure(
-            "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
+            "The pull request cannot be put up for review: "
+            + "; ".join(blockers)
+            + ". "
+            + prompt("tools/human-review-blocked")
         )
 
     target = await _target_channel(pr_ref, channel, token)
@@ -479,10 +490,6 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
     """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
-    if auto_assign_disabled():
-        return _failure(
-            "Reviewer auto-assignment is turned off on this deployment. Do not pick anyone."
-        )
     if approvers := await _github_approvers(request):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -624,6 +631,8 @@ async def settle(request: HumanReviewRequest) -> bool:
 
     ``False`` only when GitHub could not be read, so nothing is known to have changed.
     """
+    if request.kind == "posted" and skip_on_preview("settle_posted"):
+        return True
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
@@ -709,11 +718,6 @@ class AutoAssignResult:
     at: datetime | None = None
 
 
-def auto_assign_disabled() -> bool:
-    """Preview shares GitHub and Slack with production, so it never picks reviewers itself."""
-    return ENV.OPENSWE_ENV.optional() == "preview"
-
-
 async def start_auto_assign(
     request: HumanReviewRequest, *, asked: bool = False
 ) -> AutoAssignResult:
@@ -723,7 +727,7 @@ async def start_auto_assign(
     """
     result = (
         AutoAssignResult("disabled")
-        if auto_assign_disabled()
+        if not asked and skip_on_preview("start_auto_assign")
         else await _auto_assign(request, asked=asked)
     )
     logger.info(
@@ -803,8 +807,6 @@ async def expire_picks(request: HumanReviewRequest) -> str:
 
     Reviewing on GitHub counts as accepting.
     """
-    if auto_assign_disabled():
-        return "disabled"
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
     stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
@@ -892,6 +894,10 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if (request.kind == "posted" or step in ("unclaimed", "pick_expiry")) and skip_on_preview(
+        "run_deadline"
+    ):
+        return {"status": "disabled_in_preview"}
     if step == "pick_expiry":
         return {"status": await expire_picks(request)}
     if step == "unclaimed":

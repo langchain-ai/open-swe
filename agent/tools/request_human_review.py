@@ -142,11 +142,6 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     started = await start_auto_assign(request, asked=True)
     if started.status == "failed":
         return _failure("Open SWE could not start picking a reviewer for this pull request.")
-    if started.status == "disabled":
-        return _failure(
-            "Reviewer auto-assignment is turned off on this deployment. Tell the person who "
-            "asked, and do not pick anyone."
-        )
     if started.status == "picked":
         next_step = (
             f"Open SWE picked @{started.reviewer}; they are tagged in the review's Slack thread "

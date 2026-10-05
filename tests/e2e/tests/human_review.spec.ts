@@ -291,18 +291,10 @@ test.describe("Human review in Slack", () => {
   test.beforeEach(async ({ request }) => {
     await request.post("/control/reset");
     await grantWrite(request);
-    await control(request, "/control/user-preferences", {
-      login: ALICE.login,
-      preferences: { human_review_requests: true },
-    });
   });
 
   // Preferences live on the users row, which a reset keeps.
   test.afterEach(async ({ request }) => {
-    await control(request, "/control/user-preferences", {
-      login: ALICE.login,
-      preferences: { human_review_requests: false },
-    });
     await control(request, "/control/user-preferences", {
       login: BOB.login,
       preferences: { concierge_mode: false },

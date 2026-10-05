@@ -94,6 +94,45 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
+async def test_kinds_name_actions_and_narrow_by_prefix(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/github",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    since = datetime.now(UTC)
+    for event_type, payload in (
+        ("pull_request", {"action": "opened", "number": 1}),
+        ("pull_request", {"action": "opened", "number": 2}),
+        ("pull_request", {"action": "closed", "number": 1}),
+        ("pull_request_review", {"action": "submitted"}),
+        ("push", {"ref": "refs/heads/main"}),
+    ):
+        await EventLog.record(
+            request, json.dumps(payload).encode(), "github", event_type=event_type
+        )
+
+    kinds = await EventLog.kinds(since)
+    assert [(kind.event_type, kind.count) for kind in kinds] == [
+        ("pull_request.closed", 1),
+        ("pull_request.opened", 2),
+        ("pull_request_review.submitted", 1),
+        ("push", 1),
+    ]
+    narrowed = await EventLog.kinds(since, source="github", event_type="pull_request")
+    assert [kind.event_type for kind in narrowed] == ["pull_request.closed", "pull_request.opened"]
+    assert all(kind.payload_shape is None for kind in narrowed)
+    (opened,) = await EventLog.kinds(since, source="github", event_type="pull_request.opened")
+    assert opened.payload_shape == {"action": "string", "number": "number"}
+
+
 async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
     await EventLog.rotate_partitions(date(2026, 9, 1))
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
