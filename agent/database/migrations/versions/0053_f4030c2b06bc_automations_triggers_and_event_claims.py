@@ -2,8 +2,8 @@
 
 from alembic import op
 
-revision = "98952deeaeb4"
-down_revision = ["1a27b64154a3", "243390dbd39e", "f7b59c5091a8", "52fab62a7608"]
+revision = "f4030c2b06bc"
+down_revision = "37e4a81fa83f"
 branch_labels = None
 depends_on = None
 
