@@ -3947,17 +3947,6 @@
             ],
             "title": "Experimental Copilotkit Ui"
           },
-          "human_review_requests": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Human Review Requests"
-          },
           "model_routing_enabled": {
             "anyOf": [
               {
@@ -3968,6 +3957,17 @@
               }
             ],
             "title": "Model Routing Enabled"
+          },
+          "pr_review_links": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Review Links"
           },
           "preserve_sandbox_memory": {
             "anyOf": [
@@ -3988,17 +3988,6 @@
             "default": false,
             "title": "Recent Thread Context Enabled",
             "type": "boolean"
-          },
-          "review_channel_watch": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Channel Watch"
           },
           "review_draft_prs": {
             "anyOf": [

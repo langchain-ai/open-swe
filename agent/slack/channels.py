@@ -207,15 +207,15 @@ class SlackChannel(Base):
             return False
 
     async def post(
-        self, text: str, *, blocks: list[dict[str, Any]] | None = None
+        self, text: str, *, blocks: list[dict[str, Any]] | None = None, login: str | None = None
     ) -> tuple[str | None, str | None]:
         """Post a top-level message, joining the channel when the bot is outside it."""
         message_ts, error = await post_slack_top_level_message_with_ts(
-            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
         )
         if message_ts is None and error == "not_in_channel" and await self.join():
             message_ts, error = await post_slack_top_level_message_with_ts(
-                self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+                self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
             )
         return message_ts, error
 
