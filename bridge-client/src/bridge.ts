@@ -1,20 +1,27 @@
 import { hostname } from "node:os"
 
 import {
-  ApiError,
-  type ApiClient,
+  httpStatus,
+  type BridgeApi,
+  type BridgeClient,
   type BridgeRequest,
   type BridgeSession,
-  type CreateBridgeInput,
-} from "./api.ts"
-import { LocalExecutor, type DispatchOutcome } from "./executor.ts"
-import { errorMessage } from "./json.ts"
+} from "./api"
+import { LocalExecutor, type DispatchOutcome } from "./executor"
+import { errorMessage } from "./json"
 
 const POLL_WAIT_SECONDS = 25
 const POLL_LIMIT = 8
 const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 10_000
 const REPLY_ATTEMPTS = 3
+/**
+ * Below the server's cap of 1024. An id this far back is long settled, so
+ * leaving it out of a poll cannot get its command run again.
+ */
+const MAX_HELD_SENT = 1_000
+/** How long `close` waits for stopped commands to report before releasing the bridge. */
+const CLOSE_GRACE_MS = 5_000
 /** Margin over the server's long-poll window before the request is abandoned. */
 const POLL_TIMEOUT_MS = (POLL_WAIT_SECONDS + 15) * 1_000
 
@@ -32,11 +39,23 @@ export class BridgeGoneError extends Error {
   }
 }
 
-export interface OpenBridgeOptions {
-  rootPath: string
+export interface BridgeOptions {
+  client: BridgeClient
+  /** A getter when the checkout can move; it is read for every request. */
+  rootPath: string | (() => string)
   label: string | null
   /** The bridge a resumed thread is bound to; a new thread always gets its own. */
   bridgeId: string | null
+  /** What to tell the user when the backend stops accepting the credential. */
+  credentialRejected: string
+  /** Where non-fatal trouble is reported; the loop itself never throws. */
+  log: (message: string) => void
+  /** The environment the agent's commands start from, before secrets are stripped. */
+  env?: Record<string, string | undefined>
+}
+
+function resolveRoot(root: string | (() => string)): string {
+  return typeof root === "string" ? root : root()
 }
 
 function sleep(ms: number): Promise<void> {
@@ -44,11 +63,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * The CLI half of a sandbox bridge: long-polls the backend for the remote
+ * The machine half of a sandbox bridge: long-polls the backend for the remote
  * agent's requests, runs them in the local checkout, and posts the results.
  */
 export class Bridge {
-  private running = false
+  private active = false
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private readonly inFlight = new Set<Promise<void>>()
   private readonly held = new Set<string>()
@@ -57,37 +76,43 @@ export class Bridge {
   private readonly executor: LocalExecutor
 
   private constructor(
-    private readonly api: ApiClient,
+    private readonly api: BridgeApi,
     readonly session: BridgeSession,
-    private readonly input: Omit<CreateBridgeInput, "bridgeId">,
+    private readonly options: BridgeOptions,
     readonly reopened: boolean
   ) {
-    this.executor = new LocalExecutor(input.rootPath)
+    this.executor = new LocalExecutor(
+      options.rootPath,
+      options.env ? { env: options.env } : {}
+    )
   }
 
   get rootPath(): string {
-    return this.input.rootPath
+    return resolveRoot(this.options.rootPath)
   }
 
-  static async open(
-    api: ApiClient,
-    options: OpenBridgeOptions
-  ): Promise<Bridge> {
-    const input = {
-      rootPath: options.rootPath,
+  get running(): boolean {
+    return this.active
+  }
+
+  static async open(api: BridgeApi, options: BridgeOptions): Promise<Bridge> {
+    const session = await api.createBridge(Bridge.registration(options))
+    return new Bridge(api, session, options, options.bridgeId !== null)
+  }
+
+  private static registration(options: BridgeOptions) {
+    return {
+      client: options.client,
+      rootPath: resolveRoot(options.rootPath),
       hostname: hostname(),
       label: options.label,
-    }
-    const session = await api.createBridge({
-      ...input,
       bridgeId: options.bridgeId,
-    })
-    return new Bridge(api, session, input, options.bridgeId !== null)
+    }
   }
 
   start(onFatal: (error: Error) => void): void {
-    if (this.running) return
-    this.running = true
+    if (this.active) return
+    this.active = true
     this.onFatal = onFatal
     const interval = Math.max(this.session.heartbeatIntervalSeconds, 1) * 1_000
     this.heartbeatTimer = setInterval(() => void this.beat(), interval)
@@ -95,26 +120,35 @@ export class Bridge {
   }
 
   async close(): Promise<void> {
-    this.running = false
+    this.active = false
     if (this.heartbeatTimer !== null) clearInterval(this.heartbeatTimer)
     this.heartbeatTimer = null
     for (const controller of this.pollControllers) controller.abort()
     this.pollControllers.clear()
-    await Promise.allSettled(this.inFlight)
+    // Closing is quitting: a build or test run the agent started must not hold
+    // the app or the CLI open, so its process group is killed, and a reply that
+    // cannot be posted is not waited on past the grace period.
+    this.executor.stopAll()
+    let grace: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled(this.inFlight),
+      new Promise<void>((done) => {
+        grace = setTimeout(done, CLOSE_GRACE_MS)
+      }),
+    ])
+    clearTimeout(grace)
     try {
       await this.api.deleteBridge(this.session.bridgeId)
     } catch (cause) {
-      if (!(cause instanceof ApiError) || cause.status !== 404) {
-        process.stderr.write(
-          `oswe: could not release the bridge: ${errorMessage(cause)}\n`
-        )
+      if (httpStatus(cause) !== 404) {
+        this.options.log(`could not release the bridge: ${errorMessage(cause)}`)
       }
     }
   }
 
   private fail(error: Error): void {
-    if (!this.running) return
-    this.running = false
+    if (!this.active) return
+    this.active = false
     this.onFatal?.(error)
   }
 
@@ -122,49 +156,47 @@ export class Bridge {
   private async reopen(): Promise<void> {
     try {
       await this.api.createBridge({
-        ...this.input,
+        ...Bridge.registration(this.options),
         bridgeId: this.session.bridgeId,
       })
-      process.stderr.write("oswe: bridge reconnected\n")
+      this.options.log("bridge reconnected")
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) {
-        this.fail(new CredentialRejectedError(this.api.credential.rejected))
+      if (httpStatus(cause) === 401) {
+        this.fail(new CredentialRejectedError(this.options.credentialRejected))
         return
       }
-      if (cause instanceof ApiError && cause.status === 404) {
+      if (httpStatus(cause) === 404) {
         this.fail(new BridgeGoneError(this.session.bridgeId))
         return
       }
-      process.stderr.write(
-        `oswe: could not reopen the bridge: ${errorMessage(cause)}\n`
-      )
+      this.options.log(`could not reopen the bridge: ${errorMessage(cause)}`)
     }
   }
 
   private async beat(): Promise<void> {
-    if (!this.running) return
+    if (!this.active) return
     try {
       await this.api.heartbeat(this.session.bridgeId)
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) {
-        this.fail(new CredentialRejectedError(this.api.credential.rejected))
+      if (httpStatus(cause) === 401) {
+        this.fail(new CredentialRejectedError(this.options.credentialRejected))
         return
       }
-      if (cause instanceof ApiError && cause.status === 404) {
+      if (httpStatus(cause) === 404) {
         this.fail(new BridgeGoneError(this.session.bridgeId))
         return
       }
-      if (cause instanceof ApiError && cause.status === 409) {
+      if (httpStatus(cause) === 409) {
         await this.reopen()
         return
       }
-      process.stderr.write(`oswe: heartbeat failed: ${errorMessage(cause)}\n`)
+      this.options.log(`heartbeat failed: ${errorMessage(cause)}`)
     }
   }
 
   private async poll(): Promise<void> {
     let backoff = MIN_BACKOFF_MS
-    while (this.running) {
+    while (this.active) {
       const controller = new AbortController()
       const deadline = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS)
       this.pollControllers.add(controller)
@@ -172,34 +204,37 @@ export class Bridge {
         const requests = await this.api.pollRequests(this.session.bridgeId, {
           wait: POLL_WAIT_SECONDS,
           limit: POLL_LIMIT,
-          held: [...this.held],
+          held: [...this.held].slice(-MAX_HELD_SENT),
           signal: controller.signal,
         })
         backoff = MIN_BACKOFF_MS
         for (const request of requests) this.track(this.serve(request))
       } catch (cause) {
-        if (!this.running) return
-        if (cause instanceof ApiError && cause.status === 401) {
-          this.fail(new CredentialRejectedError(this.api.credential.rejected))
+        if (!this.active) return
+        if (httpStatus(cause) === 401) {
+          this.fail(
+            new CredentialRejectedError(this.options.credentialRejected)
+          )
           return
         }
-        if (cause instanceof ApiError && cause.status === 404) {
+        if (httpStatus(cause) === 404) {
           this.fail(new BridgeGoneError(this.session.bridgeId))
           return
         }
-        if (cause instanceof ApiError && cause.status === 409) {
+        if (httpStatus(cause) === 409) {
           await this.reopen()
           await sleep(backoff)
           backoff = Math.min(backoff * 2, MAX_BACKOFF_MS)
           continue
         }
+        const status = httpStatus(cause)
         if (
-          cause instanceof ApiError &&
-          cause.status < 500 &&
-          cause.status !== 408 &&
-          cause.status !== 429
+          status !== null &&
+          status < 500 &&
+          status !== 408 &&
+          status !== 429
         ) {
-          this.fail(cause)
+          this.fail(cause instanceof Error ? cause : new Error(String(cause)))
           return
         }
         await sleep(backoff)
@@ -232,17 +267,23 @@ export class Bridge {
         this.held.delete(request.requestId)
         return
       } catch (cause) {
-        if (cause instanceof ApiError && cause.status === 401) {
-          this.fail(new CredentialRejectedError(this.api.credential.rejected))
+        if (httpStatus(cause) === 401) {
+          this.fail(
+            new CredentialRejectedError(this.options.credentialRejected)
+          )
           return
         }
-        if (cause instanceof ApiError && cause.status === 404) {
+        // 404: the request is gone. 409: it is settled already, by an earlier
+        // attempt whose response was lost, the agent's own timeout, or the
+        // bridge closing. Either way the server keeps no claim to re-offer.
+        const status = httpStatus(cause)
+        if (status === 404 || status === 409) {
           this.held.delete(request.requestId)
           return
         }
-        if (attempt === REPLY_ATTEMPTS || !this.running) {
-          process.stderr.write(
-            `oswe: dropped the result for ${request.method}: ${errorMessage(cause)}\n`
+        if (attempt === REPLY_ATTEMPTS || !this.active) {
+          this.options.log(
+            `dropped the result for ${request.method}: ${errorMessage(cause)}`
           )
           return
         }

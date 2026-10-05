@@ -12,8 +12,8 @@ import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
 import type {
-  DesktopLocalPromptInput,
-  DesktopLocalThreadSummary,
+  DesktopLegacyLocalPromptInput,
+  DesktopLegacyLocalThread,
 } from "@/desktop"
 import type {
   ImageChunk,
@@ -44,15 +44,17 @@ import { useAgentSkills } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-  useDesktopLocalThread,
   useLocalRepoRefs,
-  useLocalThreadActivity,
   useLocalThreadDiff,
   useLocalThreadPr,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
+import {
+  ensureDesktopModelCredential,
+  legacyLocalThreadKeys,
+  useLegacyLocalActivity,
+  useLegacyLocalThread,
+} from "@/features/agents/lib/legacyLocal"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -73,7 +75,7 @@ import {
   threadTranscriptPainted,
 } from "@/lib/perf/threadLoad"
 
-function skillFiles(skills: DesktopLocalPromptInput["skills"]) {
+function skillFiles(skills: DesktopLegacyLocalPromptInput["skills"]) {
   return Object.fromEntries(
     skills.map(({ name, description, instructions }) => [
       `/${name}/SKILL.md`,
@@ -96,7 +98,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     transport: "local",
     threadId: sessionId,
   })
-  const threadQuery = useDesktopLocalThread(sessionId)
+  const threadQuery = useLegacyLocalThread(sessionId)
   const thread = threadQuery.data
   const queryClient = useQueryClient()
   const skills = useAgentSkills({ enabled: Boolean(session.data) })
@@ -191,7 +193,10 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           branch,
         })
         if (updated)
-          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+          queryClient.setQueryData(
+            legacyLocalThreadKeys.detail(sessionId),
+            updated
+          )
         await refetchRepoRefs()
       } catch (cause) {
         setError(errorMessage(cause))
@@ -200,7 +205,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [queryClient, refetchRepoRefs, sessionId]
   )
 
-  const activity = useLocalThreadActivity()[sessionId]
+  const activity = useLegacyLocalActivity()[sessionId]
   const isRunning =
     stream.isLoading ||
     (Boolean(thread?.pending) && !error) ||
@@ -285,16 +290,16 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
   const rememberSelection = useCallback(
     async (model?: ModelSelection | null) => {
       if (!model) return
-      const updated = await window.openSweDesktop?.updateLocalThread({
+      const updated = await window.openSweDesktop?.updateLegacyLocalThread({
         threadId: sessionId,
         viewed: true,
         modelId: model.modelId,
         effort: model.effort,
       })
       if (!updated) return
-      queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-      queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-        localThreadKeys.all,
+      queryClient.setQueryData(legacyLocalThreadKeys.detail(sessionId), updated)
+      queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+        legacyLocalThreadKeys.all,
         (threads = []) =>
           threads.map((entry) => (entry.id === sessionId ? updated : entry))
       )
@@ -310,12 +315,15 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     if (!thread || acknowledgedRef.current === sessionId) return
     acknowledgedRef.current = sessionId
     void window.openSweDesktop
-      ?.updateLocalThread({ threadId: sessionId, viewed: true })
+      ?.updateLegacyLocalThread({ threadId: sessionId, viewed: true })
       .then((updated) => {
         if (!updated) return
-        queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-        queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-          localThreadKeys.all,
+        queryClient.setQueryData(
+          legacyLocalThreadKeys.detail(sessionId),
+          updated
+        )
+        queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+          legacyLocalThreadKeys.all,
           (threads = []) =>
             threads.map((item) => (item.id === sessionId ? updated : item))
         )
@@ -326,7 +334,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     async (
       prompt: string,
       images: Array<ImageChunk>,
-      promptSkills: DesktopLocalPromptInput["skills"] = [],
+      promptSkills: DesktopLegacyLocalPromptInput["skills"] = [],
       enqueue = false
     ) => {
       if (!thread) return false
@@ -389,7 +397,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
       return
     initialPromptRef.current = sessionId
     void stream.hydrationPromise
-      .then(() => window.openSweDesktop?.getLocalPrompt(sessionId))
+      .then(() => window.openSweDesktop?.getLegacyLocalPrompt(sessionId))
       .then(async (pending) => {
         if (!pending) return
         // The pending prompt is only cleared once its run finishes, so a
@@ -404,9 +412,13 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           initialPromptRef.current = null
           return
         }
-        const updated = await window.openSweDesktop?.clearLocalPrompt(sessionId)
+        const updated =
+          await window.openSweDesktop?.clearLegacyLocalPrompt(sessionId)
         if (updated)
-          queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
+          queryClient.setQueryData(
+            legacyLocalThreadKeys.detail(sessionId),
+            updated
+          )
       })
       .catch((cause) => {
         initialPromptRef.current = null
@@ -457,14 +469,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           title={thread.title}
           localThread={thread}
           onRename={async (title) => {
-            const updated = await window.openSweDesktop?.updateLocalThread({
-              threadId: sessionId,
-              title,
-            })
+            const updated =
+              await window.openSweDesktop?.updateLegacyLocalThread({
+                threadId: sessionId,
+                title,
+              })
             if (!updated) throw new Error("Could not rename local thread")
-            queryClient.setQueryData(localThreadKeys.detail(sessionId), updated)
-            queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-              localThreadKeys.all,
+            queryClient.setQueryData(
+              legacyLocalThreadKeys.detail(sessionId),
+              updated
+            )
+            queryClient.setQueryData<Array<DesktopLegacyLocalThread>>(
+              legacyLocalThreadKeys.all,
               (threads = []) =>
                 threads.map((entry) =>
                   entry.id === sessionId ? updated : entry
