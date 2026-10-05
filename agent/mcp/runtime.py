@@ -107,22 +107,23 @@ async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> 
         return tools
 
 
+def _leaves(error: BaseException) -> list[BaseException]:
+    """The MCP client's task groups nest the real failure in exception groups."""
+    if isinstance(error, BaseExceptionGroup):
+        return [leaf for inner in error.exceptions for leaf in _leaves(inner)]
+    return [error]
+
+
 def _discovery_error(error: Exception) -> str:
-    """Name the failure without echoing URLs or headers, which can carry credentials."""
-    pending: list[BaseException] = [error]
-    first: BaseException | None = None
-    while pending:
-        current = pending.pop()
-        if isinstance(current, BaseExceptionGroup):
-            pending.extend(reversed(current.exceptions))
-            continue
-        first = first or current
-        if isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
-            return str(current)
-        elif isinstance(current, McpError):
-            return f"MCP server error {current.error.code}: {current.error.message[:300]}"
-        elif isinstance(current, httpx.HTTPStatusError):
-            status = current.response.status_code
+    """Name the failure without echoing anything the request carried, such as credentials."""
+    leaves = _leaves(error)
+    for leaf in leaves:
+        if isinstance(leaf, (MCPOAuthError, MCPDiscoveryError)):
+            return str(leaf)
+        elif isinstance(leaf, McpError):
+            return f"MCP server returned error {leaf.error.code} while listing tools"
+        elif isinstance(leaf, httpx.HTTPStatusError):
+            status = leaf.response.status_code
             hint = {
                 401: "Check the authentication headers",
                 403: "Check credentials, permissions, the server region, and MCP access settings",
@@ -130,14 +131,17 @@ def _discovery_error(error: Exception) -> str:
                 429: "Wait before retrying; the MCP server is rate limiting requests",
             }.get(status, "Check the MCP server availability")
             return f"MCP tool discovery failed (HTTP {status}). {hint}"
-        elif isinstance(current, (TimeoutError, httpx.TimeoutException)):
+        elif isinstance(leaf, (TimeoutError, httpx.TimeoutException)):
             return "MCP tool discovery timed out; check the server and try again"
-        # These messages come from the OS, TLS, or the server's response, never the request;
-        # LocalProtocolError is excluded because it echoes header values.
-        elif isinstance(current, (httpx.NetworkError, httpx.RemoteProtocolError)):
-            return f"Could not reach the MCP server: {current}"
-    kind = f" ({type(first).__name__})" if first else ""
-    return f"Could not discover MCP tools{kind}; check the URL and authentication headers"
+        # OS and TLS errors name the host at most, never the path, query, or headers.
+        elif isinstance(leaf, httpx.NetworkError):
+            return f"Could not reach the MCP server: {leaf}"
+        elif isinstance(leaf, httpx.RemoteProtocolError):
+            return "The MCP server sent an invalid HTTP response; check the URL"
+    return (
+        f"Could not discover MCP tools ({type(leaves[0]).__name__}); "
+        "check the URL and authentication headers"
+    )
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
