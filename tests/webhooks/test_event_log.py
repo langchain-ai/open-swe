@@ -94,6 +94,27 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
+async def test_kinds_filters_counts_and_latest_shapes(registry_db: None) -> None:
+    await EventLog.ensure_partitions()
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO event_log (source, endpoint, event_type, delivery_id, payload) "
+                "VALUES ('github', '/github', 'issues', '1', '{\"action\":\"opened\"}'), "
+                "('github', '/github', 'issues', '2', '{\"action\":\"opened\"}'), "
+                "('slack', '/slack', 'message', '3', '{}')"
+            )
+        )
+    since = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    all_kinds = await EventLog.kinds(since)
+    kinds = await EventLog.kinds(since, source="github", event_type="issues")
+    assert len(all_kinds) == 2
+    assert [(kind.source, kind.event_type, kind.action, kind.count) for kind in kinds] == [
+        ("github", "issues", "opened", 2)
+    ]
+    assert kinds[0].payload_shape == {"action": "string"}
+
+
 async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
     await EventLog.rotate_partitions(date(2026, 9, 1))
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}

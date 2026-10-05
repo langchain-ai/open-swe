@@ -61,16 +61,14 @@ _INSERT = text(
     """
 )
 
-_EVENT_KINDS = text(
-    f"""
+_EVENT_KINDS = f"""
     SELECT source, event_type, COALESCE(payload->>'action', '') AS action,
            count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
-    WHERE received_at >= :since
+    WHERE received_at >= :since {{filters}}
     GROUP BY 1, 2, 3
     ORDER BY 1, 2, 3
     """
-)
 
 _LATEST_PAYLOADS = text(
     f"""
@@ -280,7 +278,12 @@ class EventLog:
         """
         await cls.ensure_partitions()
         async with transaction() as conn:
-            rows = await conn.execute(_EVENT_KINDS, {"since": since})
+            filters = ""
+            parameters: dict[str, datetime | str] = {"since": since}
+            if source is not None and event_type:
+                filters = "AND source = :source AND event_type = :event_type"
+                parameters.update(source=source, event_type=event_type)
+            rows = await conn.execute(text(_EVENT_KINDS.format(filters=filters)), parameters)
             kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]
             if source is None or not event_type:
                 return kinds

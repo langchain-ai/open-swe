@@ -10,18 +10,18 @@ async def enforce_retention() -> None:
     async with transaction() as conn:
         await conn.execute(
             text(
-                "DELETE FROM events WHERE occurred_at < clock_timestamp() - "
+                "DELETE FROM events WHERE occurred_at < (SELECT clock_timestamp()) - "
                 "(:months * interval '1 month')"
             ),
             {"months": ENV.ANALYTICS_RAW_EVENT_MONTHS.get_int(25)},
         )
         await conn.execute(
-            text("DELETE FROM ingestion_receipts WHERE expires_at < clock_timestamp()")
+            text("DELETE FROM ingestion_receipts WHERE expires_at < (SELECT clock_timestamp())")
         )
         await conn.execute(
             text(
                 "DELETE FROM outbox WHERE state = 'acknowledged' AND acknowledged_at < "
-                "clock_timestamp() - (:days * interval '1 day')"
+                "(SELECT clock_timestamp()) - (:days * interval '1 day')"
             ),
             {"days": ENV.ANALYTICS_ACK_OUTBOX_DAYS.get_int(30)},
         )
