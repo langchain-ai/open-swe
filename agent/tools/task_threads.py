@@ -17,17 +17,6 @@ async def actor_from_state(state: dict[str, object]) -> service.Actor:
     return service.Actor(thread_id=thread_id, login=actor.login, email=actor.email)
 
 
-async def configure_task(
-    title: str,
-    acceptance_criteria: list[str],
-    state: Annotated[dict[str, object], InjectedState],
-) -> dict[str, object]:
-    task = await service.configure_task(
-        await actor_from_state(state), title=title, acceptance_criteria=acceptance_criteria
-    )
-    return service.task_details(task)
-
-
 async def spawn_worker(
     instructions: str,
     state: Annotated[dict[str, object], InjectedState],
@@ -79,18 +68,19 @@ async def assess_task(
     completed: bool,
     revision: int,
     state: Annotated[dict[str, object], InjectedState],
+    acceptance_criteria: list[str] | None = None,
 ) -> dict[str, object]:
     task = await service.assess_task(
         await actor_from_state(state),
         evidence=evidence,
         completed=completed,
         revision=revision,
+        acceptance_criteria=acceptance_criteria,
     )
     return service.task_details(task)
 
 
 for _tool in (
-    configure_task,
     spawn_worker,
     task_status,
     message_task_thread,

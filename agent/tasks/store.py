@@ -86,87 +86,70 @@ async def list_delegations(task_id: UUID) -> list[TaskDelegation]:
         )
 
 
-async def configure(
-    thread_id: str, *, title: str, acceptance_criteria: list[str], workspace: str
-) -> CoordinatedTask:
-    title = title.strip()
-    criteria = [criterion.strip() for criterion in acceptance_criteria]
-    if not title or not criteria or any(not criterion for criterion in criteria):
-        raise ValueError("A title and nonempty acceptance criteria are required")
-    if len(criteria) != len(set(criteria)):
-        raise ValueError("Acceptance criteria must be distinct")
+async def reserve_worker(
+    coordinator_thread_id: str,
+    worker_thread_id: str,
+    *,
+    title: str,
+    workspace: str,
+    instructions: str,
+    model: str,
+    effort: str,
+) -> tuple[CoordinatedTask, TaskDelegation]:
     postgres.require_configured()
     async with postgres.session() as session:
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-            {"key": f"task-configure:{thread_id}"},
+            {"key": f"task-delegation:{coordinator_thread_id}"},
         )
-        membership = await session.get(TaskMembership, thread_id)
+        membership = await session.get(TaskMembership, coordinator_thread_id)
         if membership is None:
             task = CoordinatedTask(
-                coordinator_thread_id=thread_id,
+                coordinator_thread_id=coordinator_thread_id,
                 title=title,
-                acceptance_criteria=criteria,
+                acceptance_criteria=[],
                 workspace=workspace,
             )
             session.add(task)
             await session.flush()
-            session.add(TaskMembership(thread_id=thread_id, task_id=task.id, role="coordinator"))
+            session.add(
+                TaskMembership(thread_id=coordinator_thread_id, task_id=task.id, role="coordinator")
+            )
         else:
             task = await session.get(CoordinatedTask, membership.task_id, with_for_update=True)
             if (
                 task is None
                 or membership.role != "coordinator"
-                or task.coordinator_thread_id != thread_id
+                or task.coordinator_thread_id != coordinator_thread_id
             ):
-                raise PermissionError("Only the permanent coordinator can configure a task")
-            if task.title != title or task.acceptance_criteria != criteria:
-                task.title = title
-                task.acceptance_criteria = criteria
-                task.status = "active"
-                task.assessment = []
-                task.revision += 1
-        return task
-
-
-async def reserve_worker(
-    task_id: UUID,
-    coordinator_thread_id: str,
-    worker_thread_id: str,
-    *,
-    instructions: str,
-    model: str,
-    effort: str,
-) -> TaskDelegation:
-    async with postgres.session() as session:
-        task = await session.get(CoordinatedTask, task_id, with_for_update=True)
-        if task is None or task.coordinator_thread_id != coordinator_thread_id:
-            raise PermissionError("Only the permanent coordinator can delegate")
+                raise PermissionError("Only the coordinator can delegate")
+            if task.workspace != workspace:
+                raise PermissionError("The thread no longer belongs to the task's workspace")
         existing = await session.get(TaskDelegation, worker_thread_id)
         if existing is not None:
             if (
-                existing.task_id != task_id
+                existing.task_id != task.id
                 or existing.coordinator_thread_id != coordinator_thread_id
             ):
                 raise PermissionError("Worker identity belongs to another task")
-            return existing
+            return task, existing
         if task.status != "active":
-            raise ValueError("Reconfigure the completed task before assigning more work")
+            raise ValueError("Reopen the task with assess_task before assigning more work")
         task.delegated = True
         task.assessment = []
         task.revision += 1
-        session.add(TaskMembership(thread_id=worker_thread_id, task_id=task_id, role="worker"))
+        session.add(TaskMembership(thread_id=worker_thread_id, task_id=task.id, role="worker"))
         await session.flush()
         delegation = TaskDelegation(
             worker_thread_id=worker_thread_id,
-            task_id=task_id,
+            task_id=task.id,
             coordinator_thread_id=coordinator_thread_id,
             instructions=instructions,
             model=model,
             effort=effort,
         )
         session.add(delegation)
-        return delegation
+        return task, delegation
 
 
 async def set_launch_error(worker_thread_id: str, error: str | None) -> None:
@@ -185,6 +168,7 @@ async def assess(
     revision: int,
     evidence: list[str],
     completed: bool,
+    acceptance_criteria: list[str] | None = None,
 ) -> CoordinatedTask:
     async with postgres.session() as session:
         task = await session.get(CoordinatedTask, task_id, with_for_update=True)
@@ -192,14 +176,28 @@ async def assess(
             raise PermissionError("Only the permanent coordinator can assess completion")
         if task.revision != revision:
             raise ValueError("The task changed; read its current criteria and assess again")
-        if len(evidence) != len(task.acceptance_criteria) or any(
-            not item.strip() for item in evidence
+        criteria = (
+            [criterion.strip() for criterion in acceptance_criteria]
+            if acceptance_criteria is not None
+            else task.acceptance_criteria
+        )
+        if any(not criterion for criterion in criteria) or len(criteria) != len(set(criteria)):
+            raise ValueError("Acceptance criteria must be nonempty and distinct")
+        if completed and not criteria:
+            raise ValueError("Record acceptance criteria before completing the task")
+        if (completed or evidence) and (
+            len(evidence) != len(criteria) or any(not item.strip() for item in evidence)
         ):
             raise ValueError("Provide evidence for each acceptance criterion, in order")
-        task.assessment = [
-            {"criterion": criterion, "evidence": item.strip()}
-            for criterion, item in zip(task.acceptance_criteria, evidence, strict=True)
-        ]
+        task.acceptance_criteria = criteria
+        task.assessment = (
+            [
+                {"criterion": criterion, "evidence": item.strip()}
+                for criterion, item in zip(criteria, evidence, strict=True)
+            ]
+            if evidence
+            else []
+        )
         task.status = "completed" if completed else "active"
         task.revision += 1
         return task
