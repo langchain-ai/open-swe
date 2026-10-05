@@ -134,8 +134,8 @@ async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(
     await _subscribe(
         workspace,
         pull_request_id=workspace["pull_request"],
-        event_types=["check_suite"],
-        payload_match={"action": "completed", "check_suite": {"conclusion": "failure"}},
+        event_types=["check_suite.completed"],
+        payload_match={"check_suite": {"conclusion": "failure"}},
     )
 
     await _github("check_suite", _check_suite("success"), "d-success")

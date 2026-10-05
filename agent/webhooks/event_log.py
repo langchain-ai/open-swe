@@ -63,22 +63,25 @@ _INSERT = text(
 
 _EVENT_KINDS = text(
     f"""
-    SELECT source, event_type, action,
-           count(*) AS count, max(received_at) AS last_received_at
+    SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
     WHERE received_at >= :since
-    GROUP BY 1, 2, 3
-    ORDER BY 1, 2, 3
+      AND (CAST(:source AS text) IS NULL OR source = :source)
+      AND (CAST(:event_type AS text) = ''
+           OR event_type = :event_type
+           OR starts_with(event_type, :event_type || '.'))
+    GROUP BY 1, 2
+    ORDER BY 1, 2
     """
 )
 
-_LATEST_PAYLOADS = text(
+_LATEST_PAYLOAD = text(
     f"""
-    SELECT DISTINCT ON (COALESCE(payload->>'action', ''))
-           COALESCE(payload->>'action', '') AS action, payload
+    SELECT payload
     FROM {_TABLE}
-    WHERE received_at >= :since AND source = :source AND event_type = :event_type
-    ORDER BY COALESCE(payload->>'action', ''), received_at DESC
+    WHERE source = :source AND event_type = :event_type AND received_at >= :since
+    ORDER BY received_at DESC
+    LIMIT 1
     """
 )
 _SHAPE_DEPTH = 6
@@ -97,11 +100,15 @@ class LoggedEvent(BaseModel):
     pull_request_id: UUID | None
     payload: JsonValue
 
+    @property
+    def base_event_type(self) -> str:
+        """``event_type`` without its ``.<action>`` suffix, e.g. ``pull_request``."""
+        return self.event_type.partition(".")[0]
+
 
 class EventKind(BaseModel):
     source: WebhookSource
     event_type: str
-    action: str
     count: int
     last_received_at: datetime
     payload_shape: JsonValue = None
@@ -240,6 +247,9 @@ class EventLog:
         except Exception:  # noqa: BLE001
             logger.warning("Rotating event log partitions failed", exc_info=True)
         payload = cls._decode(request, body)
+        action = payload.get("action") if isinstance(payload, dict) else None
+        if event_type and isinstance(action, str) and action:
+            event_type = f"{event_type}.{action}"
         try:
             async with transaction() as conn:
                 result = await conn.execute(
@@ -273,25 +283,25 @@ class EventLog:
     async def kinds(
         cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
     ) -> list[EventKind]:
-        """Every distinct source, event type, and action received since ``since``.
+        """Every distinct source and event type received since ``since``.
 
-        Naming both ``source`` and ``event_type`` narrows to that type and adds each
-        action's payload shape: keys and value types of the newest one, never values.
+        ``event_type`` narrows to that type and its ``.<action>`` variants. With
+        ``source``, an exact match also gets the newest payload's shape: keys and value
+        types, never values.
         """
         await cls.ensure_partitions()
+        params = {"since": since, "source": source, "event_type": event_type}
         async with transaction() as conn:
-            rows = await conn.execute(_EVENT_KINDS, {"since": since})
+            rows = await conn.execute(_EVENT_KINDS, params)
             kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]
-            if source is None or not event_type:
+            if source is None or not any(kind.event_type == event_type for kind in kinds):
                 return kinds
-            latest = await conn.execute(
-                _LATEST_PAYLOADS, {"since": since, "source": source, "event_type": event_type}
-            )
-            shapes = {row["action"]: cls.shape(row["payload"]) for row in latest.mappings()}
+            payload = await conn.scalar(_LATEST_PAYLOAD, params)
         return [
-            kind.model_copy(update={"payload_shape": shapes.get(kind.action)})
+            kind.model_copy(update={"payload_shape": cls.shape(payload)})
+            if kind.event_type == event_type
+            else kind
             for kind in kinds
-            if kind.source == source and kind.event_type == event_type
         ]
 
     @classmethod

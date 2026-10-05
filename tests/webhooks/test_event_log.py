@@ -94,42 +94,43 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
-async def test_kinds_preserves_json_actions_counts_and_window(
+async def test_kinds_name_actions_and_narrow_by_prefix(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
-    await EventLog.ensure_partitions()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/github",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
     since = datetime.now(UTC)
-    async with transaction() as conn:
-        await conn.execute(
-            text(
-                "INSERT INTO event_log (received_at, source, endpoint, event_type, payload) "
-                "VALUES (CAST(:since AS timestamptz) - interval '1 second', 'github', '/', 'issues', '{}'), "
-                "(:since, 'github', '/', 'issues', '{\"action\":\"opened\"}'), "
-                "(CAST(:since AS timestamptz) + interval '1 second', 'github', '/', 'issues', '{\"action\":\"opened\"}'), "
-                "(:since, 'slack', '/', 'message', '{}'), "
-                "(:since, 'slack', '/', 'message', '{\"action\": null}')"
-            ),
-            {"since": since},
+    for event_type, payload in (
+        ("pull_request", {"action": "opened", "number": 1}),
+        ("pull_request", {"action": "opened", "number": 2}),
+        ("pull_request", {"action": "closed", "number": 1}),
+        ("pull_request_review", {"action": "submitted"}),
+        ("push", {"ref": "refs/heads/main"}),
+    ):
+        await EventLog.record(
+            request, json.dumps(payload).encode(), "github", event_type=event_type
         )
-        expected = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT source, event_type, COALESCE(payload->>'action', '') AS action, "
-                        "count(*) AS count, max(received_at) AS last_received_at "
-                        "FROM event_log WHERE received_at >= :since "
-                        "GROUP BY 1,2,3 ORDER BY 1,2,3"
-                    ),
-                    {"since": since},
-                )
-            )
-            .mappings()
-            .all()
-        )
+
     kinds = await EventLog.kinds(since)
-    assert [kind.model_dump(exclude={"payload_shape"}) for kind in kinds] == list(expected)
-    assert [kind.count for kind in kinds] == [2, 2]
+    assert [(kind.event_type, kind.count) for kind in kinds] == [
+        ("pull_request.closed", 1),
+        ("pull_request.opened", 2),
+        ("pull_request_review.submitted", 1),
+        ("push", 1),
+    ]
+    narrowed = await EventLog.kinds(since, source="github", event_type="pull_request")
+    assert [kind.event_type for kind in narrowed] == ["pull_request.closed", "pull_request.opened"]
+    assert all(kind.payload_shape is None for kind in narrowed)
+    (opened,) = await EventLog.kinds(since, source="github", event_type="pull_request.opened")
+    assert opened.payload_shape == {"action": "string", "number": "number"}
 
 
 async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
