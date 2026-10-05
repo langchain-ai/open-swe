@@ -13,6 +13,7 @@ from uuid import UUID
 from githubkit.auth import TokenAuthStrategy
 from langgraph_sdk import get_client
 
+from agent.config import ENV
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card as expedited_card
 from agent.expedited_review.channels import (
@@ -624,6 +625,8 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
 
 async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None = None) -> None:
     """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+    if ENV.OPENSWE_ENV.optional() == "preview":
+        return
     location = request.slack_location or (
         (request.slack_channel_id, request.slack_message_ts)
         if request.slack_channel_id and request.slack_message_ts
@@ -639,6 +642,8 @@ async def update_blocked_reactions(
     request: HumanReviewRequest, snapshot: PullRequestSnapshot | None = None
 ) -> None:
     """Keep a watched post's failure and conflict reactions in step with GitHub."""
+    if ENV.OPENSWE_ENV.optional() == "preview":
+        return
     if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
         return
     async with HumanReviewRequest.locked(request.id) as (_, row):
