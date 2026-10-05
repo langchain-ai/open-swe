@@ -83,6 +83,54 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert len(requests) == 6
 
 
+async def test_inactivity_emits_once_and_rearms_after_activity(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.webhooks.event_subscriptions import EventSubscription
+    from agent.webhooks.thread_inactivity import emit_inactivity_events
+
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(EventSubscription, "deliver", AsyncMock())
+    async with transaction() as conn:
+        for thread_id, metadata, state in (
+            ("quiet", {}, "completed"),
+            ("private", {"visibility": "private"}, "completed"),
+            ("resolved", {"resolved": True}, "completed"),
+            ("queued", {}, "requested"),
+        ):
+            await conn.execute(
+                text("INSERT INTO thread (thread_id, metadata) VALUES (:id, CAST(:meta AS jsonb))"),
+                {"id": thread_id, "meta": json.dumps(metadata)},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO thread_turn (turn_id, thread_id, state, requested_at, completed_at) "
+                    "VALUES (:turn, :id, :state, clock_timestamp() - interval '2 hours', "
+                    "clock_timestamp() - interval '2 hours')"
+                ),
+                {"turn": uuid4(), "id": thread_id, "state": state},
+            )
+    assert await emit_inactivity_events() == 1
+    assert await emit_inactivity_events() == 0
+    async with transaction() as conn:
+        payload = await conn.scalar(text("SELECT payload FROM event_log"))
+        assert payload["thread_id"] == "quiet"
+        await conn.execute(
+            text(
+                "UPDATE thread_turn SET completed_at = clock_timestamp() WHERE thread_id = 'quiet'"
+            )
+        )
+    assert await emit_inactivity_events() == 0
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE thread_turn SET completed_at = clock_timestamp() - interval '90 minutes' "
+                "WHERE thread_id = 'quiet'"
+            )
+        )
+    assert await emit_inactivity_events() == 1
+
+
 async def _partitions() -> set[str]:
     async with transaction() as conn:
         rows = await conn.execute(
