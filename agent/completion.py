@@ -355,7 +355,11 @@ async def _handle_successful_run(
         try:
             await client.threads.update(thread_id=thread_id, metadata={_CONSECUTIVE_FAILURES: 0})
         except Exception:  # noqa: BLE001
-            logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+            logger.warning(
+                "Could not reset the consecutive failure count",
+                exc_info=True,
+                extra={"run_completion": {"thread_id": thread_id}},
+            )
     if metadata.get("source") == "incidents_agent":
         from agent.incidents import turns
 
@@ -566,7 +570,11 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
                 thread_id=thread_id, metadata={_CONSECUTIVE_FAILURES: failures}
             )
         except Exception:  # noqa: BLE001
-            logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)
+            logger.warning(
+                "Could not record the consecutive failure count",
+                exc_info=True,
+                extra={"run_completion": {"thread_id": thread_id}},
+            )
         logger.warning(
             "Suppressed failure reply after repeated failures",
             extra={"failure_reply": {"thread_id": thread_id, "consecutive_failures": failures}},
