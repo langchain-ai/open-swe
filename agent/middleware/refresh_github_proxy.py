@@ -37,7 +37,15 @@ async def refresh_github_proxy_before_model(
         return None
 
     try:
-        await maybe_refresh_proxy_token(thread_id)
+        from agent.tasks.store import load_context
+
+        context = await load_context(thread_id)
+        proxy_thread_id = (
+            context.task.coordinator_thread_id
+            if context is not None and context.membership.role == "worker"
+            else thread_id
+        )
+        await maybe_refresh_proxy_token(proxy_thread_id)
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to refresh GitHub proxy token for thread %s",
