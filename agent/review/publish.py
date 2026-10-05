@@ -41,6 +41,7 @@ from agent.review.findings import (
     normalize_finding_title,
     set_reviewer_thread_metadata,
 )
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,12 @@ _OPEN_SWE_REVIEW_COMMENT_MARKER_RE = re.compile(
     r"<!--\s*open-swe-review-comment\s+(\{.*?\})\s*-->",
     re.DOTALL,
 )
+
+
+class ReviewPublishError(ToolError):
+    def __init__(self, message: str, *, kind: str | None = None) -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 class ReviewCommentMarker(TypedDict):
@@ -610,8 +617,8 @@ async def post_pull_request_review(
     inline_comments: list[dict[str, Any]],
     token: str,
     event: Literal["COMMENT", "APPROVE"] = "COMMENT",
-) -> dict[str, Any] | None:
-    """POST one GitHub PR Review with inline comments. Returns the API response or None."""
+) -> dict[str, Any]:
+    """Post a GitHub review, raising a classified failure if rejected."""
     url = f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload: dict[str, Any] = {
         "commit_id": head_sha,
@@ -671,15 +678,12 @@ async def post_pull_request_review(
                     ):
                         error_kind = "self_approval"
                         break
-            return {
-                "_error": f"HTTP {e.response.status_code}: {body}",
-                "_error_kind": error_kind,
-                "_raw_errors": raw_errors,
-                "_status": e.response.status_code,
-            }
+            raise ReviewPublishError(
+                f"HTTP {e.response.status_code}: {body}", kind=error_kind
+            ) from e
         except httpx2.HTTPError as e:
             logger.exception("Failed to POST PR review for %s/%s#%s", owner, repo, pr_number)
-            return {"_error": f"{type(e).__name__}: {e}"}
+            raise ReviewPublishError(f"{type(e).__name__}: {e}") from e
     data = response.json()
     if isinstance(data, dict):
         return data
@@ -691,7 +695,7 @@ async def post_pull_request_review(
         pr_number,
         body_excerpt,
     )
-    return {"_error": (f"HTTP {response.status_code}: non-dict response body: {body_excerpt}")}
+    raise ReviewPublishError(f"HTTP {response.status_code}: non-dict response body: {body_excerpt}")
 
 
 async def fetch_review_comments(

@@ -1,13 +1,14 @@
 """Admin-thread tools for managing workspace automations."""
 
 import logging
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException
 
 from agent.schedules import store as schedules
 from agent.tools.access import Policy, access, ack
 from agent.tools.admin_gate import configurable
+from agent.tools.errors import ToolError
 from agent.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
@@ -29,11 +30,11 @@ async def _identity() -> tuple[str, str | None] | None:
     return cfg.github_login, cfg.user_email or None
 
 
-def _error(exc: Exception) -> dict[str, Any]:
+def _error(exc: Exception) -> NoReturn:
     if isinstance(exc, HTTPException):
-        return {"ok": False, "error": str(exc.detail)}
+        raise ToolError(str(exc.detail)) from exc
     logger.exception("Workspace automation operation failed")
-    return {"ok": False, "error": str(exc)}
+    raise ToolError(str(exc)) from exc
 
 
 @expose_mcp(access="admin")
@@ -61,7 +62,7 @@ async def create_automation(
     """Implement the `create_automation` tool."""
     identity = await _identity()
     if identity is None:
-        return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
+        raise ToolError("No GitHub identity is available for this admin thread.")
     login, email = identity
     try:
         record = await schedules.create_agent_schedule(
@@ -110,14 +111,11 @@ async def update_automation(
     """Implement the `update_automation` tool."""
     identity = await _identity()
     if identity is None:
-        return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
+        raise ToolError("No GitHub identity is available for this admin thread.")
     if clear_repo and repo is not None:
-        return {"ok": False, "error": "clear_repo cannot be combined with repo"}
+        raise ToolError("clear_repo cannot be combined with repo")
     if clear_slack_channel and slack_channel_id is not None:
-        return {
-            "ok": False,
-            "error": "clear_slack_channel cannot be combined with slack_channel_id",
-        }
+        raise ToolError("clear_slack_channel cannot be combined with slack_channel_id")
     values: dict[str, Any] = {
         "prompt": prompt,
         "schedule": schedule,

@@ -12,6 +12,7 @@ from agent.slack.client import get_active_slack_thread
 from agent.slack.move import move_slack_thread, rebind_slack_thread
 from agent.source_context import SlackThreadRef
 from agent.threads.summary import thread_is_private
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -49,34 +50,29 @@ async def slack_move_thread(
     thread_id = configurable.get("thread_id")
     configured_slack = configurable.get("slack_thread")
     if not isinstance(thread_id, str) or not thread_id:
-        return {"success": False, "error": "Missing thread_id in config"}
+        raise ToolError("Missing thread_id in config")
     if not isinstance(configured_slack, Mapping):
-        return {"success": False, "error": "Missing slack_thread config"}
+        raise ToolError("Missing slack_thread config")
 
     clean_message = message.strip() if isinstance(message, str) else ""
     if not clean_message:
-        return {"success": False, "error": "message is required"}
+        raise ToolError("message is required")
     if len(clean_message) > _MESSAGE_MAX_CHARS:
-        return {
-            "success": False,
-            "error": "message is too long",
-            "max_chars": _MESSAGE_MAX_CHARS,
-            "actual_chars": len(clean_message),
-        }
+        raise ToolError(
+            "message is too long",
+            details={"max_chars": _MESSAGE_MAX_CHARS, "actual_chars": len(clean_message)},
+        )
 
     client = langgraph_client()
     try:
         metadata = thread_metadata(await client.threads.get(thread_id))
-    except Exception:
-        return {"success": False, "error": "Cannot verify thread credential scope"}
+    except Exception as exc:
+        raise ToolError("Cannot verify thread credential scope") from exc
     if thread_is_private(metadata):
-        return {
-            "success": False,
-            "error": "Private threads cannot be moved; start a separate public thread instead",
-        }
+        raise ToolError("Private threads cannot be moved; start a separate public thread instead")
     active = await get_active_slack_thread(client, thread_id, configured_slack)
     if not active:
-        return {"success": False, "error": "Current Slack location is unavailable"}
+        raise ToolError("Current Slack location is unavailable")
 
     source_channel = str(configured_slack.get("channel_id") or "")
     source_ts = str(configured_slack.get("thread_ts") or "")
@@ -86,24 +82,17 @@ async def slack_move_thread(
         try:
             return await _finish_existing_move(client, thread_id, active, configured_slack)
         except Exception as exc:  # noqa: BLE001
-            return {
-                "success": False,
-                "error": f"Move cleanup failed: {exc}",
-                "retryable": True,
-            }
+            raise ToolError(f"Move cleanup failed: {exc}", details={"retryable": True}) from exc
 
     destination = await resolve_breakout_destination(
         active_channel, channel_id, workspace=RunConfig.from_runtime().workspace_slug
     )
     target_channel = destination.channel_id
     if not _CHANNEL_ID_RE.fullmatch(target_channel):
-        return {"success": False, "error": "channel_id must be a Slack channel ID"}
+        raise ToolError("channel_id must be a Slack channel ID")
     for candidate in dict.fromkeys((active_channel, target_channel)):
         channel = await SlackChannel.load(candidate, use_cache=False)
         if channel is None or not channel.public:
-            return {
-                "success": False,
-                "error": "Breakouts only work from and to public channels.",
-            }
+            raise ToolError("Breakouts only work from and to public channels.")
 
     return await move_slack_thread(client, thread_id, active, target_channel, clean_message)

@@ -10,7 +10,7 @@ participant never asks. Only people who turned on the
 
 import asyncio
 import logging
-from typing import Literal, TypedDict
+from typing import Literal, NoReturn
 
 from langgraph_sdk import get_client
 
@@ -26,6 +26,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.dm import note_for_concierge, open_dm
+from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -37,15 +38,7 @@ _POLL_SECONDS = 2.0
 Refusal = Literal["pending", "denied", "unreachable"]
 
 
-class ActAsRefusal(TypedDict):
-    success: Literal[False]
-    error: str
-    act_as: Refusal
-    act_as_login: str
-    token_kind: str
-
-
-def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
+def _refusal(login: str, refusal: Refusal, token_kind: str) -> NoReturn:
     reason = {
         "pending": (
             f"{login} did not answer within {int(_WAIT_SECONDS)} seconds. Their answer will "
@@ -54,16 +47,10 @@ def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
         "denied": f"{login} denied Open SWE acting as them in this thread.",
         "unreachable": f"{login} could not be sent the approval DM in Slack.",
     }[refusal]
-    return {
-        "success": False,
-        "error": (
-            "This thread has more than one participant, so the person the PR opens as must "
-            f"approve it. {reason} PR created: no."
-        ),
-        "act_as": refusal,
-        "act_as_login": login,
-        "token_kind": token_kind,
-    }
+    raise ToolError(
+        f"This thread has more than one participant, so the person the PR opens as must approve it. {reason} PR created: no.",
+        details={"act_as": refusal, "act_as_login": login, "token_kind": token_kind},
+    )
 
 
 async def require_consent(
@@ -76,8 +63,8 @@ async def require_consent(
     head: str,
     base: str,
     title: str,
-) -> ActAsRefusal | None:
-    """``None`` when the PR may open as its author; otherwise why not."""
+) -> None:
+    """Require consent before opening a PR as another participant."""
     if token_kind != "user" or not thread_id:
         return None
     thread = await ThreadActAs.load(thread_id)
@@ -149,13 +136,11 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     return True
 
 
-def _outcome(decision: Decision, login: str, token_kind: str) -> ActAsRefusal | None:
+def _outcome(decision: Decision, login: str, token_kind: str) -> None:
     return None if decision == "approved" else _refusal(login, "denied", token_kind)
 
 
-async def _wait_for_answer(
-    thread: ThreadActAs, request: ActAsRequest, token_kind: str
-) -> ActAsRefusal | None:
+async def _wait_for_answer(thread: ThreadActAs, request: ActAsRequest, token_kind: str) -> None:
     login = request.login
     if request.wake_on_answer:
         await thread.set_wake_on_answer(request, False)

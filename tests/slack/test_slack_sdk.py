@@ -4,6 +4,7 @@ from slack_sdk.errors import SlackApiError
 
 from agent.slack import http
 from agent.slack.client import remove_slack_reaction
+from agent.tools.errors import ToolError
 from tests.support.slack_api import SlackAPI, slack_api_server
 
 
@@ -79,10 +80,10 @@ async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool
     grant_tool_access(private=True)
 
     slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
-    result = await slack_read_channel_messages("C1")
+    with pytest.raises(ToolError) as raised:
+        await slack_read_channel_messages("C1")
 
-    assert result["success"] is False
-    assert "public" in result["error"]
+    assert "public" in str(raised.value)
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 

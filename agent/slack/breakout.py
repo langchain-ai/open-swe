@@ -19,6 +19,7 @@ from agent.slack.client import (
 )
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -132,26 +133,27 @@ async def _move(request: SlackRequest, target: str) -> None:
 
     title = str(metadata.get("title") or "").strip() or "Untitled"
     heading = f"`/breakout`: {_title(title)}"
-    result = await move_slack_thread(
-        client,
-        thread_id,
-        active,
-        target,
-        await _root_text(request, heading),
-    )
-    new_ts = result.get("thread_ts")
-    if not result.get("success") or not isinstance(new_ts, str):
-        logger.warning(
-            "Slack breakout move failed",
-            extra={"agent_thread_id": thread_id, "move_error": result.get("error")},
+    try:
+        result = await move_slack_thread(
+            client,
+            thread_id,
+            active,
+            target,
+            await _root_text(request, heading),
         )
+    except ToolError as exc:
+        logger.warning(
+            "Slack breakout move failed", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
+        slack_error = exc.details.get("slack_error")
         await _tell_sender(
             request,
-            _post_failure(
-                result.get("slack_error"), target, "Could not move this thread; try again."
-            ),
+            _post_failure(slack_error if isinstance(slack_error, str) else None, target, str(exc)),
         )
         return
+    new_ts = result.get("thread_ts")
+    if not isinstance(new_ts, str):
+        raise RuntimeError("Slack move did not return a thread timestamp")
     await _mark_done(request, target, new_ts)
 
 

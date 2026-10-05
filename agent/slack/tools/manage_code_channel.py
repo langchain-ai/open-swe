@@ -38,6 +38,7 @@ from agent.slack.move import SlackRebindError, rebind_slack_thread
 from agent.source_context import SlackThreadRef
 from agent.threads.summary import thread_is_private
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -88,29 +89,26 @@ async def manage_code_channel(
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "Missing thread_id in config"}
+        raise ToolError("Missing thread_id in config")
 
     client = langgraph_client()
     active = await get_active_slack_thread(
         client, thread_id, cfg.slack_thread.dump() if cfg.slack_thread else None
     )
     if not active:
-        return {"success": False, "error": "Current Slack location is unavailable"}
+        raise ToolError("Current Slack location is unavailable")
     channel_id = str(active.get("channel_id") or "")
     thread_ts = str(active.get("thread_ts") or "")
 
     if action == "create":
         try:
             metadata = thread_metadata(await client.threads.get(thread_id))
-        except Exception:
-            return {"success": False, "error": "Cannot verify thread credential scope"}
+        except Exception as exc:
+            raise ToolError("Cannot verify thread credential scope") from exc
         if thread_is_private(metadata):
-            return {
-                "success": False,
-                "error": "Private threads cannot be promoted to code channels",
-            }
+            raise ToolError("Private threads cannot be promoted to code channels")
         if is_code_channel_session(thread_ts):
-            return {"success": False, "error": "This session is already a code channel"}
+            raise ToolError("This session is already a code channel")
         return await _create(
             client,
             thread_id,
@@ -123,7 +121,7 @@ async def manage_code_channel(
         )
 
     if not is_code_channel_session(thread_ts):
-        return {"success": False, "error": "This session is not in a code channel"}
+        raise ToolError("This session is not in a code channel")
 
     if action == "status":
         data, error = await set_session_status_result(channel_id, status)
@@ -133,7 +131,7 @@ async def manage_code_channel(
         return _result(action, channel_id, None, error if not ok else None)
     if action == "context":
         if items is None:
-            return {"success": False, "error": "items is required"}
+            raise ToolError("items is required")
         ok, error = await set_context_bar(channel_id, items)
         return _result(action, channel_id, None, error if not ok else None)
     if action == "summary":
@@ -145,27 +143,24 @@ async def manage_code_channel(
         return _result(action, channel_id, data, error)
     if action == "resource":
         if resource is None:
-            return {"success": False, "error": "resource is required"}
+            raise ToolError("resource is required")
         data, error = await set_agent_resource(channel_id, resource)
         return _result(action, channel_id, data, error)
     if action == "commands":
         if commands is None:
-            return {"success": False, "error": "commands is required; use [] to clear"}
+            raise ToolError("commands is required; use [] to clear")
         data, error = await set_commands(channel_id, commands)
         return _result(action, channel_id, data, error)
     if action == "view":
         resolved_content, content_error = await _resolve_content(content, file_path)
         if content_error:
-            return {"success": False, "error": content_error}
+            raise ToolError(content_error)
         if suggestions is not None:
             if view_type != "block_kit":
-                return {
-                    "success": False,
-                    "error": "suggestions are only supported for block_kit views",
-                }
+                raise ToolError("suggestions are only supported for block_kit views")
             suggestions_error = block_suggestions_error(suggestions)
             if suggestions_error:
-                return {"success": False, "error": suggestions_error}
+                raise ToolError(suggestions_error)
         data, error = await set_view(
             channel_id,
             view_type,
@@ -205,7 +200,7 @@ async def manage_code_channel(
     if action == "set_canvas":
         resolved_content, content_error = await _resolve_content(content, file_path)
         if content_error:
-            return {"success": False, "error": content_error}
+            raise ToolError(content_error)
         data, error = await set_canvas_content(channel_id, canvas_id, resolved_content)
         return _result(action, channel_id, data, error)
     if action == "archive":
@@ -217,7 +212,7 @@ async def manage_code_channel(
         if status_error:
             result["warnings"] = [f"Could not set session status to closed: {status_error}"]
         return result
-    return {"success": False, "error": f"Unknown action {action}"}
+    raise ToolError(f"Unknown action {action}")
 
 
 async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str:
@@ -245,7 +240,7 @@ def _result(
     error: str | None,
 ) -> dict[str, Any]:
     if error:
-        return {"success": False, "error": error}
+        raise ToolError(error)
     result: dict[str, Any] = {"success": True, "action": action, "channel_id": channel_id}
     if data:
         result["data"] = data
@@ -285,7 +280,7 @@ async def _create(
     is_private: bool = False,
 ) -> dict[str, Any]:
     if not title.strip():
-        return {"success": False, "error": "title is required"}
+        raise ToolError("title is required")
     source_channel = str(active.get("channel_id") or "")
     source_ts = str(active.get("thread_ts") or "")
     origin_message_ts = str(active.get("triggering_event_ts") or "") or source_ts
@@ -299,7 +294,7 @@ async def _create(
         is_private=is_private,
     )
     if not channel_id:
-        return {"success": False, "error": error or "Slack could not create the code channel"}
+        raise ToolError(error or "Slack could not create the code channel")
 
     new_slack = SlackThreadRef.model_validate(
         {
@@ -325,19 +320,15 @@ async def _create(
         )
     except SlackRebindError as exc:
         if exc.moved:
-            return {
-                "success": False,
-                "error": f"Code channel created but the source thread was not detached: {exc}",
-                "channel_id": channel_id,
-                "retryable": True,
-            }
+            raise ToolError(
+                f"Code channel created but the source thread was not detached: {exc}",
+                details={"channel_id": channel_id, "retryable": True},
+            ) from exc
         with suppress(Exception):
             await archive_code_channel(channel_id)
-        return {
-            "success": False,
-            "error": f"Could not bind the code channel to this session: {exc}",
-            "retryable": True,
-        }
+        raise ToolError(
+            f"Could not bind the code channel to this session: {exc}", details={"retryable": True}
+        ) from exc
 
     warnings: list[str] = []
     invited: list[str] = []

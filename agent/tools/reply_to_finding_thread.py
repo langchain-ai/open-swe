@@ -13,20 +13,21 @@ from agent.review.findings import (
 )
 from agent.review.publish import reply_to_review_comment
 from agent.run_config import RunConfig
+from agent.tools.errors import ToolError
 
 
 async def reply_to_finding_thread(finding_id: str, body: str) -> dict[str, Any]:
     """Implement the `reply_to_finding_thread` tool."""
     if not body.strip():
-        return {"success": False, "error": "Reply body is required"}
+        raise ToolError("Reply body is required")
 
     cfg = RunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
-        return {"success": False, "error": "Missing repo or PR info in run config"}
+        raise ToolError("Missing repo or PR info in run config")
 
     token = await resolve_thread_github_token()
     if not token:
-        return {"success": False, "error": "No GitHub token available"}
+        raise ToolError("No GitHub token available")
 
     try:
         return await _reply_to_finding_thread_async(
@@ -53,11 +54,11 @@ async def _reply_to_finding_thread_async(
     thread_id = get_thread_id_from_runtime()
     finding = await get_finding(thread_id, finding_id)
     if finding is None:
-        return {"success": False, "error": f"No finding found with id {finding_id}"}
+        raise ToolError(f"No finding found with id {finding_id}")
 
     comment_ids = comment_ids_for_finding(finding)
     if not comment_ids:
-        return {"success": False, "error": "Finding has no GitHub review comment mapping"}
+        raise ToolError("Finding has no GitHub review comment mapping")
     comment_id = comment_ids[0]
 
     response = await reply_to_review_comment(
@@ -69,7 +70,7 @@ async def _reply_to_finding_thread_async(
         token=token,
     )
     if response is None:
-        return {"success": False, "error": "GitHub did not accept the reply"}
+        raise ToolError("GitHub did not accept the reply")
 
     reply_id = response.get("id")
     updates: dict[str, Any] = {"last_reconciliation_note": "Replied to GitHub review thread."}

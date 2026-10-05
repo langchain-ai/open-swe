@@ -19,6 +19,7 @@ from agent.slack.client import (
 from agent.slack.code_channels import is_code_channel_session
 from agent.slack.thinking import release_slack_location_status, sync_slack_background_status
 from agent.source_context import SlackThreadRef, SourceContext
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject, thread_metadata
 
@@ -190,12 +191,10 @@ async def move_slack_thread(
         unfurl_media=False,
     )
     if not new_ts:
-        return {
-            "success": False,
-            "error": slack_error or "Slack post failed",
-            "slack_error": slack_error,
-            "hint": _slack_error_hint(slack_error),
-        }
+        raise ToolError(
+            slack_error or "Slack post failed",
+            details={"slack_error": slack_error, "hint": _slack_error_hint(slack_error)},
+        )
 
     source_ref = SlackThreadRef.model_validate(dict(source))
     try:
@@ -204,18 +203,13 @@ async def move_slack_thread(
         )
     except SlackRebindError as exc:
         if exc.moved:
-            return {
-                "success": False,
-                "error": f"Move cleanup failed: {exc}",
-                "retryable": True,
-                "channel_id": target_channel,
-                "thread_ts": new_ts,
-            }
-        return {
-            "success": False,
-            "error": f"Could not persist Slack move: {exc}",
-            "retryable": True,
-        }
+            raise ToolError(
+                f"Move cleanup failed: {exc}",
+                details={"retryable": True, "channel_id": target_channel, "thread_ts": new_ts},
+            ) from exc
+        raise ToolError(
+            f"Could not persist Slack move: {exc}", details={"retryable": True}
+        ) from exc
 
     return {
         "success": True,

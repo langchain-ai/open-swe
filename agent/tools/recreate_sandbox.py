@@ -7,6 +7,7 @@ from typing import NotRequired, TypedDict
 from agent.run_config import RunConfig
 from agent.sandboxes.lifecycle import SandboxSource
 from agent.tools.access import Policy, access
+from agent.tools.errors import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ async def recreate_sandbox(
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not isinstance(thread_id, str) or not thread_id:
-        return {"success": False, "error": "No thread_id in current run config"}
+        raise ToolError("No thread_id in current run config")
 
     from agent.server import workspace_slug
 
@@ -49,9 +50,9 @@ async def recreate_sandbox(
             workspace_slug=workspace or thread_workspace,
             source=source,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to recreate sandbox for thread %s", thread_id)
-        return {"success": False, "error": str(exc)}
+        raise
 
     return {
         "success": True,

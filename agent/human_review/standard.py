@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, NoReturn
 from uuid import UUID
 
 import httpx2
@@ -53,6 +53,7 @@ from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
+from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client
@@ -98,8 +99,8 @@ class Origin:
         return self.requester is not None and request.requested_by_user_id == self.requester.id
 
 
-def _failure(error: str) -> RequestResult:
-    return RequestResult(success=False, error=error)
+def _failure(error: str) -> NoReturn:
+    raise ToolError(error)
 
 
 def summary_line(text: str) -> str:
@@ -127,9 +128,7 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
-async def _target_channel(
-    pr_ref: GitHubPrRef, override: str, token: str
-) -> SlackChannel | RequestResult:
+async def _target_channel(pr_ref: GitHubPrRef, override: str, token: str) -> SlackChannel:
     configured = override.strip()
     if not configured:
         configured = (
@@ -274,8 +273,6 @@ async def request_review(
         )
 
     target = await _target_channel(pr_ref, channel, token)
-    if isinstance(target, RequestResult):
-        return target
     recorded = await record_pull_request(pr_ref, token)
     if recorded is None:
         return _failure("Pull request is unavailable")

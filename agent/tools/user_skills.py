@@ -14,6 +14,7 @@ from agent.skill_store.store import (
     update_skill,
 )
 from agent.tools.access import Policy, access, unchanged
+from agent.tools.errors import ToolError
 from agent.utils.json_types import as_json_object
 
 _OWN = Policy(trusted="private", actor="owner", sole=unchanged)
@@ -28,7 +29,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
     """Implement the `save_user_skill` tool."""
     login = await _login()
     if not login:
-        return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
+        raise ToolError("Could not resolve the triggering user's GitHub login")
 
     existing = await get_skill(login, name)
     if existing:
@@ -47,7 +48,7 @@ async def delete_user_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_user_skill` tool."""
     login = await _login()
     if not login:
-        return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
+        raise ToolError("Could not resolve the triggering user's GitHub login")
 
     await delete_skill(login, name)
     return {"ok": True, "name": name}

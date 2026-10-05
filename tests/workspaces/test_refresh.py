@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.tools.errors import ToolError
 from agent.workspaces import refresh
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -55,11 +56,11 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> Non
             ),
             "ramon",
         )
-        result = await refresh.refresh_workspace("base")
+        with pytest.raises(ToolError, match="update script exited 1") as failed:
+            await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
-    assert result["status"] == "failed"
-    assert result["script"] == "update"
+    assert failed.value.details["script"] == "update"
     capture.assert_not_awaited()
     assert _scripts_run(backend) == ["make setup", "git pull"]
     assert record is not None
@@ -90,10 +91,10 @@ async def test_a_failing_script_is_never_captured() -> None:
             snapshot_name="openswe-environment-base",
             source_sandbox_id="sb-prior",
         )
-        result = await refresh.refresh_workspace("base")
+        with pytest.raises(ToolError, match="setup script exited 2"):
+            await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
-    assert result["status"] == "failed"
     capture.assert_not_awaited()
     assert record is not None
     assert record.refresh_status == "failed"
@@ -116,11 +117,9 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
         await WORKSPACES.create(
             WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
         )
-        result = await refresh.refresh_workspace("base")
+        with pytest.raises(ToolError, match="no capacity"):
+            await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
-
-    assert result["status"] == "failed"
-    assert result["error"] == "no capacity"
     release.assert_not_awaited()
     assert record is not None
     assert record.refresh_error == "no capacity"
@@ -199,7 +198,8 @@ async def test_the_step_that_broke_is_the_one_left_failed() -> None:
         await WORKSPACES.create(
             WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
         )
-        await refresh.refresh_workspace("base")
+        with pytest.raises(ToolError, match="setup script exited 2"):
+            await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
 
     assert record is not None

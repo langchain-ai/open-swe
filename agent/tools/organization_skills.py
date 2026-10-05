@@ -17,21 +17,16 @@ async def save_organization_skill(
     name: str, description: str, instructions: str = ""
 ) -> dict[str, Any]:
     """Implement the `save_organization_skill` tool."""
+    body = store.SkillCreate(name=name, description=description, instructions=instructions)
+    update = store.SkillUpdate(description=body.description, instructions=body.instructions)
     try:
-        body = store.SkillCreate(name=name, description=description, instructions=instructions)
-        update = store.SkillUpdate(description=body.description, instructions=body.instructions)
-        try:
-            skill = await store.update_organization_skill(body.name, update)
-            created = False
-        except HTTPException as exc:
-            if exc.status_code != 404:
-                raise
-            skill = await store.create_organization_skill(body)
-            created = True
+        skill = await store.update_organization_skill(body.name, update)
+        created = False
     except HTTPException as exc:
-        return {"ok": False, "error": str(exc.detail)}
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+        if exc.status_code != 404:
+            raise
+        skill = await store.create_organization_skill(body)
+        created = True
     return {"ok": True, "skill": skill, "created": created}
 
 
@@ -39,10 +34,5 @@ async def save_organization_skill(
 @access(_WRITE)
 async def delete_organization_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_organization_skill` tool."""
-    try:
-        await store.delete_organization_skill(name)
-    except HTTPException as exc:
-        return {"ok": False, "error": str(exc.detail)}
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    await store.delete_organization_skill(name)
     return {"ok": True, "name": name}

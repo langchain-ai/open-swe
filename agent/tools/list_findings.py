@@ -10,12 +10,15 @@ from agent.review.findings import (
 from agent.review.findings import (
     list_findings as list_findings_async,
 )
+from agent.tools.errors import ToolError
 
 
 async def list_findings(status_filter: str | None = None) -> dict[str, Any]:
     """Implement the `list_findings` tool."""
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
-        return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
+        raise ToolError(
+            f"Invalid status_filter: {status_filter}", details={"findings": [], "count": 0}
+        )
 
     thread_id = get_thread_id_from_runtime()
     try:

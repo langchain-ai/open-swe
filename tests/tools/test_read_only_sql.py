@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.tools import read_only_sql as query_tool
+from agent.tools.errors import ToolError
 
 sql_tool = import_module("agent.tools.read_only_sql")
 
@@ -51,9 +52,9 @@ async def test_read_only_sql_requires_private_admin_surface(
 
     for config in configs:
         with patch("agent.run_config.get_config", return_value=config):
-            result = await query_tool("SELECT 1")
-        assert result["ok"] is False
-        assert "not available in this thread" in str(result["error"])
+            with pytest.raises(ToolError) as raised:
+                await query_tool("SELECT 1")
+        assert "not available in this thread" in str(str(raised.value))
 
 
 @pytest.mark.asyncio
@@ -96,10 +97,10 @@ async def test_read_only_sql_rechecks_admin_membership(monkeypatch: pytest.Monke
         "agent.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="not-admin"),
     ):
-        result = await query_tool("SELECT 1")
+        with pytest.raises(ToolError) as raised:
+            await query_tool("SELECT 1")
 
-    assert result["ok"] is False
-    assert "not available in this thread" in str(result["error"])
+    assert "not available in this thread" in str(str(raised.value))
 
 
 @pytest.mark.asyncio
@@ -153,6 +154,7 @@ async def test_read_only_sql_hides_database_errors(monkeypatch: pytest.MonkeyPat
         "agent.run_config.get_config",
         return_value=_config(admin_thread=True, source="dashboard", github_login="admin"),
     ):
-        response = await query_tool("DELETE FROM users")
+        with pytest.raises(ToolError) as raised:
+            await query_tool("DELETE FROM users")
 
-    assert response == {"ok": False, "error": "The database rejected the read-only query."}
+    assert str(raised.value) == "The database rejected the read-only query."

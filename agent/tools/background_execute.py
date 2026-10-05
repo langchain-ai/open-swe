@@ -14,6 +14,7 @@ from agent.dashboard.profiles import get_profile
 from agent.run_config import RunConfig
 from agent.sandboxes.state import SANDBOX_BACKENDS
 from agent.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
+from agent.tools.errors import ToolError
 from agent.utils.background_task_state import update_background_task_state
 from agent.utils.thread_ops import langgraph_client
 
@@ -361,17 +362,17 @@ async def background_execute(
 ) -> dict[str, Any]:
     """Implement the `background_execute` tool."""
     if not command.strip():
-        return {"success": False, "error": "command must not be empty"}
+        raise ToolError("command must not be empty")
     if not isinstance(timeout, int) or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
-        return {"success": False, "error": f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s"}
+        raise ToolError(f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS}s")
     try:
         thread_id, backend = _current_backend()
         if await _uses_completion_callback():
             return await _launch_with_callback(thread_id, backend, command, timeout)
         return await _launch_with_cron(thread_id, backend, command, timeout)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to start background command")
-        return {"success": False, "error": str(exc)}
+        raise
 
 
 class _CallbackFlag(BaseModel):
@@ -427,7 +428,7 @@ async def _launch_with_cron(
     )
     active = sum(task.get("status") == "running" for task in current.get("tasks", []))
     if active >= MAX_ACTIVE_TASKS:
-        return {"success": False, "error": "active task limit reached"}
+        raise ToolError("active task limit reached")
     from agent.background_tasks import MONITOR_LOCK, ensure_background_task_cron
 
     wait_for_monitor = f"while [ -d {shlex.quote(MONITOR_LOCK)} ]; do sleep .1; done"
@@ -439,20 +440,17 @@ async def _launch_with_cron(
     await _track(thread_id, task_id)
     wait = await backend.aexecute(wait_for_monitor, timeout=15)
     if getattr(wait, "exit_code", None) != 0:
-        return {
-            "success": False,
-            **state,
-            "error": "command started, but automatic completion monitoring is busy",
-        }
+        raise ToolError(
+            "command started, but automatic completion monitoring is busy", details={**state}
+        )
     try:
         await ensure_background_task_cron(thread_id)
-    except Exception:
+    except Exception as exc:
         logger.warning("Failed to schedule background-task monitor", exc_info=True)
-        return {
-            "success": False,
-            **state,
-            "error": "command started, but automatic completion monitoring could not be scheduled",
-        }
+        raise ToolError(
+            "command started, but automatic completion monitoring could not be scheduled",
+            details={**state},
+        ) from exc
     return {"success": True, **state}
 
 

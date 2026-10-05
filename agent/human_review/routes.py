@@ -13,6 +13,7 @@ from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import Origin, RequestResult, request_review
 from agent.slack.client import GitHubPrRef
+from agent.tools.errors import ToolError
 from agent.users import User
 
 router = APIRouter(tags=["human-review"])
@@ -61,15 +62,15 @@ async def api_request_human_review(
     inline_summary = options.inline_summary
     if inline_summary is not None and not inline_summary.strip():
         raise HTTPException(422, "inline_summary must not be blank")
-    result = await request_review(
-        pr_ref,
-        Origin(requester=requester),
-        channel=options.channel,
-        inline_summary=inline_summary,
-    )
-    if not result.success:
-        raise HTTPException(409, result.error)
-    return result
+    try:
+        return await request_review(
+            pr_ref,
+            Origin(requester=requester),
+            channel=options.channel,
+            inline_summary=inline_summary,
+        )
+    except ToolError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss")

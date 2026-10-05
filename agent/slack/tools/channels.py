@@ -15,6 +15,7 @@ from agent.slack.client import (
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.payloads import SlackChannelPayload
+from agent.tools.errors import ToolError
 from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 
@@ -27,11 +28,6 @@ class SlackChannel(TypedDict):
     id: str
     name: str
     is_private: bool
-
-
-class SlackChannelError(TypedDict):
-    success: Literal[False]
-    error: str
 
 
 class SlackChannelList(TypedDict):
@@ -60,7 +56,7 @@ class SlackMessageReceipt(TypedDict):
 
 
 @sandbox_only
-async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
+async def slack_list_channels(cursor: str | None = None) -> SlackChannelList:
     """List a page of public and private channels the Open SWE bot belongs to."""
     try:
         async with SlackClient.bot() as client:
@@ -70,23 +66,23 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
                 limit=200,
                 cursor=cursor,
             )
-    except HTTPException:
+    except HTTPException as exc:
         logger.warning(
             "Slack channel lookup failed", extra={"slack_error": "missing_slack_bot_token"}
         )
-        return {"success": False, "error": "missing_slack_bot_token"}
+        raise ToolError("missing_slack_bot_token") from exc
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning("Slack channel lookup failed", extra={"slack_error": error})
-        return {"success": False, "error": error}
+        raise ToolError(error) from exc
 
     raw_channels: object = response.get("channels")
     if not isinstance(raw_channels, list):
-        return {"success": False, "error": "invalid_slack_response"}
+        raise ToolError("invalid_slack_response")
     channels: list[SlackChannel] = []
     for channel in raw_channels:
         if not isinstance(channel, dict):
-            return {"success": False, "error": "invalid_slack_response"}
+            raise ToolError("invalid_slack_response")
         channel_id = channel.get("id")
         name = channel.get("name")
         is_private = channel.get("is_private")
@@ -96,24 +92,24 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
             or not isinstance(name, str)
             or not isinstance(is_private, bool)
         ):
-            return {"success": False, "error": "invalid_slack_response"}
+            raise ToolError("invalid_slack_response")
         channels.append({"id": channel_id, "name": name, "is_private": is_private})
 
     metadata: object = response.get("response_metadata") or {}
     next_cursor = metadata.get("next_cursor", "") if isinstance(metadata, dict) else None
     if not isinstance(next_cursor, str):
-        return {"success": False, "error": "invalid_slack_response"}
+        raise ToolError("invalid_slack_response")
     return {"success": True, "channels": channels, "next_cursor": next_cursor}
 
 
 @sandbox_only
 async def slack_list_channel_members(
     channel_id: str, cursor: str | None = None
-) -> SlackChannelMemberList | SlackChannelError:
+) -> SlackChannelMemberList:
     """List one page of members of a public channel or this thread's own channel."""
     channel_id = channel_id.strip()
     if not _CHANNEL_ID_RE.fullmatch(channel_id):
-        return {"success": False, "error": "channel_id must be a Slack channel ID"}
+        raise ToolError("channel_id must be a Slack channel ID")
     own = RunConfig.from_runtime().slack_thread
     try:
         async with SlackClient.bot() as client:
@@ -124,35 +120,32 @@ async def slack_list_channel_members(
                 or channel.is_mpim
                 or (not channel.is_public and not (own and own.channel_id == channel_id))
             ):
-                return {
-                    "success": False,
-                    "error": "Only public channels or this thread's own channel can be listed.",
-                }
+                raise ToolError("Only public channels or this thread's own channel can be listed.")
             response = await client.conversations_members(
                 channel=channel_id, limit=200, cursor=cursor
             )
-    except HTTPException:
+    except HTTPException as exc:
         logger.warning(
             "Slack member lookup failed", extra={"slack_error": "missing_slack_bot_token"}
         )
-        return {"success": False, "error": "missing_slack_bot_token"}
+        raise ToolError("missing_slack_bot_token") from exc
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning("Slack member lookup failed", extra={"slack_error": error})
-        return {"success": False, "error": error}
+        raise ToolError(error) from exc
 
     raw_members: object = response.get("members")
     if not isinstance(raw_members, list):
-        return {"success": False, "error": "invalid_slack_response"}
+        raise ToolError("invalid_slack_response")
     member_ids: list[str] = []
     for member in raw_members:
         if not isinstance(member, str) or not SLACK_USER_ID_RE.fullmatch(member):
-            return {"success": False, "error": "invalid_slack_response"}
+            raise ToolError("invalid_slack_response")
         member_ids.append(member)
     metadata: object = response.get("response_metadata") or {}
     next_cursor = metadata.get("next_cursor", "") if isinstance(metadata, dict) else None
     if not isinstance(next_cursor, str):
-        return {"success": False, "error": "invalid_slack_response"}
+        raise ToolError("invalid_slack_response")
     names = await get_slack_user_names(member_ids)
     members: list[SlackChannelMember] = [
         {"id": member, "name": names[member], "github_login": await User.login_for_slack(member)}
@@ -166,32 +159,28 @@ async def slack_list_channel_members(
     }
 
 
-async def slack_post_message(
-    channel_id: str, message: str
-) -> SlackMessageReceipt | SlackChannelError:
+async def slack_post_message(channel_id: str, message: str) -> SlackMessageReceipt:
     """Post a standalone message to a channel the Open SWE bot belongs to."""
     channel_id = channel_id.strip()
     if not _CHANNEL_ID_RE.fullmatch(channel_id):
-        return {"success": False, "error": "channel_id must be a Slack channel ID"}
+        raise ToolError("channel_id must be a Slack channel ID")
     if not message.strip():
-        return {"success": False, "error": "message is required"}
+        raise ToolError("message is required")
     message = convert_mentions_to_slack_format(message)
     if len(message) > 40_000:
-        return {"success": False, "error": "msg_too_long"}
+        raise ToolError("msg_too_long")
     # conversations.info does not guarantee an is_member field.
     cursor: str | None = None
     seen_cursors: set[str] = set()
     while True:
         page = await slack_list_channels(cursor)
-        if not page["success"]:
-            return page
         if any(channel["id"] == channel_id for channel in page["channels"]):
             break
         cursor = page["next_cursor"]
         if not cursor:
-            return {"success": False, "error": "not_in_channel"}
+            raise ToolError("not_in_channel")
         if cursor in seen_cursors:
-            return {"success": False, "error": "invalid_slack_response"}
+            raise ToolError("invalid_slack_response")
         seen_cursors.add(cursor)
 
     blocks = markdown_blocks(message)
@@ -203,5 +192,5 @@ async def slack_post_message(
         blocks=block_payload(blocks) if blocks else None,
     )
     if not message_ts:
-        return {"success": False, "error": error or "post_failed"}
+        raise ToolError(error or "post_failed")
     return {"success": True, "channel_id": channel_id, "message_ts": message_ts}

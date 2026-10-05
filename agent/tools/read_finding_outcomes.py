@@ -9,6 +9,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.tools.errors import ToolError
 from agent.utils.reviewer_outcomes import read_outcomes_for_repo
 
 
@@ -23,7 +24,7 @@ async def read_finding_outcomes(limit: int = 60) -> dict[str, Any]:
     configurable = config.get("configurable") or {}
     full_name = configurable.get("review_style_full_name")
     if not isinstance(full_name, str) or "/" not in full_name:
-        return {"ok": False, "error": "no repo under analysis", "confirmed": [], "dismissed": []}
+        raise ToolError("no repo under analysis", details={"confirmed": [], "dismissed": []})
 
     outcomes = await read_outcomes_for_repo(full_name, limit=limit)
     confirmed = outcomes["confirmed"]

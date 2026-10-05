@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.tools.errors import ToolError
+
 slack_reply_tool = importlib.import_module("agent.slack.tools.reply")
 
 
@@ -62,13 +64,8 @@ async def test_kickoff_stays_until_a_subsequent_reply_posts(
 
     monkeypatch.setattr(slack_reply_tool.SlackClient, "bot", bot)
     assert await slack_reply_tool.slack_reply("Investigating", "progress") == {"success": True}
-    assert await slack_reply_tool.slack_reply("Update", "final") == {
-        "success": False,
-        "error": "rate_limited",
-        "slack_error": "rate_limited",
-        "message_chars": 6,
-        "hint": slack_reply_tool._slack_reply_failure_hint("rate_limited"),
-    }
+    with pytest.raises(ToolError):
+        await slack_reply_tool.slack_reply("Update", "final")
     deleted.assert_not_awaited()
     assert await slack_reply_tool.slack_reply("Update", "progress") == {"success": True}
     assert await slack_reply_tool.slack_reply("Done", "final") == {"success": True}
@@ -157,11 +154,9 @@ async def test_freshness_conflicts_survive_offloaded_results(
     latest = {"human_timestamps": ["1.0", "2.0"], "formatted": "new request"}
     monkeypatch.setattr(slack_reply_tool, "fetch_and_format_thread", AsyncMock(return_value=latest))
     messages = [HumanMessage(content='<input-message timestamp="1.0">request</input-message>')]
-    conflict = await slack_reply_tool._stale_reply_guard(
-        {"messages": messages}, "C1", "1.0", "run-1"
-    )
-    assert conflict is not None
-    assert conflict["formatted"] == "new request"
+    with pytest.raises(ToolError, match="new_slack_messages") as raised:
+        await slack_reply_tool._stale_reply_guard({"messages": messages}, "C1", "1.0", "run-1")
+    assert raised.value.details["formatted"] == "new request"
     messages.append(
         ToolMessage(content="Result offloaded to /large_tool_results/reply", tool_call_id="a")
     )
@@ -170,10 +165,8 @@ async def test_freshness_conflicts_survive_offloaded_results(
         is None
     )
     latest["human_timestamps"] = ["1.0", "2.0", "3.0"]
-    assert (
+    with pytest.raises(ToolError, match="new_slack_messages"):
         await slack_reply_tool._stale_reply_guard({"messages": messages}, "C1", "1.0", "run-1")
-        is not None
-    )
     latest["human_timestamps"] = ["1.0", "2.0", "3.0", "4.0"]
     assert (
         await slack_reply_tool._stale_reply_guard({"messages": messages}, "C1", "1.0", "run-1")
@@ -232,14 +225,14 @@ async def test_slack_reply_hints_not_to_retry_channel_errors(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", fake_post_and_store_mapping)
 
-    result = await slack_reply_tool.slack_reply("hello", "final")
+    with pytest.raises(ToolError) as raised:
+        await slack_reply_tool.slack_reply("hello", "final")
 
-    assert result["success"] is False
-    assert result["error"] == slack_error
-    assert result["slack_error"] == slack_error
-    assert result["message_chars"] == 5
-    assert "do not retry" in result["hint"]
-    assert "trace output" in result["hint"]
+    assert str(raised.value) == slack_error
+    assert raised.value.details["slack_error"] == slack_error
+    assert raised.value.details["message_chars"] == 5
+    assert "do not retry" in raised.value.details["hint"]
+    assert "trace output" in raised.value.details["hint"]
 
 
 @pytest.mark.parametrize("response_type", ["progress", "final"])
@@ -326,11 +319,11 @@ async def test_slack_reply_rejects_oversized_message_with_options(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
+    with pytest.raises(ToolError) as raised:
+        await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
 
-    assert result["success"] is False
-    assert result["retry"] is True
-    assert "options" in result["error"]
+    assert raised.value.details["retry"] is True
+    assert "options" in str(raised.value)
     post.assert_not_awaited()
 
 
@@ -360,10 +353,11 @@ async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_
     moved = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
 
-    result = await slack_reply_tool.slack_reply("The answer", "final")
+    with pytest.raises(ToolError) as raised:
+        await slack_reply_tool.slack_reply("The answer", "final")
 
-    assert result["moved_to_dashboard"] is True
-    assert result["retry"] is False
+    assert raised.value.details["moved_to_dashboard"] is True
+    assert raised.value.details["retry"] is False
     assert moved.await_args.args[1:] == ("T1", "C1", "1.0")
 
 
@@ -387,7 +381,8 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
 
-    assert (await slack_reply_tool.slack_reply("The answer", "final"))["moved_to_dashboard"] is True
+    with pytest.raises(ToolError):
+        await slack_reply_tool.slack_reply("The answer", "final")
     post.assert_not_awaited()
 
 
@@ -416,7 +411,8 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
     )
     monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
 
-    result = await slack_reply_tool.slack_reply("The answer", "final")
+    with pytest.raises(ToolError) as raised:
+        await slack_reply_tool.slack_reply("The answer", "final")
 
-    assert result["moved_to_dashboard"] is False
-    assert result["retry"] is True
+    assert raised.value.details["moved_to_dashboard"] is False
+    assert raised.value.details["retry"] is True

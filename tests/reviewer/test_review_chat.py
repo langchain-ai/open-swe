@@ -7,6 +7,7 @@ from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
 from agent.review import chat as review_chat_api
+from agent.tools.errors import ToolError
 
 # `agent.tools.__init__` rebinds these names to the tool *functions*, shadowing
 # the submodules. Import the real modules so we can monkeypatch their globals.
@@ -68,8 +69,8 @@ async def test_assert_chat_thread_access_rejects_unauthorized(monkeypatch, metad
 @pytest.mark.asyncio
 async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
     monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": {}})
-    result = await read_repo_file.read_repo_file("src/app.py")
-    assert result["success"] is False
+    with pytest.raises(ToolError):
+        await read_repo_file.read_repo_file("src/app.py")
 
     config = {"configurable": {"chat_repo_owner": "acme", "chat_repo_name": "repo"}}
     monkeypatch.setattr("agent.run_config.get_config", lambda: config)
@@ -77,8 +78,8 @@ async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
         (read_repo_file.read_repo_file, ("src/app.py",)),
         (search_repo_code.search_repo_code, ("foo",)),
     ):
-        result = await tool(*args)
-        assert result["error"] == "GitHub credentials unavailable; repository source was not read"
+        with pytest.raises(ToolError, match="GitHub credentials unavailable"):
+            await tool(*args)
 
 
 # --- proxy enrichment --------------------------------------------------------

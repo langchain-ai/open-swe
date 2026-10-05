@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 from urllib.parse import quote
 
 import httpx2
@@ -36,6 +36,7 @@ from agent.slack.code_channels import (
     set_view,
 )
 from agent.threads.plan_store import get_plan_content
+from agent.tools.errors import ToolError
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from agent.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
@@ -176,7 +177,7 @@ def _failure_payload(
     branch_pushed: bool | None,
     failed_step: str,
     response: httpx2.Response | None = None,
-) -> dict[str, Any]:
+) -> NoReturn:
     pushed = "unknown" if branch_pushed is None else "yes" if branch_pushed else "no"
     _record_open_pr_failure_telemetry(
         code=code,
@@ -189,15 +190,9 @@ def _failure_payload(
         branch_pushed=branch_pushed,
         failed_step=failed_step,
     )
-    return {
-        "success": False,
-        "error": (
-            "Failed to open an attributed PR with open_pull_request. "
-            f"Reason: {reason}. Likely cause: {likely_cause}. "
-            f"Branch pushed: {owner}/{repo}:{head} ({pushed}). PR created: no."
-            f"{_github_response_summary(response)}"
-        ),
-    }
+    raise ToolError(
+        f"Failed to open an attributed PR with open_pull_request. Reason: {reason}. Likely cause: {likely_cause}. Branch pushed: {owner}/{repo}:{head} ({pushed}). PR created: no.{_github_response_summary(response)}"
+    )
 
 
 def _record_open_pr_failure_telemetry(
@@ -257,7 +252,7 @@ def _access_failure_payload(
     branch_pushed: bool | None,
     failed_step: str,
     response: httpx2.Response | None = None,
-) -> dict[str, Any]:
+) -> NoReturn:
     return _failure_payload(
         code=_ACCESS_FAILURE_CODE,
         owner=owner,
@@ -288,7 +283,7 @@ def _branch_failure_payload(
     branch: str,
     branch_role: str,
     response: httpx2.Response | None = None,
-) -> dict[str, Any]:
+) -> NoReturn:
     branch_pushed = False if branch_role == "head" else None
     return _failure_payload(
         code=_BRANCH_FAILURE_CODE,
@@ -311,7 +306,7 @@ def _branch_failure_payload(
 
 async def _revoked_token_payload(
     *, author: str | None, token: str, owner: str, repo: str, head: str, base: str
-) -> dict[str, Any]:
+) -> NoReturn:
     from agent.dashboard.oauth import build_settings_url
     from agent.dashboard.profiles import mark_access_token_revoked
 
@@ -350,7 +345,7 @@ async def _preflight_pr_access(
     repo: str,
     head: str,
     base: str,
-) -> dict[str, Any] | None:
+) -> None:
     repo_resp = await _github_get(client, token, f"/repos/{owner}/{repo}")
     if repo_resp.status_code == 401 and token_kind == "user":
         return await _revoked_token_payload(
@@ -1081,7 +1076,7 @@ async def _open_pull_request(
                 branch_pushed=None,
                 failed_step="workspace_repo",
             )
-        if refusal := await require_consent(
+        await require_consent(
             thread_id=_configurable().thread_id,
             token_kind=kind,
             author=author,
@@ -1090,9 +1085,8 @@ async def _open_pull_request(
             head=head,
             base=base,
             title=title,
-        ):
-            return dict(refusal)
-        preflight_failure = await _preflight_pr_access(
+        )
+        await _preflight_pr_access(
             client=client,
             token=token,
             token_kind=kind,
@@ -1102,8 +1096,6 @@ async def _open_pull_request(
             head=head,
             base=base,
         )
-        if preflight_failure is not None:
-            return preflight_failure
         body = await _stamp_attribution_footer(
             await _maybe_append_references(client, token, owner, repo, body),
             state,
@@ -1240,20 +1232,20 @@ async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[
     """Implement the `link_pull_request` tool."""
     ref = parse_github_pr_url(pr_url)
     if ref is None:
-        return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}
+        raise ToolError(f"Not a GitHub pull request URL: {pr_url}")
     token, kind = await _resolve_pr_author_token()
     if not token:
-        return {"success": False, "error": "No GitHub token was available to read the PR"}
+        raise ToolError("No GitHub token was available to read the PR")
     async with httpx2.AsyncClient(timeout=30.0) as client:
         if (
             kind == "user"
             and await private_credential_login() is None
             and not await _workspace_has_repository(client, ref.owner, ref.repo)
         ):
-            return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
+            raise ToolError(f"{ref.owner}/{ref.repo} is not in this workspace")
         pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
         if not pr:
-            return {"success": False, "error": f"Could not read {pr_url}"}
+            raise ToolError(f"Could not read {pr_url}")
         await _record_pr_telemetry(
             client=client,
             token=token,

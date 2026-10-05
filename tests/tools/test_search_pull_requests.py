@@ -7,6 +7,7 @@ import pytest
 
 from agent.github.sandbox_access import SandboxGitHubAccess
 from agent.run_config import Repo, RunConfig
+from agent.tools.errors import ToolError
 
 search = import_module("agent.tools.search_pull_requests")
 
@@ -95,8 +96,8 @@ async def test_search_text_pagination_and_repo_isolation(monkeypatch, context):
 
 async def test_search_cannot_widen_public_event_thread_access(monkeypatch, context):
     monkeypatch.setattr(search, "thread_token_repositories", AsyncMock(return_value=["acme/app"]))
-    result = await search.search_pull_requests("needle", repo="acme/private")
-    assert result["success"] is False
+    with pytest.raises(ToolError):
+        await search.search_pull_requests("needle", repo="acme/private")
     context.assert_not_awaited()
 
 
@@ -109,6 +110,6 @@ async def test_invalid_search_response_is_not_reported_as_no_matches(monkeypatch
             yield session
 
     monkeypatch.setattr(search, "github_client", client)
-    result = await search.search_pull_requests("needle")
-    assert result["success"] is False
-    assert "results" not in result
+    with pytest.raises(ToolError) as raised:
+        await search.search_pull_requests("needle")
+    assert "results" not in raised.value.details

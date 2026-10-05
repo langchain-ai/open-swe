@@ -1,10 +1,12 @@
 import ipaddress
 import socket
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx2
+
+from agent.tools.errors import ToolError
 
 _MAX_REDIRECTS = 5
 _REDIRECT_CODES = {301, 302, 303, 307, 308}
@@ -48,14 +50,8 @@ def resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
         return False, f"URL validation error: {e}", None, None
 
 
-def _blocked_response(url: str, reason: str) -> dict[str, Any]:
-    return {
-        "success": False,
-        "status_code": 0,
-        "headers": {},
-        "content": f"Request blocked: {reason}",
-        "url": url,
-    }
+def _block_request(url: str, reason: str) -> NoReturn:
+    raise ToolError(f"Request blocked: {reason}", details={"url": url})
 
 
 def pinned_url(url: str, ip: str) -> str:
@@ -100,7 +96,7 @@ async def request_with_safe_redirects(
     validate_url: Callable[[str], tuple[bool, str]] | None = None,
     stream: bool = False,
     **kwargs: Any,
-) -> tuple[httpx2.Response | None, dict[str, Any] | None]:
+) -> httpx2.Response:
     """Issue a request with DNS pinning and per-hop redirect validation.
 
     With ``stream=True``, the caller must close the returned response.
@@ -117,10 +113,10 @@ async def request_with_safe_redirects(
         if validate_url:
             allowed, reason = validate_url(current_url)
             if not allowed:
-                return None, _blocked_response(current_url, reason)
+                _block_request(current_url, reason)
         is_safe, reason, hostname, addr_infos = resolve_and_validate(current_url)
         if not is_safe or hostname is None or addr_infos is None:
-            return None, _blocked_response(current_url, reason)
+            _block_request(current_url, reason)
 
         parsed = urlparse(current_url)
         per_hop_headers = dict(headers_for_url(url, current_url) or {}) if headers_for_url else {}
@@ -162,17 +158,17 @@ async def request_with_safe_redirects(
         if response is None:
             raise httpx2.ConnectError("No response received from pinned address")
         if response.status_code not in _REDIRECT_CODES:
-            return response, None
+            return response
 
         location = response.headers.get("Location")
         if not location:
-            return response, None
+            return response
 
         if stream:
             await response.aclose()
 
         if redirect_count == _MAX_REDIRECTS:
-            return None, _blocked_response(current_url, "Too many redirects")
+            _block_request(current_url, "Too many redirects")
 
         next_url = urljoin(current_url, location)
         request_kwargs.pop("params", None)
@@ -199,4 +195,4 @@ async def request_with_safe_redirects(
         current_method = next_method
         current_url = next_url
 
-    return None, _blocked_response(current_url, "Too many redirects")
+    _block_request(current_url, "Too many redirects")

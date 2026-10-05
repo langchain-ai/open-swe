@@ -7,6 +7,7 @@ from agent.slack.client import (
     get_slack_user_names,
     slack_message_bot_id,
 )
+from agent.tools.errors import ToolError
 from agent.tools.sandbox_preference import sandbox_only
 
 
@@ -14,7 +15,10 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
     """Fetch thread messages and resolve author names."""
     messages = await fetch_slack_thread_messages(channel_id, message_ts)
     if not messages:
-        return {"success": False, "messages": []}
+        raise ToolError(
+            "Could not fetch thread messages. The bot may not have access to that channel, or the message may have been deleted.",
+            details={"messages": []},
+        )
 
     user_ids = [
         user_id for msg in messages if isinstance(user_id := msg.get("user"), str) and user_id
@@ -44,16 +48,8 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():
-        return {"success": False, "error": "channel_id is required"}
+        raise ToolError("channel_id is required")
     if not message_ts or not message_ts.strip():
-        return {"success": False, "error": "message_ts is required"}
+        raise ToolError("message_ts is required")
 
-    result = await fetch_and_format_thread(channel_id.strip(), message_ts.strip())
-    if not result.get("success"):
-        return {
-            "success": False,
-            "error": "Could not fetch thread messages. The bot may not have access to "
-            "that channel, or the message may have been deleted.",
-        }
-
-    return result
+    return await fetch_and_format_thread(channel_id.strip(), message_ts.strip())

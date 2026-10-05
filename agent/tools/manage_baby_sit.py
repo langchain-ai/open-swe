@@ -12,6 +12,7 @@ from agent.github.token import resolve_github_token
 from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
 from agent.source_context import SourceContext
+from agent.tools.errors import ToolError
 
 
 def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
@@ -70,28 +71,27 @@ async def manage_baby_sit(
     """Implement the `manage_baby_sit` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
-        return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
+        raise ToolError("pr_url must be a canonical GitHub pull request URL")
 
     cfg, config = _configurable()
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "No executable agent thread is available"}
+        raise ToolError("No executable agent thread is available")
     key = watch_key(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if action == "stop":
         from agent.baby_sit import WATCHES
 
         watch = await WATCHES.get(key)
         if watch and watch.thread_id != thread_id:
-            return {"success": False, "error": "This watch belongs to another agent thread"}
+            raise ToolError("This watch belongs to another agent thread")
         stopped = await stop_watch(key)
         return {"success": True, "stopped": stopped, "watch_key": key}
 
     if action == "record_retry":
         if not head_sha.strip() or not check_name.strip() or not evidence.strip():
-            return {
-                "success": False,
-                "error": "head_sha, check_name, and evidence are required when recording a flaky rerun",
-            }
+            raise ToolError(
+                "head_sha, check_name, and evidence are required when recording a flaky rerun"
+            )
         return await record_retry(
             key,
             thread_id=thread_id,
@@ -104,7 +104,7 @@ async def manage_baby_sit(
     try:
         token, _ = await resolve_github_token(config, thread_id)
     except Exception as exc:
-        return {"success": False, "error": f"GitHub authentication failed: {exc}"}
+        raise ToolError(f"GitHub authentication failed: {exc}") from exc
     pr = await fetch_pr(
         owner=pr_ref.owner,
         repo=pr_ref.repo,
@@ -112,23 +112,20 @@ async def manage_baby_sit(
         token=token,
     )
     if not pr:
-        return {"success": False, "error": "Pull request is unavailable"}
+        raise ToolError("Pull request is unavailable")
     if pr.get("state") != "open":
-        return {"success": False, "error": "Pull request is not open"}
+        raise ToolError("Pull request is not open")
     head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
     pr_head_sha = head.get("sha") if isinstance(head, Mapping) else None
     pr_head_ref = head.get("ref") if isinstance(head, Mapping) else None
     if not isinstance(pr_head_sha, str) or not pr_head_sha:
-        return {"success": False, "error": "Pull request head SHA is unavailable"}
+        raise ToolError("Pull request head SHA is unavailable")
     if not isinstance(pr_head_ref, str) or not pr_head_ref:
-        return {"success": False, "error": "Pull request head branch is unavailable"}
+        raise ToolError("Pull request head branch is unavailable")
 
     installation_id = await get_github_app_installation_id_for_repo(pr_ref.owner, pr_ref.repo)
     if installation_id is None:
-        return {
-            "success": False,
-            "error": "GitHub App installation is unavailable for this repository",
-        }
+        raise ToolError("GitHub App installation is unavailable for this repository")
     source_installation_id = installation_id
     if cfg.github_issue and cfg.repo:
         source_installation_id = await get_github_app_installation_id_for_repo(
@@ -145,7 +142,7 @@ async def manage_baby_sit(
             source_context=_source_context(cfg),
         )
     except Exception as exc:
-        return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}
+        raise ToolError(f"Could not start baby-sit watch: {exc}") from exc
     return {
         "success": True,
         "watch_key": watch.key,

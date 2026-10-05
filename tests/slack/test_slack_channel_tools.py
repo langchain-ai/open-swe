@@ -4,6 +4,7 @@ import pytest
 
 from agent import tools
 from agent.run_config import RunConfig
+from agent.tools.errors import ToolError
 from agent.users import User
 from tests.support.slack_api import SlackAPI
 
@@ -66,8 +67,11 @@ async def test_list_members_restricts_other_channels(
         }
     )
     slack_api.respond({"ok": True, "members": []})
-    result = await tools.slack_list_channel_members("C456")
-    assert result["success"] is (not private and not external)
+    if private or external:
+        with pytest.raises(ToolError, match="Only public channels"):
+            await tools.slack_list_channel_members("C456")
+    else:
+        assert (await tools.slack_list_channel_members("C456"))["success"] is True
     assert ("conversations.members" in [method for method, _ in slack_api.calls]) is (
         not private and not external
     )
@@ -82,10 +86,8 @@ async def test_list_members_rejects_malformed_pages(
 ) -> None:
     slack_api.respond({"ok": True, "channel": {"id": "C123"}})
     slack_api.respond({"ok": True, **payload})
-    assert await tools.slack_list_channel_members("C123") == {
-        "success": False,
-        "error": "invalid_slack_response",
-    }
+    with pytest.raises(ToolError, match="invalid_slack_response"):
+        await tools.slack_list_channel_members("C123")
 
 
 async def test_list_members_keeps_unknown_identity_when_profile_lookup_fails(
@@ -111,10 +113,8 @@ async def test_list_members_reports_rate_limit_instead_of_empty_page(
     slack_api.respond(
         {"ok": False, "error": "ratelimited"}, status=429, headers={"Retry-After": "30"}
     )
-    assert await tools.slack_list_channel_members("C123") == {
-        "success": False,
-        "error": "rate_limited: 30",
-    }
+    with pytest.raises(ToolError, match="rate_limited: 30"):
+        await tools.slack_list_channel_members("C123")
 
 
 async def test_post_channel_message_requires_active_channel_membership(
@@ -123,8 +123,8 @@ async def test_post_channel_message_requires_active_channel_membership(
     slack_api.respond(
         {"ok": True, "channels": [{"id": "C456", "name": "other", "is_private": False}]}
     )
-    result = await tools.slack_post_message("C123", "hello")
-    assert result == {"success": False, "error": "not_in_channel"}
+    with pytest.raises(ToolError, match="not_in_channel"):
+        await tools.slack_post_message("C123", "hello")
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
 
 
@@ -147,8 +147,8 @@ async def test_post_channel_message_stops_on_repeated_membership_cursor(
         slack_api.respond(
             {"ok": True, "channels": [], "response_metadata": {"next_cursor": "same"}}
         )
-    result = await tools.slack_post_message("C123", "hello")
-    assert result == {"success": False, "error": "invalid_slack_response"}
+    with pytest.raises(ToolError, match="invalid_slack_response"):
+        await tools.slack_post_message("C123", "hello")
     assert len(slack_api.calls) == 2
 
 
@@ -163,6 +163,6 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
         {"ok": True, "channels": [{"id": "C123", "name": "target", "is_private": False}]}
     )
     slack_api.respond({"ok": False, "error": error}, status=status, headers={"Retry-After": "30"})
-    result = await tools.slack_post_message("C123", "hello")
-    assert result == {"success": False, "error": expected}
+    with pytest.raises(ToolError, match=expected):
+        await tools.slack_post_message("C123", "hello")
     assert len(slack_api.calls) == 2

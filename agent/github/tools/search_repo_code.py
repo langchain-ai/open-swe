@@ -6,6 +6,7 @@ import httpx2
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
+from agent.tools.errors import ToolError
 
 _GITHUB_API = "https://api.github.com"
 
@@ -19,12 +20,9 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
     """Implement the `search_repo_code` tool."""
     owner, repo, token = _chat_repo_context()
     if not owner or not repo:
-        return {"success": False, "error": "repository context unavailable"}
+        raise ToolError("repository context unavailable")
     if not token:
-        return {
-            "success": False,
-            "error": "GitHub credentials unavailable; repository source was not read",
-        }
+        raise ToolError("GitHub credentials unavailable; repository source was not read")
 
     capped = max(1, min(max_results, 50))
     headers = github_headers(token)
@@ -36,12 +34,12 @@ async def search_repo_code(query: str, max_results: int = 20) -> dict[str, Any]:
                 f"{_GITHUB_API}/search/code", headers=headers, params=params
             )
     except httpx2.HTTPError as exc:
-        return {"success": False, "error": f"GitHub request failed: {exc!s}"}
+        raise ToolError(f"GitHub request failed: {exc!s}") from exc
 
     if response.status_code == 422:
-        return {"success": False, "error": "query rejected by GitHub code search"}
+        raise ToolError("query rejected by GitHub code search")
     if response.status_code >= 400:
-        return {"success": False, "error": f"GitHub returned {response.status_code}"}
+        raise ToolError(f"GitHub returned {response.status_code}")
 
     payload = response.json()
     items = payload.get("items") if isinstance(payload, dict) else None

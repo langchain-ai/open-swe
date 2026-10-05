@@ -1,7 +1,7 @@
 """Tool that posts a Slack approval card for a tiny pull request."""
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from langgraph.config import get_config
 
@@ -36,11 +36,12 @@ from agent.slack.blocks import escape
 from agent.slack.cards import run_slack_location
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.tools.errors import ToolError
 from agent.tools.manage_baby_sit import dispatch_run_config
 
 
-def _failure(error: str) -> dict[str, Any]:
-    return {"success": False, "error": error}
+def _failure(error: str) -> NoReturn:
+    raise ToolError(error)
 
 
 def _next_step(*, reused: bool, elsewhere: bool, in_thread: bool) -> str:

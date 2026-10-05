@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from agent.database import postgres
 from agent.tools.access import Policy, access
+from agent.tools.errors import ToolError
 from agent.tools.mcp_exposure import expose_mcp
 
 logger = logging.getLogger(__name__)
@@ -45,12 +46,9 @@ async def read_only_sql(query: str) -> dict[str, object]:
     """Run one read-only PostgreSQL query on a private admin surface."""
     query = query.strip()
     if not query:
-        return {"ok": False, "error": "Query cannot be empty."}
+        raise ToolError("Query cannot be empty.")
     if len(query) > _MAX_QUERY_CHARS:
-        return {
-            "ok": False,
-            "error": f"Query exceeds the {_MAX_QUERY_CHARS:,}-character limit.",
-        }
+        raise ToolError(f"Query exceeds the {_MAX_QUERY_CHARS:,}-character limit.")
 
     try:
         async with postgres.read_only_transaction() as conn:
@@ -63,7 +61,7 @@ async def read_only_sql(query: str) -> dict[str, object]:
             "Read-only SQL query failed",
             extra={"error_type": type(exc).__name__},
         )
-        return {"ok": False, "error": "The database rejected the read-only query."}
+        raise ToolError("The database rejected the read-only query.") from exc
 
     rows: list[list[object]] = []
     truncated = len(fetched) > _MAX_ROWS

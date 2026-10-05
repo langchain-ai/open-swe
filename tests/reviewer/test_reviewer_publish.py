@@ -11,9 +11,11 @@ from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import Finding, new_finding
 from agent.review.publish import (
     ReviewAssessment,
+    ReviewPublishError,
     post_pull_request_review,
     render_inline_comment_body,
 )
+from agent.tools.errors import ToolError
 from tests.conftest import FakeStore
 
 
@@ -37,19 +39,19 @@ async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() ->
         patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
     ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="a" * 40,
-            token="t",
-            severity_threshold="medium",
-            is_re_review=False,
-            assessment=_assessment(),
-            state={"review_approval_policy": "Docs only"},
-        )
-    assert result["success"] is False
-    assert "commit" in result["error"]
+        with pytest.raises(ToolError) as raised:
+            await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="a" * 40,
+                token="t",
+                severity_threshold="medium",
+                is_re_review=False,
+                assessment=_assessment(),
+                state={"review_approval_policy": "Docs only"},
+            )
+    assert "commit" in str(raised.value)
     post.assert_not_awaited()
     metadata.assert_not_awaited()
 
@@ -155,11 +157,14 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
         patch("agent.tools.publish_review.mutate_findings", AsyncMock()) as mutate,
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
-        result = await publish_review(ranking=ranking)
-
-    assert result["success"] is False
-    assert result["expected_finding_ids"] == ["f_one", "f_two"]
-    assert (result["missing"], result["unknown"], result["duplicates"]) == (
+        with pytest.raises(ToolError) as raised:
+            await publish_review(ranking=ranking)
+    assert raised.value.details["expected_finding_ids"] == ["f_one", "f_two"]
+    assert (
+        raised.value.details["missing"],
+        raised.value.details["unknown"],
+        raised.value.details["duplicates"],
+    ) == (
         missing,
         unknown,
         duplicates,
@@ -181,9 +186,9 @@ async def test_publish_review_refuses_when_called_alongside_other_tools() -> Non
         ],
     )
     with patch("agent.tools.publish_review._record_ranking", AsyncMock()) as record_ranking:
-        result = await publish_review(ranking=[], state={"messages": [turn]})
+        with pytest.raises(ToolError):
+            await publish_review(ranking=[], state={"messages": [turn]})
 
-    assert result["success"] is False
     record_ranking.assert_not_awaited()
 
 
@@ -227,19 +232,18 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     client_cm.post = AsyncMock(return_value=response)
 
     with patch("agent.github.http.httpx2.AsyncClient", return_value=client_cm):
-        result = await post_pull_request_review(
-            owner="o",
-            repo="r",
-            pr_number=1,
-            head_sha="sha",
-            body="b",
-            inline_comments=[],
-            token="t",
-        )
+        with pytest.raises(ReviewPublishError) as raised:
+            await post_pull_request_review(
+                owner="o",
+                repo="r",
+                pr_number=1,
+                head_sha="sha",
+                body="b",
+                inline_comments=[],
+                token="t",
+            )
 
-    assert isinstance(result, dict)
-    assert "_error" in result
-    err = result["_error"]
+    err = str(raised.value)
     assert "HTTP 200" in err
     assert "non-dict" in err
     assert "unexpected" in err
@@ -831,12 +835,7 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
     # in the diff, so it must be dropped on retry.
     diff_line_set = {"in_diff.py": {"RIGHT": {10}, "LEFT": set()}}
 
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
+    first_response = ReviewPublishError("HTTP 422: unresolved anchor", kind="unresolved_anchor")
     retry_response = {"id": 7777}
     post_review = AsyncMock(side_effect=[first_response, retry_response])
     fetch_comments = AsyncMock(return_value=[])
@@ -913,13 +912,8 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
     ]
     diff_line_set = {"in_diff.py": {"RIGHT": {10}, "LEFT": set()}}
 
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
-    retry_response = {"_error": "HTTP 500: boom"}
+    first_response = ReviewPublishError("HTTP 422: unresolved anchor", kind="unresolved_anchor")
+    retry_response = ReviewPublishError("HTTP 500: boom")
     post_review = AsyncMock(side_effect=[first_response, retry_response])
 
     with (
@@ -945,19 +939,19 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="sha",
-            token="t",
-            severity_threshold="medium",
-            is_re_review=False,
-        )
+        with pytest.raises(ToolError) as raised:
+            await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="sha",
+                token="t",
+                severity_threshold="medium",
+                is_re_review=False,
+            )
 
-    assert result["success"] is False
-    assert result["unresolvable_findings"] == ["f_bad"]
-    assert "update_finding" in result["hint"]
+    assert raised.value.details["unresolvable_findings"] == ["f_bad"]
+    assert "anchor" in raised.value.details["hint"]
 
 
 @pytest.mark.asyncio
@@ -972,13 +966,8 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
     ]
     # No cached diff_line_set, and the on-demand fetch fails — no way to tell
     # which finding is bad.
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
-    post_review = AsyncMock(return_value=first_response)
+    first_response = ReviewPublishError("HTTP 422: unresolved anchor", kind="unresolved_anchor")
+    post_review = AsyncMock(side_effect=first_response)
 
     with (
         patch(
@@ -1003,21 +992,21 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
         ),
         patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="sha",
-            token="t",
-            severity_threshold="medium",
-            is_re_review=False,
-        )
+        with pytest.raises(ToolError) as raised:
+            await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="sha",
+                token="t",
+                severity_threshold="medium",
+                is_re_review=False,
+            )
 
     # Only one attempt — never retry blindly.
     assert post_review.await_count == 1
-    assert result["success"] is False
-    assert result["unresolvable_findings"] == []
-    assert "update_finding" in result["hint"]
+    assert raised.value.details["unresolvable_findings"] == []
+    assert "anchor" in raised.value.details["hint"]
 
 
 async def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
@@ -1046,12 +1035,12 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
         patch("agent.tools.publish_review._publish_review_async", publish_async),
         patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
-        result = await publish_review(ranking=[])
+        with pytest.raises(ToolError) as raised:
+            await publish_review(ranking=[])
 
-    assert result["success"] is False
-    assert result["error"] == "thread_not_found"
-    assert result["thread_id"] == "tid"
-    assert "Do not retry" in result["note"]
+    assert str(raised.value) == "thread_not_found"
+    assert raised.value.details["thread_id"] == "tid"
+    assert "Do not retry" in raised.value.details["note"]
 
 
 @pytest.mark.parametrize(
@@ -1203,18 +1192,31 @@ async def test_approval_publication_handles_github_rejections(
         patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
         patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle_check,
     ):
-        result = await _publish_review_async(
-            owner="o",
-            repo="r",
-            pr_number=7,
-            head_sha="a" * 40,
-            token="t",
-            severity_threshold="medium",
-            is_re_review=False,
-            assessment=_assessment(),
-            state={"review_approval_policy": "Docs only"},
-        )
-    assert result["success"] is succeeds
+        if succeeds:
+            await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha="a" * 40,
+                token="t",
+                severity_threshold="medium",
+                is_re_review=False,
+                assessment=_assessment(),
+                state={"review_approval_policy": "Docs only"},
+            )
+        else:
+            with pytest.raises(ToolError, match="Failed to POST PR review"):
+                await _publish_review_async(
+                    owner="o",
+                    repo="r",
+                    pr_number=7,
+                    head_sha="a" * 40,
+                    token="t",
+                    severity_threshold="medium",
+                    is_re_review=False,
+                    assessment=_assessment(),
+                    state={"review_approval_policy": "Docs only"},
+                )
     payloads = [call.kwargs["json"] for call in post.await_args_list]
     assert [payload["event"] for payload in payloads] == (
         ["APPROVE", "COMMENT"] if retry else ["APPROVE"]
@@ -1233,7 +1235,6 @@ async def test_approval_publication_handles_github_rejections(
         settle_check.assert_awaited_once()
     else:
         assert saved is None
-        assert "Failed to POST PR review" in result["error"]
         metadata.assert_not_awaited()
         settle_check.assert_not_awaited()
 
@@ -1251,12 +1252,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
         _f(id="f_bad", severity="high", file="not_in_diff.py", start_line=99, end_line=99),
     ]
-    first_response = {
-        "_error": "HTTP 422: ...",
-        "_error_kind": "unresolved_anchor",
-        "_raw_errors": ["Path could not be resolved"],
-        "_status": 422,
-    }
+    first_response = ReviewPublishError("HTTP 422: unresolved anchor", kind="unresolved_anchor")
     retry_response = {"id": 9999}
     post_review = AsyncMock(side_effect=[first_response, retry_response])
 

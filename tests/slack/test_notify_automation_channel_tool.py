@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
+from agent.tools.errors import ToolError
 
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
 
@@ -78,12 +79,8 @@ async def test_notify_automation_channel_rejects_unauthorized_runs(
         lambda: {"configurable": {"source": "slack", "thread_id": "thread_1"}},
     )
 
-    result = await notification_tool.notify_automation_channel("Changed dependencies")
-
-    assert result == {
-        "success": False,
-        "error": "This tool is only available to scheduled runs",
-    }
+    with pytest.raises(ToolError, match="This tool is only available to scheduled runs"):
+        await notification_tool.notify_automation_channel("Changed dependencies")
 
 
 async def test_notify_automation_channel_rejects_nonconditional_schedule(
@@ -94,12 +91,10 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
         lambda: {"configurable": {"source": "schedule", "thread_id": "thread_1"}},
     )
 
-    result = await notification_tool.notify_automation_channel("Changed dependencies")
-
-    assert result == {
-        "success": False,
-        "error": "This schedule is not configured for action-only Slack notifications",
-    }
+    with pytest.raises(
+        ToolError, match="This schedule is not configured for action-only Slack notifications"
+    ):
+        await notification_tool.notify_automation_channel("Changed dependencies")
 
 
 async def test_notify_automation_channel_posts_to_trusted_destination(
@@ -158,14 +153,9 @@ async def test_notify_automation_channel_retries_only_thread_reply_after_failure
     monkeypatch.setattr(notification_tool, "post_slack_thread_reply_with_ts", fake_thread_post)
 
     content = "First\nSecond\nThird\nFourth\nFifth"
-    first = await notification_tool.notify_automation_channel(content, summary="Summary")
+    with pytest.raises(ToolError, match="Slack thread reply failed: rate_limited"):
+        await notification_tool.notify_automation_channel(content, summary="Summary")
     second = await notification_tool.notify_automation_channel(content, summary="Summary")
-
-    assert first == {
-        "success": False,
-        "error": "Slack thread reply failed: rate_limited",
-        "slack_error": "rate_limited",
-    }
     assert second == {"success": True, "message_ts": "1786504009.596419"}
     assert channel_post_count == 1
     assert thread_responses == []
@@ -215,11 +205,9 @@ async def test_notify_automation_channel_never_reposts_when_post_state_is_unknow
     fake_client.store.fail_put = lambda value: value["status"] == "posted"
 
     content = "First\nSecond\nThird\nFourth\nFifth"
-    first = await notification_tool.notify_automation_channel(content, summary="Summary")
-    second = await notification_tool.notify_automation_channel(content, summary="Summary")
-
-    assert first["success"] is False
-    assert first["message_ts"] == "1786504009.596419"
-    assert second["success"] is False
-    assert "not posting again" in second["error"]
+    with pytest.raises(ToolError, match="state could not be saved") as failed:
+        await notification_tool.notify_automation_channel(content, summary="Summary")
+    assert failed.value.details["message_ts"] == "1786504009.596419"
+    with pytest.raises(ToolError, match="not posting again"):
+        await notification_tool.notify_automation_channel(content, summary="Summary")
     assert post_count == 1

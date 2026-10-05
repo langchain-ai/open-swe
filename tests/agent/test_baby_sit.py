@@ -11,6 +11,7 @@ from agent import store as agent_store
 from agent.github.ci import RequiredCheck
 from agent.slack.client import GitHubPrRef
 from agent.source_context import SourceContext
+from agent.tools.errors import ToolError
 
 
 class _Store:
@@ -313,14 +314,15 @@ async def test_record_retry_caps_attempts_and_deduplicates_flake_alert(
         assert result["success"] is True
         assert result["retry_count"] == expected
 
-    blocked = await baby_sit.record_retry(
-        "acme/repo#7",
-        thread_id="thread-1",
-        head_sha="head-1",
-        check_name="tests",
-        evidence="runner timeout",
-    )
-    assert blocked == {"success": False, "error": "Flaky rerun limit reached"}
+    with pytest.raises(ToolError) as raised:
+        await baby_sit.record_retry(
+            "acme/repo#7",
+            thread_id="thread-1",
+            head_sha="head-1",
+            check_name="tests",
+            evidence="runner timeout",
+        )
+    assert str(raised.value) == "Flaky rerun limit reached"
     assert notify.await_count == 1
 
 

@@ -8,6 +8,7 @@ from agent.middleware.require_user_reply import current_reply_surface
 from agent.run_config import RunConfig
 from agent.slack.blocks import actions, block_payload, button, section
 from agent.slack.tools.reply import slack_reply
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 
 
@@ -17,14 +18,14 @@ async def request_service_connection(
 ) -> dict[str, object]:
     """Offer a personal connection without starting OAuth or reading credentials."""
     if service != "notion":
-        return {"success": False, "error": "Unsupported service"}
+        raise ToolError("Unsupported service")
     cfg = RunConfig.from_config(get_config())
     surface = current_reply_surface(state) if state is not None else cfg.source
     if surface != "slack":
         return {"success": True}
     target = dashboard_thread_url(cfg.thread_id or "")
     if target is None:
-        return {"success": False, "error": "Dashboard thread URL unavailable"}
+        raise ToolError("Dashboard thread URL unavailable")
     url = f"{dashboard_api_base_url()}/dashboard/api/notion/login?" + urlencode(
         {"redirect_to": target}
     )
@@ -35,7 +36,7 @@ async def request_service_connection(
         "chat on the web. This personal connection is only available in your private "
         "threads; it does not grant access in shared channels."
     )
-    result = await slack_reply(
+    await slack_reply(
         message,
         "final",
         blocks=block_payload(
@@ -46,6 +47,4 @@ async def request_service_connection(
         ),
         state=state,
     )
-    if result.get("success") is not True:
-        return {"success": False, "error": result.get("error", "Could not post connection card")}
     return {"success": True}

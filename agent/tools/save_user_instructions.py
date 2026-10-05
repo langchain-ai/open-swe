@@ -9,6 +9,7 @@ from agent.audit_logs.tools import audit_tool
 from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 from agent.tools.access import Policy, access, unchanged
+from agent.tools.errors import ToolError
 from agent.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
@@ -20,27 +21,19 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Implement the `save_user_instructions` tool."""
     login = await resolve_github_login(as_json_object(get_config()))
     if not login:
-        return {
-            "ok": False,
-            "error": (
-                "Could not resolve the triggering user's GitHub login, so there is no "
-                "profile to save instructions to. Ask the user to set them in the "
-                "dashboard Profile tab."
-            ),
-        }
+        raise ToolError(
+            "Could not resolve the triggering user's GitHub login, so there is no profile to save instructions to. Ask the user to set them in the dashboard Profile tab."
+        )
 
     text = (instructions or "").strip()
     if len(text) > MAX_USER_INSTRUCTIONS_CHARS:
-        return {
-            "ok": False,
-            "error": f"instructions exceed the {MAX_USER_INSTRUCTIONS_CHARS} character limit",
-        }
+        raise ToolError(f"instructions exceed the {MAX_USER_INSTRUCTIONS_CHARS} character limit")
 
     try:
         record = await set_user_instructions(login, text, updated_by="open-swe")
     except Exception as exc:
         logger.exception("Failed to save user instructions for %s", login)
-        return {"ok": False, "error": f"failed to save user instructions: {exc}"}
+        raise ToolError(f"failed to save user instructions: {exc}") from exc
 
     saved = record.get("instructions", text)
     return {

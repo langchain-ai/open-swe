@@ -18,6 +18,7 @@ from agent.review.findings import (
     update_finding_fields,
 )
 from agent.run_config import RunConfig
+from agent.tools.errors import ToolError
 from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -44,17 +45,16 @@ async def update_finding(
 ) -> dict[str, Any]:
     """Implement the `update_finding` tool."""
     if status is not None and status not in {"open", "resolved", "dismissed"}:
-        return {"success": False, "error": f"Invalid status: {status}"}
+        raise ToolError(f"Invalid status: {status}")
     if severity is not None and severity not in {"low", "medium", "high", "critical"}:
-        return {"success": False, "error": f"Invalid severity: {severity}"}
+        raise ToolError(f"Invalid severity: {severity}")
     if confidence is not None and confidence not in {"low", "medium", "high"}:
-        return {"success": False, "error": f"Invalid confidence: {confidence}"}
+        raise ToolError(f"Invalid confidence: {confidence}")
     normalized_note = _normalize_note(note)
     if status in {"resolved", "dismissed"} and normalized_note is None:
-        return {
-            "success": False,
-            "error": "Resolving or dismissing a finding requires a note with the message to post.",
-        }
+        raise ToolError(
+            "Resolving or dismissing a finding requires a note with the message to post."
+        )
 
     updates: dict[str, Any] = {}
     suggestion_dropped = False
@@ -67,7 +67,7 @@ async def update_finding(
     if title is not None:
         normalized_title = normalize_finding_title(title)
         if normalized_title == DEFAULT_FINDING_TITLE:
-            return {"success": False, "error": "title must be a non-empty generated headline"}
+            raise ToolError("title must be a non-empty generated headline")
         updates["title"] = normalized_title
     if description is not None:
         updates["description"] = description
@@ -87,17 +87,11 @@ async def update_finding(
 
     if not updates:
         if suggestion_dropped:
-            return {
-                "success": False,
-                "suggestion_dropped": True,
-                "error": (
-                    f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap "
-                    "and was rejected; no other fields were provided, so "
-                    "nothing was updated. Only include `suggestion` for "
-                    "small, obvious fixes."
-                ),
-            }
-        return {"success": False, "error": "No fields provided to update"}
+            raise ToolError(
+                f"Suggestion exceeded the {MAX_SUGGESTION_LINES}-line cap and was rejected; no other fields were provided, so nothing was updated. Only include `suggestion` for small, obvious fixes.",
+                details={"suggestion_dropped": True},
+            )
+        raise ToolError("No fields provided to update")
 
     thread_id = get_thread_id_from_runtime()
     try:
@@ -106,7 +100,7 @@ async def update_finding(
         return thread_missing_tool_result(exc)
     finding = next((item for item in findings if item.get("id") == finding_id), None)
     if finding is None:
-        return {"success": False, "error": f"No finding found with id {finding_id}"}
+        raise ToolError(f"No finding found with id {finding_id}")
 
     delegated_resolution = False
     can_resolve_github_thread = bool(cfg.repo) and cfg.pr_number is not None
@@ -120,12 +114,6 @@ async def update_finding(
         resolve_result = await resolve_finding_thread(
             finding_id, status=status, note=normalized_note or ""
         )
-        if not resolve_result.get("success"):
-            return {
-                "success": False,
-                "error": "GitHub review thread resolution failed; finding was left open.",
-                "github_resolution": resolve_result,
-            }
         delegated_resolution = True
         updates.pop("status", None)
         updates.pop("last_update_note", None)
@@ -158,7 +146,7 @@ async def update_finding(
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
     if updated is None:
-        return {"success": False, "error": f"No finding found with id {finding_id}"}
+        raise ToolError(f"No finding found with id {finding_id}")
     if status in {"resolved", "dismissed"} and not delegated_resolution:
         await emit_finding_status_outcome(updated, status, cfg=cfg, thread_id=thread_id)
     result = {"success": True, "finding": updated}

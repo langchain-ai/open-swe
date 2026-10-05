@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx2
 
+from agent.tools.errors import ToolError
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from agent.tools.sandbox_preference import replaced_by_curl
 from agent.utils.url_safety import (
@@ -39,22 +40,12 @@ async def http_request(
                 kwargs["content"] = data
 
         async with httpx2.AsyncClient(timeout=timeout) as client:
-            response, blocked = await _request_with_safe_redirects(
+            response = await _request_with_safe_redirects(
                 client,
                 method,
                 url,
                 **kwargs,
             )
-        if blocked:
-            return blocked
-        if response is None:
-            return {
-                "success": False,
-                "status_code": 0,
-                "headers": {},
-                "content": "Request completed without a response",
-                "url": url,
-            }
 
         try:
             content = response.json()
@@ -68,24 +59,17 @@ async def http_request(
             "content": content,
             "url": str(response.url),
         }
-        return await _offload_large_response(result)
+        result = await _offload_large_response(result)
+        if response.status_code >= 400:
+            raise ToolError(f"HTTP {response.status_code}", details=result)
+        return result
 
-    except httpx2.TimeoutException:
-        return {
-            "success": False,
-            "status_code": 0,
-            "headers": {},
-            "content": f"Request timed out after {timeout} seconds",
-            "url": url,
-        }
+    except httpx2.TimeoutException as exc:
+        raise ToolError(
+            f"Request timed out after {timeout} seconds", details={"status_code": 0, "url": url}
+        ) from exc
     except httpx2.HTTPError as e:
-        return {
-            "success": False,
-            "status_code": 0,
-            "headers": {},
-            "content": f"Request error: {e!s}",
-            "url": url,
-        }
+        raise ToolError(f"Request error: {e!s}", details={"status_code": 0, "url": url}) from e
 
 
 async def _offload_large_response(result: dict[str, Any]) -> dict[str, Any]:
@@ -97,16 +81,16 @@ async def _offload_large_response(result: dict[str, Any]) -> dict[str, Any]:
         response_path = await write_sandbox_output(
             "http-response", chunk_output_as_jsonl(serialized), "jsonl"
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to save oversized HTTP response to sandbox")
-        return {
-            "success": False,
-            "status_code": result["status_code"],
-            "headers": {},
-            "content": "Response exceeded the inline limit and could not be saved to the sandbox",
-            "url": result["url"],
-            "response_chars": len(serialized),
-        }
+        raise ToolError(
+            "Response exceeded the inline limit and could not be saved to the sandbox",
+            details={
+                "status_code": result["status_code"],
+                "url": result["url"],
+                "response_chars": len(serialized),
+            },
+        ) from exc
 
     return {
         "success": result["success"],

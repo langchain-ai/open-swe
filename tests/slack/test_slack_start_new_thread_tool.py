@@ -12,6 +12,7 @@ from agent.credential_scope import (
     private_credential_login,
 )
 from agent.slack.channels import SlackChannel
+from agent.tools.errors import ToolError
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
@@ -51,11 +52,9 @@ async def test_slack_start_new_thread_refuses_private_channel(
     post = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
-    result = await slack_breakout_tool.slack_start_new_thread(
-        "Title", "Do the thing.", channel_id="C2"
-    )
+    with pytest.raises(ToolError):
+        await slack_breakout_tool.slack_start_new_thread("Title", "Do the thing.", channel_id="C2")
 
-    assert result["success"] is False
     post.assert_not_awaited()
 
 
@@ -379,14 +378,15 @@ async def test_breakout_preserves_requester_and_credential_scope(
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
 
-    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
-
-    assert result["success"] is allowed
     if not allowed:
+        with pytest.raises(ToolError):
+            await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
         post.assert_not_awaited()
         create.assert_not_awaited()
         dispatch.assert_not_awaited()
         return
+    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+    assert result["success"] is True
     child_metadata = create.call_args.kwargs["metadata"]
     child_config = dispatch.call_args.args[2]
     child_config["thread_id"] = result["thread_id"]
@@ -454,12 +454,12 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 
-    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+    with pytest.raises(ToolError) as raised:
+        await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
 
-    assert result["success"] is False
-    assert result["error"] == "rate_limited: 30"
-    assert result["slack_error"] == "rate_limited: 30"
-    assert "30s" in result["hint"]
+    assert str(raised.value) == "rate_limited: 30"
+    assert raised.value.details["slack_error"] == "rate_limited: 30"
+    assert "30s" in raised.value.details["hint"]
     assert captured["detail_posts"] == 2
     assert captured["sleeps"] == [30]
     assert captured["dispatched"] is False

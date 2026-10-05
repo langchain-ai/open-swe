@@ -190,9 +190,9 @@ describe("download_files", () => {
 describe("dispatch", () => {
   test("rejects unknown methods", async () => {
     const executor = new LocalExecutor(await workspace())
-    expect(await executor.dispatch("teleport", {})).toEqual({
-      error: "unsupported method teleport",
-    })
+    await expect(executor.dispatch("teleport", {})).rejects.toThrow(
+      "unsupported method teleport"
+    )
   })
 
   test("wraps execute results in the wire shape", async () => {
@@ -207,11 +207,13 @@ describe("dispatch", () => {
 
   test("rejects malformed upload and download params", async () => {
     const executor = new LocalExecutor(await workspace())
-    expect(await executor.dispatch("upload_files", { files: [{}] })).toEqual({
-      error: "upload_files requires files with path and content_base64",
-    })
-    expect(await executor.dispatch("download_files", {})).toEqual({
-      error: "download_files requires a paths array",
-    })
+    await expect(
+      executor.dispatch("upload_files", { files: [{}] })
+    ).rejects.toThrow(
+      "upload_files requires files with path and content_base64"
+    )
+    await expect(executor.dispatch("download_files", {})).rejects.toThrow(
+      "download_files requires a paths array"
+    )
   })
 })

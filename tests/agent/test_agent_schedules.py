@@ -17,6 +17,7 @@ from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_w
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.schedules import store as schedules
 from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
+from agent.tools.errors import ToolError
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
@@ -315,14 +316,10 @@ async def test_launch_scheduled_agent_run_skips_when_repo_access_revoked(
 
     monkeypatch.setattr(schedules, "require_repo_access_for_workspace", deny_access)
 
-    result = await schedules.launch_scheduled_agent_run("sched_1")
+    with pytest.raises(ToolError, match="repository unavailable") as refused:
+        await schedules.launch_scheduled_agent_run("sched_1")
 
-    assert result == {
-        "status": "unauthorized",
-        "schedule_id": "sched_1",
-        "error": "repository unavailable to the workspace GitHub App",
-        "status_code": 403,
-    }
+    assert refused.value.details["status_code"] == 403
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
     assert stored["last_error"] == "repository unavailable to the workspace GitHub App"
@@ -550,11 +547,11 @@ async def test_an_automation_whose_workspace_was_deleted_does_not_run(
         schedules.SCHEDULES_NAMESPACE, "sched_1", _scheduled_record(workspace="gone")
     )
 
-    result = await schedules.launch_scheduled_agent_run("sched_1")
+    with pytest.raises(ToolError, match="gone"):
+        await schedules.launch_scheduled_agent_run("sched_1")
     with pytest.raises(HTTPException) as refused:
         await schedules.trigger_agent_schedule("sched_1")
 
-    assert result["status"] == "unknown_workspace"
     assert refused.value.status_code == 409
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]
@@ -620,16 +617,18 @@ async def test_system_schedule_can_run_without_user_credentials(
         record["created_by"] = creator
     await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, "sched_system", record)
 
-    result = await schedules.launch_scheduled_agent_run("sched_system")
-
     if github_status != 200:
-        assert result["status"] == "unauthorized"
-        assert result["status_code"] == {None: 503, 401: 502, 403: 403, 404: 404}[github_status]
-        assert "workspace GitHub App" in result["error"]
+        with pytest.raises(ToolError, match="workspace GitHub App") as refused:
+            await schedules.launch_scheduled_agent_run("sched_system")
+        assert (
+            refused.value.details["status_code"]
+            == {None: 503, 401: 502, 403: 403, 404: 404}[github_status]
+        )
         assert not fake_client.threads.created
         assert not fake_client.runs.created
         return
 
+    result = await schedules.launch_scheduled_agent_run("sched_system")
     assert result["status"] == "started"
     metadata = fake_client.threads.created[0]["metadata"]
     assert metadata["owner_type"] == "system"
@@ -704,17 +703,20 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         run_config["configurable"] = {**original, **patch}
         assert await server._admin_thread(run_config, None) is False
-        assert (await workspaces.list_workspaces())["ok"] is False
+        with pytest.raises(ToolError):
+            await workspaces.list_workspaces()
 
     run_config["configurable"] = original
     metadata = fake_client.threads.created[0]["metadata"]
     metadata["owner_type"] = "user"
     assert await server._admin_thread(run_config, None) is False
-    assert (await workspaces.list_workspaces())["ok"] is False
+    with pytest.raises(ToolError):
+        await workspaces.list_workspaces()
     metadata["owner_type"] = "system"
     monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
     assert await server._admin_thread(run_config, None) is False
-    assert (await workspaces.list_workspaces())["ok"] is False
+    with pytest.raises(ToolError):
+        await workspaces.list_workspaces()
 
 
 async def test_launch_admin_schedule_without_current_admin_access_is_ordinary_thread(
@@ -907,13 +909,8 @@ async def test_launch_scheduled_agent_run_stops_when_slack_post_fails(
 
     monkeypatch.setattr(schedules, "post_slack_top_level_message_with_ts", fake_post)
 
-    result = await schedules.launch_scheduled_agent_run("sched_1")
-
-    assert result == {
-        "status": "error",
-        "schedule_id": "sched_1",
-        "error": "Slack post failed: not_in_channel",
-    }
+    with pytest.raises(ToolError, match="Slack post failed: not_in_channel"):
+        await schedules.launch_scheduled_agent_run("sched_1")
     assert fake_client.threads.created == []
     assert fake_client.runs.created == []
     stored = fake_client.store.items[(tuple(schedules.SCHEDULE_RUN_STATE_NAMESPACE), "sched_1")]

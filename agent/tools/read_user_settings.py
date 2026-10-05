@@ -15,6 +15,7 @@ from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.user_instructions import get_user_instructions
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.tools.access import Policy, access
+from agent.tools.errors import ToolError
 from agent.users import User, UserPreferencesPatch
 from agent.utils.thread_participants import resolve_thread_participant_logins
 
@@ -71,12 +72,12 @@ async def read_user_settings() -> dict[str, Any]:
     """Implement the `read_user_settings` tool."""
     config = get_config()
     if not isinstance(config, Mapping):
-        return {"success": False, "error": "Missing run config"}
+        raise ToolError("Missing run config")
     try:
         login = await private_credential_login(config)
-    except Exception:
+    except Exception as exc:
         logger.exception("Could not authorize personal settings read")
-        return {"success": False, "error": "Could not verify the active thread requester"}
+        raise ToolError("Could not verify the active thread requester") from exc
     if login:
         participant = await _settings_for_login(login, own_settings=True)
         participant["preferences"] = await get_user_preferences(login)
@@ -87,7 +88,7 @@ async def read_user_settings() -> dict[str, Any]:
         }
     logins, unresolved_count, error = await resolve_thread_participant_logins(config)
     if error or not logins:
-        return {"success": False, "error": error or "No verified participants found"}
+        raise ToolError(error or "No verified participants found")
     participants = await asyncio.gather(*(_settings_for_login(login) for login in sorted(logins)))
     return {
         "success": True,

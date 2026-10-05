@@ -12,6 +12,7 @@ import httpx2
 
 from agent.github.checks import github_headers
 from agent.run_config import RunConfig
+from agent.tools.errors import ToolError
 
 _GITHUB_API = "https://api.github.com"
 _MAX_FILE_BYTES = 256 * 1024
@@ -31,12 +32,9 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
     """Implement the `read_repo_file` tool."""
     owner, repo, token, head_sha = _chat_repo_context()
     if not owner or not repo:
-        return {"success": False, "error": "repository context unavailable"}
+        raise ToolError("repository context unavailable")
     if not token:
-        return {
-            "success": False,
-            "error": "GitHub credentials unavailable; repository source was not read",
-        }
+        raise ToolError("GitHub credentials unavailable; repository source was not read")
 
     clean_path = path.strip().lstrip("/")
     resolved_ref = (ref or head_sha or "").strip()
@@ -47,12 +45,12 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
         async with httpx2.AsyncClient(timeout=30) as client:
             response = await client.get(url, headers=headers, params=params)
     except httpx2.HTTPError as exc:
-        return {"success": False, "error": f"GitHub request failed: {exc!s}"}
+        raise ToolError(f"GitHub request failed: {exc!s}") from exc
 
     if response.status_code == 404:
-        return {"success": False, "error": f"not found: {clean_path} @ {resolved_ref or 'default'}"}
+        raise ToolError(f"not found: {clean_path} @ {resolved_ref or 'default'}")
     if response.status_code >= 400:
-        return {"success": False, "error": f"GitHub returned {response.status_code}"}
+        raise ToolError(f"GitHub returned {response.status_code}")
 
     payload = response.json()
     if isinstance(payload, list):
@@ -68,11 +66,11 @@ async def read_repo_file(path: str, ref: str | None = None) -> dict[str, Any]:
         return {"success": True, "path": clean_path, "ref": resolved_ref, "entries": entries}
 
     if not isinstance(payload, dict) or payload.get("type") != "file":
-        return {"success": False, "error": f"unsupported content type for {clean_path}"}
+        raise ToolError(f"unsupported content type for {clean_path}")
 
     encoded = payload.get("content")
     if not isinstance(encoded, str):
-        return {"success": False, "error": "file content unavailable (too large for contents API)"}
+        raise ToolError("file content unavailable (too large for contents API)")
     raw = base64.b64decode(encoded)
     truncated = len(raw) > _MAX_FILE_BYTES
     text = raw[:_MAX_FILE_BYTES].decode("utf-8", errors="replace")

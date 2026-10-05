@@ -12,6 +12,7 @@ from agent.threads.plan_store import (
     PLAN_STATUS_SHARED,
     save_plan_content,
 )
+from agent.tools.errors import ToolError
 from agent.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
@@ -24,32 +25,29 @@ async def save_plan(
 ) -> dict[str, Any]:
     """Implement the `save_plan` tool."""
     if not isinstance(plan_file_path, str):
-        return {"success": False, "error": "plan_file_path must be a string"}
+        raise ToolError("plan_file_path must be a string")
     path = plan_file_path.strip()
     if not path:
-        return {"success": False, "error": "plan_file_path cannot be empty"}
+        raise ToolError("plan_file_path cannot be empty")
     if not _is_html_path(path):
-        return {
-            "success": False,
-            "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
-        }
+        raise ToolError(f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}")
 
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "no thread_id in run config"}
+        raise ToolError("no thread_id in run config")
 
     try:
         content = (await _read_plan_file(str(thread_id), path)).strip()
         if not content:
-            return {"success": False, "error": "plan file cannot be empty"}
+            raise ToolError("plan file cannot be empty")
         document = wrap_html_artifact(content, title=_title_from_path(path))
         await save_plan_content(
             str(thread_id), html=document, status=PLAN_STATUS_SHARED, plan_file_path=path
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("save_plan failed for thread %s", thread_id)
-        return {"success": False, "error": f"failed to save plan: {exc}"}
+        raise ToolError(f"failed to save plan: {exc}") from exc
     return {"success": True, "path": path}
 
 

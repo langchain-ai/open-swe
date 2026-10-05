@@ -7,6 +7,7 @@ from agent.review.diff import changed_files, materialize_review_diff, review_dif
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
 from agent.sandboxes.paths import resolve_sandbox_work_dir
+from agent.tools.errors import ToolError
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -18,29 +19,26 @@ async def fetch_review_diff() -> dict[str, Any]:
 
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "review thread unavailable"}
+        raise ToolError("review thread unavailable")
     repo_name = cfg.repo.name if cfg.repo else ""
     if not _REPO_NAME_RE.fullmatch(repo_name):
-        return {"success": False, "error": "review repository unavailable"}
+        raise ToolError("review repository unavailable")
 
-    try:
-        base_ref, head_ref, merge_base = review_diff_range(
-            base_sha=cfg.base_sha or "",
-            head_sha=cfg.head_sha or "",
-            last_reviewed_sha=cfg.last_reviewed_sha or "",
-            re_review=bool(cfg.re_review),
-        )
-        sandbox_backend = get_cached_sandbox_backend(thread_id)
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        materialized = await materialize_review_diff(
-            sandbox_backend,
-            work_dir=f"{work_dir}/{repo_name}",
-            base_ref=base_ref,
-            head_ref=head_ref,
-            merge_base=merge_base,
-        )
-    except (RuntimeError, ValueError) as exc:
-        return {"success": False, "error": str(exc)}
+    base_ref, head_ref, merge_base = review_diff_range(
+        base_sha=cfg.base_sha or "",
+        head_sha=cfg.head_sha or "",
+        last_reviewed_sha=cfg.last_reviewed_sha or "",
+        re_review=bool(cfg.re_review),
+    )
+    sandbox_backend = get_cached_sandbox_backend(thread_id)
+    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+    materialized = await materialize_review_diff(
+        sandbox_backend,
+        work_dir=f"{work_dir}/{repo_name}",
+        base_ref=base_ref,
+        head_ref=head_ref,
+        merge_base=merge_base,
+    )
 
     all_files = changed_files(materialized.diff_text)
     files = all_files[:_MAX_CHANGED_FILES]

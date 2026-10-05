@@ -33,6 +33,7 @@ from agent.slack.review_links import pr_review_links
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.threads.creation import create_lock_thread
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -1062,7 +1063,7 @@ async def upload_slack_thread_file(
                 return None, "invalid_upload_ticket"
             # Keep our host and redirect validation for the external byte transfer.
             async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-                uploaded, blocked = await request_with_safe_redirects(
+                uploaded = await request_with_safe_redirects(
                     http_client,
                     "POST",
                     upload_url,
@@ -1070,10 +1071,6 @@ async def upload_slack_thread_file(
                     headers={"Content-Type": "application/octet-stream"},
                     validate_url=_validate_slack_upload_url,
                 )
-                if blocked:
-                    return None, "unsafe_upload_url"
-                if uploaded is None:
-                    return None, "upload_failed"
                 uploaded.raise_for_status()
             await client.files_completeUploadExternal(
                 files=[{"id": file_id, "title": title or filename}],
@@ -1082,6 +1079,9 @@ async def upload_slack_thread_file(
                 initial_comment=initial_comment,
             )
             return file_id, None
+    except ToolError as exc:
+        logger.warning("Unsafe Slack upload URL", extra={"reason": str(exc)})
+        return None, "unsafe_upload_url"
     except (*SLACK_REQUEST_ERRORS, httpx2.HTTPError) as exc:
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
@@ -1152,17 +1152,13 @@ async def download_slack_file(url: str) -> bytes:
 
     try:
         async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-            response, blocked = await request_with_safe_redirects(
+            response = await request_with_safe_redirects(
                 http_client,
                 "GET",
                 url,
                 headers_for_url=auth_headers,
                 stream=True,
             )
-            if blocked:
-                raise SlackFileDownloadError("unsafe_download_url")
-            if response is None:
-                raise SlackFileDownloadError("download_failed")
             try:
                 response.raise_for_status()
                 try:
@@ -1179,6 +1175,8 @@ async def download_slack_file(url: str) -> bytes:
                 return bytes(content)
             finally:
                 await response.aclose()
+    except ToolError as exc:
+        raise SlackFileDownloadError("unsafe_download_url") from exc
     except (*SLACK_REQUEST_ERRORS, httpx2.HTTPError) as exc:
         logger.warning("Slack file download failed", extra={"slack_error": slack_error(exc)})
         raise SlackFileDownloadError("download_failed") from exc

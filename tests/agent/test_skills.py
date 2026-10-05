@@ -7,6 +7,7 @@ from agent.skill_store.store import (
     SkillCreate,
     create_skill,
 )
+from agent.tools.errors import ToolError
 from agent.tools.organization_skills import save_organization_skill
 
 
@@ -48,6 +49,5 @@ async def test_save_organization_skill_requires_admin(monkeypatch: pytest.Monkey
         "agent.run_config.get_config",
         return_value={"configurable": {"github_login": "someone-else"}},
     ):
-        result = await save_organization_skill("deslop", "Minimize diffs")
-
-    assert result["ok"] is False
+        with pytest.raises(ToolError):
+            await save_organization_skill("deslop", "Minimize diffs")

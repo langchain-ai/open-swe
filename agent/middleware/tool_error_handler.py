@@ -33,6 +33,7 @@ from agent.middleware.sandbox_circuit_breaker import (
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.run_config import RunConfig
 from agent.sandboxes.retry import is_transient_sandbox_error
+from agent.tools.errors import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,9 @@ def _extract_tool_name(request: ToolCallRequest | None) -> str | None:
     return None
 
 
-def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> dict[str, str]:
-    data: dict[str, str] = {
+def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> dict[str, object]:
+    data: dict[str, object] = {
+        **(e.details if isinstance(e, ToolError) else {}),
         "error": str(e),
         "error_type": e.__class__.__name__,
         "status": "error",

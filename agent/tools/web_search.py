@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from agent.config import ENV
+from agent.tools.errors import ToolError
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 
 logger = logging.getLogger(__name__)
@@ -19,10 +20,9 @@ async def web_search(
     api_key = ENV.EXA_API_KEY.optional()
     if not api_key:
         logger.warning("exa_api_key_missing")
-        return {
-            "success": False,
-            "error": "EXA_API_KEY is not configured. Please add it to your environment variables.",
-        }
+        raise ToolError(
+            "EXA_API_KEY is not configured. Please add it to your environment variables."
+        )
 
     async def _search() -> dict[str, Any]:
         from exa_py import Exa  # deferred: heavy import
@@ -69,13 +69,7 @@ async def web_search(
         return await _search()
     except Exception as e:
         logger.exception("web_search failed")
-        return {
-            "success": False,
-            "results_path": None,
-            "results": None,
-            "result_chars": 0,
-            "error": f"{type(e).__name__}: {e}",
-        }
+        raise ToolError(f"{type(e).__name__}: {e}", details={"result_chars": 0}) from e
 
 
 def _bounded_inline_results(results: str) -> str:

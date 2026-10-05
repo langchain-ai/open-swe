@@ -1,7 +1,7 @@
 """Tools that ask people in Slack to review a pull request, assign a reviewer, or dismiss the ask."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import HTTPException
 from langgraph.config import get_config
@@ -14,12 +14,13 @@ from agent.human_review.standard import Origin, assign, request_review, start_au
 from agent.run_config import RunConfig
 from agent.slack.cards import run_slack_location
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.tools.errors import ToolError
 from agent.tools.manage_baby_sit import dispatch_run_config
 from agent.users import User
 
 
-def _failure(error: str) -> dict[str, Any]:
-    return {"success": False, "error": error}
+def _failure(error: str) -> NoReturn:
+    raise ToolError(error)
 
 
 async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None:
@@ -65,8 +66,6 @@ async def request_human_review(
         slack_thread_ts=own_thread,
     )
     result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
-    if not result.success:
-        return _failure(result.error)
     if result.summary_updated:
         posted = "The open review card now shows your new inline_summary."
     elif result.reused:
@@ -117,9 +116,7 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    result = await assign(request, github_login.strip().lstrip("@"), reason)
-    if not result.success:
-        return _failure(result.error)
+    await assign(request, github_login.strip().lstrip("@"), reason)
     return {
         "success": True,
         "next": "They are tagged on the card and messaged directly. Nothing else to post.",

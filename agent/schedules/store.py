@@ -37,6 +37,7 @@ from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_lock_thread, create_thread
+from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -748,7 +749,7 @@ async def _launch_agent_schedule_record(
         # and connections, which nobody chose for it.
         error = f"workspace {workspace!r} no longer exists"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-        return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
+        raise ToolError(error, details={"status": "unknown_workspace", "schedule_id": schedule_id})
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
@@ -763,19 +764,21 @@ async def _launch_agent_schedule_record(
                     "last_error_at": now_iso(),
                 },
             )
-            return {
-                "status": "unauthorized",
-                "schedule_id": schedule_id,
-                "error": exc.detail,
-                "status_code": exc.status_code,
-            }
+            raise ToolError(
+                exc.detail,
+                details={
+                    "status": "unauthorized",
+                    "schedule_id": schedule_id,
+                    "status_code": exc.status_code,
+                },
+            ) from exc
 
     if dm_user_id := _slack_dm_user_id(record):
         dm_channel_id = await open_dm(dm_user_id)
         if not dm_channel_id:
             error = "Slack DM could not be opened"
             await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-            return {"status": "error", "schedule_id": schedule_id, "error": error}
+            raise ToolError(error, details={"status": "error", "schedule_id": schedule_id})
         record = {**record, "slack_channel_id": dm_channel_id, "slack_dm_user_id": dm_user_id}
 
     client = langgraph_client()
@@ -801,7 +804,7 @@ async def _launch_agent_schedule_record(
                 record,
                 {"last_error": error, "last_error_at": now_iso()},
             )
-            return {"status": "error", "schedule_id": schedule_id, "error": error}
+            raise ToolError(error, details={"status": "error", "schedule_id": schedule_id})
         slack_thread = {
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
@@ -1066,16 +1069,15 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
     _assert_schedule_exists(record)
     assert record is not None
 
-    result = await _launch_agent_schedule_record(record, test_run=True)
-    status = result.get("status")
-    if status == "started":
-        return result
-    if status == "unauthorized":
-        status_code = result.get("status_code")
-        raise HTTPException(
-            status_code if isinstance(status_code, int) else 403,
-            result.get("error") or "automation repository unavailable",
-        )
-    if status == "unknown_workspace":
-        raise HTTPException(409, result.get("error") or "automation workspace no longer exists")
-    raise HTTPException(502, result.get("error") or "failed to start automation test")
+    try:
+        return await _launch_agent_schedule_record(record, test_run=True)
+    except ToolError as exc:
+        status = exc.details.get("status")
+        status_code = exc.details.get("status_code")
+        if status == "unauthorized":
+            raise HTTPException(
+                status_code if isinstance(status_code, int) else 403, str(exc)
+            ) from exc
+        if status == "unknown_workspace":
+            raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(502, str(exc)) from exc

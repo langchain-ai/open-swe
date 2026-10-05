@@ -48,6 +48,7 @@ from agent.review.findings import (
 )
 from agent.review.publish import (
     ReviewAssessment,
+    ReviewPublishError,
     approval_allowed_for_head,
     clear_review_started_comment,
     fetch_pr_review_threads,
@@ -66,6 +67,7 @@ from agent.review.publish import (
 from agent.review.reconcile import reconcile_findings_with_review_threads
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_review_url
 from agent.utils.langsmith import get_langsmith_trace_url
 
@@ -87,15 +89,11 @@ async def publish_review(
 ) -> dict[str, Any]:
     """Implement the `publish_review` tool."""
     if _has_sibling_tool_calls(state):
-        return {
-            "success": False,
-            "error": (
-                "publish_review must be the only tool call in its turn. Wait for your other "
-                "tool calls to return, then call publish_review alone. Nothing was published."
-            ),
-        }
+        raise ToolError(
+            "publish_review must be the only tool call in its turn. Wait for your other tool calls to return, then call publish_review alone. Nothing was published."
+        )
     if severity_threshold not in {"low", "medium", "high", "critical"}:
-        return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
+        raise ToolError(f"Invalid severity_threshold: {severity_threshold}")
 
     config = get_config()
     cfg = RunConfig.from_config(config)
@@ -104,15 +102,14 @@ async def publish_review(
     is_re_review = bool(cfg.re_review)
 
     if not cfg.repo:
-        return {"success": False, "error": "Missing repo info in run config"}
+        raise ToolError("Missing repo info in run config")
     if pr_number is None:
-        return {"success": False, "error": "Missing pr_number in run config"}
+        raise ToolError("Missing pr_number in run config")
     if not head_sha:
-        return {"success": False, "error": "Missing head_sha in run config"}
+        raise ToolError("Missing head_sha in run config")
 
     try:
-        if ranking_error := await _record_ranking(ranking, cfg):
-            return ranking_error
+        await _record_ranking(ranking, cfg)
     except ReviewerThreadMissingError as exc:
         return thread_missing_tool_result(exc)
 
@@ -129,7 +126,7 @@ async def publish_review(
 
     token = await resolve_thread_github_token()
     if not token:
-        return {"success": False, "error": "No GitHub token available"}
+        raise ToolError("No GitHub token available")
 
     try:
         return await _publish_review_async(
@@ -151,14 +148,10 @@ async def publish_review(
         thread_id = get_thread_id_from_runtime()
         if thread_id:
             await invalidate_cached_github_token(thread_id)
-        return {
-            "success": False,
-            "error": (
-                "GitHub returned 401 — the cached OAuth token is invalid or revoked. "
-                "Please re-authenticate and trigger the review again."
-            ),
-            "auth_error": str(exc),
-        }
+        raise ToolError(
+            "GitHub returned 401 — the cached OAuth token is invalid or revoked. Please re-authenticate and trigger the review again.",
+            details={"auth_error": str(exc)},
+        ) from exc
 
 
 def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
@@ -166,11 +159,8 @@ def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
     return bool(messages) and len(getattr(messages[-1], "tool_calls", None) or []) > 1
 
 
-async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
-    """Store the reviewer's best-first order over the findings this publish would post.
-
-    Returns a tool error instead when ``ranking`` is not exactly that set, once each.
-    """
+async def _record_ranking(ranking: list[str], cfg: RunConfig) -> None:
+    """Store the ranking, rejecting missing, duplicate, or unknown findings."""
     thread_id = get_thread_id_from_runtime()
     findings = await list_findings_async(thread_id)
     head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
@@ -190,17 +180,15 @@ async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] 
     unknown = [finding_id for finding_id in ranking if finding_id not in known]
     missing = [finding_id for finding_id in expected if finding_id not in ranking]
     if duplicates or unknown or missing:
-        return {
-            "success": False,
-            "error": (
-                "ranking must list every finding in expected_finding_ids exactly once, "
-                "most important first. Nothing was published."
-            ),
-            "expected_finding_ids": expected,
-            "missing": missing,
-            "unknown": unknown,
-            "duplicates": duplicates,
-        }
+        raise ToolError(
+            "ranking must list every finding in expected_finding_ids exactly once, most important first. Nothing was published.",
+            details={
+                "expected_finding_ids": expected,
+                "missing": missing,
+                "unknown": unknown,
+                "duplicates": duplicates,
+            },
+        )
 
     expected_ids = set(expected)
     ranks = {
@@ -312,10 +300,7 @@ async def _publish_review_async(
     # reviewed, not the stale one this run was created for.
     head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
     if assessment is not None and assessment.head_sha != head_sha:
-        return {
-            "success": False,
-            "error": "Assessment commit differs from the current review head. Review it again.",
-        }
+        raise ToolError("Assessment commit differs from the current review head. Review it again.")
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -443,8 +428,8 @@ async def _publish_review_async(
             owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
         )
     )
-    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
-    for _ in range(2):
+    unresolvable_findings: list[str] = []
+    for _ in range(3):
         review_body = render_review_body(
             pr_number=pr_number,
             surfaced_count=len(inline_comments),
@@ -455,107 +440,50 @@ async def _publish_review_async(
             approved=approved,
             dry_run=dry_run,
         )
-
-        review_response = await post_pull_request_review(
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            head_sha=head_sha,
-            body=review_body,
-            inline_comments=inline_comments,
-            token=token,
-            event="APPROVE" if approved else "COMMENT",
-        )
-        if (
-            approved
-            and isinstance(review_response, dict)
-            and review_response.get("_error_kind") == "self_approval"
-        ):
-            approved = False
-        else:
-            break
-    # If GitHub rejected the batch because one or more inline comments anchor
-    # to a file/line that's not in the PR diff, drop just those findings and
-    # retry once. Returning the bare 422 to the agent only invites it to
-    # retry publish_review with byte-identical args until findings drain.
-    unresolvable_findings: list[str] = []
-    if (
-        isinstance(review_response, dict)
-        and review_response.get("_error_kind") == "unresolved_anchor"
-    ):
-        valid_with_payload, dropped_ids = await _filter_against_pr_diff(
-            eligible_with_payload,
-            owner=owner,
-            repo=repo,
-            pr_number=pr_number,
-            token=token,
-            state=state,
-        )
-        if dropped_ids and valid_with_payload:
-            retry_inline = [p for _, p in valid_with_payload]
-            retry_body = render_review_body(
-                pr_number=pr_number,
-                surfaced_count=len(retry_inline),
-                trace_url=review_trace_url,
-                ui_url=review_ui_url,
-                additional_findings_count=additional_findings_count,
-            )
-            retry_response = await post_pull_request_review(
+        try:
+            review_response = await post_pull_request_review(
                 owner=owner,
                 repo=repo,
                 pr_number=pr_number,
                 head_sha=head_sha,
-                body=retry_body,
-                inline_comments=retry_inline,
+                body=review_body,
+                inline_comments=inline_comments,
                 token=token,
+                event="APPROVE" if approved else "COMMENT",
             )
-            if isinstance(retry_response, dict) and "_error" not in retry_response:
-                review_response = retry_response
-                inline_comments = retry_inline
-                eligible_with_payload = valid_with_payload
-                unresolvable_findings = dropped_ids
-            else:
-                retry_error = (
-                    retry_response.get("_error", "unknown error")
-                    if isinstance(retry_response, dict)
-                    else "no response"
+            break
+        except ReviewPublishError as exc:
+            if approved and exc.kind == "self_approval":
+                approved = False
+                continue
+            if exc.kind == "unresolved_anchor" and not unresolvable_findings:
+                valid_with_payload, dropped_ids = await _filter_against_pr_diff(
+                    eligible_with_payload,
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    token=token,
+                    state=state,
                 )
-                return {
-                    "success": False,
-                    "error": f"Failed to POST PR review: {retry_error}",
-                    "unresolvable_findings": dropped_ids,
-                    "hint": (
-                        "Call update_finding(status='resolved') on these ids "
-                        "or fix their file/line before retrying."
-                    ),
-                }
-        else:
-            # Either nothing to drop (no diff_line_set available, so we can't
-            # tell which findings are bad) or everything would be dropped.
-            # Either way, do not retry — surface the structural signal so the
-            # agent stops retrying with the same args.
-            return {
-                "success": False,
-                "error": f"Failed to POST PR review: {review_response['_error']}",
-                "unresolvable_findings": dropped_ids,
-                "hint": (
-                    "Call update_finding(status='resolved') on these ids "
-                    "or fix their file/line before retrying."
-                ),
-            }
-    if isinstance(review_response, dict) and "_error" in review_response:
-        return {
-            "success": False,
-            "error": f"Failed to POST PR review: {review_response['_error']}",
-        }
-    if review_response is None:
-        # Defensive guard: with the upstream change this should never happen,
-        # but keep a clear signal if it does so the agent doesn't retry blindly.
-        return {
-            "success": False,
-            "error": "Failed to POST PR review: no response from GitHub",
-        }
-    review_id = review_response.get("id") if isinstance(review_response, dict) else None
+                unresolvable_findings = dropped_ids
+                if dropped_ids and valid_with_payload:
+                    inline_comments = [payload for _, payload in valid_with_payload]
+                    eligible_with_payload = valid_with_payload
+                    assessment = None
+                    approved = False
+                    continue
+            raise ToolError(
+                f"Failed to POST PR review: {exc}",
+                details={
+                    "unresolvable_findings": unresolvable_findings,
+                    "hint": "Fix unresolved file/line anchors before retrying."
+                    if exc.kind == "unresolved_anchor" or unresolvable_findings
+                    else "Report the failure before retrying.",
+                },
+            ) from exc
+    else:
+        raise ToolError("Failed to POST PR review after correcting GitHub rejections")
+    review_id = review_response.get("id")
 
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.

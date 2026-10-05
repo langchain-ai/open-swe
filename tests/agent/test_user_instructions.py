@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.tools.errors import ToolError
 from agent.tools.save_user_instructions import save_user_instructions
 
 
@@ -15,9 +16,9 @@ async def test_save_user_instructions_requires_login(
         "agent.tools.save_user_instructions.get_config",
         return_value={"configurable": {}},
     ):
-        result = await save_user_instructions("Always run tests.")
-    assert result["ok"] is False
-    assert "GitHub login" in result["error"]
+        with pytest.raises(ToolError) as raised:
+            await save_user_instructions("Always run tests.")
+    assert "GitHub login" in str(raised.value)
 
 
 @pytest.mark.asyncio

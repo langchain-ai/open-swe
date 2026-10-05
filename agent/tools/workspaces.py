@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.tools.access import Policy, access, ack
 from agent.tools.admin_gate import configurable as _configurable
+from agent.tools.errors import ToolError
 from agent.tools.mcp_exposure import expose_mcp
 from agent.workspaces import refresh, store
 
@@ -56,22 +57,26 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
     """Enqueue a refresh and describe the handle, or say why it cannot start."""
     record = await store.WORKSPACES.get(slug)
     if record is None:
-        return {
-            "status": "error",
-            "error": f"no workspace named {name!r}; publish_workspace creates one",
-        }
+        raise ToolError(
+            f"no workspace named {name!r}; publish_workspace creates one",
+            details={"status": "error"},
+        )
     if not record.setup_script:
-        return {"status": "error", "error": f"workspace {name!r} has no setup_script to run"}
+        raise ToolError(
+            f"workspace {name!r} has no setup_script to run", details={"status": "error"}
+        )
     if refresh.is_refresh_in_flight(record):
-        return {
-            "status": "error",
-            "error": f"a refresh of {name!r} is already running",
-            "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
-        }
+        raise ToolError(
+            f"a refresh of {name!r} is already running",
+            details={
+                "status": "error",
+                "task_id": refresh.refresh_task_id(record.refresh_run_id or ""),
+            },
+        )
 
     run_id = await refresh.start_refresh_run(slug)
     if run_id is None:
-        return {"status": "error", "error": "could not start the refresh job"}
+        raise ToolError("could not start the refresh job", details={"status": "error"})
     return {"status": "started", "task_id": refresh.refresh_task_id(run_id)}
 
 
@@ -119,66 +124,60 @@ async def publish_workspace(
         "fs_capacity_bytes": fs_capacity_bytes,
     }
     if clear_sizing and any(value is not None for value in sizing.values()):
-        return {"ok": False, "error": "clear_sizing cannot be combined with sizing values"}
+        raise ToolError("clear_sizing cannot be combined with sizing values")
     if clear_create_params and create_params is not None:
-        return {"ok": False, "error": "clear_create_params cannot be combined with create_params"}
+        raise ToolError("clear_create_params cannot be combined with create_params")
     if clear_base_snapshot_id and base_snapshot_id is not None:
-        return {
-            "ok": False,
-            "error": "clear_base_snapshot_id cannot be combined with base_snapshot_id",
-        }
+        raise ToolError("clear_base_snapshot_id cannot be combined with base_snapshot_id")
     thread_id = _configurable().thread_id
     if not thread_id:
-        return {"ok": False, "error": "no thread_id in the current run config"}
+        raise ToolError("no thread_id in the current run config")
 
     # Validate the whole definition before capturing, so a bad name or script
     # limit is refused in milliseconds rather than after minutes of capture.
-    try:
-        slug = store.slugify(name)
-        existing = await store.WORKSPACES.get(slug)
-        definition: store.WorkspaceCreate | store.WorkspaceUpdate
-        if existing is None:
-            definition = store.WorkspaceCreate(
-                name=name,
-                prompt=prompt,
-                setup_script=setup_script or "",
-                update_script=update_script or "",
-                base_snapshot_id=base_snapshot_id,
-                snapshot_name=snapshot_name,
-                repos=repos or [],
-                mem_bytes=mem_bytes,
-                vcpus=vcpus,
-                fs_capacity_bytes=fs_capacity_bytes,
-                create_params=create_params or {},
-            )
-        else:
-            update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
-            update_values.update(
-                dict.fromkeys(sizing)
-                if clear_sizing
-                else {field: value for field, value in sizing.items() if value is not None}
-            )
-            if create_params is not None:
-                update_values["create_params"] = create_params
-            elif clear_create_params:
-                update_values["create_params"] = {}
-            if setup_script is not None:
-                update_values["setup_script"] = setup_script
-            if update_script is not None:
-                update_values["update_script"] = update_script
-            if snapshot_name is not None:
-                update_values["snapshot_name"] = snapshot_name
-            if base_snapshot_id is not None:
-                update_values["base_snapshot_id"] = base_snapshot_id
-            elif clear_base_snapshot_id:
-                update_values["base_snapshot_id"] = None
-            definition = store.WorkspaceUpdate(**update_values)
-        # Repository ownership and the min-one-repo rule are checked here as
-        # well as on the write: a capture takes minutes, and a definition that
-        # can never be saved should be refused before it starts.
-        await store.WORKSPACES.assert_publishable(slug, definition)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    slug = store.slugify(name)
+    existing = await store.WORKSPACES.get(slug)
+    definition: store.WorkspaceCreate | store.WorkspaceUpdate
+    if existing is None:
+        definition = store.WorkspaceCreate(
+            name=name,
+            prompt=prompt,
+            setup_script=setup_script or "",
+            update_script=update_script or "",
+            base_snapshot_id=base_snapshot_id,
+            snapshot_name=snapshot_name,
+            repos=repos or [],
+            mem_bytes=mem_bytes,
+            vcpus=vcpus,
+            fs_capacity_bytes=fs_capacity_bytes,
+            create_params=create_params or {},
+        )
+    else:
+        update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
+        update_values.update(
+            dict.fromkeys(sizing)
+            if clear_sizing
+            else {field: value for field, value in sizing.items() if value is not None}
+        )
+        if create_params is not None:
+            update_values["create_params"] = create_params
+        elif clear_create_params:
+            update_values["create_params"] = {}
+        if setup_script is not None:
+            update_values["setup_script"] = setup_script
+        if update_script is not None:
+            update_values["update_script"] = update_script
+        if snapshot_name is not None:
+            update_values["snapshot_name"] = snapshot_name
+        if base_snapshot_id is not None:
+            update_values["base_snapshot_id"] = base_snapshot_id
+        elif clear_base_snapshot_id:
+            update_values["base_snapshot_id"] = None
+        definition = store.WorkspaceUpdate(**update_values)
+    # Repository ownership and the min-one-repo rule are checked here as
+    # well as on the write: a capture takes minutes, and a definition that
+    # can never be saved should be refused before it starts.
+    await store.WORKSPACES.assert_publishable(slug, definition)
 
     published_name = snapshot_name or (
         existing.published_snapshot_name
@@ -196,7 +195,7 @@ async def publish_workspace(
         )
     except Exception as exc:
         logger.exception("Failed to capture sandbox for workspace", extra={"workspace": slug})
-        return {"ok": False, "error": f"snapshot capture failed: {exc}"}
+        raise ToolError(f"snapshot capture failed: {exc}") from exc
 
     # Definition and image pointer land in one write, so a failure here means
     # nothing was written — and the image nothing points at is discarded.
@@ -213,7 +212,7 @@ async def publish_workspace(
     except Exception as exc:
         logger.exception("Failed to record workspace after capture", extra={"workspace": slug})
         await store.discard_unreferenced_snapshot(slug, snapshot_id)
-        return {"ok": False, "error": f"failed to record the workspace: {exc}"}
+        raise ToolError(f"failed to record the workspace: {exc}") from exc
 
     await store.retire_superseded_snapshot(
         slug, existing.snapshot_id if existing is not None else None, snapshot_id
@@ -230,7 +229,7 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
     try:
         slug = store.slugify(name)
     except ValueError as exc:
-        return {"status": "error", "error": str(exc)}
+        raise ToolError(str(exc), details={"status": "error"}) from exc
     return await _start_refresh(slug, name)
 
 
@@ -238,19 +237,16 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
 @access(_WRITE)
 async def delete_workspace(name: str) -> dict[str, Any]:
     """Implement the `delete_workspace` tool."""
-    try:
-        slug = store.slugify(name)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    slug = store.slugify(name)
     try:
         deleted = await store.WORKSPACES.remove(slug)
-    except store.DefaultWorkspaceDeletionError as exc:
-        return {"ok": False, "error": str(exc)}
+    except store.DefaultWorkspaceDeletionError:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete workspace", extra={"workspace": slug})
-        return {"ok": False, "error": f"failed to delete workspace: {exc}"}
+        raise ToolError(f"failed to delete workspace: {exc}") from exc
     if not deleted:
-        return {"ok": False, "error": f"no workspace named {name!r}"}
+        raise ToolError(f"no workspace named {name!r}")
     return {"ok": True, "deleted": True}
 
 
@@ -262,20 +258,17 @@ async def configure_repository(
     may_start_threads: bool | None = None,
 ) -> dict[str, Any]:
     """Implement the `configure_repository` tool."""
-    try:
-        slug = store.slugify(workspace)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    slug = store.slugify(workspace)
     try:
         settings = await store.WORKSPACES.configure_repository(
             slug, repo, may_start_threads=may_start_threads
         )
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+    except ValueError:
+        raise
     except Exception as exc:
         logger.exception(
             "Failed to configure repository",
             extra={"workspace": slug, "repository": repo},
         )
-        return {"ok": False, "error": f"failed to configure repository: {exc}"}
+        raise ToolError(f"failed to configure repository: {exc}") from exc
     return {"ok": True, "workspace": slug, "repository": settings.model_dump()}

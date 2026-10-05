@@ -14,6 +14,7 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge
 from agent.store import TypedStore, now_iso
+from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -82,61 +83,46 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
     """Implement the `notify_automation_channel` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.source != "schedule":
-        return {"success": False, "error": "This tool is only available to scheduled runs"}
+        raise ToolError("This tool is only available to scheduled runs")
 
     notification = cfg.automation_slack_notification
     if notification is None or notification.mode != "on_action":
-        return {
-            "success": False,
-            "error": "This schedule is not configured for action-only Slack notifications",
-        }
+        raise ToolError("This schedule is not configured for action-only Slack notifications")
 
     channel_id = notification.channel_id
     if not channel_id:
-        return {"success": False, "error": "Missing configured automation Slack channel"}
+        raise ToolError("Missing configured automation Slack channel")
 
     schedule_id = cfg.schedule_id
     if not schedule_id or notification.schedule_id != schedule_id:
-        return {"success": False, "error": "Invalid automation notification configuration"}
+        raise ToolError("Invalid automation notification configuration")
 
     thread_id = cfg.thread_id
     if not thread_id:
-        return {"success": False, "error": "Missing scheduled thread ID"}
+        raise ToolError("Missing scheduled thread ID")
 
     clean_content = content.strip()
     clean_summary = summary.strip()
     if not clean_content:
-        return {"success": False, "error": "Content cannot be empty"}
+        raise ToolError("Content cannot be empty")
     if len(clean_content) > _MAX_MESSAGE_CHARS:
-        return {
-            "success": False,
-            "error": f"Content must be at most {_MAX_MESSAGE_CHARS} characters",
-        }
+        raise ToolError(f"Content must be at most {_MAX_MESSAGE_CHARS} characters")
     if len(clean_content.splitlines()) > _MAX_TOP_LEVEL_LINES and not clean_summary:
-        return {
-            "success": False,
-            "error": f"Summary is required when content exceeds {_MAX_TOP_LEVEL_LINES} lines",
-        }
+        raise ToolError(f"Summary is required when content exceeds {_MAX_TOP_LEVEL_LINES} lines")
     if clean_summary and len(clean_summary.splitlines()) > _MAX_TOP_LEVEL_LINES:
-        return {
-            "success": False,
-            "error": f"Summary must be at most {_MAX_TOP_LEVEL_LINES} lines",
-        }
+        raise ToolError(f"Summary must be at most {_MAX_TOP_LEVEL_LINES} lines")
     if len(clean_summary) > _MAX_MESSAGE_CHARS:
-        return {
-            "success": False,
-            "error": f"Summary must be at most {_MAX_MESSAGE_CHARS} characters",
-        }
+        raise ToolError(f"Summary must be at most {_MAX_MESSAGE_CHARS} characters")
 
     store = _notification_store()
     async with _notification_lock(thread_id):
         try:
             existing = await store.get(thread_id)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failed to check automation notification", extra={"thread_id": thread_id}
             )
-            return {"success": False, "error": "Could not check the Slack notification state"}
+            raise ToolError("Could not check the Slack notification state") from exc
 
         if existing is not None and existing.status == "delivered":
             if existing.notified_at:
@@ -151,13 +137,9 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
             logger.error(
                 "Automation notification outcome is unknown", extra={"thread_id": thread_id}
             )
-            return {
-                "success": False,
-                "error": (
-                    "A previous Slack notification for this thread did not record its "
-                    "outcome; not posting again because it may already be in the channel"
-                ),
-            }
+            raise ToolError(
+                "A previous Slack notification for this thread did not record its outcome; not posting again because it may already be in the channel"
+            )
 
         if existing is None:
             record = AutomationNotification(
@@ -165,11 +147,11 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
             )
             try:
                 await store.put(thread_id, record)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Failed to reserve automation notification", extra={"thread_id": thread_id}
                 )
-                return {"success": False, "error": "Could not reserve the Slack notification"}
+                raise ToolError("Could not reserve the Slack notification") from exc
 
             title = (notification.schedule_name or "").strip()
             channel_message = clean_summary or clean_content
@@ -182,36 +164,31 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                     unfurl_links=False,
                     unfurl_media=False,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Automation Slack post raised", extra={"thread_id": thread_id})
                 await _release_reservation(thread_id)
-                return {"success": False, "error": "Slack post failed unexpectedly"}
+                raise ToolError("Slack post failed unexpectedly") from exc
             if posted_ts is None:
                 await _release_reservation(thread_id)
-                return {
-                    "success": False,
-                    "error": f"Slack post failed: {slack_error or 'unknown error'}",
-                    "slack_error": slack_error,
-                }
+                raise ToolError(
+                    f"Slack post failed: {slack_error or 'unknown error'}",
+                    details={"slack_error": slack_error},
+                )
 
             if cfg.automation_dm_user_id:
                 await note_for_concierge(cfg.automation_dm_user_id, channel_id, text)
             record = record.model_copy(update={"status": "posted", "message_ts": posted_ts})
             try:
                 await store.put(thread_id, record)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Failed to record the automation Slack post",
                     extra={"thread_id": thread_id},
                 )
-                return {
-                    "success": False,
-                    "error": (
-                        "Slack post succeeded but its state could not be saved; this thread "
-                        "will not notify again"
-                    ),
-                    "message_ts": posted_ts,
-                }
+                raise ToolError(
+                    "Slack post succeeded but its state could not be saved; this thread will not notify again",
+                    details={"message_ts": posted_ts},
+                ) from exc
         else:
             record = existing
 
@@ -225,15 +202,14 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                     unfurl_links=False,
                     unfurl_media=False,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Automation Slack reply raised", extra={"thread_id": thread_id})
-                return {"success": False, "error": "Slack thread reply failed unexpectedly"}
+                raise ToolError("Slack thread reply failed unexpectedly") from exc
             if reply_ts is None:
-                return {
-                    "success": False,
-                    "error": f"Slack thread reply failed: {slack_error or 'unknown error'}",
-                    "slack_error": slack_error,
-                }
+                raise ToolError(
+                    f"Slack thread reply failed: {slack_error or 'unknown error'}",
+                    details={"slack_error": slack_error},
+                )
 
         delivered = record.model_copy(update={"status": "delivered", "notified_at": now_iso()})
         try:

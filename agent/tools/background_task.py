@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal, NamedTuple
 
 from agent.tools.admin_gate import require_admin
+from agent.tools.errors import ToolError
 from agent.workspaces import refresh as workspace_refresh
 
 logger = logging.getLogger(__name__)
@@ -66,19 +67,19 @@ async def background_task(
 ) -> dict[str, Any]:
     """Implement the `background_task` tool."""
     if action in {"status", "stop"} and not task_id:
-        return {"success": False, "error": f"task_id is required for {action}"}
+        raise ToolError(f"task_id is required for {action}")
     try:
         if action == "list":
             return {"success": True, "tasks": await _list_all()}
         assert task_id is not None
         provider = next(p for p in _providers() if p.owns(task_id))
         if provider.admin_only and (denied := await require_admin(f"read {provider.name} tasks")):
-            return {"success": False, "error": denied}
+            raise ToolError(denied)
         result = await (provider.status if action == "status" else provider.stop)(task_id)
         return {"success": True, **result}
-    except Exception as exc:
+    except Exception:
         logger.warning("background_task %s failed", action, exc_info=True)
-        return {"success": False, "error": str(exc)}
+        raise
 
 
 async def _list_all() -> list[dict[str, Any]]:
