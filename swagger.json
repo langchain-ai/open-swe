@@ -6835,6 +6835,18 @@
             ],
             "title": "Gateway Enabled"
           },
+          "human_review_auto_assign_minutes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Assign Minutes"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
