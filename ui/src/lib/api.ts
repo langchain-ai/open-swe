@@ -245,8 +245,6 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
   pr_review_links?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -271,8 +269,6 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
   pr_review_links?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
