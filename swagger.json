@@ -4464,6 +4464,160 @@
         "title": "ReviewCounts",
         "type": "object"
       },
+      "ReviewDiff": {
+        "description": "The PR's changed files; ``files`` is ``None`` until the current head's are listed.",
+        "properties": {
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewDiffFile"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "patch_page_size": {
+            "title": "Patch Page Size",
+            "type": "integer"
+          },
+          "total_additions": {
+            "title": "Total Additions",
+            "type": "integer"
+          },
+          "total_deletions": {
+            "title": "Total Deletions",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_sha",
+          "head_sha",
+          "patch_page_size",
+          "files",
+          "total_additions",
+          "total_deletions",
+          "truncated"
+        ],
+        "title": "ReviewDiff",
+        "type": "object"
+      },
+      "ReviewDiffFile": {
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "previousPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previouspath"
+          },
+          "status": {
+            "enum": [
+              "added",
+              "removed",
+              "modified",
+              "renamed",
+              "copied",
+              "changed",
+              "unchanged"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "previousPath",
+          "status",
+          "additions",
+          "deletions",
+          "position"
+        ],
+        "title": "ReviewDiffFile",
+        "type": "object"
+      },
+      "ReviewPatch": {
+        "properties": {
+          "patch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patch"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "patch"
+        ],
+        "title": "ReviewPatch",
+        "type": "object"
+      },
+      "ReviewPatchPage": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewPatch"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_sha",
+          "files"
+        ],
+        "title": "ReviewPatchPage",
+        "type": "object"
+      },
       "ReviewScoutTrigger": {
         "properties": {
           "run_id": {
@@ -13492,9 +13646,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Review Diff Dashboard Api Reviews  Owner   Repo   Pr Number  Diff Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewDiff"
                 }
               }
             },
@@ -13870,6 +14022,90 @@
           }
         ],
         "summary": "Api Get Review Image",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/patches": {
+      "get": {
+        "operationId": "api_get_review_patches_dashboard_api_reviews__owner___repo___pr_number__patches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "head_sha",
+            "required": true,
+            "schema": {
+              "title": "Head Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPatchPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Review Patches",
         "tags": [
           "dashboard",
           "review"
