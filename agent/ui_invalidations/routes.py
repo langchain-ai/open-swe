@@ -1,9 +1,10 @@
-"""The dashboard's one change stream: which subscribed topics changed, as they change.
+"""The dashboard's one invalidation stream: which subscribed topics went stale, as they do.
 
 A browser opens it with every topic its mounted queries read, each paired with
 how many seconds ago that query's data was last known current. The stream
-first reports which of those topics changed within their window, then every
-change as it commits. Frames carry topics only; the browser refetches.
+first reports which of those topics were invalidated within their window, then
+every invalidation as it commits. Frames carry topics only; the browser
+refetches.
 """
 
 import asyncio
@@ -16,12 +17,12 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from agent.dashboard.deps import SESSION_DEP
-from agent.ui_events import hub, outbox, topics
+from agent.ui_invalidations import hub, outbox, topics
 from agent.utils.build_info import backend_build_info
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["ui-events"])
+router = APIRouter(tags=["ui-invalidations"])
 
 HEARTBEAT_SECONDS = 15.0
 MAX_TOPICS = 256
@@ -33,8 +34,8 @@ _SSE_HEADERS = {
 }
 
 
-@router.get("/ui-events")
-async def api_ui_events(
+@router.get("/ui-invalidations")
+async def api_ui_invalidations(
     t: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> StreamingResponse:
@@ -61,32 +62,32 @@ def _parse_subscriptions(values: list[str]) -> dict[str, float]:
 
 
 async def _stream(ages: dict[str, float], denied: list[str]) -> AsyncGenerator[str]:
-    """``hello`` names what changed while the reader was away; it is synchronized from then on."""
+    """``hello`` names what was invalidated while the reader was away; it is synchronized after."""
     with hub.subscribe(frozenset(ages)) as stream:
         windows = {topic: age + hub.REPLAY_MARGIN_SECONDS for topic, age in ages.items()}
         try:
-            stream.mark(await outbox.changed_since(windows))
+            stream.mark(await outbox.invalidated_since(windows))
         except Exception:  # noqa: BLE001
-            # Without a replay the reader cannot know what it missed, so it is
-            # told everything changed: a refetch too many, never a stale page.
-            logger.warning("Replaying UI events failed", exc_info=True)
+            # Without a replay the reader cannot know what it missed, so every
+            # topic is invalidated: a refetch too many, never a stale page.
+            logger.warning("Replaying UI invalidations failed", exc_info=True)
             stream.mark(ages)
         yield _frame(
             "hello",
             {
                 "backend_commit": backend_build_info()["commit"],
-                "changed": sorted(stream.take()),
+                "invalidated": sorted(stream.take()),
                 "denied": denied,
             },
         )
         while True:
-            changed = await stream.drain(HEARTBEAT_SECONDS)
-            if not changed:
+            invalidated = await stream.drain(HEARTBEAT_SECONDS)
+            if not invalidated:
                 yield _frame("alive", {})
                 continue
             await asyncio.sleep(_COALESCE_SECONDS)
-            changed |= stream.take()
-            yield _frame("changed", {"topics": sorted(changed)})
+            invalidated |= stream.take()
+            yield _frame("invalidated", {"topics": sorted(invalidated)})
 
 
 def _frame(event: str, data: dict[str, object]) -> str:

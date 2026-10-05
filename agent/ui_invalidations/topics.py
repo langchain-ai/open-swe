@@ -1,8 +1,8 @@
 """Topic names, and which session may hear each one.
 
-A topic is ``<kind>`` or ``<kind>/<key>``. Events carry nothing but the topic,
-so hearing one reveals only that something the session could already read has
-changed; each kind still answers who may subscribe, because a key can name
+A topic is ``<kind>`` or ``<kind>/<key>``. An invalidation carries nothing but
+the topic, so hearing one reveals only that something the session could already
+read has changed; each kind still answers who may subscribe, because a key can name
 something private.
 """
 

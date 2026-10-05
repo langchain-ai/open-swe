@@ -42,7 +42,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
     from agent.schedules.store import migrate_automation_workspaces
     from agent.transcript import listener as transcript_listener
-    from agent.ui_events import hub as ui_events_hub
+    from agent.ui_invalidations import hub as ui_invalidations_hub
     from agent.users import User
     from agent.users.import_concierge_mode import import_concierge_mode
     from agent.users.import_store import import_user_mappings
@@ -110,16 +110,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # liveness ticks; what goes quiet is a bridge driven from another replica.
         logger.warning("Sandbox bridge listener startup failed", exc_info=True)
     try:
-        await ui_events_hub.start()
+        await ui_invalidations_hub.start()
     except Exception:  # noqa: BLE001
         # Dashboard pages still load and refetch on their own actions; what
         # stops is hearing about changes made elsewhere.
-        logger.warning("UI event hub startup failed", exc_info=True)
+        logger.warning("UI invalidation hub startup failed", exc_info=True)
     notifications.start()
     try:
         yield
     finally:
-        await ui_events_hub.stop()
+        await ui_invalidations_hub.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
         await notifications.stop()

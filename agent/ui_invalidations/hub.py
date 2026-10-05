@@ -1,9 +1,9 @@
-"""Routing notified topics to this process's open streams.
+"""Routing invalidated topics to this process's open streams.
 
 Every replica hears every notification on the shared LISTEN connection and
 hands each topic to the streams here that asked for it. While that connection
-is down, other replicas' changes reach nobody here, so on reconnect the hub
-asks the outbox which subscribed topics changed in the gap.
+is down, other replicas' invalidations reach nobody here, so on reconnect the
+hub asks the outbox which subscribed topics were invalidated in the gap.
 """
 
 import asyncio
@@ -13,7 +13,7 @@ import time
 from collections.abc import Iterable, Iterator
 
 from agent.database import notifications, postgres
-from agent.ui_events import outbox
+from agent.ui_invalidations import outbox
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ _STOP = asyncio.Event()
 
 
 class Stream:
-    """One reader's topics, and the ones that changed since it last drained."""
+    """One reader's topics, and the ones invalidated since it last drained."""
 
     __slots__ = ("_changed", "_wake", "topics")
 
@@ -86,13 +86,13 @@ def deliver(topics: Iterable[str]) -> None:
 async def start() -> None:
     global _PRUNE_TASK, _STARTED_AT
     if not postgres.configured():
-        logger.info("UI events disabled: PostgreSQL is not configured")
+        logger.info("UI invalidations disabled: PostgreSQL is not configured")
         return
     _STARTED_AT = time.monotonic()
     _STOP.clear()
     await notifications.listen(outbox.CHANNEL, _on_notify, _on_connected)
     if _PRUNE_TASK is None or _PRUNE_TASK.done():
-        _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="ui-event-prune")
+        _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="ui-invalidation-prune")
 
 
 async def stop() -> None:
@@ -117,7 +117,7 @@ async def _on_connected(down_seconds: float | None) -> None:
         return
     unheard = time.monotonic() - _STARTED_AT if down_seconds is None else down_seconds
     age = unheard + REPLAY_MARGIN_SECONDS
-    deliver(await outbox.changed_since(dict.fromkeys(_STREAMS, age)))
+    deliver(await outbox.invalidated_since(dict.fromkeys(_STREAMS, age)))
 
 
 async def _prune_forever() -> None:
@@ -133,6 +133,6 @@ async def _prune_forever() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            logger.warning("Pruning UI events failed", exc_info=True)
+            logger.warning("Pruning UI invalidations failed", exc_info=True)
             continue
-        logger.info("Pruned UI events", extra={"pruned_ui_events": pruned})
+        logger.info("Pruned UI invalidations", extra={"pruned_ui_invalidations": pruned})

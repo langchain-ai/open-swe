@@ -48,7 +48,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
-import { LIVE_TOPICS } from "@/lib/live/topics"
+import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
 import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
@@ -178,7 +178,7 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
-    meta: { live: [LIVE_TOPICS.workspaces] },
+    meta: { invalidatedBy: [INVALIDATION_TOPICS.workspaces] },
   })
   const options = useWorkspaceOptions(true)
   const repositories = useRepos()

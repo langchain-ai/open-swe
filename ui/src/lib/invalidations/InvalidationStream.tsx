@@ -4,11 +4,11 @@ import { useEffect } from "react"
 import { normalizeBuildInfo } from "@/lib/api"
 import { sessionQueryOptions } from "@/lib/session"
 
-import { LiveTab } from "./client"
-import type { LiveHello } from "./client"
+import { InvalidationTab } from "./client"
+import type { InvalidationHello } from "./client"
 
-/** Keeps every query that declares `meta.live` current while someone is signed in. */
-export function LiveEvents() {
+/** Refetches every query that declares `meta.invalidatedBy` when its topics change. */
+export function InvalidationStream() {
   const queryClient = useQueryClient()
   const { data: user } = useQuery(sessionQueryOptions)
   const signedIn = Boolean(user)
@@ -17,7 +17,7 @@ export function LiveEvents() {
     if (!signedIn) return
     // A deploy drops every stream, so the first hello after it names the new
     // backend; the session query is what the version banner compares against.
-    const onHello = (hello: LiveHello) => {
+    const onHello = (hello: InvalidationHello) => {
       const session = queryClient.getQueryData(sessionQueryOptions.queryKey)
       const deployed = normalizeBuildInfo(session?.build_info)?.backend.commit
       if (
@@ -30,7 +30,7 @@ export function LiveEvents() {
         })
       }
     }
-    const tab = new LiveTab(queryClient, onHello)
+    const tab = new InvalidationTab(queryClient, onHello)
     tab.start()
     return () => tab.stop()
   }, [queryClient, signedIn])

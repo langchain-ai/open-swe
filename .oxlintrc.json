@@ -4,7 +4,7 @@
   "jsPlugins": [
     { "name": "query", "specifier": "@tanstack/eslint-plugin-query" },
     { "name": "router", "specifier": "@tanstack/eslint-plugin-router" },
-    { "name": "live", "specifier": "./ui/lint/live-plugin.mjs" }
+    { "name": "invalidations", "specifier": "./ui/lint/no-polling-plugin.mjs" }
   ],
   "categories": { "correctness": "error" },
   "rules": {
@@ -37,7 +37,7 @@
     },
     {
       "files": ["ui/src/**/*.ts", "ui/src/**/*.tsx"],
-      "rules": { "live/no-polling": "error" }
+      "rules": { "invalidations/no-polling": "error" }
     },
     {
       "files": [
@@ -61,7 +61,7 @@
         "ui/src/routes/agents/reviews/$owner.$repo.$number.tsx",
         "ui/src/routes/usage.tsx"
       ],
-      "rules": { "live/no-polling": "off" }
+      "rules": { "invalidations/no-polling": "off" }
     }
   ]
 }

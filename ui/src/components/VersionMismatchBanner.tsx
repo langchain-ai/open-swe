@@ -7,7 +7,7 @@ import { sessionQueryOptions } from "@/lib/session"
 
 export function VersionMismatchBanner() {
   const hydrated = useIsHydrated()
-  // `LiveEvents` refetches the session when a stream reports another backend.
+  // `InvalidationStream` refetches the session when a stream reports another backend.
   const { data: user } = useQuery(sessionQueryOptions)
   const running = hydrated ? window.__OPEN_SWE_BUNDLE__?.commit : null
   const deployed = normalizeBuildInfo(user?.build_info)?.backend.commit

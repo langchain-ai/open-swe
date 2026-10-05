@@ -18255,10 +18255,10 @@
         ]
       }
     },
-    "/dashboard/api/ui-events": {
+    "/dashboard/api/ui-invalidations": {
       "get": {
         "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
-        "operationId": "api_ui_events_dashboard_api_ui_events_get",
+        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
         "parameters": [
           {
             "in": "query",
@@ -18305,10 +18305,10 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Ui Events",
+        "summary": "Api Ui Invalidations",
         "tags": [
           "dashboard",
-          "ui-events"
+          "ui-invalidations"
         ]
       }
     },

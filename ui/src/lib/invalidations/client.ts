@@ -2,29 +2,29 @@ import type { QueryClient } from "@tanstack/react-query"
 
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
-import type { LiveTopic } from "./topics"
+import type { InvalidationTopic } from "./topics"
 
 /** Per topic, the epoch ms from which this browser does not know what changed. */
-type Since = Map<LiveTopic, number>
+type Since = Map<InvalidationTopic, number>
 
-export interface LiveHello {
+export interface InvalidationHello {
   backend_commit: string | null
-  /** Topics that changed while this browser was not listening. */
-  changed: LiveTopic[]
+  /** Topics invalidated while this browser was not listening. */
+  invalidated: InvalidationTopic[]
   /** Topics this session may not hear; they are not asked for again. */
-  denied: LiveTopic[]
+  denied: InvalidationTopic[]
 }
 
 type TabMessage =
-  | { kind: "interest"; tab: string; since: Record<LiveTopic, number> }
+  | { kind: "interest"; tab: string; since: Record<InvalidationTopic, number> }
   | { kind: "leave"; tab: string }
   | { kind: "census" }
-  | { kind: "changed"; topics: LiveTopic[] }
-  | { kind: "covered"; topics: LiveTopic[]; at: number }
-  | { kind: "hello"; hello: LiveHello }
+  | { kind: "invalidated"; topics: InvalidationTopic[] }
+  | { kind: "covered"; topics: InvalidationTopic[]; at: number }
+  | { kind: "hello"; hello: InvalidationHello }
 
-const CHANNEL_NAME = "open-swe-live"
-const LOCK_NAME = "open-swe-live-leader"
+const CHANNEL_NAME = "open-swe-invalidations"
+const LOCK_NAME = "open-swe-invalidations-leader"
 const REPORT_DEBOUNCE_MS = 100
 const CONNECT_DEBOUNCE_MS = 150
 /** The server sends a frame at least every 15s; three missed means the stream is dead. */
@@ -33,16 +33,16 @@ const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
 
 /**
- * One browser tab's part in the dashboard's single change stream.
+ * One browser tab's part in the dashboard's single invalidation stream.
  *
  * Tabs elect a leader with the Web Locks API. Only the leader holds an
  * `EventSource`; the others tell it which topics their mounted queries read
- * and hear its events over a `BroadcastChannel`. Every tab invalidates its own
- * queries when a topic they read changes.
+ * and hear its invalidations over a `BroadcastChannel`. Every tab refetches
+ * its own queries when a topic they read is invalidated.
  */
-export class LiveTab {
+export class InvalidationTab {
   private readonly id = crypto.randomUUID()
-  /** Per topic, the last time a live stream was known to cover it. */
+  /** Per topic, the last time an open stream was known to cover it. */
   private readonly covered: Since = new Map()
   private channel: BroadcastChannel | null = null
   private leader: Leader | null = null
@@ -54,7 +54,7 @@ export class LiveTab {
 
   constructor(
     private readonly queryClient: QueryClient,
-    private readonly onHello: (hello: LiveHello) => void
+    private readonly onHello: (hello: InvalidationHello) => void
   ) {}
 
   start(): void {
@@ -115,9 +115,9 @@ export class LiveTab {
         this.onHello(hello)
         this.post({ kind: "hello", hello })
       },
-      onChanged: (topics) => {
+      onInvalidated: (topics) => {
         this.invalidate(topics)
-        this.post({ kind: "changed", topics })
+        this.post({ kind: "invalidated", topics })
       },
       onCovered: (topics, at) => {
         this.cover(topics, at)
@@ -142,7 +142,7 @@ export class LiveTab {
       case "census":
         if (!this.leader) this.report(true)
         return
-      case "changed":
+      case "invalidated":
         this.invalidate(message.topics)
         return
       case "covered":
@@ -183,14 +183,14 @@ export class LiveTab {
 
   /**
    * Each topic an observed query reads, with the oldest moment any of them
-   * was last known current: when its data arrived, or later if a live stream
+   * was last known current: when its data arrived, or later if an open stream
    * has covered the topic since. A query still loading counts as current.
    */
   private localSince(): Since {
     const now = Date.now()
     const since: Since = new Map()
     for (const query of this.queryClient.getQueryCache().getAll()) {
-      const topics = query.meta?.live
+      const topics = query.meta?.invalidatedBy
       if (!topics?.length || query.getObserversCount() === 0) continue
       const fetched = query.state.dataUpdatedAt || now
       for (const topic of topics) {
@@ -201,16 +201,17 @@ export class LiveTab {
     return since
   }
 
-  private invalidate(topics: readonly LiveTopic[]): void {
+  private invalidate(topics: readonly InvalidationTopic[]): void {
     if (!topics.length) return
-    const changed = new Set(topics)
+    const invalidated = new Set(topics)
     void this.queryClient.invalidateQueries({
       predicate: (query) =>
-        query.meta?.live?.some((topic) => changed.has(topic)) ?? false,
+        query.meta?.invalidatedBy?.some((topic) => invalidated.has(topic)) ??
+        false,
     })
   }
 
-  private cover(topics: readonly LiveTopic[], at: number): void {
+  private cover(topics: readonly InvalidationTopic[], at: number): void {
     for (const topic of topics) {
       this.covered.set(topic, Math.max(this.covered.get(topic) ?? 0, at))
     }
@@ -218,9 +219,9 @@ export class LiveTab {
 }
 
 interface LeaderEvents {
-  onHello: (hello: LiveHello) => void
-  onChanged: (topics: LiveTopic[]) => void
-  onCovered: (topics: LiveTopic[], at: number) => void
+  onHello: (hello: InvalidationHello) => void
+  onInvalidated: (topics: InvalidationTopic[]) => void
+  onCovered: (topics: InvalidationTopic[], at: number) => void
 }
 
 /**
@@ -229,7 +230,7 @@ interface LeaderEvents {
  */
 class Leader {
   private readonly interests = new Map<string, Since>()
-  private readonly denied = new Set<LiveTopic>()
+  private readonly denied = new Set<InvalidationTopic>()
   private current: Connection | null = null
   private pending: Connection | null = null
   private connectTimer: ReturnType<typeof setTimeout> | null = null
@@ -271,9 +272,9 @@ class Leader {
     this.pending?.close()
     const connection: Connection = new Connection(since, {
       onHello: (hello) => this.opened(connection, hello),
-      onChanged: (topics) => {
+      onInvalidated: (topics) => {
         if (connection !== this.current) return
-        this.events.onChanged(topics)
+        this.events.onInvalidated(topics)
         this.events.onCovered(connection.topics, Date.now())
       },
       onAlive: () => {
@@ -285,7 +286,7 @@ class Leader {
     this.pending = connection
   }
 
-  private opened(connection: Connection, hello: LiveHello): void {
+  private opened(connection: Connection, hello: InvalidationHello): void {
     if (connection !== this.pending) {
       connection.close()
       return
@@ -296,7 +297,7 @@ class Leader {
     this.pending = null
     this.backoff = MIN_BACKOFF_MS
     this.events.onHello(hello)
-    this.events.onChanged(hello.changed)
+    this.events.onInvalidated(hello.invalidated)
     this.events.onCovered(
       connection.topics.filter((topic) => !this.denied.has(topic)),
       Date.now()
@@ -330,8 +331,8 @@ class Leader {
 }
 
 interface ConnectionEvents {
-  onHello: (hello: LiveHello) => void
-  onChanged: (topics: LiveTopic[]) => void
+  onHello: (hello: InvalidationHello) => void
+  onInvalidated: (topics: InvalidationTopic[]) => void
   onAlive: () => void
   onError: () => void
 }
@@ -343,7 +344,7 @@ interface ConnectionEvents {
  */
 class Connection {
   readonly key: string
-  readonly topics: LiveTopic[]
+  readonly topics: InvalidationTopic[]
   private readonly source: EventSource
   private watchdog: ReturnType<typeof setTimeout> | null = null
   private closed = false
@@ -362,15 +363,18 @@ class Connection {
     }
     const search = params.toString()
     const query = search ? `?${search}` : ""
-    this.source = new EventSource(dashboardApiUrl(`/ui-events${query}`), {
-      withCredentials: true,
-    })
-    this.source.addEventListener("hello", (event) =>
-      this.frame(event, (data: LiveHello) => events.onHello(data))
+    this.source = new EventSource(
+      dashboardApiUrl(`/ui-invalidations${query}`),
+      {
+        withCredentials: true,
+      }
     )
-    this.source.addEventListener("changed", (event) =>
-      this.frame(event, (data: { topics: LiveTopic[] }) =>
-        events.onChanged(data.topics)
+    this.source.addEventListener("hello", (event) =>
+      this.frame(event, (data: InvalidationHello) => events.onHello(data))
+    )
+    this.source.addEventListener("invalidated", (event) =>
+      this.frame(event, (data: { topics: InvalidationTopic[] }) =>
+        events.onInvalidated(data.topics)
       )
     )
     this.source.addEventListener("alive", (event) =>
@@ -392,7 +396,7 @@ class Connection {
     try {
       apply(JSON.parse(event.data) as T)
     } catch (error) {
-      console.warn("Unreadable live event frame; reconnecting", error)
+      console.warn("Unreadable invalidation frame; reconnecting", error)
       this.fail()
     }
   }
@@ -409,6 +413,6 @@ class Connection {
   }
 }
 
-function topicsKey(topics: Iterable<LiveTopic>): string {
+function topicsKey(topics: Iterable<InvalidationTopic>): string {
   return [...topics].sort().join("\n")
 }
