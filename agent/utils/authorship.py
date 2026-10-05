@@ -38,10 +38,11 @@ def build_pr_attribution_footer(
     *,
     model_id: str | None = None,
     reasoning_effort: str | None = None,
+    project_url: str = PR_ATTRIBUTION_DEFAULT_URL,
 ) -> str:
     """Build the Open SWE PR footer with the run's model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
-    footer = PR_ATTRIBUTION_FOOTER
+    footer = f"{PR_ATTRIBUTION_TEXT}({project_url})"
     if url:
         footer += f" · [view thread]({url})"
     model = _normalize_text(model_id).replace("`", "")
@@ -335,6 +336,7 @@ def add_pr_collaboration_note(
     *,
     model_id: str | None = None,
     reasoning_effort: str | None = None,
+    project_url: str = PR_ATTRIBUTION_DEFAULT_URL,
 ) -> str:
     """Make the Open SWE attribution footer the PR body's last line.
 
@@ -343,7 +345,7 @@ def add_pr_collaboration_note(
     line — is replaced rather than kept alongside.
     """
     note = build_pr_attribution_footer(
-        thread_url, model_id=model_id, reasoning_effort=reasoning_effort
+        thread_url, model_id=model_id, reasoning_effort=reasoning_effort, project_url=project_url
     )
     kept: list[str] = []
     legacy_names = (

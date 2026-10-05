@@ -39,6 +39,14 @@ Authenticated dashboard navigation sends Segment `page` events with a normalized
 
 Every newly persisted GitHub, Slack, and Linear event-log delivery also sends `Webhook Received`, including events without a resolved user. Properties include source, event type, action, environment, and resolved workspace/repository/PR IDs; the raw webhook payload stays in the local event log. Resolved users use the event log's internal user UUID; unresolved events use a source-specific anonymous ID. This is best-effort delivery, not a historical backfill or durable export.
 
+### Optional PR-description link telemetry
+
+Set a separate random `PR_LINK_SIGNING_KEY` backend secret to wrap platform-generated PR footer and reference links in signed redirects. Keep this key stable and backed up: removing or rotating it breaks previously published tracked links. Session-secret rotation does not affect these links. Without this key, links remain direct; existing PR descriptions and agent-written links/images are not rewritten.
+
+Redirects never require sign-in. A valid dashboard session attributes the visit to its internal user UUID; otherwise each visit gets an independent anonymous ID, without setting a tracking cookie. Structured backend logs record the link kind, originating thread, and authenticated visitor ID/login; with `SEGMENT_WRITE_KEY`, best-effort `PR Description Link Visited` events carry the thread, link kind, environment, and user/anonymous ID. Destination URLs, referrers, and IPs are not included in those events. Thread attribution is not a unique PR identifier when a thread opens multiple PRs.
+
+These are redirect visits, not verified human clicks: previews, scanners, and reloads may count. HEAD requests do not count. Session attribution requires the browser to send its existing cookie to `DASHBOARD_API_BASE_URL` (or `LANGGRAPH_URL`); split-origin deployments may therefore record anonymous visits. The signed link contains its destination and thread in readable form, so only use it for URLs already intended for the PR audience. Redirects disable caching and outgoing referrers. Telemetry failure does not block navigation.
+
 ## 1. Create the deployment
 
 You need the deployment's public URL before the GitHub App can be created, so create the deployment first. Its initial revision may remain stopped until step 6, when you configure the GitHub and Slack variables plus a required login allowlist.

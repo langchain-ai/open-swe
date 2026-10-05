@@ -437,14 +437,23 @@ def test_plan_reference_survives_source_reference_failure(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
+    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
     assert client.post_calls
 
 
+@pytest.mark.parametrize("tracking", [False, True])
 def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
+    tracking: bool,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setattr(
+        opr,
+        "tracked_pr_link",
+        lambda url, *, thread_id, kind: (
+            f"https://dashboard.example/visit/{thread_id}/{kind}" if tracking else url
+        ),
+    )
     _set_config(
         monkeypatch,
         {
@@ -471,11 +480,23 @@ def test_public_repo_appends_plan_and_slack_reference(
     )
     _install_client(monkeypatch, client)
 
-    _open_with_body("body")
+    body = "[Unchanged](https://example.com/read?q=1) ![Screenshot](https://example.com/signed?token=x)"
+    _open_with_body(body)
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
-    assert "- Slack thread: https://slack.example/p1" in sent_body
+    plan_url = (
+        "https://dashboard.example/visit/thread-1/plan"
+        if tracking
+        else "https://dashboard.example/agents/thread-1/plan"
+    )
+    slack_url = (
+        "https://dashboard.example/visit/thread-1/slack_thread"
+        if tracking
+        else "https://slack.example/p1"
+    )
+    assert f"- [Plan]({plan_url})" in sent_body
+    assert f"- [Slack thread]({slack_url})" in sent_body
+    assert sent_body.startswith(body)
 
 
 @pytest.mark.parametrize("source", ["linear", "github_issue"])
@@ -483,6 +504,11 @@ def test_public_repo_appends_plan_and_slack_reference(
 def test_issue_references_require_private_repo(
     monkeypatch: pytest.MonkeyPatch, source: str, private: bool
 ) -> None:
+    monkeypatch.setattr(
+        opr,
+        "tracked_pr_link",
+        lambda url, *, thread_id, kind: f"https://dashboard.example/visit/{thread_id}/{kind}",
+    )
     _set_config(
         monkeypatch,
         {
@@ -504,6 +530,32 @@ def test_issue_references_require_private_repo(
     sent_body = client.post_calls[0]["json"]["body"]
     reference = "Linear ticket" if source == "linear" else "GitHub issue"
     assert (reference in sent_body) is private
+    if private:
+        kind = "linear_issue" if source == "linear" else "github_issue"
+        assert f"https://dashboard.example/visit/pr-thread/{kind}" in sent_body
+
+
+def test_footer_tracks_generated_links_without_rewriting_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    _set_config(monkeypatch, {"thread_id": "thread-1", "resolved_agent_model_id": "test-model"})
+    monkeypatch.setattr(
+        opr,
+        "tracked_pr_link",
+        lambda url, *, thread_id, kind: f"https://dashboard.example/visit/{thread_id}/{kind}",
+    )
+    body = (
+        "[Documentation](https://example.com/docs?q=1)\n\nMade by [Open SWE](https://old.example)"
+    )
+
+    result = asyncio.run(opr._stamp_attribution_footer(body))
+
+    assert result == (
+        "[Documentation](https://example.com/docs?q=1)\n\n"
+        "Made by [Open SWE](https://dashboard.example/visit/thread-1/project)"
+        " · [view thread](https://dashboard.example/visit/thread-1/thread) · test-model"
+    )
 
 
 def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch) -> None:

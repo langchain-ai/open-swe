@@ -357,6 +357,12 @@ ENV.var(
     "Deployment environment; `preview` lets startup drop superseded migration revisions.",
 )
 ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
+ENV.var(
+    "PR_LINK_SIGNING_KEY",
+    "Optional durable signing key for PR-description links; retain it for published links.",
+    secret=True,
+    default="",
+)
 ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")

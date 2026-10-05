@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from agent.analytics.pr_links import router as pr_links_router
 from agent.analytics.queries import InvalidUsageCursor, SortDirection, UsageSort, usage_leaderboard
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
@@ -13,6 +14,7 @@ from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analytics"])
+router.include_router(pr_links_router)
 
 
 class TelemetryConfig(BaseModel):
