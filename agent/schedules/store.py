@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langgraph_sdk.schema import Config
-from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -37,6 +37,7 @@ from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
+from agent.review.styles import normalize_repo_full_name
 from agent.run_config import RunConfig
 from agent.slack.client import (
     bind_slack_thread_id,
@@ -101,63 +102,49 @@ def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
     return "on_action" if record.get("slack_notification_mode") == "on_action" else "always"
 
 
+def _normalized_repo(value: str) -> str:
+    return normalize_repo_full_name(value)
+
+
 class ScheduleTrigger(BaseModel):
     kind: Literal["schedule"] = "schedule"
     cron: str = Field(min_length=1, max_length=120)
+    # A cron carries no event to say where to work, so runs start here.
+    repo: str | None = None
 
     @field_validator("cron")
     @classmethod
     def _valid_cron(cls, value: str) -> str:
         return normalize_cron_schedule(value)
 
+    @field_validator("repo")
+    @classmethod
+    def _valid_repo(cls, value: str | None) -> str | None:
+        return _normalized_repo(value) if value else None
+
 
 class GitHubTrigger(BaseModel):
-    """Fires on events in the automation's repository."""
+    """Fires on events in one repository; its runs work in that repository."""
 
     kind: Literal["github"] = "github"
+    repo: str = Field(min_length=3)
     events: list[GitHubEvent] = Field(min_length=1)
+
+    @field_validator("repo")
+    @classmethod
+    def _valid_repo(cls, value: str) -> str:
+        return _normalized_repo(value)
 
 
 TriggerConfig = Annotated[ScheduleTrigger | GitHubTrigger, Field(discriminator="kind")]
 _TRIGGERS = TypeAdapter(list[TriggerConfig])
 
 
-def _provider_triggers(
-    current: Sequence[TriggerConfig],
-    *,
-    schedule: str | None,
-    clear_schedule: bool,
-    github_events: list[GitHubEvent] | None,
-) -> list[TriggerConfig]:
-    """``current`` with each named provider's trigger replaced; others are kept.
-
-    An empty ``github_events`` removes the GitHub trigger.
-    """
-    triggers: list[TriggerConfig] = list(current)
-    if schedule is not None or clear_schedule:
-        triggers = [t for t in triggers if not isinstance(t, ScheduleTrigger)]
-        if schedule is not None:
-            triggers.insert(0, ScheduleTrigger(cron=schedule))
-    if github_events is not None:
-        triggers = [t for t in triggers if not isinstance(t, GitHubTrigger)]
-        if github_events:
-            triggers.append(GitHubTrigger(events=github_events))
-    return triggers
-
-
-def _require_repo_for_github(triggers: Sequence[TriggerConfig], repo: str | None) -> None:
-    if not repo and any(isinstance(trigger, GitHubTrigger) for trigger in triggers):
-        raise ValueError("repo is required for GitHub-triggered automations")
-
-
 class ScheduleCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
-    # One field per provider; ``triggers`` is the full list and overrides them.
-    schedule: str | None = Field(default=None, min_length=1, max_length=120)
-    github_events: list[GitHubEvent] | None = None
-    triggers: list[TriggerConfig] | None = Field(default=None, min_length=1)
+    # Every trigger, any of which fires the automation, each with its own filters.
+    triggers: list[TriggerConfig] = Field(min_length=1)
     name: str | None = Field(default=None, max_length=120)
-    repo: str | None = None
     model_id: str | None = None
     effort: str | None = None
     slack_channel_id: str | None = None
@@ -165,22 +152,6 @@ class ScheduleCreateBody(BaseModel):
     admin_thread: bool = False
     # The workspace its runs launch in, always chosen explicitly.
     workspace: str = Field(min_length=1, max_length=120)
-
-    @field_validator("schedule")
-    @classmethod
-    def _valid_schedule(cls, value: str | None) -> str | None:
-        return normalize_cron_schedule(value) if value is not None else None
-
-    @model_validator(mode="after")
-    def _valid_trigger_configuration(self) -> ScheduleCreateBody:
-        if self.triggers is None:
-            self.triggers = _provider_triggers(
-                [], schedule=self.schedule, clear_schedule=False, github_events=self.github_events
-            )
-        if not self.triggers:
-            raise ValueError("an automation needs a schedule or GitHub events to trigger on")
-        _require_repo_for_github(self.triggers, self.repo)
-        return self
 
     @field_validator("slack_channel_id")
     @classmethod
@@ -190,14 +161,9 @@ class ScheduleCreateBody(BaseModel):
 
 class ScheduleUpdateBody(BaseModel):
     prompt: str | None = Field(default=None, min_length=1, max_length=20_000)
-    # Each provider field replaces only that provider's trigger, and an empty
-    # ``github_events`` removes it; ``triggers`` replaces them all.
-    schedule: str | None = Field(default=None, min_length=1, max_length=120)
-    clear_schedule: bool = False
-    github_events: list[GitHubEvent] | None = None
+    # Replaces every trigger.
     triggers: list[TriggerConfig] | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, max_length=120)
-    repo: str | None = None
     model_id: str | None = None
     effort: str | None = None
     enabled: bool | None = None
@@ -205,17 +171,6 @@ class ScheduleUpdateBody(BaseModel):
     slack_notification_mode: SlackNotificationMode | None = None
     admin_thread: bool | None = None
     workspace: str | None = None
-
-    @field_validator("schedule")
-    @classmethod
-    def _valid_schedule(cls, value: str | None) -> str | None:
-        return normalize_cron_schedule(value) if value is not None else None
-
-    @model_validator(mode="after")
-    def _one_schedule_change(self) -> ScheduleUpdateBody:
-        if self.clear_schedule and self.schedule is not None:
-            raise ValueError("clear_schedule cannot be combined with schedule")
-        return self
 
     @field_validator("slack_channel_id")
     @classmethod
@@ -274,7 +229,6 @@ def _repo_full_name(repo: dict[str, str] | None) -> str | None:
 
 
 def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
-    repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     triggers = record.get("triggers") or []
     schedule = next(
         ((t.get("config") or {}).get("cron") for t in triggers if t.get("kind") == "schedule"),
@@ -289,7 +243,6 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "triggers": [{"id": t["id"], **(t.get("config") or {})} for t in triggers],
         "scope": "workspace",
         "workspace": _record_workspace(record),
-        "repo": _repo_full_name(repo),
         "slackChannelId": record.get("slack_channel_id"),
         "slackNotificationMode": _slack_notification_mode(record),
         "adminThread": record.get("admin_thread") is True,
@@ -342,11 +295,8 @@ _SELECT_AUTOMATIONS = """
 """
 
 
-def _match_key(trigger: TriggerConfig, repo: dict[str, str] | None) -> str | None:
-    if isinstance(trigger, GitHubTrigger):
-        full_name = _repo_full_name(repo)
-        return full_name.lower() if full_name else None
-    return None
+def _match_key(trigger: TriggerConfig) -> str | None:
+    return trigger.repo.lower() if isinstance(trigger, GitHubTrigger) else None
 
 
 async def _load_records(
@@ -382,11 +332,6 @@ async def _load_records(
         )
     records = []
     for row in rows:
-        repo = (
-            {"owner": row["repo_owner"], "name": row["repo_name"]}
-            if row["repo_owner"] and row["repo_name"]
-            else None
-        )
         records.append(
             {
                 "id": str(row["id"]),
@@ -394,7 +339,6 @@ async def _load_records(
                 "workspace": row["workspace_slug"],
                 "name": row["name"],
                 "prompt": row["prompt"],
-                "repo": repo,
                 "slack_channel_id": row["slack_channel_id"],
                 "slack_notification_mode": row["slack_notification_mode"],
                 "admin_thread": row["admin_thread"],
@@ -423,10 +367,10 @@ async def _insert_triggers(
     conn: AsyncConnection,
     automation_id: str,
     triggers: Sequence[TriggerConfig],
-    repo: dict[str, str] | None,
+    trigger_ids: Sequence[uuid.UUID],
     cron_ids: Sequence[str | None],
 ) -> None:
-    for trigger, cron_id in zip(triggers, cron_ids, strict=True):
+    for trigger, trigger_id, cron_id in zip(triggers, trigger_ids, cron_ids, strict=True):
         await conn.execute(
             text(
                 "INSERT INTO automation_trigger (id, automation_id, kind, config, match_key, "
@@ -434,11 +378,11 @@ async def _insert_triggers(
                 ":match_key, :cron_id)"
             ),
             {
-                "id": uuid.uuid4(),
+                "id": trigger_id,
                 "automation_id": uuid.UUID(automation_id),
                 "kind": trigger.kind,
                 "config": json.dumps(trigger.model_dump(mode="json")),
-                "match_key": _match_key(trigger, repo),
+                "match_key": _match_key(trigger),
                 "cron_id": cron_id,
             },
         )
@@ -499,11 +443,13 @@ def _build_cron_config(automation_id: str) -> Config:
     return {"configurable": {"schedule_id": automation_id}}
 
 
-async def _create_cron(automation_id: str, cron: str, created_by: str | None) -> str:
+async def _create_cron(
+    automation_id: str, trigger_id: uuid.UUID, cron: str, created_by: str | None
+) -> str:
     created = await langgraph_client().crons.create(
         _SCHEDULER_ASSISTANT_ID,
         schedule=cron,
-        input={"schedule_id": automation_id},
+        input={"schedule_id": automation_id, "trigger_id": str(trigger_id)},
         config=_build_cron_config(automation_id),
         metadata={
             "kind": "agent_schedule",
@@ -559,14 +505,21 @@ async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
 
 
 async def _create_crons(
-    automation_id: str, triggers: Sequence[TriggerConfig], *, enabled: bool, created_by: str
+    automation_id: str,
+    triggers: Sequence[TriggerConfig],
+    trigger_ids: Sequence[uuid.UUID],
+    *,
+    enabled: bool,
+    created_by: str,
 ) -> list[str | None]:
     """One cron per schedule trigger of an enabled automation; all or nothing."""
     cron_ids: list[str | None] = []
     try:
-        for trigger in triggers:
+        for trigger, trigger_id in zip(triggers, trigger_ids, strict=True):
             if enabled and isinstance(trigger, ScheduleTrigger):
-                cron_ids.append(await _create_cron(automation_id, trigger.cron, created_by))
+                cron_ids.append(
+                    await _create_cron(automation_id, trigger_id, trigger.cron, created_by)
+                )
             else:
                 cron_ids.append(None)
     except Exception as exc:
@@ -581,6 +534,39 @@ def _parsed_triggers(record: dict[str, Any]) -> list[TriggerConfig]:
     return _TRIGGERS.validate_python([t["config"] for t in record.get("triggers") or []])
 
 
+async def _checked_triggers(
+    triggers: Sequence[TriggerConfig], login: str, *, use_workspace_credentials: bool
+) -> list[TriggerConfig]:
+    """``triggers`` once whoever configures them can reach every repository they name."""
+    for repo in {trigger.repo for trigger in triggers if trigger.repo}:
+        if use_workspace_credentials:
+            await repo_config_for_workspace(repo)
+        else:
+            await repo_config_for_user(login, repo)
+    return list(triggers)
+
+
+def _repo_dict(full_name: str | None) -> dict[str, str] | None:
+    if not full_name or "/" not in full_name:
+        return None
+    owner, name = full_name.split("/", 1)
+    return {"owner": owner, "name": name}
+
+
+def _trigger_repo(record: dict[str, Any], trigger_id: str | None = None) -> str | None:
+    """The repository a run starts in: the named trigger's, else the first one with a repo."""
+    triggers = record.get("triggers") or []
+    for trigger in triggers:
+        if trigger_id is not None and trigger.get("id") == trigger_id:
+            repo = (trigger.get("config") or {}).get("repo")
+            return repo if isinstance(repo, str) and repo else None
+    for trigger in sorted(triggers, key=lambda t: t.get("kind") != "schedule"):
+        repo = (trigger.get("config") or {}).get("repo")
+        if isinstance(repo, str) and repo:
+            return repo
+    return None
+
+
 async def create_agent_schedule(
     login: str,
     body: ScheduleCreateBody,
@@ -593,30 +579,33 @@ async def create_agent_schedule(
         raise HTTPException(403, "admin only")
     if use_workspace_credentials:
         profile: dict[str, Any] = {}
-        repo = await repo_config_for_workspace(body.repo)
         run_email = email
     else:
         await _ensure_dashboard_github_token(login)
         profile = await get_profile(login) or {}
-        repo = await repo_config_for_user(login, body.repo)
         run_email = await resolve_run_email(login, profile) or email
+    triggers = await _checked_triggers(
+        body.triggers, login, use_workspace_credentials=use_workspace_credentials
+    )
     workspace = await _existing_workspace(body.workspace)
     workspace_id = await WORKSPACES.id_for_slug(workspace)
     if workspace_id is None:
         raise HTTPException(422, f"no workspace named {workspace!r}")
-    triggers = body.triggers or []
     chosen_model, chosen_effort = normalize_model_choice(body.model_id, body.effort)
     automation_id = str(uuid.uuid4())
-    cron_ids = await _create_crons(automation_id, triggers, enabled=True, created_by=login)
+    trigger_ids = [uuid.uuid4() for _ in triggers]
+    cron_ids = await _create_crons(
+        automation_id, triggers, trigger_ids, enabled=True, created_by=login
+    )
     try:
         async with transaction() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO automation (id, workspace_id, name, prompt, repo_owner, "
-                    "repo_name, slack_channel_id, slack_notification_mode, admin_thread, model, "
+                    "INSERT INTO automation (id, workspace_id, name, prompt, "
+                    "slack_channel_id, slack_notification_mode, admin_thread, model, "
                     "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                    "user_email) VALUES (:id, :workspace_id, :name, :prompt, :repo_owner, "
-                    ":repo_name, :slack_channel_id, :slack_notification_mode, :admin_thread, "
+                    "user_email) VALUES (:id, :workspace_id, :name, :prompt, "
+                    ":slack_channel_id, :slack_notification_mode, :admin_thread, "
                     ":model, :effort, :base_branch, :branch_prefix, true, :login, :login, "
                     ":user_email)"
                 ),
@@ -625,8 +614,6 @@ async def create_agent_schedule(
                     "workspace_id": workspace_id,
                     "name": (body.name or _derive_name(body.prompt)).strip(),
                     "prompt": body.prompt.strip(),
-                    "repo_owner": repo["owner"] if repo else None,
-                    "repo_name": repo["name"] if repo else None,
                     "slack_channel_id": body.slack_channel_id,
                     "slack_notification_mode": body.slack_notification_mode,
                     "admin_thread": body.admin_thread,
@@ -638,7 +625,7 @@ async def create_agent_schedule(
                     "user_email": (run_email or "").strip().lower(),
                 },
             )
-            await _insert_triggers(conn, automation_id, triggers, repo, cron_ids)
+            await _insert_triggers(conn, automation_id, triggers, trigger_ids, cron_ids)
     except Exception:
         for cron_id in cron_ids:
             await _delete_cron(cron_id)
@@ -674,15 +661,6 @@ async def update_agent_schedule(
         columns["name"] = body.name.strip() or _derive_name(
             str(columns.get("prompt", existing["prompt"]))
         )
-    repo = existing.get("repo")
-    if body.repo is not None:
-        repo = (
-            await repo_config_for_workspace(body.repo)
-            if use_workspace_credentials
-            else await repo_config_for_user(existing["created_by"], body.repo)
-        )
-        columns["repo_owner"] = repo["owner"] if repo else None
-        columns["repo_name"] = repo["name"] if repo else None
     if body.model_id is not None or body.effort is not None:
         model, effort = normalize_model_choice(body.model_id, body.effort)
         if model and effort:
@@ -704,33 +682,27 @@ async def update_agent_schedule(
 
     current_triggers = _parsed_triggers(existing)
     triggers = current_triggers
-    if body.triggers is not None:
-        triggers = body.triggers
-    else:
-        triggers = _provider_triggers(
-            current_triggers,
-            schedule=body.schedule,
-            clear_schedule=body.clear_schedule,
-            github_events=body.github_events,
+    if body.triggers is not None and [t.model_dump() for t in body.triggers] != [
+        t.model_dump() for t in current_triggers
+    ]:
+        triggers = await _checked_triggers(
+            body.triggers,
+            existing["created_by"],
+            use_workspace_credentials=use_workspace_credentials,
         )
-    if not triggers:
-        raise HTTPException(422, "an automation needs a schedule or GitHub events to trigger on")
-    try:
-        _require_repo_for_github(triggers, _repo_full_name(repo))
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
 
     enabled = bool(columns.get("enabled", existing.get("enabled")))
-    rebuild_triggers = (
-        [t.model_dump() for t in triggers] != [t.model_dump() for t in current_triggers]
-        or enabled != bool(existing.get("enabled"))
-        or (body.repo is not None and repo != existing.get("repo"))
-    )
+    rebuild_triggers = triggers is not current_triggers or enabled != bool(existing.get("enabled"))
     old_cron_ids = [t.get("cron_id") for t in existing.get("triggers") or []]
+    trigger_ids = [uuid.uuid4() for _ in triggers]
     new_cron_ids: list[str | None] = []
     if rebuild_triggers:
         new_cron_ids = await _create_crons(
-            existing["id"], triggers, enabled=enabled, created_by=existing["created_by"]
+            existing["id"],
+            triggers,
+            trigger_ids,
+            enabled=enabled,
+            created_by=existing["created_by"],
         )
     assignments = ", ".join(f"{key} = :{key}" for key in columns)
     try:
@@ -747,7 +719,7 @@ async def update_agent_schedule(
                     text("DELETE FROM automation_trigger WHERE automation_id = :id"),
                     {"id": uuid.UUID(existing["id"])},
                 )
-                await _insert_triggers(conn, existing["id"], triggers, repo, new_cron_ids)
+                await _insert_triggers(conn, existing["id"], triggers, trigger_ids, new_cron_ids)
     except Exception:
         for cron_id in new_cron_ids:
             await _delete_cron(cron_id)
@@ -796,14 +768,15 @@ async def delete_workspace_automations(workspace: str) -> int:
 
 def _legacy_triggers(record: dict[str, Any]) -> tuple[list[TriggerConfig], str | None]:
     trigger = record.get("trigger") or "schedule"
+    repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     if trigger == "schedule":
         schedule = record.get("schedule")
-        return ([ScheduleTrigger(cron=schedule)] if isinstance(schedule, str) else []), (
+        return ([ScheduleTrigger(cron=schedule, repo=repo)] if isinstance(schedule, str) else []), (
             record.get("cron_id") if isinstance(record.get("cron_id"), str) else None
         )
-    # Older releases only had this one event trigger.
-    if trigger == "github_issue_opened":
-        return [GitHubTrigger(events=["issues.opened"])], None
+    # Older releases only had this one event trigger, which always named a repo.
+    if trigger == "github_issue_opened" and repo:
+        return [GitHubTrigger(repo=repo, events=["issues.opened"])], None
     return [], None
 
 
@@ -840,16 +813,15 @@ async def import_store_automations() -> int:
             await delete_value(SCHEDULES_NAMESPACE, schedule_id)
             await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
             continue
-        repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
         state = {**record, **run_states.get(schedule_id, {})}
         async with transaction() as conn:
             inserted = await conn.execute(
                 text(
-                    "INSERT INTO automation (id, workspace_id, name, prompt, repo_owner, "
-                    "repo_name, slack_channel_id, slack_notification_mode, admin_thread, model, "
+                    "INSERT INTO automation (id, workspace_id, name, prompt, "
+                    "slack_channel_id, slack_notification_mode, admin_thread, model, "
                     "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
                     "user_email, last_thread_id, last_run_id, last_error) VALUES (:id, "
-                    ":workspace_id, :name, :prompt, :repo_owner, :repo_name, :slack_channel_id, "
+                    ":workspace_id, :name, :prompt, :slack_channel_id, "
                     ":slack_notification_mode, :admin_thread, :model, :effort, :base_branch, "
                     ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
                     ":last_thread_id, :last_run_id, :last_error) ON CONFLICT (id) DO NOTHING "
@@ -862,8 +834,6 @@ async def import_store_automations() -> int:
                         record.get("name") or _derive_name(str(record.get("prompt") or ""))
                     ),
                     "prompt": str(record.get("prompt") or ""),
-                    "repo_owner": repo.get("owner") if repo else None,
-                    "repo_name": repo.get("name") if repo else None,
                     "slack_channel_id": record.get("slack_channel_id"),
                     "slack_notification_mode": _slack_notification_mode(record),
                     "admin_thread": record.get("admin_thread") is True,
@@ -885,7 +855,7 @@ async def import_store_automations() -> int:
                     conn,
                     schedule_id,
                     triggers,
-                    repo,
+                    [uuid.uuid4() for _ in triggers],
                     [cron_id if isinstance(t, ScheduleTrigger) else None for t in triggers],
                 )
                 imported += 1
@@ -895,9 +865,12 @@ async def import_store_automations() -> int:
 
 
 def _slack_root_message(
-    record: dict[str, Any], *, test_run: bool = False, concierge: bool = False
+    record: dict[str, Any],
+    repo: str | None,
+    *,
+    test_run: bool = False,
+    concierge: bool = False,
 ) -> str:
-    repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
     run_kind = "test" if test_run else "scheduled"
     follow_up = (
@@ -966,12 +939,12 @@ async def authorized_admin_schedule(cfg: RunConfig) -> dict[str, Any] | None:
 def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
+    repo: dict[str, str] | None,
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
     admin_thread: bool = False,
 ) -> dict[str, Any]:
-    repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     created_ms = now_ms()
     title_prefix = "Test" if test_run else "Scheduled"
     metadata: dict[str, Any] = {
@@ -995,7 +968,7 @@ def _agent_run_metadata(
         "created_at_ms": created_ms,
         "updated_at_ms": created_ms,
     }
-    if repo and repo.get("owner") and repo.get("name"):
+    if repo:
         metadata["repo_owner"] = repo["owner"]
         metadata["repo_name"] = repo["name"]
     if slack_thread:
@@ -1008,6 +981,7 @@ def _agent_run_metadata(
 async def _agent_run_config(
     record: dict[str, Any],
     thread_id: str,
+    repo: dict[str, str] | None,
     slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
@@ -1022,8 +996,7 @@ async def _agent_run_config(
         },
         new_invocation_id(),
     )
-    repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
-    if repo and repo.get("owner") and repo.get("name"):
+    if repo:
         configurable["repo"] = repo
     workspace = _record_workspace(record)
     configurable["workspace"] = workspace
@@ -1059,6 +1032,7 @@ async def _agent_run_config(
 async def _launch_agent_schedule_record(
     record: dict[str, Any],
     *,
+    repo: str | None,
     test_run: bool = False,
     prompt: str | None = None,
     token_repositories: list[str] | None = None,
@@ -1075,11 +1049,9 @@ async def _launch_agent_schedule_record(
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
 
-    repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
-    full_name = _repo_full_name(repo)
-    if full_name:
+    if repo:
         try:
-            await require_repo_access_for_workspace(full_name)
+            await require_repo_access_for_workspace(repo)
         except HTTPException as exc:
             await _put_run_state(
                 record,
@@ -1113,7 +1085,7 @@ async def _launch_agent_schedule_record(
         and slack_channel_id
     ):
         concierge = dm_user_id is not None and await User.concierge_mode_for_slack(dm_user_id)
-        root_message = _slack_root_message(record, test_run=test_run, concierge=concierge)
+        root_message = _slack_root_message(record, repo, test_run=test_run, concierge=concierge)
         message_ts, slack_error = await post_slack_top_level_message_with_ts(
             slack_channel_id,
             root_message,
@@ -1137,12 +1109,14 @@ async def _launch_agent_schedule_record(
             await note_for_concierge(dm_user_id, slack_channel_id, root_message)
 
     admin_thread = _admin_thread_enabled(record)
+    repo_config = _repo_dict(repo)
     run_config = await _agent_run_config(
-        record, thread_id, slack_thread, test_run=test_run, admin_thread=admin_thread
+        record, thread_id, repo_config, slack_thread, test_run=test_run, admin_thread=admin_thread
     )
     metadata = _agent_run_metadata(
         record,
         thread_id,
+        repo_config,
         slack_thread,
         test_run=test_run,
         admin_thread=admin_thread,
@@ -1376,6 +1350,7 @@ async def launch_github_automations(
         try:
             result = await _launch_agent_schedule_record(
                 record,
+                repo=f"{owner_login}/{repo_name}",
                 prompt=await _github_event_prompt(record, event_type, payload, event),
                 # An outsider can open an issue on a public repository, so the
                 # run it starts reaches only that repository.
@@ -1409,18 +1384,28 @@ async def launch_github_issue_automations(
     return await launch_github_automations("issues", {"action": "opened", **payload}, delivery_id)
 
 
-async def launch_scheduled_agent_run(schedule_id: str) -> dict[str, Any]:
+async def launch_scheduled_agent_run(
+    schedule_id: str, trigger_id: str | None = None
+) -> dict[str, Any]:
+    """Run the automation a cron fired for; ``trigger_id`` names its schedule trigger.
+
+    Crons made before triggers had ids send none, and run with the first schedule's repo.
+    """
     record = await get_agent_schedule(schedule_id)
     if not record:
         await _delete_orphan_crons(schedule_id, keep=set())
         return {"status": "missing", "schedule_id": schedule_id}
     triggers = record.get("triggers") or []
-    if not any(t.get("kind") == "schedule" for t in triggers):
+    schedules = [t for t in triggers if t.get("kind") == "schedule"]
+    fired = next((t for t in schedules if t.get("id") == trigger_id), None) or (
+        schedules[0] if schedules and trigger_id is None else None
+    )
+    if fired is None:
         await _delete_orphan_crons(
             schedule_id, keep={t["cron_id"] for t in triggers if t.get("cron_id")}
         )
         return {"status": "trigger_mismatch", "schedule_id": schedule_id}
-    return await _launch_agent_schedule_record(record)
+    return await _launch_agent_schedule_record(record, repo=_trigger_repo(record, fired["id"]))
 
 
 async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
@@ -1428,7 +1413,7 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
     _assert_schedule_exists(record)
     assert record is not None
 
-    result = await _launch_agent_schedule_record(record, test_run=True)
+    result = await _launch_agent_schedule_record(record, repo=_trigger_repo(record), test_run=True)
     status = result.get("status")
     if status == "started":
         return result

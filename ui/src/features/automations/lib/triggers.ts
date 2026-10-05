@@ -4,38 +4,99 @@ import type {
   GitHubTriggerEvent,
 } from "@/features/agents/lib/types"
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
-import { describeCron } from "@/features/automations/lib/cron"
+import {
+  describeCron,
+  isDescribableCron,
+} from "@/features/automations/lib/cron"
 
-export function scheduleCron(schedule?: AgentSchedule): string | null {
-  const trigger = schedule?.triggers.find((t) => t.kind === "schedule")
-  return trigger?.kind === "schedule" ? trigger.cron : null
+/** A trigger being edited: a GitHub one may not have its repository yet. */
+export type TriggerDraft =
+  | {
+      key: string
+      kind: "schedule"
+      cron: string
+      repo: string | null
+      /** Edit the cron as text rather than through a preset. */
+      custom: boolean
+    }
+  | {
+      key: string
+      kind: "github"
+      repo: string | null
+      events: Array<GitHubTriggerEvent>
+    }
+
+let nextKey = 0
+const draftKey = () => `trigger-${++nextKey}`
+
+export function scheduleDraft(cron: string, repo: string | null = null) {
+  return {
+    key: draftKey(),
+    kind: "schedule" as const,
+    cron,
+    repo,
+    custom: !isDescribableCron(cron),
+  }
 }
 
-export function githubEvents(
-  schedule?: AgentSchedule
-): Array<GitHubTriggerEvent> {
-  const trigger = schedule?.triggers.find((t) => t.kind === "github")
-  return trigger?.kind === "github" ? trigger.events : []
+export function githubDraft(
+  repo: string | null = null,
+  events: Array<GitHubTriggerEvent> = []
+) {
+  return { key: draftKey(), kind: "github" as const, repo, events }
 }
 
-/** The triggers the editor's per-provider state stands for. */
-export function buildTriggers(
-  cron: string | null,
-  events: Array<GitHubTriggerEvent>
+export function draftsFor(
+  schedule?: AgentSchedule,
+  templateCron?: string | null
+): Array<TriggerDraft> {
+  if (!schedule) return templateCron ? [scheduleDraft(templateCron)] : []
+  return schedule.triggers.map((trigger) =>
+    trigger.kind === "schedule"
+      ? scheduleDraft(trigger.cron, trigger.repo ?? null)
+      : githubDraft(trigger.repo, trigger.events)
+  )
+}
+
+/** Why a draft cannot be saved yet, or null when it can. */
+export function draftProblem(draft: TriggerDraft): string | null {
+  if (draft.kind === "schedule") {
+    return draft.cron.trim() ? null : "Enter a cron schedule."
+  }
+  if (!draft.repo) return "Pick the repository whose events run this."
+  if (draft.events.length === 0) return "Pick at least one event."
+  return null
+}
+
+export function toTriggers(
+  drafts: Array<TriggerDraft>
 ): Array<AutomationTriggerConfig> {
-  const triggers: Array<AutomationTriggerConfig> = []
-  if (cron?.trim()) triggers.push({ kind: "schedule", cron: cron.trim() })
-  if (events.length > 0) triggers.push({ kind: "github", events })
-  return triggers
+  return drafts.flatMap((draft): Array<AutomationTriggerConfig> => {
+    if (draftProblem(draft)) return []
+    if (draft.kind === "schedule") {
+      const cron = draft.cron.trim()
+      return [
+        draft.repo
+          ? { kind: "schedule", cron, repo: draft.repo }
+          : { kind: "schedule", cron },
+      ]
+    }
+    return draft.repo
+      ? [{ kind: "github", repo: draft.repo, events: draft.events }]
+      : []
+  })
 }
 
-/** One line per provider, e.g. "GitHub: PR closed, PR merged". */
+/** One part per trigger, e.g. "GitHub acme/oss: PR closed, PR merged". */
 export function describeTriggers(schedule: AgentSchedule): string {
   const parts = schedule.triggers.map((trigger) => {
-    if (trigger.kind === "schedule") return describeCron(trigger.cron)
+    if (trigger.kind === "schedule") {
+      const when = describeCron(trigger.cron)
+      return trigger.repo ? `${when} in ${trigger.repo}` : when
+    }
     const provider = AUTOMATION_EVENT_PROVIDERS[trigger.kind]
     const events = trigger.events.map((event) => provider.events[event])
-    return `${provider.label}: ${events.join(", ")}`
+    return `${provider.label} ${trigger.repo}: ${events.join(", ")}`
   })
   return parts.length > 0 ? parts.join(" · ") : "No trigger"
 }

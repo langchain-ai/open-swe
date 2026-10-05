@@ -239,10 +239,11 @@ export type GitHubTriggerEvent =
   | "pull_request.closed"
   | "pull_request.merged"
 
-/** One way an automation fires; `kind` names the provider. */
+/** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
-  | { kind: "schedule"; cron: string }
-  | { kind: "github"; events: Array<GitHubTriggerEvent> }
+  /** `repo` is where runs start: a cron carries no event to say. */
+  | { kind: "schedule"; cron: string; repo?: string | null }
+  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
 
 export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
 
@@ -268,7 +269,6 @@ export interface AgentSchedule {
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string
-  repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
   adminThread: boolean

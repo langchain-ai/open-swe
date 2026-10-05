@@ -16,7 +16,12 @@ from agent.dashboard.options import fable_disabled_fallback
 from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.schedules import store as schedules
-from agent.schedules.store import ScheduleCreateBody, ScheduleUpdateBody
+from agent.schedules.store import (
+    GitHubTrigger,
+    ScheduleCreateBody,
+    ScheduleTrigger,
+    ScheduleUpdateBody,
+)
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
@@ -190,8 +195,7 @@ async def test_create_agent_schedule_registers_scheduler_cron(fake_client, auth)
         workspace="default",
         name="Daily report",
         prompt="Summarize merged PRs",
-        schedule="0 9 * * 1-5",
-        repo="langchain-ai/open-swe",
+        triggers=[ScheduleTrigger(cron="0 9 * * 1-5", repo="langchain-ai/open-swe")],
         slack_channel_id="C0123456789",
     )
 
@@ -215,7 +219,7 @@ async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -
         workspace="default",
         name="Admin cleanup",
         prompt="Clean up workspace environments",
-        schedule="0 9 * * *",
+        triggers=[ScheduleTrigger(cron="0 9 * * *")],
         admin_thread=True,
     )
 
@@ -238,8 +242,7 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
             ScheduleCreateBody(
                 workspace="default",
                 prompt="hello",
-                schedule="0 9 * * 1",
-                repo="victim/private",
+                triggers=[ScheduleTrigger(cron="0 9 * * 1", repo="victim/private")],
             ),
         )
 
@@ -279,7 +282,7 @@ async def test_update_agent_schedule_rejects_non_admin_elevation(fake_client) ->
     assert stored["admin_thread"] is False
 
 
-async def test_each_provider_field_replaces_only_its_own_trigger(
+async def test_each_trigger_runs_in_its_own_repository(
     fake_client: _FakeClient, auth: None
 ) -> None:
     created = await schedules.create_agent_schedule(
@@ -287,27 +290,37 @@ async def test_each_provider_field_replaces_only_its_own_trigger(
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage",
-            schedule="0 9 * * *",
-            github_events=["pull_request.closed"],
-            repo="langchain-ai/open-swe",
+            triggers=[
+                ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/docs"),
+                GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.closed"]),
+            ],
         ),
     )
-    assert [t["kind"] for t in created["triggers"]] == ["schedule", "github"]
-    assert created["cronId"] == "cron_1"
+    schedule_trigger = created["triggers"][0]
+    cron_input = fake_client.crons.created[0]["input"]
+    assert cron_input == {"schedule_id": created["id"], "trigger_id": schedule_trigger["id"]}
 
-    without_github = await schedules.update_agent_schedule(
-        created["id"], "alice", ScheduleUpdateBody(github_events=[])
+    def closed_on(repo: str) -> dict[str, Any]:
+        return {
+            "action": "closed",
+            "repository": {"owner": {"login": "langchain-ai"}, "name": repo, "private": True},
+            "pull_request": {"number": 7, "merged": False},
+        }
+
+    scheduled = await schedules.launch_scheduled_agent_run(created["id"], cron_input["trigger_id"])
+    unwatched = await schedules.launch_github_automations("pull_request", closed_on("docs"), "d-1")
+    watched = await schedules.launch_github_automations(
+        "pull_request", closed_on("open-swe"), "d-2"
     )
-    assert without_github["triggers"] == [
-        {"id": without_github["triggers"][0]["id"], "kind": "schedule", "cron": "0 9 * * *"}
-    ]
-    assert without_github["cronId"] is not None
 
-    with pytest.raises(HTTPException) as refused:
-        await schedules.update_agent_schedule(
-            created["id"], "alice", ScheduleUpdateBody(clear_schedule=True)
-        )
-    assert refused.value.status_code == 422
+    assert scheduled["status"] == "started"
+    assert unwatched == []
+    assert [result["status"] for result in watched] == ["started"]
+    repos = [run["config"]["configurable"]["repo"] for run in fake_client.runs.created]
+    assert repos == [
+        {"owner": "langchain-ai", "name": "docs"},
+        {"owner": "langchain-ai", "name": "open-swe"},
+    ]
 
 
 async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
@@ -318,8 +331,7 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage issues",
-            schedule="0 9 * * *",
-            repo="langchain-ai/open-swe",
+            triggers=[ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/open-swe")],
         ),
     )
     cron_delete = AsyncMock(side_effect=RuntimeError("cron service unavailable"))
@@ -328,7 +340,9 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     updated = await schedules.update_agent_schedule(
         created["id"],
         "alice",
-        ScheduleUpdateBody(clear_schedule=True, github_events=["issues.opened"]),
+        ScheduleUpdateBody(
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])]
+        ),
     )
     tick = await schedules.launch_scheduled_agent_run(created["id"])
 
@@ -443,8 +457,7 @@ async def test_issue_delivery_stays_claimed_after_dispatched_run_bookkeeping_fai
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage issues",
-            github_events=["issues.opened"],
-            repo="langchain-ai/open-swe",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
             slack_channel_id="C0123456789",
         ),
     )
@@ -482,8 +495,7 @@ async def test_issue_delivery_can_retry_failed_dispatch(
         ScheduleCreateBody(
             workspace="default",
             prompt="Triage issues",
-            github_events=["issues.opened"],
-            repo="langchain-ai/open-swe",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
         ),
     )
     payload = {
@@ -509,8 +521,7 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         ScheduleCreateBody(
             workspace="default",
             prompt="Summarize the closed PR",
-            github_events=["pull_request.closed"],
-            repo="langchain-ai/open-swe",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.closed"])],
         ),
     )
     on_merge = await schedules.create_agent_schedule(
@@ -518,8 +529,7 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
         ScheduleCreateBody(
             workspace="default",
             prompt="Write release notes",
-            github_events=["pull_request.merged"],
-            repo="langchain-ai/open-swe",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.merged"])],
         ),
     )
 
@@ -660,7 +670,12 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
     assert first["last_thread_id"] == "thread-before"
     assert first["triggers"][0]["cron_id"] == "cron_kept"
     assert second["workspace"] == "oss"
-    assert second["triggers"][0]["config"] == {"kind": "github", "events": ["issues.opened"]}
+    assert first["triggers"][0]["config"]["repo"] == "langchain-ai/open-swe"
+    assert second["triggers"][0]["config"] == {
+        "kind": "github",
+        "repo": "langchain-ai/open-swe",
+        "events": ["issues.opened"],
+    }
     # A record whose workspace is gone is dropped along with its cron.
     assert await schedules.get_agent_schedule(SCHED_GONE) is None
     assert fake_client.crons.deleted == ["cron_orphan"]
@@ -789,15 +804,17 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     child = await automations.create_automation(
         "Check workspace repos",
         workspace="default",
-        schedule="0 9 * * *",
-        repo="langchain-ai/open-swe",
+        triggers=[ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/open-swe")],
         admin_thread=True,
     )
     assert child["ok"] is True
     child_id = child["automation"]["id"]
-    changed = await automations.update_automation(child_id, repo="langchain-ai/another-repo")
+    changed = await automations.update_automation(
+        child_id,
+        triggers=[ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/another-repo")],
+    )
     assert changed["ok"] is True
-    assert changed["automation"]["repo"] == "langchain-ai/another-repo"
+    assert changed["automation"]["triggers"][0]["repo"] == "langchain-ai/another-repo"
 
     # A later invocation or human reply cannot inherit the scheduled grant.
     original = dict(run_config["configurable"])
@@ -1065,7 +1082,10 @@ async def test_an_issue_automation_on_a_public_repository_records_a_single_repos
 def test_a_new_automation_must_name_its_workspace() -> None:
     with pytest.raises(ValidationError):
         ScheduleCreateBody.model_validate(
-            {"prompt": "Triage this issue", "github_events": ["issues.opened"], "repo": "a/b"}
+            {
+                "prompt": "Triage this issue",
+                "triggers": [{"kind": "github", "repo": "a/b", "events": ["issues.opened"]}],
+            }
         )
 
 
@@ -1076,8 +1096,7 @@ async def test_a_new_automation_keeps_the_workspace_it_names(
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     body = ScheduleCreateBody(
         prompt="Triage this issue",
-        github_events=["issues.opened"],
-        repo="langchain-ai/open-swe",
+        triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
         workspace="Core",
     )
 
@@ -1090,7 +1109,9 @@ async def test_an_automation_cannot_name_a_missing_workspace(
     fake_client, auth, registry_db
 ) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
-        prompt="Triage", github_events=["issues.opened"], repo="a/b", workspace="gone"
+        prompt="Triage",
+        triggers=[GitHubTrigger(repo="a/b", events=["issues.opened"])],
+        workspace="gone",
     )
 
     with pytest.raises(HTTPException) as refused:

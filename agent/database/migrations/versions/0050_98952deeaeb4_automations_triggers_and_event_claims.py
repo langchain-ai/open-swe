@@ -16,8 +16,6 @@ def upgrade() -> None:
             workspace_id uuid NOT NULL REFERENCES workspace (id) ON DELETE CASCADE,
             name text NOT NULL,
             prompt text NOT NULL,
-            repo_owner text,
-            repo_name text,
             slack_channel_id text,
             slack_notification_mode text NOT NULL DEFAULT 'always'
                 CHECK (slack_notification_mode IN ('always', 'on_action')),
@@ -77,7 +75,8 @@ def upgrade() -> None:
         "COMMENT ON TABLE automation IS 'A stored prompt that runs in one workspace whenever "
         "one of its triggers fires. Run state lives on the row.'",
         "COMMENT ON TABLE automation_trigger IS 'What fires an automation: a cron schedule or "
-        "matching GitHub events. config is validated by the application per kind; match_key is "
+        "matching GitHub events. config holds each kind''s own filters, such as a GitHub "
+        "trigger''s repository and events, and is validated by the application; match_key is "
         "the lowercased repository for GitHub triggers.'",
         "COMMENT ON TABLE event_claim IS 'Exactly-once claims for inbound events, keyed by a "
         "scope and a key such as automation id plus delivery id. A claim can be released so a "

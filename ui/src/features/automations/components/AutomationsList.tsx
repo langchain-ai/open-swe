@@ -280,7 +280,6 @@ function AutomationRow({
                 {workspaceName}
               </span>
             )}
-            {schedule.repo && <span>{schedule.repo}</span>}
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>

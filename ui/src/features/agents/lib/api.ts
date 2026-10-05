@@ -35,7 +35,6 @@ export interface ScheduleCreateRequest {
   /** Every trigger, any of which fires the automation; replaces them all on update. */
   triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
@@ -50,7 +49,6 @@ export interface ScheduleUpdateRequest {
   /** Every trigger, any of which fires the automation; replaces them all on update. */
   triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean

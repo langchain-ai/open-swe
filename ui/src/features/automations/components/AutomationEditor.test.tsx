@@ -62,7 +62,13 @@ vi.mock("@/lib/slack-channels", async (importOriginal) => ({
   }),
 }))
 vi.mock("@/features/settings/components/RepoSelector", () => ({
-  RepoSelector: () => <div />,
+  RepoSelector: ({
+    onRepoChange,
+    placeholder,
+  }: {
+    onRepoChange: (repo: string | null) => void
+    placeholder: string
+  }) => <button onClick={() => onRepoChange("acme/oss")}>{placeholder}</button>,
 }))
 vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
@@ -152,7 +158,6 @@ describe("AutomationEditor", () => {
           triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
           scope: "workspace",
           workspace: "core",
-          repo: "acme/oss",
           slackNotificationMode: "always",
           adminThread: false,
           model: "Default",
@@ -210,7 +215,6 @@ describe("AutomationEditor", () => {
             ],
             scope: "workspace",
             workspace: "gone",
-            repo: null,
             slackNotificationMode: "always",
             adminThread: false,
             model: "Default",
@@ -227,7 +231,7 @@ describe("AutomationEditor", () => {
     }
   })
 
-  it("saves GitHub events as one GitHub trigger beside the schedule", () => {
+  it("saves a GitHub trigger with its own repository beside the schedule", () => {
     signInAsAdmin()
     render(
       <AutomationEditor
@@ -240,7 +244,6 @@ describe("AutomationEditor", () => {
           triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
           scope: "workspace",
           workspace: "default",
-          repo: "acme/oss",
           slackNotificationMode: "always",
           adminThread: false,
           model: "Default",
@@ -250,6 +253,7 @@ describe("AutomationEditor", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
+    fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
     fireEvent.click(screen.getByRole("button", { name: "PR merged" }))
     fireEvent.click(screen.getByRole("button", { name: "PR closed" }))
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
@@ -258,6 +262,7 @@ describe("AutomationEditor", () => {
       { kind: "schedule", cron: "0 9 * * *" },
       {
         kind: "github",
+        repo: "acme/oss",
         events: ["pull_request.closed", "pull_request.merged"],
       },
     ])
