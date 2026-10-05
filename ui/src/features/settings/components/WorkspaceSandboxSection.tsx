@@ -106,7 +106,7 @@ export function WorkspaceSandboxSection({
       {record.slug !== "default" && (
         <SettingsRow
           label="Inherit sandbox from default"
-          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent."
+          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
           control={
             <input
               type="checkbox"
