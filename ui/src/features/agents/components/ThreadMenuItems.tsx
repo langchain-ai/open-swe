@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   CopyIcon,
+  FolderIcon,
   PushPinIcon,
   PushPinSlashIcon,
   TrashIcon,
@@ -36,8 +37,38 @@ export function ThreadMenuItems({
   onDelete: () => void
 }) {
   const threadId = thread?.id ?? localThread?.id
+  const repositories = [
+    ...new Set(
+      [
+        thread?.repoFullName,
+        ...(thread?.pullRequests?.map((pr) => pr.repoFullName) ?? []),
+      ]
+        .map((repo) => repo?.trim())
+        .filter((repo): repo is string => Boolean(repo))
+    ),
+  ]
   return (
     <>
+      {repositories.length > 0 && (
+        <Menu.Group>
+          <Menu.GroupLabel className="px-2 py-1.5 text-xs text-muted-foreground">
+            Repositories
+          </Menu.GroupLabel>
+          {repositories.map((repo) => (
+            <Menu.LinkItem
+              key={repo}
+              href={`https://github.com/${repo}`}
+              target="_blank"
+              rel="noreferrer"
+              closeOnClick
+              className={menuItemClassName}
+            >
+              <FolderIcon className="size-3.5 shrink-0" />
+              {repo}
+            </Menu.LinkItem>
+          ))}
+        </Menu.Group>
+      )}
       {thread?.traceUrl && (
         <Menu.LinkItem
           href={thread.traceUrl}
