@@ -1,0 +1,1 @@
+Report these blockers to the requester. Do not work around this refusal by posting a manual Slack review request, requesting reviewers through GitHub, or using another review tool to bypass the readiness gate, even when the user also asked for a channel post. Resolve the blockers before retrying request_human_review.

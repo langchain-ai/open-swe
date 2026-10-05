@@ -276,7 +276,7 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
-ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
+ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
@@ -324,6 +324,21 @@ ENV.var(
     "NOTION_MCP_CLIENT_NAME",
     "Client name registered with the Notion MCP OAuth server.",
     default="Open SWE",
+)
+ENV.var(
+    "LANGSMITH_CONNECTION_URL",
+    "LangSmith API origin people connect their own accounts to (Sign in with LangSmith).",
+    default="https://api.smith.langchain.com",
+)
+ENV.var(
+    "LANGSMITH_OAUTH_CLIENT_ID",
+    "Confidential OAuth application registered in the LangSmith organization (Settings > "
+    "OAuth applications) for personal LangSmith connections. Unset hides the connection.",
+)
+ENV.var(
+    "LANGSMITH_OAUTH_CLIENT_SECRET",
+    "Client secret of the LANGSMITH_OAUTH_CLIENT_ID application. Unset hides the connection.",
+    secret=True,
 )
 ENV.var("RUN_COMPLETE_WEBHOOK_SECRET", "Token authenticating /webhooks/run-complete.", secret=True)
 ENV.var("COMPLETION_WEBHOOK_URL", "Where LangGraph posts run-completion webhooks.")

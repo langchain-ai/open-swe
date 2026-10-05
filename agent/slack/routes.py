@@ -507,9 +507,7 @@ async def slack_webhook(
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
-        event.type == "app_mention"
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
+        event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
     leading_mention = re.match(r"\s*<@([^>]+)>", text)
     if (
