@@ -40,6 +40,7 @@ from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
+from agent.webhooks.event_matches import EVENT_MATCH_KIND
 from agent.webhooks.event_subscriptions import EventSubscription
 
 logger = logging.getLogger(__name__)
@@ -550,7 +551,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
-    failures = _consecutive_failures(metadata) + 1
+    # Only event-woken runs count: a failure on a run a person started always replies
+    # and lets later event-woken failures report again.
+    event_woken = (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == EVENT_MATCH_KIND
+    )
+    failures = _consecutive_failures(metadata) + 1 if event_woken else 0
+    counter = (
+        {_CONSECUTIVE_FAILURES: failures} if failures or _consecutive_failures(metadata) else {}
+    )
     if failures > _MAX_CONSECUTIVE_FAILURE_REPLIES:
         try:
             await client.threads.update(
@@ -572,7 +581,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     try:
         await client.threads.update(
             thread_id=thread_id,
-            metadata=_failure_reply_metadata(metadata, run_id) | {_CONSECUTIVE_FAILURES: failures},
+            metadata=_failure_reply_metadata(metadata, run_id) | counter,
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)

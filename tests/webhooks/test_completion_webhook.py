@@ -171,13 +171,12 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
         {
             "failure_reply_posted_run_id": "run-2",
             "failure_reply_posted_run_ids": ["run-1", "run-2"],
-            "consecutive_failed_runs": 1,
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_repeated_failures_stop_posting_replies(
+async def test_repeated_event_woken_failures_stop_replying_but_person_started_runs_still_do(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient(_slack_metadata() | {"consecutive_failed_runs": 3})
@@ -185,13 +184,23 @@ async def test_repeated_failures_stop_posting_replies(
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
 
-    result = await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-4", "status": "error"}
+    suppressed = await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-4",
+            "status": "error",
+            "metadata": {"kind": "event_match"},
+        }
+    )
+    person_started = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-5", "status": "error"}
     )
 
-    assert result == {"status": "ignored", "reason": "repeated failures"}
-    reply.assert_not_awaited()
-    assert client.threads.updates == [{"consecutive_failed_runs": 4}]
+    assert suppressed == {"status": "ignored", "reason": "repeated failures"}
+    assert person_started["status"] == "ok"
+    reply.assert_awaited_once()
+    assert client.threads.updates[0] == {"consecutive_failed_runs": 4}
+    assert client.threads.updates[1]["consecutive_failed_runs"] == 0
 
 
 class _FakeRuns:
