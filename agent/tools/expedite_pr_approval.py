@@ -163,6 +163,13 @@ async def expedite_pr_approval(
         return _failure("Could not read the pull request's changed files")
     verdict = assess_eligibility(files)
     if isinstance(verdict, Ineligible):
+        active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if active is not None and active.kind == "expedited" and active.thread_id == thread_id:
+            await retire(
+                active,
+                "superseded",
+                f"No longer eligible for expedited review: {verdict.reason}.",
+            )
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
             f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests, and "
