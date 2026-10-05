@@ -41,6 +41,7 @@ from agent.human_review.lifecycle import (
     post_standard_card,
     refresh_card,
     release_picks,
+    retire,
     update_blocked_reactions,
 )
 from agent.human_review.merging import merge_pull_request
@@ -255,7 +256,8 @@ async def request_review(
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if active is not None:
+    pending_expedited = active is not None and active.kind == "expedited" and active.awaiting_ready
+    if active is not None and not pending_expedited:
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
@@ -282,6 +284,10 @@ async def request_review(
     pull_request, details = recorded
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
+
+    if pending_expedited and active is not None:
+        if await retire(active, "superseded", "Replaced by a standard review request.") is None:
+            return _failure("The pull request's review request changed meanwhile. Try again.")
 
     in_thread = origin.slack_channel_id == target.id and bool(origin.slack_thread_ts)
     try:

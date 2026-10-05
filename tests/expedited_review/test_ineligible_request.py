@@ -5,8 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.expedited_review.eligibility import ChangedFile
-from agent.human_review import lifecycle
+from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
+from agent.human_review import lifecycle, standard
 from agent.human_review.requests import HumanReviewRequest
+from agent.slack.client import GitHubPrRef
 from tests.expedited_review.conftest import OpenApproval
 
 tool = import_module("agent.tools.expedite_pr_approval")
@@ -46,3 +48,52 @@ async def test_ineligible_update_retires_existing_card(
     retired = await HumanReviewRequest.get(approval.id)
     assert retired is not None
     assert retired.state == ("superseded" if thread_id == "thread-1" else "open")
+
+
+@pytest.mark.asyncio
+async def test_standard_review_replaces_author_only_request(
+    monkeypatch: pytest.MonkeyPatch, open_approval: OpenApproval
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    monkeypatch.setattr(standard, "repo_token", AsyncMock(return_value="token"))
+    snapshot = PullRequestSnapshot(
+        state="open",
+        merged=False,
+        draft=False,
+        head_sha="new",
+        title="Fix",
+        author="ada",
+        mergeable=True,
+        mergeable_state="clean",
+        check_state="success",
+        unresolved_threads=0,
+    )
+    monkeypatch.setattr(
+        standard, "assess_readiness", AsyncMock(return_value=Readiness(snapshot, []))
+    )
+    monkeypatch.setattr(
+        standard,
+        "_target_channel",
+        AsyncMock(return_value=SimpleNamespace(id="C1", name="reviews")),
+    )
+    monkeypatch.setattr(
+        standard,
+        "record_pull_request",
+        AsyncMock(
+            return_value=(approval.pull_request, SimpleNamespace(head_sha="new", body="Fix"))
+        ),
+    )
+    monkeypatch.setattr(standard, "_schedule", AsyncMock(return_value=True))
+    monkeypatch.setattr(standard, "post_standard_card", AsyncMock(return_value=("3.0", None)))
+    monkeypatch.setattr(
+        standard, "_permalink", AsyncMock(return_value="https://slack.example/card")
+    )
+    monkeypatch.setattr(lifecycle, "refresh_card_in_thread", AsyncMock())
+    result = await standard.request_review(
+        GitHubPrRef("lc", "repo", 7, "https://github.com/lc/repo/pull/7"), standard.Origin()
+    )
+    assert result.success
+    active = await HumanReviewRequest.active_for("lc", "repo", 7)
+    assert active is not None and active.kind == "standard"
+    retired = await HumanReviewRequest.get(approval.id)
+    assert retired is not None and retired.state == "superseded"
