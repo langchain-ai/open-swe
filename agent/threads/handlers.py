@@ -12,7 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
-from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
@@ -731,6 +731,7 @@ async def get_dashboard_thread_pull_request_context(
     *,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
@@ -748,7 +749,7 @@ async def get_dashboard_thread_pull_request_context(
     if record is None:
         raise HTTPException(404, "pull request is not tracked by this thread")
     token = await _github_token_for_login(login)
-    result = await get_pull_request_context(record, token)
+    result = await get_pull_request_context(record, token, scope)
     if result is None:
         raise HTTPException(502, "could not scan pull request")
     return result

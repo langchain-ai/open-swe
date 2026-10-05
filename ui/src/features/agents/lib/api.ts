@@ -1,5 +1,6 @@
 import type {
   AgentPullRequestContextResponse,
+  ThreadFixScope,
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
@@ -390,11 +391,13 @@ export const agentsApi = {
   getThreadPullRequestContext: (
     threadId: string,
     repoFullName: string,
-    number: number
+    number: number,
+    scope: ThreadFixScope
   ) => {
     const query = new URLSearchParams({
       repo_full_name: repoFullName,
       number: String(number),
+      scope,
     })
     return agentsRequest<AgentPullRequestContextResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-context?${query}`

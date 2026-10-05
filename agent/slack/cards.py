@@ -6,14 +6,29 @@ from collections.abc import Awaitable, Callable
 from langgraph_sdk import get_client
 
 from agent.run_config import RunConfig
-from agent.slack.blocks import Block, block_payload
+from agent.slack.blocks import Block, block_payload, context
 from agent.slack.client import (
     delete_slack_message,
     get_active_slack_thread,
+    get_slack_permalink,
     post_slack_thread_reply_with_ts,
 )
+from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
+
+
+async def origin_footer(thread_id: str, location: tuple[str, str] | None = None) -> list[Block]:
+    links: list[str] = []
+    if url := dashboard_thread_url(thread_id):
+        links.append(f"<{url}|Web thread>")
+    if location is None and thread_id:
+        source = await get_active_slack_thread(get_client(), thread_id)
+        if source and source.get("channel_id") and source.get("thread_ts"):
+            location = (source["channel_id"], source["thread_ts"])
+    if location and (url := await get_slack_permalink(*location)):
+        links.append(f"<{url}|Slack thread>")
+    return [context(" · ".join(links))] if links else []
 
 
 async def run_slack_location(cfg: RunConfig, thread_id: str) -> tuple[str, str]:
@@ -37,6 +52,7 @@ async def repost_thread_card(
     broadcast: bool,
     agent_thread_id: str | None,
     adopt: Callable[[str], Awaitable[bool]],
+    login: str | None = None,
 ) -> bool:
     """Replace a thread card with a fresh reply, sent to the channel too if ``broadcast``.
 
@@ -51,6 +67,7 @@ async def repost_thread_card(
         blocks=block_payload(blocks),
         agent_thread_id=agent_thread_id,
         reply_broadcast=broadcast,
+        login=login,
     )
     if not message_ts:
         logger.warning(

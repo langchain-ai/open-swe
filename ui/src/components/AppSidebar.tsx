@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import {
   IoArrowBackOutline,
+  IoBarChartOutline,
   IoCloudOutline,
   IoCubeOutline,
   IoFlaskOutline,
@@ -58,6 +59,12 @@ const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
         to: "/admin",
         label: "Admin",
         icon: IoSettingsOutline,
+        adminOnly: true,
+      },
+      {
+        to: "/admin/evals",
+        label: "Evals",
+        icon: IoBarChartOutline,
         adminOnly: true,
       },
     ],
@@ -140,7 +147,9 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                       to={item.to}
                       onClick={layout.closeOnMobile}
                       className={LINK_CLASS}
-                      activeOptions={{ exact: withWorkspaces }}
+                      activeOptions={{
+                        exact: withWorkspaces || item.to === "/admin",
+                      }}
                       activeProps={ACTIVE_LINK_PROPS}
                     >
                       <Icon className="size-4" />

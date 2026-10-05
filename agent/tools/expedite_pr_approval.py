@@ -14,10 +14,12 @@ from agent.expedited_review.eligibility import (
     fingerprint_matches,
 )
 from agent.github.ci import fetch_pr
+from agent.github.comments import derive_pr_state
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoSettings
 from agent.github.token import resolve_github_token
 from agent.human_review.lifecycle import (
+    broadcast_configured,
     post_card,
     prompt_author_ready,
     refresh_card,
@@ -169,7 +171,7 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
-    settings = await RepoSettings.fetch(pr_ref.owner, pr_ref.repo, token=token, ref=head_sha)
+    settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
     review_channel = settings.channel_for_files([file.filename for file in files])
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:
@@ -179,9 +181,7 @@ async def expedite_pr_approval(
         )
     broadcast_choice = (
         [{"id": broadcast_target.id, "name": broadcast_target.name}]
-        if broadcast_target is not None
-        and broadcast_target.name
-        and broadcast_target.id != channel_id
+        if broadcast_target is not None and broadcast_target.name
         else []
     )
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
@@ -197,6 +197,7 @@ async def expedite_pr_approval(
                 active = updated
         if not active.awaiting_ready:
             await refresh_card(active)
+            await broadcast_configured(active)
         readiness_warning = await prompt_author_ready(active)
         return {
             "success": True,
@@ -232,12 +233,16 @@ async def expedite_pr_approval(
             )
 
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if not pull_request.title:
-        pull_request.title = payload.title
-        pull_request.head_ref = payload.head_ref
-        pull_request.base_ref = payload.base_ref
-        pull_request.author = payload.author
-        pull_request.author_github_id = payload.author_id
+    pull_request.title = payload.title
+    pull_request.body = payload.body or ""
+    pull_request.state = derive_pr_state(
+        state=payload.state, merged=payload.merged, draft=payload.draft
+    )
+    pull_request.head_ref = payload.head_ref
+    pull_request.base_ref = payload.base_ref
+    pull_request.author = payload.author
+    pull_request.author_github_id = payload.author_id
+    pull_request = await pull_request.save()
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
@@ -289,6 +294,7 @@ async def expedite_pr_approval(
         return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
+    await broadcast_configured(approval)
     await remove_superseded_cards(approval)
     readiness_warning = await prompt_author_ready(approval)
     return {

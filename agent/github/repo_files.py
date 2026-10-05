@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_PATH = ".open-swe/settings.json"
 SETTINGS_MAX_CHARS = 10_000
-SETTINGS_FRESH_FOR = timedelta(minutes=5)
+SETTINGS_FRESH_FOR = timedelta(minutes=30)
 SETTINGS_MAX_AGE = timedelta(hours=24)
 
 

@@ -21,10 +21,12 @@ function asMergeMethod(value: string): MergeMethod | "" | null {
 
 export function MergePullRequest({
   pr,
+  apply,
   onMerged,
 }: {
   pr: OpenPullRequest
-  onMerged: () => void
+  apply: () => () => void
+  onMerged?: () => void
 }) {
   const [choice, setChoice] = useState<MergeMethod | "">("")
   const [preferred] = useState(readPreferredMergeMethod)
@@ -53,9 +55,10 @@ export function MergePullRequest({
     pr,
     action: "merge",
     method: method || undefined,
+    apply,
     onDone: () => {
       if (method) writePreferredMergeMethod(method)
-      onMerged()
+      onMerged?.()
     },
   })
   return (

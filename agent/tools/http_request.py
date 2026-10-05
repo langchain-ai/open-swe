@@ -5,6 +5,7 @@ from typing import Any
 import httpx2
 
 from agent.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
+from agent.tools.sandbox_preference import replaced_by_curl
 from agent.utils.url_safety import (
     request_with_safe_redirects as _request_with_safe_redirects,
 )
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 HTTP_REQUEST_MAX_INLINE_CHARS = 100_000
 
 
+@replaced_by_curl
 async def http_request(
     url: str,
     method: str = "GET",

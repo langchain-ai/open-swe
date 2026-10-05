@@ -14,6 +14,8 @@ import logging
 import os
 import re
 import socket
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 import e2e_env  # noqa: F401  (sets env before any agent import)
@@ -211,7 +213,26 @@ def apply() -> None:
 
     # Every module that bound the name at import time needs its own rebind, or
     # it keeps calling the real store and reports "no GitHub token for @user".
+    import httpx
+    from githubkit import GitHub
+    from githubkit.auth import BaseAuthStrategy
+
     from agent.github import repos as github_repos
+
+    @asynccontextmanager
+    async def _fake_github_sdk[A: BaseAuthStrategy](
+        auth: A, *, timeout: float = 30.0, connect_timeout: float = 10.0
+    ) -> AsyncIterator[GitHub[A]]:
+        async with GitHub(
+            auth,
+            base_url=FAKE_GITHUB_API,
+            timeout=httpx.Timeout(timeout, connect=connect_timeout),
+            http_cache=False,
+            auto_retry=False,
+        ) as client:
+            yield client
+
+    github_repos.github_sdk = _fake_github_sdk
     from agent.review import routes as review_routes
     from agent.webhooks import common as webhook_common
 
