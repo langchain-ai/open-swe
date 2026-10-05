@@ -437,7 +437,7 @@ def test_plan_reference_survives_source_reference_failure(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
+    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
     assert client.post_calls
 
 
@@ -474,8 +474,8 @@ def test_public_repo_appends_plan_and_slack_reference(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- Plan: https://dashboard.example/agents/thread-1/plan" in sent_body
-    assert "- Slack thread: https://slack.example/p1" in sent_body
+    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
+    assert "- [Slack thread](https://slack.example/p1)" in sent_body
 
 
 @pytest.mark.parametrize("source", ["linear", "github_issue"])
@@ -502,8 +502,12 @@ def test_issue_references_require_private_repo(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    reference = "Linear ticket" if source == "linear" else "GitHub issue"
-    assert (reference in sent_body) is private
+    reference = (
+        "- [Linear ticket ENG-123](https://linear.app/issue/ENG-123)"
+        if source == "linear"
+        else "- [GitHub issue #123](https://github.com/org/private/issues/123)"
+    )
+    assert sent_body == (f"body\n\n## References\n{reference}" if private else "body")
 
 
 def test_does_not_duplicate_existing_references(monkeypatch: pytest.MonkeyPatch) -> None:
