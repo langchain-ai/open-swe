@@ -44,6 +44,25 @@ overrides:
   'nanoid@>=3.0.0 <4.0.0': 3.3.19
   postcss: 8.5.28
   undici: 7.30.0
+  # CopilotKit's dependency tree declares zod 3; the workspace stays on zod 4.
+  '@a2ui/web_core>zod': 4.6.5
+  '@ag-ui/client>zod': 4.6.5
+  '@ag-ui/core>zod': 4.6.5
+  '@ag-ui/proto>zod': 4.6.5
+  '@ai-sdk/anthropic>zod': 4.6.5
+  '@ai-sdk/gateway>zod': 4.6.5
+  '@ai-sdk/google>zod': 4.6.5
+  '@ai-sdk/google-vertex>zod': 4.6.5
+  '@ai-sdk/mcp>zod': 4.6.5
+  '@ai-sdk/openai>zod': 4.6.5
+  '@ai-sdk/openai-compatible>zod': 4.6.5
+  '@ai-sdk/provider-utils>zod': 4.6.5
+  '@copilotkit/a2ui-renderer>zod': 4.6.5
+  '@copilotkit/react-core>zod': 4.6.5
+  '@copilotkit/runtime>zod': 4.6.5
+  '@copilotkit/shared>zod': 4.6.5
+  '@modelcontextprotocol/sdk@1.31.0>zod': 4.6.5
+  ai>zod: 4.6.5
 
 patchedDependencies:
   '@electron/osx-sign@1.3.3': desktop/patches/@electron__osx-sign@1.3.3.patch
