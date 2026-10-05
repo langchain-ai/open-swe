@@ -1474,12 +1474,18 @@ async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JS
     )
 
 
-@app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/check-runs")
-async def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
-    pr = fakes.find_pull_by_sha(owner, repo, sha)
+@app.get("/fake-gh/repos/{owner}/{repo}/commits/{ref:path}/check-runs")
+async def gh_get_check_runs(owner: str, repo: str, ref: str) -> JSONResponse:
+    pull_ref = ref.removeprefix("refs/pull/").removesuffix("/head")
+    pr = (
+        fakes.find_pull(int(pull_ref), owner, repo)
+        if pull_ref.isdigit() and ref != pull_ref
+        else fakes.find_pull_by_sha(owner, repo, ref)
+    )
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse({"total_count": len(pr["check_runs"]), "check_runs": pr["check_runs"]})
+    runs = [{**run, "head_sha": pr["head_sha"]} for run in pr["check_runs"]]
+    return JSONResponse({"total_count": len(runs), "check_runs": runs})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/status")

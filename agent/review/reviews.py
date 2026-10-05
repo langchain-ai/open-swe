@@ -419,31 +419,39 @@ def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _fetch_check_runs(owner: str, repo: str, sha: str, token: str) -> list[dict[str, Any]]:
-    if not sha:
-        return []
+async def _check_runs_at(owner: str, repo: str, ref: str, token: str) -> list[dict[str, Any]]:
     try:
         payload = await _github_get(
-            f"/repos/{owner}/{repo}/commits/{sha}/check-runs",
+            f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
             token,
             params={"per_page": 50},
         )
     except HTTPException:
         return []
     runs = payload.get("check_runs") if isinstance(payload, dict) else None
-    out: list[dict[str, Any]] = []
-    for run in runs if isinstance(runs, list) else []:
-        if not isinstance(run, dict):
-            continue
-        out.append(
-            {
-                "name": run.get("name") or "",
-                "status": run.get("status") or "",
-                "conclusion": run.get("conclusion"),
-                "url": run.get("html_url"),
-            }
-        )
-    return out
+    return [run for run in runs if isinstance(run, dict)] if isinstance(runs, list) else []
+
+
+async def _fetch_check_runs(
+    owner: str, repo: str, sha: str, token: str, prefetched: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Serialize ``prefetched`` runs, refetching by ``sha`` when a push moved the head between reads."""
+    if not sha:
+        return []
+    runs = (
+        prefetched
+        if all(run.get("head_sha") == sha for run in prefetched)
+        else await _check_runs_at(owner, repo, sha, token)
+    )
+    return [
+        {
+            "name": run.get("name") or "",
+            "status": run.get("status") or "",
+            "conclusion": run.get("conclusion"),
+            "url": run.get("html_url"),
+        }
+        for run in runs
+    ]
 
 
 async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
@@ -994,11 +1002,14 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     its GitHub-sourced details, checks and diff, and no findings.
     """
     token = await _require_app_token()
-    raw_pr = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
+    raw_pr, thread, head_runs = await asyncio.gather(
+        _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token),
+        _reviewer_thread_for(owner, repo, pr_number),
+        _check_runs_at(owner, repo, f"refs/pull/{pr_number}/head", token),
+    )
     pr_payload = raw_pr if isinstance(raw_pr, dict) else {}
     details = _serialize_pr_details(pr_payload)
 
-    thread = await _reviewer_thread_for(owner, repo, pr_number)
     stored = (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
     summary = _thread_review_summary(thread, stored) if thread else None
     metadata = thread_metadata(thread) if thread else {}
@@ -1006,7 +1017,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
 
     head_sha = details["head_sha"] or summary["head_sha"]
-    checks = await _fetch_check_runs(owner, repo, head_sha, token)
+    checks = await _fetch_check_runs(owner, repo, head_sha, token, head_runs)
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(

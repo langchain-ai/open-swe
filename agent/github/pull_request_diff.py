@@ -9,6 +9,7 @@ installation token).
 """
 
 import asyncio
+from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -22,6 +23,8 @@ GITHUB_MAX_LISTED_FILES = 3000
 PR_DIFF_MAX_FILE_BYTES = 1_000_000
 PR_DIFF_FETCH_CONCURRENCY = 10
 _FILES_PAGE_SIZE = 100
+# Keyed by the PR's base and head SHAs, so a push or base update misses the cache.
+_PATCH_DIFF_CACHE_TTL = timedelta(hours=1)
 
 
 async def _fetch_file_at_ref(
@@ -156,6 +159,27 @@ async def build_pr_diff_files(
     hydrates on demand. ``client`` must already be configured with auth headers.
     """
     base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
+    if with_contents:
+        return await _pr_diff_at(client, full_name, pr_number, base_sha, head_sha, with_contents)
+
+    from langgraph_api.cache import swr
+
+    async def load() -> dict[str, Any]:
+        return await _pr_diff_at(client, full_name, pr_number, base_sha, head_sha, with_contents)
+
+    key = f"pr-diff:{full_name}#{pr_number}:{base_sha}..{head_sha}".lower()
+    result = await swr(key, load, fresh_for=_PATCH_DIFF_CACHE_TTL, max_age=_PATCH_DIFF_CACHE_TTL)
+    return result.value
+
+
+async def _pr_diff_at(
+    client: httpx2.AsyncClient,
+    full_name: str,
+    pr_number: int,
+    base_sha: str,
+    head_sha: str,
+    with_contents: bool,
+) -> dict[str, Any]:
     raw_files: list[Any] = []
     page = 1
     while True:

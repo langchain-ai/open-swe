@@ -1,5 +1,7 @@
 """GitHub repository access checks for dashboard actions."""
 
+from datetime import timedelta
+
 import httpx2
 from fastapi import HTTPException
 
@@ -7,6 +9,10 @@ from agent.dashboard.profiles import get_valid_access_token
 from agent.github.app import get_github_app_installation_token
 from agent.review.styles import normalize_repo_full_name
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+
+# Bounds how long a user who lost GitHub access can keep reading App-token data.
+REPO_ACCESS_FRESH_FOR = timedelta(seconds=30)
+REPO_ACCESS_MAX_AGE = timedelta(seconds=60)
 
 
 def _raise_for_github_repo_status(status_code: int) -> None:
@@ -38,18 +44,34 @@ async def assert_repo_access(full_name: str, token: str) -> str:
 
 
 async def require_repo_access_for_user(login: str, full_name: str) -> str:
+    from langgraph_api.cache import swr
+
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
+    verified_token = token
+
+    async def verify() -> bool:
+        nonlocal verified_token
+        verified_token = await _verify_repo_access_for_user(login, full_name, token)
+        return True
+
+    key = f"repo-access:{login}:{normalize_repo_full_name(full_name)}".lower()
+    await swr(key, verify, fresh_for=REPO_ACCESS_FRESH_FOR, max_age=REPO_ACCESS_MAX_AGE)
+    return verified_token
+
+
+async def _verify_repo_access_for_user(login: str, full_name: str, token: str) -> str:
     try:
         await assert_repo_access(full_name, token)
     except HTTPException as exc:
         if exc.status_code != 401:
             raise
-        token = await get_valid_access_token(login, force_refresh=True)
-        if not token:
+        refreshed = await get_valid_access_token(login, force_refresh=True)
+        if not refreshed:
             raise HTTPException(401, "github token expired, re-login required") from exc
-        await assert_repo_access(full_name, token)
+        await assert_repo_access(full_name, refreshed)
+        return refreshed
     return token
 
 
