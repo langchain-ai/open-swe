@@ -58,6 +58,7 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from agent.users import User
+from agent.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 
@@ -624,6 +625,8 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
 
 async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None = None) -> None:
     """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+    if skip_on_preview("pr_reaction"):
+        return
     location = request.slack_location or (
         (request.slack_channel_id, request.slack_message_ts)
         if request.slack_channel_id and request.slack_message_ts
@@ -639,6 +642,8 @@ async def update_blocked_reactions(
     request: HumanReviewRequest, snapshot: PullRequestSnapshot | None = None
 ) -> None:
     """Keep a watched post's failure and conflict reactions in step with GitHub."""
+    if skip_on_preview("update_blocked_reactions"):
+        return
     if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
         return
     async with HumanReviewRequest.locked(request.id) as (_, row):
