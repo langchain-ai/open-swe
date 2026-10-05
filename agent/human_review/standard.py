@@ -368,7 +368,10 @@ async def _request_github_review(request: HumanReviewRequest, login: str) -> boo
 async def _add_reviewer(
     request: HumanReviewRequest, reviewer: Participant, *, picked: bool
 ) -> HumanReviewRequest | Outcome:
-    """Sign ``reviewer`` up, or record Open SWE's pick of them; a pick signing up accepts it."""
+    """Sign ``reviewer`` up, or record Open SWE's pick of them.
+
+    A pick signing up accepts it, and someone whose pick expired may still sign up themselves.
+    """
     if request.state != "open":
         return Outcome("This review request is closed.")
     if request.is_author(reviewer.user.id, reviewer.github_login):
@@ -377,7 +380,7 @@ async def _add_reviewer(
         if row is None or row.state != "open":
             return Outcome("This review request closed before you signed up.")
         existing = row.participant(reviewer.user.id)
-        if existing is not None and (picked or existing.decision != "picked"):
+        if existing is not None and (picked or existing.decision not in ("picked", "expired")):
             return Outcome(f"@{reviewer.github_login} is already reviewing this.")
         if existing is not None:
             existing.decision = "review"
