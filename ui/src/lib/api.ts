@@ -246,6 +246,7 @@ export interface Profile {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -271,6 +272,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
