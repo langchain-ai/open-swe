@@ -57,10 +57,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent.config import ENV
 from agent.database import postgres
 from agent.github.repositories import Repository
-from agent.live.outbox import publish as publish_change
-from agent.live.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
+from agent.ui_events.outbox import publish as publish_change
+from agent.ui_events.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,

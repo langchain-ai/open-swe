@@ -1,8 +1,8 @@
 """Recording what changed, and reading back what a reconnecting reader missed.
 
 A write names the topics it changed inside its own transaction: one
-``live_event`` row per topic, plus a ``pg_notify`` that Postgres delivers only
-if the transaction commits. Live readers hear the notification; the rows exist
+``ui_event`` row per topic, plus a ``pg_notify`` that Postgres delivers only
+if the transaction commits. Open streams hear the notification; the rows exist
 so a reader that was disconnected can ask which of its topics changed while it
 was gone.
 """
@@ -18,7 +18,7 @@ from agent.database import postgres
 
 logger = logging.getLogger(__name__)
 
-CHANNEL = "open_swe_live"
+CHANNEL = "open_swe_ui_events"
 """LISTEN/NOTIFY channel carrying newline-separated topics."""
 
 RETENTION = timedelta(days=1)
@@ -26,7 +26,7 @@ RETENTION = timedelta(days=1)
 
 _NOTIFY_PAYLOAD_LIMIT = 7900
 
-_INSERT = text("INSERT INTO live_event (topic) SELECT unnest(:topics)").bindparams(
+_INSERT = text("INSERT INTO ui_event (topic) SELECT unnest(:topics)").bindparams(
     bindparam("topics", type_=ARRAY(Text))
 )
 _NOTIFY = text("SELECT pg_notify(:channel, :payload)")
@@ -34,12 +34,12 @@ _CHANGED_SINCE = text(
     """
     SELECT DISTINCT wanted.topic
     FROM unnest(:topics, :ages) AS wanted (topic, age)
-    JOIN live_event ON live_event.topic = wanted.topic
-    WHERE live_event.created_at >= clock_timestamp() - make_interval(secs => wanted.age)
+    JOIN ui_event ON ui_event.topic = wanted.topic
+    WHERE ui_event.created_at >= clock_timestamp() - make_interval(secs => wanted.age)
     """
 ).bindparams(bindparam("topics", type_=ARRAY(Text)), bindparam("ages", type_=ARRAY(Float)))
 _PRUNE = text(
-    "DELETE FROM live_event WHERE created_at < clock_timestamp() - make_interval(secs => :seconds)"
+    "DELETE FROM ui_event WHERE created_at < clock_timestamp() - make_interval(secs => :seconds)"
 ).bindparams(bindparam("seconds", type_=Float))
 
 
@@ -71,7 +71,7 @@ async def publish_standalone(*topics: str) -> None:
             await publish(conn, *topics)
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Publishing a live change failed", extra={"live_topics": list(topics)}, exc_info=True
+            "Publishing a UI event failed", extra={"ui_event_topics": list(topics)}, exc_info=True
         )
 
 

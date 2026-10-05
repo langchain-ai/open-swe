@@ -28,10 +28,10 @@ from agent.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from agent.live.outbox import publish_standalone
-from agent.live.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.ui_events.outbox import publish_standalone
+from agent.ui_events.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 

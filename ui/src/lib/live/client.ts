@@ -362,7 +362,7 @@ class Connection {
     }
     const search = params.toString()
     const query = search ? `?${search}` : ""
-    this.source = new EventSource(dashboardApiUrl(`/live/events${query}`), {
+    this.source = new EventSource(dashboardApiUrl(`/ui-events${query}`), {
       withCredentials: true,
     })
     this.source.addEventListener("hello", (event) =>

@@ -5,9 +5,9 @@ from contextlib import aclosing
 from sqlalchemy import text
 
 from agent.database import notifications, postgres
-from agent.live import hub, outbox
-from agent.live.routes import _stream
-from agent.live.topics import WORKSPACES
+from agent.ui_events import hub, outbox
+from agent.ui_events.routes import _stream
+from agent.ui_events.topics import WORKSPACES
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from agent.workspaces.store import WORKSPACES as WORKSPACE_STORE
 
@@ -33,16 +33,14 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
 
     async with postgres.transaction() as conn:
         await conn.execute(
-            text("UPDATE live_event SET created_at = created_at - interval '10 minutes'")
+            text("UPDATE ui_event SET created_at = created_at - interval '10 minutes'")
         )
     assert await outbox.changed_since({WORKSPACES: 60}) == set()
     assert await outbox.changed_since({WORKSPACES: 3600}) == {WORKSPACES}
 
     assert await outbox.prune() == 0
     async with postgres.transaction() as conn:
-        await conn.execute(
-            text("UPDATE live_event SET created_at = created_at - interval '2 days'")
-        )
+        await conn.execute(text("UPDATE ui_event SET created_at = created_at - interval '2 days'"))
     assert await outbox.prune() == 1
 
 

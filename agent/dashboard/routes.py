@@ -21,7 +21,6 @@ from agent.github.pull_request_dashboard_routes import router as pull_requests_r
 from agent.human_review.routes import router as human_review_router
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
-from agent.live.routes import router as live_router
 from agent.mcp.cli_tools import router as cli_mcp_tools_router
 from agent.mcp.routes import router as mcp_router
 from agent.review.conversation import router as review_conversation_router
@@ -31,6 +30,7 @@ from agent.skill_store.routes import router as skills_router
 from agent.slack.dashboard_routes import router as slack_router
 from agent.threads.routes import router as threads_router
 from agent.transcript.routes import router as transcript_router
+from agent.ui_events.routes import router as ui_events_router
 from agent.users.routes import router as users_router
 from agent.workspaces.routes import router as workspaces_router
 
@@ -68,4 +68,4 @@ router.include_router(threads_router)
 router.include_router(transcript_router)
 router.include_router(api_keys_router)
 router.include_router(bridge_router)
-router.include_router(live_router)
+router.include_router(ui_events_router)

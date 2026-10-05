@@ -1,5 +1,5 @@
 /**
- * Topics the backend publishes when data changes (`agent/live/topics.py`).
+ * Topics the backend publishes when data changes (`agent/ui_events/topics.py`).
  * A query lists the ones it reads in `meta.live`; a change to any of them
  * invalidates it, so it never needs a `refetchInterval`.
  */

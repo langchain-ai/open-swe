@@ -16,12 +16,12 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from agent.dashboard.deps import SESSION_DEP
-from agent.live import hub, outbox, topics
+from agent.ui_events import hub, outbox, topics
 from agent.utils.build_info import backend_build_info
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["live"])
+router = APIRouter(tags=["ui-events"])
 
 HEARTBEAT_SECONDS = 15.0
 MAX_TOPICS = 256
@@ -33,8 +33,8 @@ _SSE_HEADERS = {
 }
 
 
-@router.get("/live/events")
-async def api_live_events(
+@router.get("/ui-events")
+async def api_ui_events(
     t: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> StreamingResponse:
@@ -69,7 +69,7 @@ async def _stream(ages: dict[str, float], denied: list[str]) -> AsyncGenerator[s
         except Exception:  # noqa: BLE001
             # Without a replay the reader cannot know what it missed, so it is
             # told everything changed: a refetch too many, never a stale page.
-            logger.warning("Replaying live events failed", exc_info=True)
+            logger.warning("Replaying UI events failed", exc_info=True)
             stream.mark(ages)
         yield _frame(
             "hello",

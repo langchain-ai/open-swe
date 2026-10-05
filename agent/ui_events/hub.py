@@ -13,7 +13,7 @@ import time
 from collections.abc import Iterable, Iterator
 
 from agent.database import notifications, postgres
-from agent.live import outbox
+from agent.ui_events import outbox
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +86,13 @@ def deliver(topics: Iterable[str]) -> None:
 async def start() -> None:
     global _PRUNE_TASK, _STARTED_AT
     if not postgres.configured():
-        logger.info("Live events disabled: PostgreSQL is not configured")
+        logger.info("UI events disabled: PostgreSQL is not configured")
         return
     _STARTED_AT = time.monotonic()
     _STOP.clear()
     await notifications.listen(outbox.CHANNEL, _on_notify, _on_connected)
     if _PRUNE_TASK is None or _PRUNE_TASK.done():
-        _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="live-event-prune")
+        _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="ui-event-prune")
 
 
 async def stop() -> None:
@@ -133,6 +133,6 @@ async def _prune_forever() -> None:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            logger.warning("Pruning live events failed", exc_info=True)
+            logger.warning("Pruning UI events failed", exc_info=True)
             continue
-        logger.info("Pruned live events", extra={"pruned_live_events": pruned})
+        logger.info("Pruned UI events", extra={"pruned_ui_events": pruned})
