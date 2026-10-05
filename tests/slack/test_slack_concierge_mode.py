@@ -146,16 +146,13 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 
     await dm._record_in_concierge_thread("D1", "Mark the PR ready for review")
 
-    if status == "busy":
-        queue.assert_awaited_once_with(
-            "concierge-thread", [{"type": "text", "text": "Mark the PR ready for review"}]
-        )
-        threads.update_state.assert_not_awaited()
-    else:
-        assert threads.update_state.await_args.kwargs["values"]["messages"][0].content == (
-            "Mark the PR ready for review"
-        )
-        queue.assert_not_awaited()
+    queue.assert_awaited_once()
+    assert queue.await_args.args[0] == "concierge-thread"
+    note = queue.await_args.args[1][0]["text"]
+    assert "Mark the PR ready for review" in note
+    assert "not written by this person" in note
+    assert "already sent" in note
+    threads.update_state.assert_not_awaited()
 
 
 @pytest.mark.asyncio
