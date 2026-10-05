@@ -189,9 +189,17 @@ async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: time
 
 async def _existing(active: HumanReviewRequest) -> RequestResult:
     if active.kind == "expedited":
-        return _failure(
-            "This pull request has an open expedited review card. Dismiss it before "
-            "asking for a standard review."
+        permalink = await _permalink(active)
+        return RequestResult(
+            success=False,
+            error=(
+                "This pull request has an open expedited review card. Dismiss it before "
+                "asking for a standard review."
+                + (f" Open in Slack: {permalink}" if permalink else "")
+            ),
+            request_id=str(active.id),
+            channel=active.slack_channel_id,
+            permalink=permalink,
         )
     return RequestResult(
         success=True,

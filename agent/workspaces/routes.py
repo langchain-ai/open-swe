@@ -89,7 +89,7 @@ async def api_create_workspace(
     except ValueError as e:
         raise _save_conflict(e) from e
     await bind_workspace(request, record)
-    if record.setup_script:
+    if record.setup_script and not record.inherit_default_sandbox:
         await ensure_refresh_cron(record.slug)
         run_id = await start_refresh_run(record.slug)
         if run_id is None:
@@ -165,7 +165,7 @@ async def api_update_workspace(
     except ValueError as e:
         raise _save_conflict(e) from e
     await bind_workspace(request, record)
-    if record.setup_script:
+    if record.setup_script and not record.inherit_default_sandbox:
         await ensure_refresh_cron(record.slug)
         if repos_changed:
             run_id = await start_refresh_run(record.slug)

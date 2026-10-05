@@ -644,6 +644,15 @@
             ],
             "title": "Bridge Id"
           },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
+          },
           "hostname": {
             "title": "Hostname",
             "type": "string"
@@ -3443,6 +3452,17 @@
             ],
             "title": "Model Routing Enabled"
           },
+          "pr_failure_reactions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Failure Reactions"
+          },
           "pr_review_links": {
             "anyOf": [
               {
@@ -6107,6 +6127,11 @@
             ],
             "title": "Fs Capacity Bytes"
           },
+          "inherit_default_sandbox": {
+            "default": false,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
+          },
           "kitchen_channel_ids": {
             "items": {
               "type": "string"
@@ -6404,6 +6429,11 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "default": true,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
           },
           "kitchen_channel_ids": {
             "items": {
@@ -6970,6 +7000,17 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherit Default Sandbox"
           },
           "kitchen_channel_ids": {
             "anyOf": [
@@ -18439,6 +18480,63 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/ui-invalidations": {
+      "get": {
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Ui Invalidations",
+        "tags": [
+          "dashboard",
+          "ui-invalidations"
         ]
       }
     },
