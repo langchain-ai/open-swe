@@ -491,6 +491,18 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
+        from agent.tasks.events import worker_finished
+
+        try:
+            if await worker_finished(thread_id, run_id, status, payload):
+                return {"status": "ok", "reason": "worker completion handled"}
+        except Exception:
+            logger.exception(
+                "Could not persist worker completion",
+                extra={"thread_id": thread_id, "run_id": run_id},
+            )
+            raise
     payload_metadata = payload.get("metadata")
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         await settle_review_style_run(payload_metadata)

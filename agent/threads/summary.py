@@ -176,6 +176,12 @@ def _assert_thread_postable(
         raise HTTPException(403, "only admins can send messages in this thread")
 
 
+def assert_thread_postable(
+    metadata: Mapping[str, object], login: str, email: str | None = None
+) -> None:
+    _assert_thread_postable(metadata, login, email)
+
+
 def _metadata_repo(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
     owner = metadata.get("repo_owner")
     name = metadata.get("repo_name")

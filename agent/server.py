@@ -144,6 +144,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.stale_workspace import warn_stale_workspace
+from agent.middleware.task_coordination import TaskCoordinationMiddleware
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -259,6 +260,14 @@ from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.tools.task_threads import (
+    assess_task,
+    configure_task,
+    control_worker,
+    message_task_thread,
+    spawn_worker,
+    task_status,
+)
 from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
@@ -1733,6 +1742,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
+        configure_task,
+        spawn_worker,
+        task_status,
+        message_task_thread,
+        control_worker,
+        assess_task,
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
@@ -2104,6 +2119,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
+                    TaskCoordinationMiddleware(),
                     refresh_github_proxy_before_model,
                     *(
                         []

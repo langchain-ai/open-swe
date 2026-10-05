@@ -1,0 +1,122 @@
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from agent.sandboxes import lifecycle
+from agent.sandboxes.providers.registry import SandboxGoneError
+from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
+from agent.tasks.store import CoordinatedTask, TaskContext, TaskMembership
+
+
+@pytest.fixture
+def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, object]]:
+    task = CoordinatedTask(
+        coordinator_thread_id="coordinator",
+        title="Fix login",
+        acceptance_criteria=["Login works"],
+        workspace="default",
+    )
+    metadata: dict[str, dict[str, object]] = {
+        "coordinator": {
+            "owner_type": "user",
+            "owner_login": "owner",
+            "workspace": "default",
+            "sandbox_id": "sb-old",
+            "github_token_repositories": ["langchain-ai/open-swe"],
+        }
+    }
+    metadata["worker"] = {
+        **metadata["coordinator"],
+        "task_id": str(task.id),
+        "sandbox_host_thread_id": "coordinator",
+    }
+
+    async def context(thread_id: str) -> TaskContext:
+        return TaskContext(
+            task,
+            TaskMembership(
+                thread_id=thread_id,
+                task_id=task.id,
+                role="coordinator" if thread_id == "coordinator" else "worker",
+            ),
+        )
+
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        return metadata[thread_id]
+
+    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        shared_metadata[thread_id].update(metadata)
+
+    shared_metadata = metadata
+    monkeypatch.setattr(lifecycle, "load_context", context)
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr(lifecycle.client.threads, "update", update)
+    monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
+    monkeypatch.setattr(
+        lifecycle, "thread_token_repositories", AsyncMock(return_value=["langchain-ai/open-swe"])
+    )
+    from agent.sandboxes import tool_access
+
+    monkeypatch.setattr(tool_access, "provision_tool_url", AsyncMock())
+    SANDBOX_BACKENDS.clear()
+    SANDBOX_CONNECTIONS.clear()
+    return metadata
+
+
+@pytest.mark.parametrize("host_sandbox_id", ["sb-old", "sb-replacement"])
+async def test_worker_attaches_to_current_host_without_guest_proxy_identity(
+    shared_sandbox: dict[str, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    host_sandbox_id: str,
+) -> None:
+    shared_sandbox["coordinator"]["sandbox_id"] = host_sandbox_id
+    backend = MagicMock(id=host_sandbox_id)
+    connect = AsyncMock(return_value=backend)
+    refresh = AsyncMock()
+    monkeypatch.setattr(lifecycle, "create_sandbox", connect)
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", refresh)
+
+    attached = await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
+
+    assert attached.id == host_sandbox_id
+    assert SANDBOX_BACKENDS["coordinator"].id == SANDBOX_BACKENDS["worker"].id
+    assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
+    connect.assert_awaited_once_with(host_sandbox_id)
+    assert refresh.await_args.kwargs["thread_id"] == "coordinator"
+
+
+async def test_worker_does_not_replace_a_deleted_host_sandbox(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        lifecycle, "create_sandbox", AsyncMock(side_effect=SandboxGoneError("deleted"))
+    )
+    create = AsyncMock()
+    monkeypatch.setattr(lifecycle, "_create_sandbox_with_proxy", create)
+
+    with pytest.raises(SandboxUnreachableError, match="coordinator must recover"):
+        await lifecycle.ensure_sandbox_for_thread("worker", allow_replacement=True)
+
+    create.assert_not_awaited()
+    assert "worker" not in SANDBOX_BACKENDS
+    assert shared_sandbox["worker"]["sandbox_id"] == "sb-old"
+
+
+@pytest.mark.parametrize("invalid_binding", ["membership", "repository_scope"])
+async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
+    shared_sandbox: dict[str, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_binding: str,
+) -> None:
+    if invalid_binding == "membership":
+        shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
+    else:
+        shared_sandbox["worker"]["github_token_repositories"] = []
+    connect = AsyncMock()
+    monkeypatch.setattr(lifecycle, "create_sandbox", connect)
+
+    with pytest.raises(PermissionError):
+        await lifecycle.ensure_sandbox_for_thread("worker")
+
+    connect.assert_not_awaited()
+    assert "worker" not in SANDBOX_BACKENDS

@@ -1,0 +1,1 @@
+Configure a bounded task in this conversation, with a title and explicit, distinct acceptance criteria. This conversation becomes its permanent coordinator. Updating the title or criteria clears prior completion evidence and reopens the task. Only the coordinator can configure it. Configure before delegating.

@@ -6,7 +6,7 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -19,6 +19,7 @@ from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from agent.github.token_scope import token_repositories_from_metadata
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -33,7 +34,8 @@ from agent.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
-from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, SANDBOX_PROXY_CONFIG_METADATA_KEY
+from agent.tasks.store import load_context
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -346,6 +348,77 @@ async def _connect_existing_sandbox(
     return refreshed
 
 
+async def _attach_task_worker_sandbox(
+    thread_id: str,
+    metadata: Mapping[str, object],
+    *,
+    github_proxy_repositories: Sequence[str] | None,
+    workspace_slug: str | None,
+) -> SandboxBackendProtocol:
+    context = await load_context(thread_id)
+    host_id = metadata.get(SANDBOX_HOST_THREAD_KEY)
+    if (
+        context is None
+        or not isinstance(host_id, str)
+        or context.membership.role != "worker"
+        or str(context.task.id) != metadata.get("task_id")
+        or host_id != context.task.coordinator_thread_id
+        or host_id == thread_id
+    ):
+        raise PermissionError("The shared sandbox host does not match this worker's task")
+    host_context = await load_context(host_id)
+    if (
+        host_context is None
+        or host_context.task.id != context.task.id
+        or host_context.membership.role != "coordinator"
+    ):
+        raise PermissionError("The shared sandbox host is not this task's coordinator")
+    host = await get_sandbox_metadata(host_id)
+    owner = metadata.get("owner_login")
+    host_owner = host.get("owner_login")
+    if (
+        host.get(SANDBOX_HOST_THREAD_KEY)
+        or host.get("task_id")
+        or metadata.get("owner_type") != "user"
+        or host.get("owner_type") != "user"
+        or not isinstance(owner, str)
+        or not owner.strip()
+        or not isinstance(host_owner, str)
+        or owner.strip().lower() != host_owner.strip().lower()
+        or metadata.get("workspace") != context.task.workspace
+        or (host.get("workspace") or host.get("environment") or "default") != context.task.workspace
+        or (workspace_slug is not None and workspace_slug != context.task.workspace)
+        or metadata.get("admin_thread", False) != host.get("admin_thread", False)
+        or metadata.get("visibility", "public") != host.get("visibility", "public")
+    ):
+        raise PermissionError("The shared sandbox host has different ownership or permissions")
+    host_repositories = token_repositories_from_metadata(host)
+    worker_repositories = narrowed_repositories(
+        github_proxy_repositories, token_repositories_from_metadata(metadata)
+    )
+    if worker_repositories is not None and (
+        host_repositories is None
+        or not {repo.lower() for repo in host_repositories}.issubset(
+            repo.lower() for repo in worker_repositories
+        )
+    ):
+        raise PermissionError("The shared sandbox grants repositories outside this worker's scope")
+    backend = await ensure_sandbox_for_thread(
+        host_id, workspace_slug=context.task.workspace, require_existing=True
+    )
+    current_host = await get_sandbox_metadata(host_id)
+    if current_host.get("sandbox_id") != backend.id:
+        raise RuntimeError("The coordinator's sandbox changed while the worker was attaching")
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={
+            "sandbox_id": backend.id,
+            SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.get(SANDBOX_PROXY_CONFIG_METADATA_KEY),
+        },
+    )
+    return set_sandbox_backend(thread_id, backend)
+
+
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
@@ -353,6 +426,7 @@ async def ensure_sandbox_for_thread(
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
     record_stale_boot: bool = False,
+    require_existing: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -386,8 +460,19 @@ async def ensure_sandbox_for_thread(
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
+    if sandbox_metadata.get("task_id") is not None:
+        return await _attach_task_worker_sandbox(
+            thread_id,
+            sandbox_metadata,
+            github_proxy_repositories=github_proxy_repositories,
+            workspace_slug=workspace_slug,
+        )
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    if require_existing and sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id, None, "The coordinator must attach its sandbox first"
+        )
     bridge_id = Bridge.bridge_id_of(sandbox_id)
     if bridge_id is not None:
         # The sandbox is the user's own machine: there is nothing to boot, no
@@ -434,6 +519,12 @@ async def ensure_sandbox_for_thread(
                 workspace_slug=workspace_slug,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
+            if require_existing:
+                raise SandboxUnreachableError(
+                    thread_id,
+                    sandbox_id,
+                    "The coordinator must recover its sandbox before workers attach",
+                ) from exc
             gone = isinstance(exc, SandboxGoneError)
             if not (gone or allow_replacement):
                 raise
