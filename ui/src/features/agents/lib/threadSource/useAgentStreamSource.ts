@@ -18,6 +18,7 @@ import type { StreamThreadSource, ThreadRunInput } from "./types"
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
   const { stream, connection, trackRunAcceptance } = useAgentThreadStream({
+    transport: "cloud",
     threadId,
   })
   // `stream.stop()` only cancels server-side when this client dispatched the

@@ -3,7 +3,8 @@ import type {
   WorkspaceFileIndex,
   WorkspacePath,
 } from "@/features/agents/lib/workspaceFiles"
-import type { AgentPullRequest } from "@/features/agents/lib/types"
+import type { AgentPullRequest, ImageChunk } from "@/features/agents/lib/types"
+import type { Skill } from "@/lib/api"
 
 export type DesktopCommandId =
   | "new-thread"
@@ -33,6 +34,31 @@ export interface DesktopLocalThread {
   bridgeId: string | null
   createdAt: number
   updatedAt: number
+}
+
+/** A thread the retired local LangGraph server ran, before "This Mac" moved to the cloud. */
+export interface DesktopLegacyLocalThread {
+  id: string
+  cwd: string
+  worktreePath: string | null
+  /** Worktrees this app created for the thread, removed when it is deleted. */
+  ownedWorktrees?: Array<string>
+  title: string
+  viewed: boolean
+  archived?: boolean
+  createdAt: number
+  updatedAt: number
+  modelId: string | null
+  effort: string | null
+  pending?: DesktopLegacyLocalPromptInput | null
+}
+
+export type DesktopLegacyLocalActivity = Record<string, "running" | "error">
+
+export interface DesktopLegacyLocalPromptInput {
+  prompt: string
+  images: Array<ImageChunk>
+  skills: Array<Skill>
 }
 
 export type DesktopWorkspaceMode = "local" | "worktree"
@@ -190,6 +216,33 @@ declare global {
         localSessionId: string
         path: string
       }) => Promise<string | null>
+      localModelCredentialStatus: (modelId?: string) => Promise<{
+        available: boolean
+        variable: string | null
+        canSignIn?: boolean
+      }>
+      openLocalTrace: (threadId: string) => Promise<boolean>
+      signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
+      getLegacyLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLegacyLocalPromptInput | null>
+      clearLegacyLocalPrompt: (
+        threadId: string
+      ) => Promise<DesktopLegacyLocalThread | null>
+      getLegacyLocalThread: (
+        threadId: string
+      ) => Promise<DesktopLegacyLocalThread | null>
+      listLegacyLocalThreads: () => Promise<Array<DesktopLegacyLocalThread>>
+      legacyLocalActivity: () => Promise<DesktopLegacyLocalActivity>
+      updateLegacyLocalThread: (input: {
+        threadId: string
+        title?: string
+        viewed?: boolean
+        archived?: boolean
+        modelId?: string
+        effort?: string
+      }) => Promise<DesktopLegacyLocalThread | null>
+      deleteLegacyLocalThread: (threadId: string) => Promise<boolean>
       /**
        * Set up a thread the renderer is about to start in the cloud: its
        * checkout or a new worktree, and the bridge its agent runs through.

@@ -10,6 +10,8 @@ Desktop users can choose **This Mac** in the new-task composer to run an agent o
 
 Commands run with your login shell's environment, minus anything secret-shaped except `GITHUB_TOKEN` and `GH_TOKEN`, so `git` and `gh` use your own identity and credentials. A thread runs only while the app that started it is open: quitting closes its bridge, and a run started meanwhile reports the Mac as unreachable. Opening the thread again, or sending a follow-up, reopens it. The thread is visible from the web and other computers, but only this Mac can continue it.
 
+Threads started before this change ran on a private loopback LangGraph server the app bundles. They are still listed under This Mac and run on that server, with their own `OPENAI_API_KEY` or ChatGPT sign-in; new threads always use the bridge. The local server will be removed once those threads have aged out.
+
 The composer's workspace selector chooses where a local thread runs. **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects. **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree. Deleting a thread removes its worktree along with anything uncommitted in it. Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session
@@ -34,7 +36,7 @@ GitHub users can create dashboard sessions, including the ones "This Mac" thread
 
 ## Install on macOS
 
-Install Git, Node.js 22, and [Bun](https://bun.com/docs/installation), clone this
+Install Git, Node.js 22, `uv`, and [Bun](https://bun.com/docs/installation), clone this
 repository, then run this from its root:
 
 ```bash

@@ -143,6 +143,7 @@ jobs:
           test -n "$APPLE_PROVISIONING_PROFILE_B64"
           printf '%s' "$APPLE_PROVISIONING_PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/open-swe.provisionprofile"
           pnpm run build
+          pnpm --filter open-swe-desktop run build:local-backend
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never --config.mac.provisioningProfile="$RUNNER_TEMP/open-swe.provisionprofile"
 
       - name: Verify and package release assets
@@ -171,6 +172,7 @@ jobs:
             exit 1
           fi
 
+          test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
           # "This Mac" threads are served by the bridge client the main process requires.
           pnpm dlx @electron/asar list "${apps[0]}/Contents/Resources/app.asar" \
             | grep -q '/node_modules/open-swe-bridge-client/dist/index.js'

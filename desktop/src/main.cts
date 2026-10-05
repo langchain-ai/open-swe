@@ -15,10 +15,12 @@ const {
   net,
   protocol,
   powerMonitor,
+  safeStorage,
   session,
   shell,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const { BackendSupervisor } = require("./backend-supervisor.cjs");
 const {
   ConsoleLogBuffer,
   buildDiagnosticsReport,
@@ -28,6 +30,9 @@ const {
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
+const {
+  LocalThreadStore: LegacyLocalThreadStore,
+} = require("./legacy-local-thread-store.cjs");
 const {
   addWorktree,
   captureCheckpoint,
@@ -62,6 +67,7 @@ const {
   listWorkspaceFiles,
   readWorkspacePath,
 } = require("./workspace-files.cjs");
+const { OpenAiOAuthManager } = require("./openai-oauth.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
 const {
   APP_ORIGIN,
@@ -134,6 +140,11 @@ const connectFlows = new Map();
 let quitting = false;
 let localThreadStore = null;
 let localBridges = null;
+// Threads the retired local backend ran, served by it until they are dropped.
+let legacyThreadStore = null;
+let lastActivity = {};
+let backendSupervisor = null;
+let openAiOAuth = null;
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
   version?: string;
@@ -327,8 +338,21 @@ function threadRoot(thread) {
   return thread.worktreePath || project;
 }
 
+/** A thread this Mac has a checkout for, whichever backend runs it. */
+function findLocalThread(threadId) {
+  return localThreadStore.get(threadId) ?? legacyThreadStore.get(threadId);
+}
+
+function storeOf(threadId) {
+  return legacyThreadStore.get(threadId) ? legacyThreadStore : localThreadStore;
+}
+
+function allLocalThreads() {
+  return [...localThreadStore.list(), ...legacyThreadStore.list()];
+}
+
 function resolveLocalProjectPath(localSessionId, value) {
-  const localSession = localThreadStore.get(localSessionId);
+  const localSession = findLocalThread(localSessionId);
   if (!localSession || typeof value !== "string" || value.length === 0)
     return null;
   try {
@@ -356,7 +380,7 @@ async function recordLocalCheckpoint(thread) {
   const ref = checkpointRef(thread.id);
   await captureCheckpoint(repo, ref);
   const branch = await currentBranch(repo);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
+  return storeOf(thread.id).setCheckpoint(thread.id, { repo, ref, branch });
 }
 
 async function syncThreadBranch(thread) {
@@ -364,7 +388,7 @@ async function syncThreadBranch(thread) {
   const branch = await currentBranch(thread.checkpoint.repo);
   if (!branch || branch === thread.checkpoint.branch) return thread;
   return (
-    localThreadStore.setCheckpoint(thread.id, {
+    storeOf(thread.id).setCheckpoint(thread.id, {
       ...thread.checkpoint,
       branch,
     }) ?? thread
@@ -377,7 +401,7 @@ async function syncThreadBranch(thread) {
  * happens to be checked out is only this thread's while this thread is running.
  */
 async function diffThread(threadId) {
-  const thread = localThreadStore.get(threadId);
+  const thread = findLocalThread(threadId);
   if (!thread) return thread;
   if (thread.worktreePath) return syncThreadBranch(thread);
   return (await threadRunning(threadId)) ? syncThreadBranch(thread) : thread;
@@ -385,6 +409,12 @@ async function diffThread(threadId) {
 
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
+  if (legacyThreadStore.get(threadId)) {
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity)
+      throw new Error("Could not reach the local Open SWE backend");
+    return activity[threadId] === "running";
+  }
   if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
     new URL(
@@ -437,16 +467,14 @@ async function createThreadWorktree(thread, baseBranch) {
     `${path.basename(repo)}-${token}`,
   );
   await addWorktree(repo, worktree, `open-swe/local-${token}`, base);
-  return localThreadStore.setWorktree(thread.id, worktree, true);
+  return storeOf(thread.id).setWorktree(thread.id, worktree, true);
 }
 
 /** Prevent branch switches and worktree reuse from disrupting running agents. */
 async function assertWorkspaceFree(root, exceptThreadId = null) {
-  const sharing = localThreadStore
-    .list()
-    .filter(
-      (thread) => thread.id !== exceptThreadId && threadRoot(thread) === root,
-    );
+  const sharing = allLocalThreads().filter(
+    (thread) => thread.id !== exceptThreadId && threadRoot(thread) === root,
+  );
   const running = await Promise.all(
     sharing.map((thread) => threadRunning(thread.id)),
   );
@@ -470,14 +498,14 @@ async function startThreadWorktree(thread, baseBranch) {
   if (!existing || !managedWorktree(existing))
     return createThreadWorktree(thread, baseBranch);
   await assertWorkspaceFree(existing, thread.id);
-  return localThreadStore.setWorktree(thread.id, existing);
+  return storeOf(thread.id).setWorktree(thread.id, existing);
 }
 
 async function moveThreadWorkspace(thread, worktreePath) {
   if ((thread.worktreePath || null) === worktreePath) return thread;
   await closeThreadTerminals(thread.id);
   return recordLocalCheckpoint(
-    localThreadStore.setWorktree(thread.id, worktreePath),
+    storeOf(thread.id).setWorktree(thread.id, worktreePath),
   );
 }
 
@@ -507,7 +535,7 @@ async function discardLocalThread(thread) {
 }
 
 async function discardThreadWorktree(thread) {
-  const others = localThreadStore.list().filter((it) => it.id !== thread.id);
+  const others = allLocalThreads().filter((it) => it.id !== thread.id);
   const owned = thread.ownedWorktrees.filter(
     (worktree) =>
       managedWorktree(worktree) &&
@@ -521,6 +549,116 @@ async function discardThreadWorktree(thread) {
   const repo = await repoRoot(thread.cwd);
   if (!repo) return;
   for (const worktree of owned) await removeWorktree(repo, worktree);
+}
+
+/**
+ * Threads the retired local backend ran before "This Mac" moved to the cloud
+ * agent. They stay readable and runnable until the local backend is removed.
+ */
+function configureLegacyLocalThreadIpc() {
+  ipcMain.handle("desktop:local-model-credential-status", (event, modelId) => {
+    requireTrustedDesktopIpc(event);
+    return backendSupervisor.credentialStatus(modelId);
+  });
+  ipcMain.handle("desktop:open-local-trace", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    try {
+      if (!backendUrl || typeof threadId !== "string" || !threadId)
+        throw new Error("The local trace is unavailable.");
+      const response = await backendFetch(
+        new URL(
+          `/dashboard/api/me/local-trace-url/${encodeURIComponent(threadId)}`,
+          backendUrl,
+        ).toString(),
+      );
+      if (!response.ok) throw new Error("Could not load the local trace.");
+      const payload = await response.json();
+      if (typeof payload?.trace_url !== "string" || !payload.trace_url)
+        throw new Error("No trace is available for this thread yet.");
+      const url = new URL(payload.trace_url);
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        throw new Error("The trace URL must use HTTP or HTTPS.");
+      await shell.openExternal(url.href);
+      return true;
+    } catch (error) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "Open trace",
+        message: "Unable to open trace",
+        detail: error instanceof Error ? error.message : "Please try again.",
+      });
+      return false;
+    }
+  });
+  ipcMain.handle("desktop:local-openai-sign-in", async (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!openAiOAuth) throw new Error("ChatGPT sign-in is unavailable");
+    return openAiOAuth.login((url) => shell.openExternal(url));
+  });
+  ipcMain.handle("desktop:get-legacy-local-prompt", (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    return legacyThreadStore.pendingPrompt(threadId);
+  });
+  ipcMain.handle("desktop:clear-legacy-local-prompt", (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    return legacyThreadStore.clearPrompt(threadId);
+  });
+  ipcMain.handle("desktop:get-legacy-local-thread", async (event, threadId) => {
+    requireTrustedDesktopIpc(event);
+    const thread = await ensureThreadWorktree(legacyThreadStore.get(threadId));
+    if (!thread) return null;
+    await backendSupervisor.createThread(thread.id);
+    return thread;
+  });
+  ipcMain.handle("desktop:list-legacy-local-threads", (event) => {
+    requireTrustedDesktopIpc(event);
+    return legacyThreadStore.list();
+  });
+  ipcMain.handle("desktop:legacy-local-activity", async (event) => {
+    requireTrustedDesktopIpc(event);
+    const activity = await backendSupervisor.threadActivity();
+    if (!activity) return lastActivity;
+    for (const [threadId, status] of Object.entries(lastActivity)) {
+      if (status === "running" && activity[threadId] !== "running")
+        legacyThreadStore.update(threadId, { viewed: false });
+    }
+    lastActivity = activity;
+    return activity;
+  });
+  ipcMain.handle("desktop:update-legacy-local-thread", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    return legacyThreadStore.update(input?.threadId, {
+      ...(typeof input?.title === "string" ? { title: input.title } : {}),
+      ...(typeof input?.viewed === "boolean" ? { viewed: input.viewed } : {}),
+      ...(typeof input?.archived === "boolean"
+        ? { archived: input.archived }
+        : {}),
+      ...(typeof input?.modelId === "string" ? { modelId: input.modelId } : {}),
+      ...(typeof input?.effort === "string" ? { effort: input.effort } : {}),
+    });
+  });
+  ipcMain.handle(
+    "desktop:delete-legacy-local-thread",
+    async (event, threadId) => {
+      requireTrustedDesktopIpc(event);
+      const thread = legacyThreadStore.get(threadId);
+      if (!thread) return false;
+      const activity = await backendSupervisor.threadActivity();
+      if (!activity || activity[threadId] === "running")
+        throw new Error("Stop the local agent before deleting it");
+      await closeThreadTerminals(threadId);
+      try {
+        await backendSupervisor.deleteThread(threadId);
+      } catch (error) {
+        console.warn("Could not delete local LangGraph thread", error);
+      }
+      legacyThreadStore.delete(threadId);
+      if (thread.checkpoint.repo && thread.checkpoint.ref)
+        deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
+      await discardThreadWorktree(thread);
+      return true;
+    },
+  );
 }
 
 function configureDesktopIpc() {
@@ -552,7 +690,12 @@ function configureDesktopIpc() {
     );
     updateInstallTimer.unref();
     try {
-      await Promise.all([closeAllTerminals(), localBridges?.closeAll()]);
+      await Promise.all([
+        closeAllTerminals(),
+        localBridges?.closeAll(),
+        backendSupervisor?.close(),
+        openAiOAuth?.close(),
+      ]);
       if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -747,6 +890,7 @@ function configureDesktopIpc() {
     await discardLocalThread(thread);
     return true;
   });
+  configureLegacyLocalThreadIpc();
   /**
    * Move a thread onto a branch. A branch already checked out somewhere can
    * only be worked on there, so the thread follows it: into that worktree, or
@@ -755,7 +899,7 @@ function configureDesktopIpc() {
    */
   ipcMain.handle("desktop:set-local-branch", async (event, input) => {
     requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(input?.threadId);
+    const thread = findLocalThread(input?.threadId);
     if (!thread) throw new Error("Local thread not found");
     const project = registeredProject(thread.cwd);
     if (!project) throw new Error("Project is not registered");
@@ -824,7 +968,7 @@ function configureDesktopIpc() {
   });
   const localWorkspaceRoot = (id: unknown): string => {
     const root =
-      threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd;
+      threadRoot(findLocalThread(id)) ?? projectScopeSession(id)?.cwd;
     if (!root) throw new Error("Local workspace not found");
     return root;
   };
@@ -1102,6 +1246,11 @@ async function serveBundledUi(request) {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/dashboard/api"))
     return proxyBackendRequest(request);
+  if (
+    url.pathname === "/local-graph" ||
+    url.pathname.startsWith("/local-graph/")
+  )
+    return backendSupervisor.proxy(request);
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -1683,11 +1832,60 @@ if (!hasSingleInstanceLock) {
     }
     void shareBackendSession();
 
-    // A new file: threads the retired local backend ran have no cloud thread
-    // or bridge to come back to.
     localThreadStore = new LocalThreadStore(
       path.join(app.getPath("userData"), "desktop-this-mac-threads.json"),
     );
+    legacyThreadStore = new LegacyLocalThreadStore(
+      path.join(app.getPath("userData"), "desktop-local-threads.json"),
+    );
+    openAiOAuth = new OpenAiOAuthManager({
+      storagePath: path.join(app.getPath("userData"), "openai-auth.bin"),
+      encryptString: (value) => {
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error("Secure credential storage is unavailable");
+        }
+        return safeStorage.encryptString(value);
+      },
+      decryptString: (value) => safeStorage.decryptString(value),
+    });
+    if (legacyThreadStore.list().length)
+      await openAiOAuth.startBroker().catch((error) => {
+        console.warn(
+          "Could not start the local OpenAI credential broker",
+          error,
+        );
+      });
+    backendSupervisor = new BackendSupervisor({
+      isPackaged: app.isPackaged,
+      repoRoot: path.resolve(__dirname, "../.."),
+      resourcesPath: process.resourcesPath,
+      stateDir: path.join(app.getPath("userData"), "local-backend"),
+      projectsFile: projectsPath(),
+      worktreesDir: worktreesPath(),
+      tracingEnv: async () => {
+        if (!backendUrl) return {};
+        try {
+          const response = await backendFetch(
+            new URL("/dashboard/api/me/preferences", backendUrl).toString(),
+            { signal: AbortSignal.timeout(2_000) },
+          );
+          if (!response.ok) return {};
+          const preferences = await response.json();
+          const project =
+            preferences.local_tracing_project ||
+            preferences.default_local_tracing_project;
+          return project
+            ? { LANGSMITH_PROJECT: project, LANGSMITH_TRACING: "true" }
+            : {};
+        } catch {
+          return {};
+        }
+      },
+      providerEnv: () => openAiOAuth?.backendEnv() || {},
+      openAiOAuthAvailable: () =>
+        openAiOAuth?.status().signedIn === true &&
+        Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
+    });
     localBridges = new LocalBridges({
       send: sendBridgeRequest,
       rootFor: (threadId) => threadRoot(localThreadStore.get(threadId)),
@@ -1708,13 +1906,20 @@ if (!hasSingleInstanceLock) {
     createWindow();
     if (pendingDeepLink && openDesktopLink(pendingDeepLink))
       pendingDeepLink = null;
+    // Otherwise the first local thread opened after launch waits behind the
+    // backend's boot, showing a blank page for seconds.
+    if (legacyThreadStore.list().length) {
+      backendSupervisor.start().catch((error) => {
+        console.warn("Could not start the local backend ahead of use", error);
+      });
+    }
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,
       requireTrusted: requireTrustedDesktopIpc,
       getWindow: () => mainWindow,
       getSessionRoot: (id) =>
-        threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
+        threadRoot(findLocalThread(id)) ?? projectScopeSession(id)?.cwd,
       userDataPath: app.getPath("userData"),
     });
 
@@ -1731,10 +1936,13 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([closeAllTerminals(), localBridges?.closeAll()]).finally(
-      () => {
-        app.quit();
-      },
-    );
+    void Promise.all([
+      closeAllTerminals(),
+      localBridges?.closeAll(),
+      backendSupervisor?.close(),
+      openAiOAuth?.close(),
+    ]).finally(() => {
+      app.quit();
+    });
   });
 }

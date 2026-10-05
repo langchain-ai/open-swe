@@ -102,7 +102,9 @@ def _render_collaboration_section() -> str:
     )
 
 
-def _working_environment_prompt(*, local_checkout: bool) -> str:
+def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
+    if source == "desktop":
+        return "system/working-environment-desktop"
     if local_checkout:
         return "system/working-environment-local"
     return "system/working-environment"
@@ -146,6 +148,7 @@ def construct_system_prompt(
         "system/main",
         working_dir=working_dir,
         local_checkout=local_checkout,
+        desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
@@ -156,7 +159,7 @@ def construct_system_prompt(
             else ""
         ),
         working_environment_section=prompt(
-            _working_environment_prompt(local_checkout=local_checkout),
+            _working_environment_prompt(source, local_checkout=local_checkout),
             working_dir=working_dir,
             desktop=local_checkout_client == "desktop",
             prefer_tools_in_sandbox=prefer_tools_in_sandbox,

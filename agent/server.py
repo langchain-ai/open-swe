@@ -38,8 +38,10 @@ from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
-from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -82,8 +84,14 @@ from agent.dashboard.options import (
     model_supports_images,
 )
 from agent.dashboard.user_credentials import get_notion_status
-from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
+from agent.desktop import (
+    create_desktop_backend,
+    desktop_artifact_routes,
+    is_desktop_run,
+    is_desktop_worktree,
+)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     dynamic_context_hash,
@@ -258,6 +266,7 @@ from agent.utils.authorship import (
 )
 from agent.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from agent.utils.deferred_model import make_deferred_error_model
+from agent.utils.gateway import gateway_env_default
 from agent.utils.json_types import as_json_object, thread_metadata
 from agent.utils.model import (
     DEFAULT_LLM_REASONING,
@@ -573,8 +582,13 @@ def _subagent_middleware(
     return middleware
 
 
-def _subagent_guard_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Shell guards mirroring the parent stack for delegated tool calls."""
+def _subagent_guard_middleware(local_run: bool) -> list[AgentMiddleware[Any, Any, Any]]:
+    """Shell guards mirroring the parent stack for delegated tool calls.
+
+    Local desktop runs skip the PR-creation guard the same way the parent does.
+    """
+    if local_run:
+        return []
     return [PullRequestCreationGuardMiddleware()]
 
 
@@ -765,7 +779,12 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
 
     They are served by the LangSmith box itself, which a bridged thread does not have.
     """
-    return ENV.SANDBOX_TYPE.get() == "langsmith" and cfg.stop_summary is not True and not bridged
+    return (
+        ENV.SANDBOX_TYPE.get() == "langsmith"
+        and cfg.stop_summary is not True
+        and not bridged
+        and not is_desktop_run(cfg)
+    )
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
@@ -1103,6 +1122,39 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
+        if is_desktop_run(cfg):
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                try:
+                    sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+                    sandbox_backend = await retry_transient_sandbox_errors(
+                        sandbox_proxy.ready,
+                        description="Sandbox attach",
+                        max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+                    )
+                except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+                    await post_sandbox_unreachable_notification(
+                        self._config or {},
+                        sandbox_id=exc.sandbox_id
+                        if isinstance(exc, SandboxUnreachableError)
+                        else None,
+                    )
+                    raise
+            if cfg.local_project_path and is_desktop_worktree(cfg.local_project_path):
+                schedule_worktree_branch_rename(
+                    thread_id=self._thread_id,
+                    backend=sandbox_backend,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
+            async with aphase(self._thread_id, "prepare.work_dir"):
+                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            return {
+                "work_dir": work_dir,
+                "rendered_system_prompt": construct_system_prompt(
+                    working_dir=work_dir,
+                    source="desktop",
+                ),
+            }
         async with aphase(self._thread_id, "prepare.github_token"):
             github_token, _expires_at = await resolve_github_token(self._config, self._thread_id)
         async with aphase(self._thread_id, "prepare.default_repo"):
@@ -1298,6 +1350,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
+class DesktopAgentState(FilesystemState, DeepAgentState):
+    """Desktop agent state including snapshotted skill files."""
+
+
 async def _get_agent(config: RunnableConfig) -> Pregel:
     return await build_agent(config)
 
@@ -1327,16 +1383,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
-    try:
-        credential_login = await private_credential_login(config)
-        credential_scope_known = True
-    except Exception:
-        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+    if not is_desktop_run(cfg):
+        try:
+            credential_login = await private_credential_login(config)
+            credential_scope_known = True
+        except Exception:
+            logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
+        if is_desktop_run(_cfg):
+            return create_desktop_backend(_cfg)
         return await ensure_sandbox_for_thread(
             _thread_id,
             workspace_slug=workspace_slug(_cfg),
@@ -1350,6 +1409,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
+    local_run = is_desktop_run(cfg)
     reset_model_selection = (
         cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
     )
@@ -1360,31 +1420,48 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         bridge_client = await _bridge_client(thread_id)
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
-            await load_thread_settings(client, thread_id)
+            {} if local_run else await load_thread_settings(client, thread_id)
         )
         # Bridged threads and deployments without a tools endpoint have no way to
         # reach sandbox-only tools, so they keep every tool direct.
         prefer_tools_in_sandbox = (
-            bridge_client is None
+            not local_run
+            and bridge_client is None
             and tools_endpoint_configured()
             and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    async with aphase(thread_id, "factory.settings_defaults"):
-        settings, profile = await asyncio.gather(
-            cached_workspace_settings(settings_workspace),
-            _cached_profile(
-                profile_login
-                if reset_model_selection or not thread_settings.get("model_id")
-                else None
-            ),
-        )
-        model_defaults = settings.default_model_pair("agent")
-        routing_defaults: dict[str, tuple[str, str | None]] = dict(settings.agent_routing_models)
-        title_defaults = settings.default_thread_title_model
-        use_gateway = settings.effective_gateway_enabled
-        fable_enabled = settings.fable_enabled
+    settings: WorkspaceSettings | None = None
+    routing_defaults: dict[str, tuple[str, str | None]]
+    if local_run:
+        from agent.dashboard.options import default_model_pair
+
+        model_defaults = (default_model_pair(), default_model_pair())
+        routing_defaults = {
+            "fast": default_model_pair(),
+            "balanced": default_model_pair(),
+            "performance": default_model_pair(),
+        }
+        title_defaults = model_defaults[0]
+        use_gateway = gateway_env_default()
+        profile = None
+        fable_enabled = False
+    else:
+        async with aphase(thread_id, "factory.settings_defaults"):
+            settings, profile = await asyncio.gather(
+                cached_workspace_settings(settings_workspace),
+                _cached_profile(
+                    profile_login
+                    if reset_model_selection or not thread_settings.get("model_id")
+                    else None
+                ),
+            )
+            model_defaults = settings.default_model_pair("agent")
+            routing_defaults = dict(settings.agent_routing_models)
+            title_defaults = settings.default_thread_title_model
+            use_gateway = settings.effective_gateway_enabled
+            fable_enabled = settings.fable_enabled
 
     slack_ask_mode = _slack_ask_mode(cfg)
     linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
@@ -1427,7 +1504,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # User preference overrides the workspace's toggle; None inherits it.
     adaptive_model_routing = profile_model_routing_enabled(profile)
     if adaptive_model_routing is None:
-        adaptive_model_routing = settings.model_routing_enabled
+        adaptive_model_routing = settings.model_routing_enabled if settings else False
     stored_model = thread_settings.get("model_id")
     if isinstance(stored_model, str) and not reset_model_selection:
         model_id = stored_model
@@ -1518,7 +1595,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         },
         "repo_instructions": repo_instructions,
     }
-    if settings_changed or {**thread_settings, **resolved_settings} != thread_settings:
+    if not local_run and (
+        settings_changed or {**thread_settings, **resolved_settings} != thread_settings
+    ):
         async with aphase(thread_id, "factory.store_settings"):
             await store_thread_settings(client, thread_id, {**thread_settings, **resolved_settings})
 
@@ -1597,7 +1676,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
-    if not stop_summary_mode and credential_scope_known:
+    if not stop_summary_mode and not local_run and credential_scope_known:
         mcp_tools, notion_tools = await asyncio.gather(
             _phase_result(
                 thread_id,
@@ -1694,7 +1773,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
         ]
-    if not ENV.SLACK_BOT_TOKEN.get():
+    if local_run or not ENV.SLACK_BOT_TOKEN.get():
         static_tools = [
             tool
             for tool in static_tools
@@ -1707,7 +1786,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         ]
     if (
-        not ENV.SLACK_BOT_TOKEN.get()
+        local_run
+        or not ENV.SLACK_BOT_TOKEN.get()
         or not (await cached_workspace_settings(settings_workspace)).expedited_review_enabled
     ):
         static_tools = [
@@ -1731,7 +1811,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             }
         },
     )
-    if stop_summary_mode:
+    if local_run:
+        static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
+    elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
     if prefer_tools_in_sandbox:
         static_tools = [
@@ -1786,21 +1868,28 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
         ),
     }
-    skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-        StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-    )
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-    if credential_login:
-        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(
-                namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
-            )
+    if is_desktop_run(cfg):
+        skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(StateBackend())
+        skill_sources = [USER_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
+        # The default backend is the user's project, so offloads would land in
+        # their repository. Keep the agent's scratch files out of it.
+        skill_routes.update(await desktop_artifact_routes(thread_id))
+    else:
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
+            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
         )
-        skill_sources.insert(0, USER_SKILLS_ROUTE)
-    # Offloaded images live in the store so they can be read without the sandbox.
-    skill_routes[BLOBS_ROUTE] = StoreBackend(
-        namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
-    )
+        skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
+        if credential_login:
+            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
+                StoreBackend(
+                    namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
+                )
+            )
+            skill_sources.insert(0, USER_SKILLS_ROUTE)
+        # Offloaded images live in the store so they can be read without the sandbox.
+        skill_routes[BLOBS_ROUTE] = StoreBackend(
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+        )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
@@ -1808,6 +1897,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if (adaptive_model_routing or source == "slack")
         and not thread_settings.get("model_handoff_complete", bool(stored_model))
         and source in {"dashboard", "slack"}
+        and not local_run
         and not stop_summary_mode
         and incident_session is None
         and not cfg.background_task_completion
@@ -1899,7 +1989,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     )
     workspace_skills = (
         WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
-        if credential_login is None
+        if credential_login is None and not local_run
         else None
     )
     async with aphase(thread_id, "factory.graph_assembly"):
@@ -1922,7 +2012,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
                     else None,
-                    guard_middleware=_subagent_guard_middleware(),
+                    guard_middleware=_subagent_guard_middleware(local_run),
                     inherited_middleware_exclusions=(
                         check_message_queue_before_model.name,
                         deliver_event_matches_before_model.name,
@@ -1932,6 +2022,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ],
             skills=skill_sources,
             backend=agent_backend,
+            state_schema=DesktopAgentState if local_run else None,
             middleware=cast(
                 list[AgentMiddleware[Any, Any, Any]],
                 [
@@ -1993,7 +2084,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         initial_delay=1.0,
                         max_delay=10.0,
                     ),
-                    PullRequestCreationGuardMiddleware(),
+                    *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
                     refresh_github_proxy_before_model,
                     *(
@@ -2042,7 +2133,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
         )
-    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional():
+    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
         await save_tool_context(thread_id, config)
     return graph
 

@@ -94,12 +94,12 @@ vi.mock("@/features/agents/lib/useRunCompletionNotifier", () => ({
   useRunCompletionNotifier: () => {},
 }))
 
-vi.mock("@/features/agents/lib/desktopLocal", async (actual) => ({
+vi.mock("@/features/agents/lib/legacyLocal", async (actual) => ({
   ...((await actual()) as object),
-  useDesktopLocalThreads: () => stub.localThreads,
-  useLocalThreadActivity: () => stub.activity,
-  useRefreshLocalThreads: () => stub.noop,
-  useMarkLocalThreadViewed: () => stub.noop,
+  useLegacyLocalThreads: () => stub.localThreads,
+  useLegacyLocalActivity: () => stub.activity,
+  useRefreshLegacyLocalThreads: () => stub.noop,
+  useMarkLegacyLocalThreadViewed: () => stub.noop,
 }))
 
 vi.mock("@/features/agents/lib/desktopProjects", () => ({

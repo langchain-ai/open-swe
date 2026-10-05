@@ -27,3 +27,8 @@ export function createDashboardClient(
     callerOptions: { fetch: fetcher },
   })
 }
+
+/** A LangGraph client for the desktop app's local graph proxy. */
+export function createLocalGraphClient(): Client {
+  return new Client({ apiUrl: absoluteApiUrl("/local-graph"), apiKey: null })
+}

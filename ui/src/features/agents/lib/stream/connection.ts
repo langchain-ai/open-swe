@@ -12,6 +12,8 @@ export type AgentStream = UseStreamReturn & {
   routed: RoutedModel | null
 }
 
+export type AgentThreadTransport = "cloud" | "local"
+
 /** Liveness of a thread's event stream. */
 export type StreamConnection =
   | { status: "live" }

@@ -4,6 +4,7 @@ import { Menu } from "@base-ui/react/menu"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ThreadMenuItems } from "./ThreadMenuItems"
 
@@ -19,6 +20,18 @@ const thread: AgentThread = {
   createdAt: 0,
   updatedAt: 0,
   messages: [],
+}
+
+const localThread: DesktopLegacyLocalThread = {
+  id: "local-thread-id",
+  title: "Local thread",
+  cwd: "/workspace/open-swe",
+  worktreePath: null,
+  viewed: true,
+  createdAt: 0,
+  updatedAt: 0,
+  modelId: null,
+  effort: null,
 }
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(
@@ -46,6 +59,11 @@ describe("Copy thread ID", () => {
       name: "a cloud thread without a sandbox",
       props: { thread },
       expectedId: thread.id,
+    },
+    {
+      name: "a local thread",
+      props: { thread: null, localThread },
+      expectedId: localThread.id,
     },
   ])("copies the ID of $name", async ({ props, expectedId }) => {
     const writeText = vi

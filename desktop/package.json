@@ -13,8 +13,9 @@
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build:ui",
-    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:cli && electron-builder --dir",
-    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:cli && electron-builder",
+    "pack": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && pnpm run build:cli && electron-builder --dir",
+    "dist": "pnpm run build:ui && pnpm run build && pnpm run build:local-backend && pnpm run build:cli && electron-builder",
+    "build:local-backend": "node scripts/build-local-backend.cjs",
     "build:cli": "pnpm --filter open-swe-cli run build"
   },
   "build": {
@@ -67,6 +68,13 @@
       {
         "from": "../ui/native/libghostty-vt/LICENSE",
         "to": "ui/licenses/libghostty-vt.LICENSE"
+      },
+      {
+        "from": "resources/local-backend",
+        "to": "local-backend",
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../cli/dist/oswe",

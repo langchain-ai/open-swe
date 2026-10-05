@@ -52,6 +52,25 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
   resolveLocalProjectPath: (input) =>
     ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
+  localModelCredentialStatus: (modelId) =>
+    ipcRenderer.invoke("desktop:local-model-credential-status", modelId),
+  openLocalTrace: (threadId) =>
+    ipcRenderer.invoke("desktop:open-local-trace", threadId),
+  signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
+  getLegacyLocalPrompt: (threadId) =>
+    ipcRenderer.invoke("desktop:get-legacy-local-prompt", threadId),
+  clearLegacyLocalPrompt: (threadId) =>
+    ipcRenderer.invoke("desktop:clear-legacy-local-prompt", threadId),
+  getLegacyLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:get-legacy-local-thread", threadId),
+  listLegacyLocalThreads: () =>
+    ipcRenderer.invoke("desktop:list-legacy-local-threads"),
+  legacyLocalActivity: () =>
+    ipcRenderer.invoke("desktop:legacy-local-activity"),
+  updateLegacyLocalThread: (input) =>
+    ipcRenderer.invoke("desktop:update-legacy-local-thread", input),
+  deleteLegacyLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:delete-legacy-local-thread", threadId),
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
   ensureLocalBridge: (threadId) =>

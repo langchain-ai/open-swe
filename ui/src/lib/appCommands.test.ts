@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "./appCommands"
 import { buildPaletteResults } from "@/components/AppCommandPalette"
@@ -42,20 +43,34 @@ describe("app commands", () => {
     ).toEqual([])
   })
 
-  it("filters commands and thread results", () => {
+  it("filters commands and merges cloud and local thread results", () => {
     const cloud = {
       id: "cloud-1",
       title: "Fix cloud search",
     } as AgentThread
+    const local: DesktopLegacyLocalThread = {
+      id: "local-1",
+      title: "Fix local search",
+      cwd: "/tmp/repo",
+      worktreePath: null,
+      viewed: true,
+      createdAt: 1,
+      updatedAt: 2,
+      modelId: null,
+      effort: null,
+    }
     const commands = [
       { ...command("settings", "Open settings"), aliases: ["preferences"] },
       { ...command("hidden", "Hidden"), showInPalette: false },
     ]
 
-    const results = buildPaletteResults(commands, [cloud], "fix")
+    const results = buildPaletteResults(commands, [cloud], [local], "fix")
 
-    expect(results.map((item) => item.id)).toEqual(["cloud:cloud-1"])
-    expect(buildPaletteResults(commands, [], "preferences")[0]?.id).toBe(
+    expect(results.map((item) => item.id)).toEqual([
+      "cloud:cloud-1",
+      "local:local-1",
+    ])
+    expect(buildPaletteResults(commands, [], [], "preferences")[0]?.id).toBe(
       "command:settings"
     )
   })
