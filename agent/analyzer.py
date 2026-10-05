@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.state import StateBackend
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
@@ -34,7 +35,7 @@ from agent.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     ToolErrorMiddleware,
 )
-from agent.prompts import apply_tool_descriptions, prompt
+from agent.prompts import apply_tool_descriptions, common_prompt, prompt
 from agent.review.style_guidance import REVIEWER_STYLE_THEMES
 from agent.run_config import RunConfig
 from agent.runtime import (
@@ -151,7 +152,14 @@ async def get_analyzer(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=_make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs),
-        system_prompt="",
+        system_prompt=common_prompt(),
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+                "skills": [SKILLS_ROUTE],
+            }
+        ],
         tools=apply_tool_descriptions([save_review_style_prompt, read_finding_outcomes]),
         backend=backend,
         skills=[SKILLS_ROUTE],

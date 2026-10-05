@@ -141,7 +141,7 @@ from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from agent.prompt import construct_system_prompt
-from agent.prompts import apply_tool_descriptions, load_prompt
+from agent.prompts import apply_tool_descriptions, common_prompt, load_prompt
 from agent.run_config import RunConfig
 from agent.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -1946,7 +1946,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
             model=main_model,
-            system_prompt="",
+            system_prompt=common_prompt(),
             tools=main_tools,
             subagents=[
                 _general_purpose_subagent(

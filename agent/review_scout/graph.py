@@ -13,6 +13,7 @@ from typing import Any, NotRequired, cast
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -37,7 +38,7 @@ from agent.middleware import (
 )
 from agent.middleware.prepare_run import PrepareRunState
 from agent.middleware.trace import OpenSWEMiddleware
-from agent.prompts import apply_tool_descriptions, prompt
+from agent.prompts import apply_tool_descriptions, common_prompt, prompt
 from agent.review.author_guidance import SteeringHistory
 from agent.review.walkthrough import Walkthrough
 from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
@@ -257,7 +258,13 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
 
     return create_deep_agent(
         model=model,
-        system_prompt="",
+        system_prompt=common_prompt(),
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            }
+        ],
         tools=apply_tool_descriptions([commit_walkthrough_step, record_human_input]),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(

@@ -7,6 +7,8 @@ from typing import Any
 from jinja2 import Environment, FunctionLoader, StrictUndefined
 from langchain_core.tools import BaseTool
 
+from agent.config import ENV
+
 _PROMPT_ROOT = resources.files("agent.resources").joinpath("prompts")
 
 
@@ -72,3 +74,20 @@ def apply_tool_descriptions(
             value.__doc__ = description
             described.append(value)
     return described
+
+
+def _deployment_context() -> tuple[str, str]:
+    """Identify the agent service deployment from explicit configuration."""
+    if configured := ENV.OPENSWE_ENV.optional():
+        environment = configured.lower()
+        return "production" if environment == "prod" else environment, "OPENSWE_ENV"
+    if ENV.LANGSMITH_LANGGRAPH_API_VARIANT.optional() == "local_dev":
+        return "local", "LANGSMITH_LANGGRAPH_API_VARIANT"
+    return "unknown", "no explicit environment or local runtime marker"
+
+
+def common_prompt(agent_prompt: str = "") -> str:
+    """Render service-wide instructions from current deployment configuration."""
+    environment, source = _deployment_context()
+    shared = prompt("system/common", deployment_environment=environment, deployment_source=source)
+    return f"{shared}\n\n{agent_prompt}" if agent_prompt else shared
