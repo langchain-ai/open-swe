@@ -12,24 +12,29 @@ import logging
 import re
 import socket
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import timedelta
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
 import httpx2
 from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent.database import postgres
 from agent.github.app import get_github_app_installation_token
+from agent.github.check_runs import CheckRun
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
 from agent.github.http import github_client
 from agent.github.pull_request_diff import (
-    build_pr_diff_files,
+    GITHUB_MAX_LISTED_FILES,
     fetch_file_versions,
+    git_patch,
+    pull_request_files_page,
 )
 from agent.github.pull_request_status import fetch_unresolved_review_threads
+from agent.github.pull_requests import FileStatus, PullRequest, PullRequestFilePayload
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import (
@@ -373,85 +378,36 @@ def _as_review_summary(raw: dict[str, Any] | None) -> ReviewSummary | None:
         return None
 
 
-def _user_ref(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    login = value.get("login")
-    if not isinstance(login, str):
-        return None
-    return {"login": login, "avatar_url": value.get("avatar_url")}
-
-
-def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
-    labels = payload.get("labels")
-    state = payload.get("state")
-    if payload.get("merged"):
-        state = "merged"
-    elif payload.get("draft"):
-        state = "draft"
+def _serialize_pr_details(pull_request: PullRequest) -> dict[str, Any]:
     return {
-        "state": state if isinstance(state, str) else "open",
-        "title": payload.get("title") or "",
-        "body": payload.get("body") or "",
-        "additions": payload.get("additions") or 0,
-        "deletions": payload.get("deletions") or 0,
-        "changed_files": payload.get("changed_files") or 0,
-        "commits": payload.get("commits") or 0,
-        "head_sha": (payload.get("head") or {}).get("sha") or "",
-        "head_ref": (payload.get("head") or {}).get("ref") or "",
-        "base_ref": (payload.get("base") or {}).get("ref") or "",
-        "author": _user_ref(payload.get("user")),
-        "assignees": [
-            user
-            for user in (_user_ref(value) for value in payload.get("assignees") or [])
-            if user is not None
-        ],
-        "requested_reviewers": [
-            user
-            for user in (_user_ref(value) for value in payload.get("requested_reviewers") or [])
-            if user is not None
-        ],
-        "labels": [
-            {"name": label.get("name"), "color": label.get("color")}
-            for label in (labels if isinstance(labels, list) else [])
-            if isinstance(label, dict) and isinstance(label.get("name"), str)
-        ],
+        "state": pull_request.state,
+        "title": pull_request.title,
+        "body": pull_request.body,
+        "additions": pull_request.additions or 0,
+        "deletions": pull_request.deletions or 0,
+        "changed_files": pull_request.changed_files or 0,
+        "commits": pull_request.commits or 0,
+        "head_sha": pull_request.head_sha,
+        "head_ref": pull_request.head_ref,
+        "base_ref": pull_request.base_ref,
+        "author": (
+            {"login": pull_request.author, "avatar_url": pull_request.author_avatar_url or None}
+            if pull_request.author
+            else None
+        ),
+        "assignees": pull_request.assignees,
+        "requested_reviewers": pull_request.requested_reviewers,
+        "labels": pull_request.labels,
     }
 
 
-async def _check_runs_at(owner: str, repo: str, ref: str, token: str) -> list[dict[str, Any]]:
-    try:
-        payload = await _github_get(
-            f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
-            token,
-            params={"per_page": 50},
-        )
-    except HTTPException:
-        return []
-    runs = payload.get("check_runs") if isinstance(payload, dict) else None
-    return [run for run in runs if isinstance(run, dict)] if isinstance(runs, list) else []
-
-
-async def _fetch_check_runs(
-    owner: str, repo: str, sha: str, token: str, prefetched: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Serialize ``prefetched`` runs, refetching by ``sha`` when a push moved the head between reads."""
-    if not sha:
-        return []
-    runs = (
-        prefetched
-        if all(run.get("head_sha") == sha for run in prefetched)
-        else await _check_runs_at(owner, repo, sha, token)
-    )
-    return [
-        {
-            "name": run.get("name") or "",
-            "status": run.get("status") or "",
-            "conclusion": run.get("conclusion"),
-            "url": run.get("html_url"),
-        }
-        for run in runs
-    ]
+def _serialize_check_run(run: CheckRun) -> dict[str, Any]:
+    return {
+        "name": run.name,
+        "status": run.status,
+        "conclusion": run.conclusion,
+        "url": run.html_url or None,
+    }
 
 
 async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
@@ -971,53 +927,53 @@ async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadL
     return thread if isinstance(thread, dict) else None
 
 
-def _unreviewed_summary(
-    owner: str, repo: str, pr_number: int, pr_payload: dict[str, Any]
-) -> dict[str, Any]:
+def _unreviewed_summary(pull_request: PullRequest) -> dict[str, Any]:
     """A review summary for a PR the reviewer has never run on."""
-    author = pr_payload.get("user")
     return {
         "thread_id": None,
-        "owner": owner,
-        "repo": repo,
-        "full_name": f"{owner}/{repo}",
-        "number": pr_number,
-        "title": pr_payload.get("title") or f"PR #{pr_number}",
-        "url": pr_payload.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{pr_number}",
-        "head_ref": (pr_payload.get("head") or {}).get("ref") or "",
-        "base_ref": (pr_payload.get("base") or {}).get("ref") or "",
-        "author": (author.get("login") or "") if isinstance(author, dict) else "",
-        "head_sha": (pr_payload.get("head") or {}).get("sha") or "",
+        "owner": pull_request.owner,
+        "repo": pull_request.repo,
+        "full_name": pull_request.repo_full_name,
+        "number": pull_request.number,
+        "title": pull_request.title or f"PR #{pull_request.number}",
+        "url": pull_request.url,
+        "head_ref": pull_request.head_ref,
+        "base_ref": pull_request.base_ref,
+        "author": pull_request.author,
+        "head_sha": pull_request.head_sha,
         "watch": False,
         "status": "none",
         "counts": _finding_counts([]),
-        "updated_at": pr_payload.get("updated_at"),
+        "updated_at": (
+            pull_request.github_updated_at.isoformat() if pull_request.github_updated_at else None
+        ),
     }
 
 
 async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     """The review page payload: the PR itself, plus review results when they exist.
 
-    The reviewer graph is optional — a PR it has never run on still renders with
-    its GitHub-sourced details, checks and diff, and no findings.
+    Everything comes from PostgreSQL and the reviewer thread: the PR from its
+    mirror, which reads GitHub only the first time anyone opens it. The
+    reviewer graph is optional — a PR it has never run on still renders with
+    its details and checks, and no findings. ``checks`` is ``None`` until the
+    head's check runs are known.
     """
-    token = await _require_app_token()
-    raw_pr, thread, head_runs = await asyncio.gather(
-        _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token),
+    pull_request, thread = await asyncio.gather(
+        PullRequest.mirrored(owner, repo, pr_number),
         _reviewer_thread_for(owner, repo, pr_number),
-        _check_runs_at(owner, repo, f"refs/pull/{pr_number}/head", token),
     )
-    pr_payload = raw_pr if isinstance(raw_pr, dict) else {}
-    details = _serialize_pr_details(pr_payload)
+    details = _serialize_pr_details(pull_request)
 
     stored = (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
     summary = _thread_review_summary(thread, stored) if thread else None
     metadata = thread_metadata(thread) if thread else {}
     if not summary:
-        summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
+        summary = _unreviewed_summary(pull_request)
 
     head_sha = details["head_sha"] or summary["head_sha"]
-    checks = await _fetch_check_runs(owner, repo, head_sha, token, head_runs)
+    runs = await pull_request.check_runs()
+    checks = None if runs is None else [_serialize_check_run(run) for run in runs]
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
@@ -1031,7 +987,14 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    target = await _scout_target(
+        owner,
+        repo,
+        pr_number,
+        title=pull_request.title,
+        base_sha=pull_request.base_sha,
+        head_sha=pull_request.head_sha,
+    )
     walkthrough = await target.walkthrough() if target else None
     walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     walkthrough_error = (
@@ -1283,33 +1246,123 @@ async def get_pull_request_preview(
     )
 
 
-async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """Return the PR's changed files as per-file git patches.
+PATCH_PAGE_SIZE = 30
+"""Files per patch page; GitHub's file listing pages by this, so the client does too."""
 
-    Uses the App installation token so the diff is available regardless of who
-    is viewing the review. The client renders these with pierre's PatchDiff and
-    calls :func:`get_review_file_contents` to expand context on demand.
+_PATCH_PAGE_TTL = timedelta(hours=1)
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+class ReviewDiffFile(BaseModel):
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    path: str
+    previous_path: str | None = Field(serialization_alias="previousPath")
+    status: FileStatus
+    additions: int
+    deletions: int
+    position: int
+
+
+class ReviewDiff(BaseModel):
+    """The PR's changed files; ``files`` is ``None`` until the current head's are listed."""
+
+    base_sha: str
+    head_sha: str
+    patch_page_size: int
+    files: list[ReviewDiffFile] | None
+    total_additions: int
+    total_deletions: int
+    truncated: bool
+
+
+class ReviewPatch(BaseModel):
+    path: str
+    patch: str | None
+
+
+class ReviewPatchPage(BaseModel):
+    head_sha: str
+    files: list[ReviewPatch]
+
+
+async def get_review_diff(owner: str, repo: str, pr_number: int) -> ReviewDiff:
+    """The PR's changed files from its mirror; :func:`get_review_patches` serves their patches.
+
+    ``base_sha`` is the merge base the files are listed against, which is what
+    :func:`get_review_file_contents` reads the old side at.
     """
-    token = await _require_app_token()
-    async with httpx2.AsyncClient(headers=github_headers(token), timeout=_GITHUB_TIMEOUT) as client:
-        diff = await build_pr_diff_files(client, f"{owner}/{repo}", pr_number, with_contents=False)
-    files = diff["files"]
-    return {
-        "files": [
-            {
-                **{key: value for key, value in f.items() if key not in _CONTENT_KEYS},
-                "baseSha": diff["base_sha"],
-                "headSha": diff["head_sha"],
-            }
-            for f in files
+    pull_request = await PullRequest.mirrored(owner, repo, pr_number)
+    files = await pull_request.files() if pull_request.files_current else None
+    return ReviewDiff(
+        base_sha=pull_request.merge_base_sha,
+        head_sha=pull_request.head_sha,
+        patch_page_size=PATCH_PAGE_SIZE,
+        files=None
+        if files is None
+        else [
+            ReviewDiffFile(
+                path=file.path,
+                previous_path=file.previous_path,
+                status=file.status,
+                additions=file.additions,
+                deletions=file.deletions,
+                position=file.position,
+            )
+            for file in files
         ],
-        "total_additions": sum(f["additions"] for f in files),
-        "total_deletions": sum(f["deletions"] for f in files),
-        "truncated": diff["truncated"],
-    }
+        total_additions=sum(file.additions for file in files or []),
+        total_deletions=sum(file.deletions for file in files or []),
+        truncated=pull_request.files_truncated,
+    )
 
 
-_CONTENT_KEYS = frozenset({"originalContent", "modifiedContent"})
+async def get_review_patches(
+    owner: str, repo: str, pr_number: int, head_sha: str, page: int
+) -> ReviewPatchPage:
+    """One page of the PR's patches at ``head_sha``, in the order its files are listed.
+
+    GitHub lists only the current head, so a page asked for at any other head is
+    a 409 the client answers by refetching the file list. A page never changes
+    for a head, so it is cached.
+    """
+    from langgraph_api.cache import swr
+
+    if not _SHA.fullmatch(head_sha):
+        raise HTTPException(400, "invalid head revision")
+    if not 1 <= page <= GITHUB_MAX_LISTED_FILES // PATCH_PAGE_SIZE:
+        raise HTTPException(400, "invalid patch page")
+
+    async def load() -> ReviewPatchPage:
+        token = await _require_app_token()
+        async with github_client(token=token) as client:
+            raw = await pull_request_files_page(
+                client, f"{owner}/{repo}", pr_number, page=page, per_page=PATCH_PAGE_SIZE
+            )
+        files = [PullRequestFilePayload.model_validate(item) for item in raw]
+        if any(file.head_sha not in ("", head_sha) for file in files):
+            raise HTTPException(409, "the pull request head moved")
+        return ReviewPatchPage(
+            head_sha=head_sha,
+            files=[
+                ReviewPatch(
+                    path=file.filename,
+                    patch=git_patch(
+                        file.filename,
+                        file.previous_filename or file.filename,
+                        file.status,
+                        file.patch,
+                    ),
+                )
+                for file in files
+            ],
+        )
+
+    key = f"pr-patches:{owner}/{repo}#{pr_number}@{head_sha}:{page}x{PATCH_PAGE_SIZE}".lower()
+    result = await swr(
+        key, load, fresh_for=_PATCH_PAGE_TTL, max_age=_PATCH_PAGE_TTL, model=ReviewPatchPage
+    )
+    return result.value
 
 
 async def get_review_file_contents(
@@ -1496,21 +1549,18 @@ class _ScoutPull(BaseModel):
 
 
 async def _scout_target(
-    owner: str, repo: str, pr_number: int, pr_payload: object
+    owner: str, repo: str, pr_number: int, *, title: str, base_sha: str, head_sha: str
 ) -> ReviewScoutTarget | None:
     """The scout target for the PR's current head, or ``None`` without a database or head."""
-    if not postgres.configured():
-        return None
-    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
-    if not pull.base.sha or not pull.head.sha:
+    if not postgres.configured() or not base_sha or not head_sha:
         return None
     return ReviewScoutTarget(
         owner=owner,
         repo=repo,
         pr_number=pr_number,
-        pr_title=pull.title,
-        base_sha=pull.base.sha,
-        head_sha=pull.head.sha,
+        pr_title=title,
+        base_sha=base_sha,
+        head_sha=head_sha,
         workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
     )
 
@@ -1567,7 +1617,15 @@ async def trigger_review_scout(
     """
     token = await _require_app_token()
     pr_payload = await _github_get(f"/repos/{owner}/{repo}/pulls/{pr_number}", token)
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
+    target = await _scout_target(
+        owner,
+        repo,
+        pr_number,
+        title=pull.title,
+        base_sha=pull.base.sha,
+        head_sha=pull.head.sha,
+    )
     if target is None:
         raise HTTPException(503, "the review scout needs a database and a pull request head")
     # Taken before the scout starts, so a walkthrough it stores quickly still counts as newer.
@@ -1576,7 +1634,6 @@ async def trigger_review_scout(
         trigger = ReviewScoutTrigger(started=False)
     else:
         trigger = ReviewScoutTrigger(started=True, run_id=await target.start())
-    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
     try:
         await ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=login).open(
             title=pull.title,

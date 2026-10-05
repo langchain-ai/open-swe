@@ -1,6 +1,7 @@
 """Tests for the public-repo org-membership gate on GitHub webhooks."""
 
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx2 import Response
@@ -240,11 +241,13 @@ async def test_gate_blocks_non_member_on_public_issue(
     assert "not a member" in body["reason"]
 
 
-async def test_review_requested_is_unsupported_before_public_repo_gate(
+async def test_review_requested_only_mirrors_the_pull_request_before_public_repo_gate(
     fake_store: Any, monkeypatch, registry_db
 ) -> None:
     _common_setup(monkeypatch)
     seen = _install_membership_stub(monkeypatch, members={"insider"})
+    review = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "process_github_pr_ready", review)
 
     response = await _post_github_webhook(
         "pull_request",
@@ -267,10 +270,9 @@ async def test_review_requested_is_unsupported_before_public_repo_gate(
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ignored",
-        "reason": "Unsupported GitHub pull_request action: review_requested",
-    }
+    assert response.json() == {"status": "accepted", "message": "Mirroring PR review_requested"}
+    review.assert_not_awaited()
+    assert seen["calls"] == []
     assert seen["calls"] == []
 
 

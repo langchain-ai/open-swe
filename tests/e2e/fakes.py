@@ -8,8 +8,10 @@ sees in the UI is exactly what the agent produced.
 import shutil
 import subprocess
 import time
+import zlib
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from e2e_env import (
     BARE_REMOTE,
@@ -540,6 +542,30 @@ def review_thread_count_graphql(threads: list[dict[str, Any]]) -> dict[str, Any]
             {"isResolved": review_thread_graphql(thread)["isResolved"]} for thread in threads
         ],
         "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
+
+
+def pull_file_rest_json(pull: dict[str, Any], file: dict[str, Any]) -> dict[str, Any]:
+    """A changed file as ``GET /pulls/{n}/files`` lists it, naming the head it was read at."""
+    path = quote(str(file["filename"]), safe="/")
+    return {
+        "status": "modified",
+        **file,
+        "contents_url": (
+            f"https://api.github.com/repos/{pull['owner']}/{pull['repo']}/contents/{path}"
+            f"?ref={pull['head_sha']}"
+        ),
+    }
+
+
+def check_run_rest_json(pull: dict[str, Any], check: dict[str, Any], index: int) -> dict[str, Any]:
+    """A check run as GitHub's REST API lists it, with an id stable for the PR head."""
+    identity = f"{pull['owner']}/{pull['repo']}#{pull['number']}@{pull['head_sha']}:{index}"
+    return {
+        **check,
+        "id": zlib.crc32(identity.encode()),
+        "head_sha": pull["head_sha"],
+        "html_url": check.get("details_url"),
     }
 
 

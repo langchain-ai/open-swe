@@ -23,14 +23,25 @@ identity: they create the row if it is missing and touch no other column.
 Rows live in PostgreSQL (``POSTGRES_URI``), which this module requires. Entity
 rows carry a synthetic UUIDv7 ``id``; ``(repository, number)`` stays the natural
 key callers address a PR by.
+
+The row also mirrors GitHub, so pages read a PR without calling GitHub: a save
+carrying GitHub's ``updated_at`` is a snapshot and writes the head/base SHAs,
+people and labels too, unless the stored snapshot is newer. Webhooks keep it
+current; ``mirrored`` fetches a PR nobody has mirrored yet and refreshes a stale
+one in the background. ``sync_revision`` lists the files of the current head
+and its check runs, which webhooks alone cannot supply.
 """
 
+import asyncio
 import logging
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Self, TypedDict
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid7
 
+import httpx2
+from fastapi import HTTPException
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 from sqlalchemy import (
     BigInteger,
@@ -39,23 +50,37 @@ from sqlalchemy import (
     Index,
     Text,
     UniqueConstraint,
+    case,
+    delete,
     desc,
+    exists,
     func,
     inspect,
     or_,
     select,
     tuple_,
+    update,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR, insert
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
+from agent.github.app import get_github_app_installation_token
+from agent.github.check_runs import CheckRun, CheckRunEvent
 from agent.github.comments import PrState, derive_pr_state
+from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.pull_request_diff import (
+    GITHUB_MAX_LISTED_FILES,
+    list_pull_request_files,
+    merge_base_sha,
+)
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
+from agent.ui_invalidations import outbox
+from agent.ui_invalidations.topics import pull_request_topic
 from agent.users.models import User, UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -63,10 +88,24 @@ from agent.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 ThreadRole = Literal["primary", "secondary"]
+FileStatus = Literal["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]
 AGENT_OPENED_LINK_SOURCE = "open_pull_request"
+
+STALE_AFTER = timedelta(seconds=30)
+"""How old a mirrored row may be before a read refreshes it in the background."""
 
 _SEARCH_PAGE_SIZE = 50
 _GITHUB_COLUMNS = ("state", "title", "body", "head_ref", "base_ref", "author")
+_SNAPSHOT_COLUMNS = (
+    "head_sha",
+    "base_sha",
+    "commits",
+    "author_avatar_url",
+    "labels",
+    "assignees",
+    "requested_reviewers",
+    "github_updated_at",
+)
 _DIFF_COLUMNS = ("additions", "deletions", "changed_files")
 _WRITE_ONCE_COLUMNS = (
     "opening_base_sha",
@@ -85,6 +124,16 @@ class DiffStats(TypedDict):
     files: int
     additions: int
     deletions: int
+
+
+class UserRef(TypedDict):
+    login: str
+    avatar_url: str | None
+
+
+class LabelRef(TypedDict):
+    name: str
+    color: str | None
 
 
 class ThreadLink(Base):
@@ -168,6 +217,21 @@ class PullRequest(Base):
     additions: Mapped[int | None] = mapped_column(default=None)
     deletions: Mapped[int | None] = mapped_column(default=None)
     changed_files: Mapped[int | None] = mapped_column(default=None)
+    head_sha: Mapped[str] = mapped_column(server_default="", default="")
+    base_sha: Mapped[str] = mapped_column(server_default="", default="")
+    commits: Mapped[int | None] = mapped_column(default=None)
+    author_avatar_url: Mapped[str] = mapped_column(server_default="", default="")
+    labels: Mapped[list[LabelRef]] = mapped_column(JSONB, default_factory=list)
+    assignees: Mapped[list[UserRef]] = mapped_column(JSONB, default_factory=list)
+    requested_reviewers: Mapped[list[UserRef]] = mapped_column(JSONB, default_factory=list)
+    github_updated_at: Mapped[datetime | None] = mapped_column(default=None)
+    synced_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
+    files_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    files_base_ref: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    merge_base_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    files_truncated: Mapped[bool] = mapped_column(default=False, init=False)
+    checks_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    checks_synced_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     threads: Mapped[list[ThreadLink]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -300,6 +364,252 @@ class PullRequest(Base):
         return [link.thread_id for link in self.threads if link.role == "primary"] + [
             link.thread_id for link in self.threads if link.role != "primary"
         ]
+
+    @property
+    def is_snapshot(self) -> bool:
+        """Whether this record carries a whole GitHub PR, so saving it refreshes the mirror."""
+        return self.github_updated_at is not None and bool(self.head_sha)
+
+    @property
+    def topic(self) -> str:
+        return pull_request_topic(self.owner, self.repo, self.number)
+
+    @property
+    def files_current(self) -> bool:
+        return bool(self.head_sha) and (self.files_head_sha, self.files_base_ref) == (
+            self.head_sha,
+            self.base_ref,
+        )
+
+    @property
+    def checks_current(self) -> bool:
+        return bool(self.head_sha) and self.checks_head_sha == self.head_sha
+
+    @property
+    def snapshot_stale(self) -> bool:
+        return self.synced_at is None or datetime.now(UTC) - self.synced_at >= STALE_AFTER
+
+    @classmethod
+    async def mirrored(cls, owner: str, repo: str, number: int) -> PullRequest:
+        """The mirrored PR, fetched first when never mirrored and refreshed in the background when stale."""
+        row = await cls.get(owner, repo, number)
+        if row is None or row.synced_at is None:
+            row = await cls.pull(owner, repo, number)
+        if row.snapshot_stale or not (row.files_current and row.checks_current):
+            cls.refresh_in_background(owner, repo, number)
+        return row
+
+    @classmethod
+    async def pull(cls, owner: str, repo: str, number: int) -> PullRequest:
+        """Fetch the PR from GitHub into the mirror; concurrent callers share one fetch."""
+        key = (owner.lower(), repo.lower(), number)
+        if key not in _PULLS:
+            _PULLS[key] = asyncio.ensure_future(cls._pull(owner, repo, number))
+            _PULLS[key].add_done_callback(lambda _done: _PULLS.pop(key, None))
+        return await asyncio.shield(_PULLS[key])
+
+    @classmethod
+    async def _pull(cls, owner: str, repo: str, number: int) -> PullRequest:
+        async with github_client(token=await cls._github_token()) as client:
+            payload = await PullRequestPayload.fetch(client, owner, repo, number)
+        return await payload.to_pull_request(owner, repo, number).save(
+            repository_private=payload.repo_private
+        )
+
+    @classmethod
+    def refresh_in_background(cls, owner: str, repo: str, number: int) -> None:
+        key = (owner.lower(), repo.lower(), number)
+        if key in _REFRESHES:
+            return
+        _REFRESHES[key] = asyncio.create_task(
+            cls._refresh(owner, repo, number), name="pull-request-refresh"
+        )
+        _REFRESHES[key].add_done_callback(lambda _done: _REFRESHES.pop(key, None))
+
+    @classmethod
+    async def _refresh(cls, owner: str, repo: str, number: int) -> None:
+        try:
+            row = await cls.get(owner, repo, number)
+            if row is not None and not row.snapshot_stale:
+                await row.sync_revision()
+                return
+            before = row.github_updated_at if row is not None else None
+            row = await cls.pull(owner, repo, number)
+            if row.github_updated_at != before:
+                await outbox.invalidate_standalone(row.topic)
+            await row.sync_revision(recheck_unfinished=True)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Refreshing a mirrored pull request failed",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+                exc_info=True,
+            )
+
+    async def changed_on_github(self) -> None:
+        """Tell open pages this saved snapshot changed, and list a new head's files and checks."""
+        await outbox.invalidate_standalone(self.topic)
+        if not (self.files_current and self.checks_current):
+            type(self).refresh_in_background(self.owner, self.repo, self.number)
+
+    async def sync_revision(self, *, recheck_unfinished: bool = False) -> None:
+        """List the current head's files and check runs when the mirror lacks them.
+
+        ``recheck_unfinished`` lists check runs again while any stored one is
+        unfinished, covering a ``check_run`` webhook GitHub never delivered.
+        """
+        relist_checks = not self.checks_current or (
+            recheck_unfinished
+            and any(run.status != "completed" for run in await self.check_runs() or [])
+        )
+        if self.files_current and not relist_checks:
+            return
+        async with github_client(token=await self._github_token()) as client:
+            if not self.files_current:
+                await self._sync_files(client)
+            if relist_checks:
+                await self._sync_checks(client)
+
+    async def _sync_files(self, client: httpx2.AsyncClient) -> None:
+        head_sha, base_ref = self.head_sha, self.base_ref
+        raw = await list_pull_request_files(client, self.repo_full_name, self.number)
+        files = [PullRequestFilePayload.model_validate(item) for item in raw]
+        if any(file.head_sha not in ("", head_sha) for file in files):
+            logger.info(
+                "Pull request head moved while listing its files",
+                extra={"pr_repo_full_name": self.repo_full_name, "pr_number": self.number},
+            )
+            return
+        merge_base = await merge_base_sha(client, self.repo_full_name, self.base_sha, head_sha)
+        cls = type(self)
+        async with postgres.session() as session:
+            current = (
+                await session.execute(
+                    select(cls.head_sha, cls.base_ref).where(cls.id == self.id).with_for_update()
+                )
+            ).one_or_none()
+            if current is None or (current.head_sha, current.base_ref) != (head_sha, base_ref):
+                return
+            await session.execute(
+                delete(PullRequestFile).where(PullRequestFile.pull_request_id == self.id)
+            )
+            session.add_all(
+                PullRequestFile(
+                    pull_request_id=self.id,
+                    position=position,
+                    path=file.filename,
+                    status=file.status,
+                    previous_path=file.previous_filename,
+                    additions=file.additions,
+                    deletions=file.deletions,
+                )
+                for position, file in enumerate(files)
+            )
+            await session.execute(
+                update(cls)
+                .where(cls.id == self.id)
+                .values(
+                    files_head_sha=head_sha,
+                    files_base_ref=base_ref,
+                    merge_base_sha=merge_base,
+                    files_truncated=len(raw) >= GITHUB_MAX_LISTED_FILES,
+                )
+            )
+            await outbox.invalidate(session, self.topic)
+        self.files_head_sha, self.files_base_ref, self.merge_base_sha = (
+            head_sha,
+            base_ref,
+            merge_base,
+        )
+
+    async def _sync_checks(self, client: httpx2.AsyncClient) -> None:
+        head_sha = self.head_sha
+        runs = await CheckRun.fetch_for_commit(client, self.repo_full_name, head_sha)
+        cls = type(self)
+        async with postgres.session() as session:
+            current = (
+                await session.execute(
+                    select(cls.head_sha, cls.checks_head_sha)
+                    .where(cls.id == self.id)
+                    .with_for_update()
+                )
+            ).one_or_none()
+            if current is None or current.head_sha != head_sha:
+                return
+            await CheckRun.store(
+                session,
+                [
+                    CheckRun.from_payload(run, self.repository_id)
+                    for run in runs
+                    if run.head_sha == head_sha
+                ],
+            )
+            await session.execute(
+                update(cls)
+                .where(cls.id == self.id)
+                .values(checks_head_sha=head_sha, checks_synced_at=func.clock_timestamp())
+            )
+            previous = current.checks_head_sha
+            if previous and previous != head_sha:
+                still_a_head = await session.scalar(
+                    select(
+                        exists().where(
+                            cls.repository_id == self.repository_id, cls.head_sha == previous
+                        )
+                    )
+                )
+                if not still_a_head:
+                    await CheckRun.forget_commit(session, self.repository_id, previous)
+            await outbox.invalidate(session, self.topic)
+        self.checks_head_sha = head_sha
+
+    async def files(self) -> list[PullRequestFile]:
+        """The current head's files in GitHub's order; meaningful only when ``files_current``."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(PullRequestFile)
+                .where(PullRequestFile.pull_request_id == self.id)
+                .order_by(PullRequestFile.position)
+            )
+            return list(rows)
+
+    async def check_runs(self) -> list[CheckRun] | None:
+        """The head's check runs; ``None`` while none are known and the head is not listed yet."""
+        runs = await CheckRun.for_commit(self.repository_id, self.head_sha) if self.head_sha else []
+        return runs if runs or self.checks_current else None
+
+    @classmethod
+    async def record_check_run(cls, payload: object) -> None:
+        """Mirror a ``check_run`` webhook onto the PRs whose head it ran on."""
+        try:
+            event = CheckRunEvent.model_validate(payload)
+        except ValidationError:
+            logger.info("Ignoring an unreadable check_run webhook", exc_info=True)
+            return
+        run = event.check_run
+        async with postgres.session() as session:
+            heads = list(
+                await session.execute(
+                    select(cls.repository_id, cls.owner, cls.repo, cls.number)
+                    .join(Repository, Repository.id == cls.repository_id)
+                    .where(
+                        Repository.key == event.repo_full_name.lower(),
+                        cls.head_sha == run.head_sha,
+                    )
+                )
+            )
+            if not heads:
+                return
+            await CheckRun.store(session, [CheckRun.from_payload(run, heads[0].repository_id)])
+            await outbox.invalidate(
+                session, *(pull_request_topic(h.owner, h.repo, h.number) for h in heads)
+            )
+
+    @staticmethod
+    async def _github_token() -> str:
+        token = await get_github_app_installation_token()
+        if not token:
+            raise HTTPException(503, "GitHub App token unavailable")
+        return token
 
     async def save(self, *, repository_private: bool | None = None) -> Self:
         """Write the PR as GitHub describes it and register its repository.
@@ -502,19 +812,53 @@ class PullRequest(Base):
             owner=self.owner,
             repo=self.repo,
             **{column: getattr(self, column) for column in _GITHUB_COLUMNS},
+            **{column: getattr(self, column) for column in _SNAPSHOT_COLUMNS},
             **{column: getattr(self, column) for column in _WRITE_ONCE_COLUMNS},
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
             **{column: getattr(self, column) for column in _DIFF_COLUMNS},
+            synced_at=func.clock_timestamp() if self.is_snapshot else None,
             legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
         )
         discovery_change = (
             {"legacy_threads_discovered_at": func.clock_timestamp()} if legacy_discovered else {}
         )
+        if self.is_snapshot:
+            newer = or_(
+                cls.github_updated_at.is_(None),
+                upsert.excluded.github_updated_at >= cls.github_updated_at,
+            )
+            github_owned = {
+                **{
+                    column: case(
+                        (newer, getattr(upsert.excluded, column)), else_=getattr(cls, column)
+                    )
+                    for column in (*_GITHUB_COLUMNS, *_SNAPSHOT_COLUMNS)
+                },
+                **{
+                    column: case(
+                        (
+                            newer,
+                            func.coalesce(getattr(upsert.excluded, column), getattr(cls, column)),
+                        ),
+                        else_=getattr(cls, column),
+                    )
+                    for column in _DIFF_COLUMNS
+                },
+                "synced_at": case((newer, func.clock_timestamp()), else_=cls.synced_at),
+            }
+        else:
+            github_owned = {
+                **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                **{
+                    column: func.coalesce(getattr(upsert.excluded, column), getattr(cls, column))
+                    for column in _DIFF_COLUMNS
+                },
+            }
         github_changes = (
             {
-                **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
+                **github_owned,
                 **{
                     column: func.coalesce(
                         func.nullif(getattr(cls, column), ""), getattr(upsert.excluded, column)
@@ -526,10 +870,6 @@ class PullRequest(Base):
                 ),
                 "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
                 "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
-                **{
-                    column: func.coalesce(getattr(upsert.excluded, column), getattr(cls, column))
-                    for column in _DIFF_COLUMNS
-                },
             }
             if overwrite
             else {}
@@ -550,6 +890,22 @@ class PullRequest(Base):
         return row
 
 
+class _UserPayload(BaseModel):
+    login: str = ""
+    avatar_url: str | None = None
+
+    @classmethod
+    def refs(cls, users: Sequence[Self]) -> list[UserRef]:
+        return [
+            UserRef(login=user.login, avatar_url=user.avatar_url) for user in users if user.login
+        ]
+
+
+class _LabelPayload(BaseModel):
+    name: str = ""
+    color: str | None = None
+
+
 class PullRequestPayload(BaseModel):
     number: int | None = None
     title: str = ""
@@ -560,11 +916,62 @@ class PullRequestPayload(BaseModel):
     additions: int | None = None
     deletions: int | None = None
     changed_files: int | None = None
+    commits: int | None = None
+    updated_at: datetime | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
+    author_avatar_url: str | None = Field(None, validation_alias=AliasPath("user", "avatar_url"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
     head_sha: str = Field("", validation_alias=AliasPath("head", "sha"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
+    base_sha: str = Field("", validation_alias=AliasPath("base", "sha"))
+    repo_private: bool | None = Field(None, validation_alias=AliasPath("base", "repo", "private"))
+    labels: list[_LabelPayload] = []
+    assignees: list[_UserPayload] = []
+    requested_reviewers: list[_UserPayload] = []
+
+    @classmethod
+    async def fetch(cls, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> Self:
+        response = await github_request(
+            client, "GET", f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}"
+        )
+        if response.status_code == 404:
+            raise HTTPException(404, "not found on GitHub")
+        if response.status_code != 200:
+            raise HTTPException(502, f"GitHub request failed ({response.status_code})")
+        return cls.model_validate(response.json())
+
+    @property
+    def pr_state(self) -> PrState:
+        return derive_pr_state(state=self.state or None, merged=self.merged, draft=self.draft)
+
+    def to_pull_request(self, owner: str, repo: str, number: int) -> PullRequest:
+        """An unsaved record carrying what GitHub says about the PR."""
+        return PullRequest(
+            owner=owner,
+            repo=repo,
+            number=number,
+            state=self.pr_state,
+            title=self.title,
+            body=self.body or "",
+            head_ref=self.head_ref,
+            base_ref=self.base_ref,
+            author=self.author,
+            author_github_id=self.author_id,
+            additions=self.additions,
+            deletions=self.deletions,
+            changed_files=self.changed_files,
+            head_sha=self.head_sha,
+            base_sha=self.base_sha,
+            commits=self.commits,
+            author_avatar_url=self.author_avatar_url or "",
+            labels=[
+                LabelRef(name=label.name, color=label.color) for label in self.labels if label.name
+            ],
+            assignees=_UserPayload.refs(self.assignees),
+            requested_reviewers=_UserPayload.refs(self.requested_reviewers),
+            github_updated_at=self.updated_at,
+        )
 
 
 class PullRequestEvent(BaseModel):
@@ -589,29 +996,60 @@ class PullRequestEvent(BaseModel):
 
     @property
     def state(self) -> PrState:
-        return derive_pr_state(
-            state=self.pull_request.state or None,
-            merged=self.pull_request.merged,
-            draft=self.pull_request.draft,
-        )
+        return self.pull_request.pr_state
 
     def to_pull_request(self) -> PullRequest | None:
         """An unsaved record carrying what this event says about the PR."""
         if self.identity is None:
             return None
         owner, repo, number = self.identity
-        return PullRequest(
-            owner=owner,
-            repo=repo,
-            number=number,
-            state=self.state,
-            title=self.pull_request.title,
-            body=self.pull_request.body or "",
-            head_ref=self.pull_request.head_ref,
-            base_ref=self.pull_request.base_ref,
-            author=self.pull_request.author,
-            author_github_id=self.pull_request.author_id,
-            additions=self.pull_request.additions,
-            deletions=self.pull_request.deletions,
-            changed_files=self.pull_request.changed_files,
-        )
+        return self.pull_request.to_pull_request(owner, repo, number)
+
+    async def mirror(self) -> PullRequest:
+        """Save what this event says about the PR and tell open pages it changed."""
+        pull_request = self.to_pull_request()
+        if pull_request is None:
+            raise ValueError("pull_request event names no pull request")
+        saved = await pull_request.save(repository_private=self.repo_private)
+        await saved.changed_on_github()
+        return saved
+
+
+class PullRequestFilePayload(BaseModel):
+    """One entry of ``GET /pulls/{n}/files``."""
+
+    filename: str
+    status: FileStatus = "modified"
+    previous_filename: str | None = None
+    additions: int = 0
+    deletions: int = 0
+    patch: str | None = None
+    contents_url: str = ""
+
+    @property
+    def head_sha(self) -> str:
+        """The commit GitHub listed this file at, read from ``contents_url``'s ``ref``."""
+        query = parse_qs(urlsplit(self.contents_url).query)
+        return query["ref"][0] if "ref" in query else ""
+
+
+class PullRequestFile(Base):
+    """A file a pull request's current head changes, in GitHub's listing order."""
+
+    __tablename__ = "pull_request_file"
+
+    pull_request_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pull_request.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(primary_key=True)
+    path: Mapped[str]
+    status: Mapped[FileStatus] = mapped_column(Text)
+    previous_path: Mapped[str | None] = mapped_column(default=None)
+    additions: Mapped[int] = mapped_column(default=0)
+    deletions: Mapped[int] = mapped_column(default=0)
+
+
+type _MirrorKey = tuple[str, str, int]
+
+_PULLS: dict[_MirrorKey, asyncio.Future[PullRequest]] = {}
+_REFRESHES: dict[_MirrorKey, asyncio.Task[None]] = {}

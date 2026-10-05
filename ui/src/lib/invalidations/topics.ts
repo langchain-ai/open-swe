@@ -9,3 +9,12 @@ export const INVALIDATION_TOPICS = {
 } as const
 
 export type InvalidationTopic = string
+
+/** One pull request's mirrored details, files and check runs. */
+export function pullRequestTopic(
+  owner: string,
+  repo: string,
+  number: number
+): InvalidationTopic {
+  return `pull-request/${owner.toLowerCase()}/${repo.toLowerCase()}/${number}`
+}

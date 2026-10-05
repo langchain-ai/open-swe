@@ -10,6 +10,7 @@ const file: ReviewDiffFile = {
   status: "modified",
   additions: 1,
   deletions: 1,
+  position: 0,
   patch: "patch",
   baseSha: "a".repeat(40),
   headSha: "b".repeat(40),

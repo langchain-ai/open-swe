@@ -3,12 +3,38 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 
 router = APIRouter()
+
+
+async def _mirror_pull_request(payload: dict[str, object], delivery_id: str) -> None:
+    event = PullRequestEvent.parse(payload)
+    if event is None or event.identity is None:
+        common.logger.info(
+            "Ignoring a pull_request webhook without a readable pull request",
+            extra={"github_delivery": delivery_id},
+        )
+        return
+    try:
+        await event.mirror()
+    except Exception:
+        common.logger.exception(
+            "Failed to mirror a GitHub pull request", extra={"github_delivery": delivery_id}
+        )
+
+
+async def _record_check_run(payload: dict[str, object], delivery_id: str) -> None:
+    try:
+        await PullRequest.record_check_run(payload)
+    except Exception:
+        common.logger.exception(
+            "Failed to mirror a GitHub check run", extra={"github_delivery": delivery_id}
+        )
 
 
 async def _launch_issue_automations(payload: dict[str, object], delivery_id: str) -> None:
@@ -97,8 +123,14 @@ async def github_webhook(
     is_issue_event = event_type == "issues"
     is_pull_request_event = event_type == "pull_request"
 
+    if event_type == "check_run":
+        background_tasks.add_task(_record_check_run, payload, delivery_id)
+
     if is_pull_request_event:
         action = payload.get("action", "")
+        if action in common.GH_PR_MIRROR_ONLY_ACTIONS:
+            background_tasks.add_task(_mirror_pull_request, payload, delivery_id)
+            return {"status": "accepted", "message": f"Mirroring PR {action}"}
         if action not in common.SUPPORTED_GH_PULL_REQUEST_ACTIONS:
             common.logger.info("Ignoring unsupported GitHub pull_request action: %s", action)
             return {

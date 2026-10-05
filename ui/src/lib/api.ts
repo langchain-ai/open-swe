@@ -1106,7 +1106,8 @@ export interface ReviewDetail extends Omit<
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
-  checks: Array<ReviewCheckRun>
+  /** null until the head's check runs are known. */
+  checks: Array<ReviewCheckRun> | null
   findings: Array<ReviewFinding>
   walkthrough: ReviewWalkthrough | null
   /** A review scout is working on this head, so `walkthrough` is on its way. */
@@ -1152,18 +1153,25 @@ export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput 
   updated_at: string
 }
 
-export interface ReviewDiffFile {
-  baseSha: string
-  headSha: string
+/** A changed file as the review diff lists it, before its patch is loaded. */
+export interface ReviewListedFile {
   path: string
   previousPath: string | null
-  status: "added" | "removed" | "modified" | "renamed"
+  status: PreviewFileStatus
   additions: number
   deletions: number
-  // A full per-file git patch. null when GitHub omits one (binary or very
-  // large files), which is what `unrenderable` reports.
-  patch: string | null
-  unrenderable?: boolean
+  /** Its index in GitHub's listing, which places it on a patch page. */
+  position: number
+}
+
+export interface ReviewDiffFile extends ReviewListedFile {
+  baseSha: string
+  headSha: string
+  /**
+   * A full per-file git patch: `undefined` while its page loads, `null` when
+   * GitHub has none (binary or very large files).
+   */
+  patch: string | null | undefined
 }
 
 export interface ReviewFileContents {
@@ -1233,10 +1241,20 @@ export interface PullRequestPreview {
 }
 
 export interface ReviewDiffPayload {
-  files: Array<ReviewDiffFile>
+  /** The merge base the files are listed against. */
+  base_sha: string
+  head_sha: string
+  patch_page_size: number
+  /** null until the current head's files are listed. */
+  files: Array<ReviewListedFile> | null
   total_additions: number
   total_deletions: number
   truncated: boolean
+}
+
+export interface ReviewPatchPage {
+  head_sha: string
+  files: Array<{ path: string; patch: string | null }>
 }
 
 export interface ReviewChatMeta {
@@ -1819,6 +1837,17 @@ export const api = {
   getReviewDiff: (owner: string, repo: string, number: number) =>
     request<ReviewDiffPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/diff`
+    ),
+  getReviewPatches: (
+    owner: string,
+    repo: string,
+    number: number,
+    headSha: string,
+    page: number
+  ) =>
+    request<ReviewPatchPage>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/patches` +
+        `?head_sha=${encodeURIComponent(headSha)}&page=${page}`
     ),
   getReviewFileContents: (
     owner: string,

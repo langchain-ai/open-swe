@@ -12,9 +12,16 @@ import {
   markReviewViewed,
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
+import {
+  RequestPatchContext,
+  useReviewDiffFiles,
+} from "@/features/reviews/lib/reviewPatches"
+import {
+  reviewDetailQuery,
+  reviewDiffQuery,
+} from "@/features/reviews/lib/reviewQueries"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -70,8 +77,7 @@ function ReviewDetailPage() {
     return () => controls.setCollapsed(false)
   }, [])
   const detail = useQuery({
-    queryKey: ["review", owner, repo, prNumber],
-    queryFn: () => api.getReview(owner, repo, prNumber),
+    ...reviewDetailQuery(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
     refetchInterval: (query) =>
       query.state.data?.status === "running" ||
@@ -80,10 +86,15 @@ function ReviewDetailPage() {
         : false,
   })
   const diff = useQuery({
-    queryKey: ["reviewDiff", owner, repo, prNumber],
-    queryFn: () => api.getReviewDiff(owner, repo, prNumber),
+    ...reviewDiffQuery(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
   })
+  const { files: diffFiles, requestPatch } = useReviewDiffFiles(
+    owner,
+    repo,
+    prNumber,
+    diff.data
+  )
 
   const queryClient = useQueryClient()
   const headSha = detail.data?.head_sha
@@ -177,14 +188,16 @@ function ReviewDetailPage() {
           <Skeleton className="h-96 w-full" />
         </div>
       ) : (
-        <ReviewMainBody
-          key={detail.data.head_sha}
-          detail={detail.data}
-          diffFiles={diff.data?.files ?? null}
-          openComment={activeComment}
-          onUpdateOpenComment={updateActiveComment}
-          onCloseOpenComment={closeActiveComment}
-        />
+        <RequestPatchContext value={requestPatch}>
+          <ReviewMainBody
+            key={detail.data.head_sha}
+            detail={detail.data}
+            diffFiles={diffFiles}
+            openComment={activeComment}
+            onUpdateOpenComment={updateActiveComment}
+            onCloseOpenComment={closeActiveComment}
+          />
+        </RequestPatchContext>
       )}
     </div>
   )

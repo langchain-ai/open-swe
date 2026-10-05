@@ -271,7 +271,7 @@ def apply() -> None:
 
     github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    from agent.github import repo_files
+    from agent.github import check_runs, pull_requests, repo_files
     from agent.human_review import standard
     from agent.threads import session_upload
 
@@ -284,6 +284,8 @@ def apply() -> None:
         standard,
         repo_files,
         session_upload,
+        pull_requests,
+        check_runs,
     ):
         module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
@@ -320,7 +322,7 @@ def apply() -> None:
     for module in (review_reviews, pull_request_diff, review_conversation):
         module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
-    for module in (review_reviews, review_chat, chat_graph):
+    for module in (review_reviews, review_chat, chat_graph, pull_requests):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
 

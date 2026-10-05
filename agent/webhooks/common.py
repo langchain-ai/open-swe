@@ -179,6 +179,7 @@ __all__ = [
     "mentions_open_swe",
     "GH_PR_AGENT_STATE_ACTIONS",
     "GH_PR_FIRST_REVIEW_ACTIONS",
+    "GH_PR_MIRROR_ONLY_ACTIONS",
     "GH_PR_WATCH_TOGGLE_ACTIONS",
     "SUPPORTED_GH_COMMENT_ACTIONS",
     "SUPPORTED_GH_EVENTS",
@@ -982,6 +983,17 @@ SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
         "synchronize",
     ]
 )
+# PR actions that change only what the pull request mirror shows.
+GH_PR_MIRROR_ONLY_ACTIONS = frozenset(
+    [
+        "labeled",
+        "unlabeled",
+        "assigned",
+        "unassigned",
+        "review_requested",
+        "review_request_removed",
+    ]
+)
 GH_PR_WATCH_TOGGLE_ACTIONS = frozenset(["closed", "reopened", "converted_to_draft"])
 GH_PR_FIRST_REVIEW_ACTIONS = frozenset(["opened", "ready_for_review"])
 # PR lifecycle actions that should refresh the agent thread's tracked pr_state.
@@ -1429,7 +1441,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        saved = await pull_request.save(repository_private=event.repo_private)
+        saved = await event.mirror()
         thread_ids = await saved.linked_threads()
     except Exception:  # noqa: BLE001
         logger.warning(

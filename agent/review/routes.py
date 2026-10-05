@@ -43,6 +43,8 @@ from agent.review.reviews import (
     PostedReviewComment,
     PullRequestPreview,
     PullRequestReviewEvent,
+    ReviewDiff,
+    ReviewPatchPage,
     ReviewScoutTrigger,
     ReviewSummary,
     SubmittedReview,
@@ -54,6 +56,7 @@ from agent.review.reviews import (
     get_review,
     get_review_diff,
     get_review_file_contents,
+    get_review_patches,
     get_review_summaries,
     list_review_comments,
     list_reviews,
@@ -270,9 +273,22 @@ async def api_get_review_diff(
     repo: str,
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
+) -> ReviewDiff:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     return await get_review_diff(owner, repo, pr_number)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/patches")
+async def api_get_review_patches(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    page: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> ReviewPatchPage:
+    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    return await get_review_patches(owner, repo, pr_number, head_sha, page)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/file-contents")

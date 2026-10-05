@@ -41,6 +41,8 @@ import {
 } from "@/features/reviews/lib/lineRange"
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
+import { useReviewDiffFiles } from "@/features/reviews/lib/reviewPatches"
+import { reviewDiffQuery } from "@/features/reviews/lib/reviewQueries"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
 import { api } from "@/lib/api"
@@ -210,14 +212,23 @@ export function PullRequestFiles({
   const [owner = "", name = ""] = pr.repo.split("/")
   const [wanted, setWanted] = useState(false)
   const diff = useQuery({
-    queryKey: ["reviewDiff", owner, name, pr.number],
-    queryFn: () => api.getReviewDiff(owner, name, pr.number),
+    ...reviewDiffQuery(owner, name, pr.number),
     enabled: wanted || expanded.length > 0,
   })
-  const byPath = useMemo(
-    () => new Map((diff.data?.files ?? []).map((file) => [file.path, file])),
-    [diff.data]
+  const { files: diffFiles, requestPatch } = useReviewDiffFiles(
+    owner,
+    name,
+    pr.number,
+    diff.data,
+    { preload: false }
   )
+  const byPath = useMemo(
+    () => new Map((diffFiles ?? []).map((file) => [file.path, file])),
+    [diffFiles]
+  )
+  useEffect(() => {
+    for (const path of expanded) requestPatch(path)
+  }, [expanded, requestPatch])
   const comments = useLineComments(pr, login)
   const want = () => {
     setWanted(true)
@@ -244,13 +255,13 @@ export function PullRequestFiles({
             />
             {open && (
               <div className="mt-1 mb-2 overflow-hidden rounded-md border border-border">
-                {diff.isPending ? (
-                  <p className="p-3 text-xs text-muted-foreground">
-                    Loading diff…
-                  </p>
-                ) : diff.error ? (
+                {diff.error ? (
                   <p role="alert" className="p-3 text-xs text-destructive">
                     {diff.error.message}
+                  </p>
+                ) : !diffFiles ? (
+                  <p className="p-3 text-xs text-muted-foreground">
+                    Loading diff…
                   </p>
                 ) : (
                   <FileDiff
@@ -440,12 +451,19 @@ function FileDiff({
     },
     [setDraft, send, removeFromBatch]
   )
-  if (!file || file.unrenderable || !file.patch) {
+  if (file?.patch === undefined) {
+    return file ? (
+      <p className="p-3 text-xs text-muted-foreground">Loading diff…</p>
+    ) : (
+      <p className="p-3 text-center text-xs text-muted-foreground">
+        This file is not in the loaded diff.
+      </p>
+    )
+  }
+  if (!file.patch) {
     return (
       <p className="p-3 text-center text-xs text-muted-foreground">
-        {file
-          ? "Binary or large file — diff not shown."
-          : "This file is not in the loaded diff."}
+        Binary or large file — diff not shown.
       </p>
     )
   }

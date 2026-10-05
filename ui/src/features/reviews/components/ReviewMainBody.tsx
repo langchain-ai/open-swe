@@ -126,6 +126,8 @@ import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
+import { RequestPatchContext } from "@/features/reviews/lib/reviewPatches"
+import { PatchPlaceholder } from "@/features/reviews/components/PatchPlaceholder"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -2010,6 +2012,11 @@ const FileDiffCard = memo(function FileDiffCard({
   // where the gutter utility is enabled (the full reviews page).
   const commentable = selectable && Boolean(onStartComment)
   const diffOptions = useDiffOptions(diffStyle)
+  const requestPatch = useContext(RequestPatchContext)
+  const requestOwnPatch = useCallback(
+    () => requestPatch(file.path),
+    [requestPatch, file.path]
+  )
   const diffWrapperRef = useRef<HTMLDivElement | null>(null)
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
   const [popup, setPopup] = useState<{
@@ -2291,7 +2298,12 @@ const FileDiffCard = memo(function FileDiffCard({
         </label>
       </div>
       {expanded &&
-        (file.unrenderable || file.patch === null ? (
+        (file.patch === undefined ? (
+          <PatchPlaceholder
+            lines={additions + deletions}
+            onNearViewport={requestOwnPatch}
+          />
+        ) : file.patch === null ? (
           <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
             Binary or large file — diff not shown.
           </div>
@@ -3403,11 +3415,20 @@ function FindingSection({
   )
 }
 
-function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
+function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> | null }) {
   return (
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">Checks</h3>
-      {checks.length === 0 ? (
+      {checks === null ? (
+        <div
+          aria-busy="true"
+          aria-label="Loading checks"
+          className="space-y-1.5"
+        >
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      ) : checks.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">No checks reported.</p>
       ) : (
         <div className="max-h-56 space-y-1 overflow-y-auto">

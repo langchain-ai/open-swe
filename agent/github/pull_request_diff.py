@@ -1,15 +1,14 @@
-"""Shared builders for full-content GitHub diffs.
+"""Shared builders for GitHub diffs.
 
 Fetches the changed files of a pull request — or of an arbitrary
 ``base...head`` comparison, for a branch that has no pull request — together
 with their full original/modified contents, so the UI can render
 syntax-highlighted diffs with pierre's ``MultiFileDiff``. Used by the thread
-branch diff endpoint (user token) and the review diff endpoint (App
-installation token).
+branch diff endpoint (user token). The review page instead lists files from
+the pull request mirror and reads GitHub's patches a page at a time.
 """
 
 import asyncio
-from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -23,8 +22,6 @@ GITHUB_MAX_LISTED_FILES = 3000
 PR_DIFF_MAX_FILE_BYTES = 1_000_000
 PR_DIFF_FETCH_CONCURRENCY = 10
 _FILES_PAGE_SIZE = 100
-# Keyed by the PR's base and head SHAs, so a push or base update misses the cache.
-_PATCH_DIFF_CACHE_TTL = timedelta(hours=1)
 
 
 async def _fetch_file_at_ref(
@@ -77,7 +74,7 @@ async def fetch_file_versions(
     return {"originalContent": original, "modifiedContent": modified}
 
 
-def _git_patch(path: str, original_path: str, status: str, patch: str | None) -> str | None:
+def git_patch(path: str, original_path: str, status: str, patch: str | None) -> str | None:
     """Wrap GitHub's hunks-only patch in the git file header pierre's parser needs."""
     header = f"diff --git a/{original_path} b/{path}\n"
     if original_path != path:
@@ -117,6 +114,47 @@ def _merge_base_sha(comparison: dict[str, Any]) -> str:
     return base_sha
 
 
+async def merge_base_sha(
+    client: httpx2.AsyncClient, full_name: str, base_ref: str, head_ref: str
+) -> str:
+    """The commit ``base...head`` diffs from, which is what a PR's file list is relative to."""
+    return _merge_base_sha(await _fetch_comparison(client, full_name, base_ref, head_ref))
+
+
+async def pull_request_files_page(
+    client: httpx2.AsyncClient, full_name: str, pr_number: int, *, page: int, per_page: int
+) -> list[Any]:
+    """One page of ``GET /pulls/{n}/files``, always for the PR's current head."""
+    response = await client.get(
+        f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
+        params={"per_page": per_page, "page": page},
+    )
+    if response.status_code == 404:
+        raise HTTPException(404, "pull request not found")
+    if response.status_code != 200:
+        raise HTTPException(502, f"github API error ({response.status_code})")
+    batch = response.json()
+    if not isinstance(batch, list):
+        raise HTTPException(502, "github API returned an unexpected files payload")
+    return batch
+
+
+async def list_pull_request_files(
+    client: httpx2.AsyncClient, full_name: str, pr_number: int
+) -> list[Any]:
+    """Every file ``GET /pulls/{n}/files`` lists, up to GitHub's cap."""
+    raw_files: list[Any] = []
+    page = 1
+    while True:
+        batch = await pull_request_files_page(
+            client, full_name, pr_number, page=page, per_page=_FILES_PAGE_SIZE
+        )
+        raw_files.extend(batch)
+        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
+            return raw_files
+        page += 1
+
+
 async def _pull_branch_shas(
     client: httpx2.AsyncClient, full_name: str, pr_number: int
 ) -> tuple[str, str]:
@@ -135,85 +173,23 @@ async def _pull_branch_shas(
     return base_sha, head_sha
 
 
-async def pull_request_diff_refs(
-    client: httpx2.AsyncClient, full_name: str, pr_number: int
-) -> tuple[str, str]:
-    """Return the PR's ``(merge_base_sha, head_sha)`` — the refs its diff spans."""
-    base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
-    return _merge_base_sha(comparison), head_sha
-
-
 async def build_pr_diff_files(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    pr_number: int,
-    *,
-    with_contents: bool = True,
+    client: httpx2.AsyncClient, full_name: str, pr_number: int
 ) -> dict[str, Any]:
     """Return ``{base_sha, head_sha, truncated, files}`` for a PR.
 
-    With ``with_contents``, each file carries full ``originalContent``/
-    ``modifiedContent`` (or ``None`` for binary/oversized blobs, flagged via
-    ``unrenderable``); without it only ``patch`` is populated and the client
-    hydrates on demand. ``client`` must already be configured with auth headers.
+    Each file carries full ``originalContent``/``modifiedContent`` (or ``None``
+    for binary/oversized blobs, flagged via ``unrenderable``). ``client`` must
+    already be configured with auth headers.
     """
     base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    if with_contents:
-        return await _pr_diff_at(client, full_name, pr_number, base_sha, head_sha, with_contents)
-
-    from langgraph_api.cache import swr
-
-    async def load() -> dict[str, Any]:
-        return await _pr_diff_at(client, full_name, pr_number, base_sha, head_sha, with_contents)
-
-    key = f"pr-diff:{full_name}#{pr_number}:{base_sha}..{head_sha}".lower()
-    result = await swr(key, load, fresh_for=_PATCH_DIFF_CACHE_TTL, max_age=_PATCH_DIFF_CACHE_TTL)
-    return result.value
-
-
-async def _pr_diff_at(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    pr_number: int,
-    base_sha: str,
-    head_sha: str,
-    with_contents: bool,
-) -> dict[str, Any]:
-    raw_files: list[Any] = []
-    page = 1
-    while True:
-        response = await client.get(
-            f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
-            params={"per_page": _FILES_PAGE_SIZE, "page": page},
-        )
-        if response.status_code != 200:
-            raise HTTPException(502, f"github API error ({response.status_code})")
-        batch = response.json()
-        if not isinstance(batch, list):
-            raise HTTPException(502, "github API returned an unexpected files payload")
-        raw_files.extend(batch)
-        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
-            break
-        page += 1
-    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
-    return await _build_diff_files(
-        client,
-        full_name,
-        raw_files,
-        _merge_base_sha(comparison),
-        head_sha,
-        with_contents=with_contents,
-    )
+    raw_files = await list_pull_request_files(client, full_name, pr_number)
+    merge_base = await merge_base_sha(client, full_name, base_sha, head_sha)
+    return await _build_diff_files(client, full_name, raw_files, merge_base, head_sha)
 
 
 async def build_compare_diff_files(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    base_ref: str,
-    head_ref: str,
-    *,
-    with_contents: bool = True,
+    client: httpx2.AsyncClient, full_name: str, base_ref: str, head_ref: str
 ) -> dict[str, Any]:
     """Return ``{base_sha, head_sha, truncated, files}`` for ``base...head``.
 
@@ -235,9 +211,7 @@ async def build_compare_diff_files(
     if not isinstance(raw_files, list):
         raise HTTPException(502, "github API returned an unexpected files payload")
 
-    return await _build_diff_files(
-        client, full_name, raw_files, base_sha, head_ref, with_contents=with_contents
-    )
+    return await _build_diff_files(client, full_name, raw_files, base_sha, head_ref)
 
 
 async def _build_diff_files(
@@ -246,8 +220,6 @@ async def _build_diff_files(
     raw_files: list[Any],
     base_ref: str,
     head_ref: str,
-    *,
-    with_contents: bool,
 ) -> dict[str, Any]:
     """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
     truncated = len(raw_files) >= GITHUB_MAX_LISTED_FILES
@@ -266,16 +238,15 @@ async def _build_diff_files(
 
         original: str | None = ""
         modified: str | None = ""
-        if with_contents:
-            if status != "added":
-                original = await _fetch_file_at_ref(
-                    client, semaphore, full_name, original_path, base_ref
-                )
-            if status != "removed":
-                modified = await _fetch_file_at_ref(client, semaphore, full_name, path, head_ref)
+        if status != "added":
+            original = await _fetch_file_at_ref(
+                client, semaphore, full_name, original_path, base_ref
+            )
+        if status != "removed":
+            modified = await _fetch_file_at_ref(client, semaphore, full_name, path, head_ref)
 
         raw_patch = raw.get("patch") if isinstance(raw.get("patch"), str) else None
-        patch = _git_patch(path, original_path, status, raw_patch)
+        patch = git_patch(path, original_path, status, raw_patch)
         return {
             "path": path,
             "previousPath": previous if isinstance(previous, str) else None,
@@ -285,11 +256,7 @@ async def _build_diff_files(
             "originalContent": original,
             "modifiedContent": modified,
             "patch": patch,
-            # GitHub omits the patch for binary and very large files; without
-            # contents to fall back on there is nothing to render.
-            "unrenderable": (original is None or modified is None)
-            if with_contents
-            else patch is None,
+            "unrenderable": original is None or modified is None,
         }
 
     entries = await asyncio.gather(*(build_entry(raw) for raw in raw_files))

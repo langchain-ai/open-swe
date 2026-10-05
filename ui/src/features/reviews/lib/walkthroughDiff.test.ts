@@ -12,6 +12,7 @@ function file(): ReviewDiffFile {
     status: "modified",
     additions: 2,
     deletions: 2,
+    position: 0,
     patch:
       "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -3,1 +3,1 @@\n-line 3\n+line three\n@@ -35,1 +35,1 @@\n-line 35\n+line thirty-five\n",
   }

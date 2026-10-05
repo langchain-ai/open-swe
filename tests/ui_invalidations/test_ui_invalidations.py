@@ -2,10 +2,13 @@ import asyncio
 import json
 from contextlib import aclosing
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import text
 
+from agent.dashboard import repo_access
 from agent.database import notifications, postgres
-from agent.ui_invalidations import hub, outbox
+from agent.ui_invalidations import hub, outbox, topics
 from agent.ui_invalidations.routes import _stream
 from agent.ui_invalidations.topics import WORKSPACES
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -65,3 +68,19 @@ async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> No
     finally:
         await hub.stop()
         await notifications.stop()
+
+
+async def test_a_pull_request_topic_is_heard_only_by_readers_of_its_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def require_access(_login: str, full_name: str) -> str:
+        if full_name.lower() != "lc/repo":
+            raise HTTPException(404, "repository not found")
+        return "token"
+
+    monkeypatch.setattr(repo_access, "require_repo_access_for_user", require_access)
+    session = {"sub": "ada"}
+
+    assert await topics.may_hear(session, topics.pull_request_topic("LC", "Repo", 7))
+    assert not await topics.may_hear(session, topics.pull_request_topic("lc", "private", 7))
+    assert not await topics.may_hear(session, "pull-request/lc/repo")
