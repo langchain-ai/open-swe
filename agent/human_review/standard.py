@@ -47,13 +47,15 @@ from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
-from agent.slack.blocks import escape
+from agent.slack.blocks import block_payload, escape, section
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
 from agent.users import User
 from agent.utils.json_types import JsonObject
+from agent.utils.preview import skip_on_preview
 from agent.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -188,9 +190,17 @@ async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: time
 
 async def _existing(active: HumanReviewRequest) -> RequestResult:
     if active.kind == "expedited":
-        return _failure(
-            "This pull request has an open expedited review card. Dismiss it before "
-            "asking for a standard review."
+        permalink = await _permalink(active)
+        return RequestResult(
+            success=False,
+            error=(
+                "This pull request has an open expedited review card. Dismiss it before "
+                "asking for a standard review."
+                + (f" Open in Slack: {permalink}" if permalink else "")
+            ),
+            request_id=str(active.id),
+            channel=active.slack_channel_id,
+            permalink=permalink,
         )
     return RequestResult(
         success=True,
@@ -266,7 +276,10 @@ async def request_review(
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers := request_blockers(readiness.snapshot):
         return _failure(
-            "The pull request cannot be put up for review: " + "; ".join(blockers) + "."
+            "The pull request cannot be put up for review: "
+            + "; ".join(blockers)
+            + ". "
+            + prompt("tools/human-review-blocked")
         )
 
     target = await _target_channel(pr_ref, channel, token)
@@ -482,9 +495,11 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
+        text = f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}"
         await send_dm(
             user.slack_user_id,
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}",
+            text,
+            blocks=block_payload([section(text), *await origin_footer(added.thread_id)]),
         )
     return RequestResult(
         success=True,
@@ -572,6 +587,8 @@ async def settle(request: HumanReviewRequest) -> bool:
 
     ``False`` only when GitHub could not be read, so nothing is known to have changed.
     """
+    if request.kind == "posted" and skip_on_preview("settle_posted"):
+        return True
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
@@ -655,6 +672,8 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    if not asked and skip_on_preview("start_auto_assign"):
+        return False
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
@@ -700,6 +719,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if (request.kind == "posted" or step == "unclaimed") and skip_on_preview("run_deadline"):
+        return {"status": "disabled_in_preview"}
     if step == "unclaimed":
         if request.reviewers:
             return {"status": "claimed"}

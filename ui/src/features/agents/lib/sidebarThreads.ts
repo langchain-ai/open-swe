@@ -1,6 +1,6 @@
 import type {
-  DesktopLocalActivity,
-  DesktopLocalThreadSummary,
+  DesktopLegacyLocalActivity,
+  DesktopLegacyLocalThread,
   DesktopProject,
 } from "@/desktop"
 import type {
@@ -44,7 +44,7 @@ export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
 
 export interface LocalSidebarThreadItem extends SidebarThreadItemBase {
   location: "local"
-  thread: DesktopLocalThreadSummary
+  thread: DesktopLegacyLocalThread
 }
 
 export type SidebarThreadItem = CloudSidebarThreadItem | LocalSidebarThreadItem
@@ -125,9 +125,9 @@ export function cloudSidebarThread(
 }
 
 export function localSidebarThread(
-  thread: DesktopLocalThreadSummary,
+  thread: DesktopLegacyLocalThread,
   repo: DesktopProject | undefined,
-  activity: DesktopLocalActivity[string] | undefined
+  activity: DesktopLegacyLocalActivity[string] | undefined
 ): LocalSidebarThreadItem {
   const repoLabel = repo?.name.trim() || localRepoName(thread.cwd)
   return {

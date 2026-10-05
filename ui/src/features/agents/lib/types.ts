@@ -498,6 +498,8 @@ export interface AgentThread {
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
+  /** For a thread bridged to someone's machine: which app serves it. */
+  sandboxBridgeClient?: "cli" | "desktop" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

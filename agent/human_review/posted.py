@@ -10,6 +10,7 @@ from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import record_pull_request, settle
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.users import User
+from agent.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,13 @@ def linked_pull_request(text: str) -> GitHubPrRef | None:
 
 async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text: str) -> None:
     """Start watching the pull request ``text`` links, if the message qualifies."""
+    if skip_on_preview("watch_post"):
+        return
     pr_ref = linked_pull_request(text)
     if pr_ref is None:
         return
     user = await User.for_identity("slack", slack_user_id)
-    if user is None or not user.typed_preferences.review_channel_watch:
+    if user is None:
         return
     extra = {
         "pr_repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",

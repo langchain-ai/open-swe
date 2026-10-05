@@ -14,13 +14,18 @@ deliberately the same code path, so a missing publish only ever costs latency.
 A bridge is alive while its heartbeat is recent. A machine that goes away
 mid-run simply stops heartbeating, and the prune sweep turns that into a closed
 bridge with failed requests rather than waiters that never return.
+
+Requests are only useful until their waiter reads them, so they live in daily
+partitions that the rotation drops once they are a day old.
 """
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
 
 from fastapi import HTTPException
@@ -36,6 +41,7 @@ from agent.bridge.constants import (
     REQUEST_EVENT,
     RESULT_EVENT,
     SANDBOX_ID_PREFIX,
+    BridgeClient,
 )
 from agent.bridge.protocol import BridgeMethod, JsonObject
 from agent.database import postgres
@@ -49,8 +55,16 @@ CLOSED_ERROR = "bridge closed"
 DISCONNECTED_ERROR = "bridge disconnected"
 
 _BRIDGE_COLUMNS = (
-    "bridge_id, owner_id, hostname, root_path, label, created_at, last_heartbeat_at, closed_at"
+    "bridge_id, owner_id, client, hostname, root_path, label, created_at, last_heartbeat_at, "
+    "closed_at"
 )
+_REQUEST_TABLE = "sandbox_bridge_request"
+# Today's partition plus yesterday's, so a request queued just before midnight
+# outlives its longest possible wait.
+_RETAINED_DAYS = 2
+_ROTATE_INTERVAL_SECONDS = 3600
+_rotated_at: float | None = None
+_rotation_lock = asyncio.Lock()
 
 
 class BridgeUnavailableError(RuntimeError):
@@ -78,6 +92,7 @@ class Bridge(BaseModel):
 
     bridge_id: str
     owner_id: str
+    client: BridgeClient = "cli"
     hostname: str
     root_path: str
     label: str | None = None
@@ -121,10 +136,11 @@ class SandboxBridgeBinding(BaseModel):
 
     sandbox_id: str
     sandbox_kind: Literal["bridge"] = "bridge"
+    sandbox_bridge_client: BridgeClient = "cli"
 
     @classmethod
     def of(cls, bridge: Bridge) -> Self:
-        return cls(sandbox_id=bridge.sandbox_id)
+        return cls(sandbox_id=bridge.sandbox_id, sandbox_bridge_client=bridge.client)
 
     def dump(self) -> dict[str, str]:
         return self.model_dump(mode="json")
@@ -170,6 +186,7 @@ class BridgeStore:
         cls,
         *,
         owner_id: str,
+        client: BridgeClient = "cli",
         hostname: str,
         root_path: str,
         label: str | None,
@@ -190,13 +207,14 @@ class BridgeStore:
                     conn,
                     f"""
                     INSERT INTO sandbox_bridge
-                        (bridge_id, owner_id, hostname, root_path, label)
-                    VALUES (:bridge_id, :owner_id, :hostname, :root_path, :label)
+                        (bridge_id, owner_id, client, hostname, root_path, label)
+                    VALUES (:bridge_id, :owner_id, :client, :hostname, :root_path, :label)
                     RETURNING {_BRIDGE_COLUMNS}
                     """,
                     {
                         "bridge_id": uuid.uuid4().hex,
                         "owner_id": owner_id,
+                        "client": client,
                         "hostname": hostname,
                         "root_path": root_path,
                         "label": label,
@@ -368,6 +386,7 @@ class BridgeStore:
     @classmethod
     async def enqueue(cls, bridge_id: str, *, method: BridgeMethod, params: JsonObject) -> str:
         """Queue one request for a live bridge and wake whoever is polling it."""
+        await cls.ensure_partitions()
         request_id = uuid.uuid4().hex
         async with postgres.transaction() as conn:
             alive = await cls._rows(
@@ -538,6 +557,58 @@ class BridgeStore:
                 await cls._notify(conn, bridge_id, request_id, RESULT_EVENT)
             await cls._notify(conn, bridge_id, "", CLOSED_EVENT)
         return failed
+
+    @classmethod
+    async def ensure_partitions(cls) -> None:
+        """Rotate at most once an hour per process; called before every enqueue."""
+        global _rotated_at
+        if _rotated_at is not None and time.monotonic() - _rotated_at < _ROTATE_INTERVAL_SECONDS:
+            return
+        async with _rotation_lock:
+            if (
+                _rotated_at is not None
+                and time.monotonic() - _rotated_at < _ROTATE_INTERVAL_SECONDS
+            ):
+                return
+            await cls.rotate_partitions()
+            _rotated_at = time.monotonic()
+
+    @classmethod
+    async def rotate_partitions(cls, today: date | None = None) -> None:
+        """Create today's and tomorrow's partitions and drop those older than the window.
+
+        Partition names and bounds come only from dates, so the DDL has no
+        caller-supplied text to quote.
+        """
+        today = today or datetime.now(UTC).date()
+        oldest = today - timedelta(days=_RETAINED_DAYS - 1)
+        async with postgres.transaction() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:table))"), {"table": _REQUEST_TABLE}
+            )
+            for day in (today, today + timedelta(days=1)):
+                await conn.execute(
+                    text(
+                        f"CREATE TABLE IF NOT EXISTS {cls._partition(day)} "
+                        f"PARTITION OF {_REQUEST_TABLE} "
+                        f"FOR VALUES FROM ('{day.isoformat()} 00:00+00') "
+                        f"TO ('{(day + timedelta(days=1)).isoformat()} 00:00+00')"
+                    )
+                )
+            partitions = await conn.execute(
+                text(
+                    "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+                    "WHERE i.inhparent = CAST(:table AS regclass)"
+                ),
+                {"table": _REQUEST_TABLE},
+            )
+            for name in partitions.scalars().all():
+                if date.fromisoformat(name.removeprefix(f"{_REQUEST_TABLE}_")) < oldest:
+                    await conn.execute(text(f"DROP TABLE {name}"))
+
+    @staticmethod
+    def _partition(day: date) -> str:
+        return f"{_REQUEST_TABLE}_{day.strftime('%Y%m%d')}"
 
     @staticmethod
     def _publish_closed(failed: Mapping[str, Sequence[str]]) -> None:

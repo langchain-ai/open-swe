@@ -32,38 +32,18 @@ export function HumanReviewPreference() {
         }
       />
       <SettingsRow
-        label="Request human reviews in Slack"
-        htmlFor="human-review-requests"
-        description="Ask a repository's Slack review channel to review a pull request, from the dashboard or by asking Open SWE. The pull request merges once its reviewers approve."
+        label="React to failing PR checks in Slack"
+        htmlFor="pr-failure-reactions"
+        description="Add ❌ to watched pull request posts in Slack when checks fail on a PR you own. Off by default."
         control={
           <Switch
-            id="human-review-requests"
-            checked={profile.data?.human_review_requests ?? false}
+            id="pr-failure-reactions"
+            checked={profile.data?.pr_failure_reactions ?? false}
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
               save.patch(
-                { human_review_requests: value },
-                defaults.default_agent_model,
-                defaults.default_agent_reasoning_effort
-              )
-            }}
-          />
-        }
-      />
-      <SettingsRow
-        label="Watch pull requests I post for review"
-        htmlFor="review-channel-watch"
-        description="When you link a pull request in any Slack channel Open SWE is in, Open SWE reacts once it is approved and once it merges. If it sits green without an approval for 30 minutes, Open SWE bumps it and picks a reviewer."
-        control={
-          <Switch
-            id="review-channel-watch"
-            checked={profile.data?.review_channel_watch ?? false}
-            disabled={disabled}
-            onCheckedChange={(value) => {
-              if (!defaults) return
-              save.patch(
-                { review_channel_watch: value },
+                { pr_failure_reactions: value },
                 defaults.default_agent_model,
                 defaults.default_agent_reasoning_effort
               )

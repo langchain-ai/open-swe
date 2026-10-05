@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-import httpx2
+from githubkit.auth import TokenAuthStrategy
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
@@ -30,9 +30,10 @@ from agent.expedited_review.readiness import (
 )
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
+from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
 from agent.github.repo_files import RepoSettings
+from agent.github.sdk import github_sdk
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
 from agent.human_review.requests import (
@@ -42,8 +43,8 @@ from agent.human_review.requests import (
     RequestState,
 )
 from agent.run_config import RunConfig
-from agent.slack.blocks import Block, block_payload, escape
-from agent.slack.cards import repost_thread_card
+from agent.slack.blocks import Block, block_payload, escape, section
+from agent.slack.cards import origin_footer, repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
@@ -57,6 +58,7 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from agent.users import User
+from agent.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +209,11 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
     )
-    payload = block_payload(blocks)
-    dm_location = await send_dm_with_location(author.slack_user_id, text, blocks=payload)
+    dm_location = await send_dm_with_location(
+        author.slack_user_id,
+        text,
+        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+    )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
@@ -287,6 +292,15 @@ async def _render_standard(
 
 
 async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
+) -> tuple[str, list[Block]]:
+    text, blocks = await _render(request, outcome, copy=copy)
+    if copy or dm or (request.kind == "standard" and not request.slack_thread_ts):
+        blocks.extend(await origin_footer(request.thread_id))
+    return text, blocks
+
+
+async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
@@ -611,6 +625,8 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
 
 async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None = None) -> None:
     """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+    if skip_on_preview("pr_reaction"):
+        return
     location = request.slack_location or (
         (request.slack_channel_id, request.slack_message_ts)
         if request.slack_channel_id and request.slack_message_ts
@@ -626,6 +642,8 @@ async def update_blocked_reactions(
     request: HumanReviewRequest, snapshot: PullRequestSnapshot | None = None
 ) -> None:
     """Keep a watched post's failure and conflict reactions in step with GitHub."""
+    if skip_on_preview("update_blocked_reactions"):
+        return
     if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
         return
     async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -638,7 +656,12 @@ async def update_blocked_reactions(
             and snapshot.state == "open"
             and not snapshot.merged
         ):
-            failing = snapshot.check_state in {"failure", "blocked"}
+            author = snapshot.author or row.pull_request.author
+            preferences = await User.preferences_for_login(author)
+            failing = preferences.pr_failure_reactions and snapshot.check_state in {
+                "failure",
+                "blocked",
+            }
             conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
         for emoji, blocked in (("x", failing), ("construction", conflicted)):
             react = add_slack_reaction if blocked else remove_slack_reaction
@@ -681,22 +704,18 @@ def idle_picks(
 
 async def _unrequest_github_review(request: HumanReviewRequest, login: str, token: str) -> None:
     pr = request.pull_request
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/requested_reviewers"
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "DELETE", url, json={"reviewers": [login]})
-    except httpx2.HTTPError:
+        async with github_sdk(TokenAuthStrategy(token)) as client:
+            await client.rest.pulls.async_remove_requested_reviewers(
+                pr.owner, pr.repo, pr.number, data={"reviewers": [login]}
+            )
+    except Exception:
         logger.warning(
             "GitHub review request removal did not complete",
             extra={"request_id": str(request.id)},
             exc_info=True,
         )
         return
-    if response.status_code != 200:
-        logger.warning(
-            "GitHub refused to remove a review request",
-            extra={"request_id": str(request.id), "status_code": response.status_code},
-        )
 
 
 async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
@@ -727,6 +746,9 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
             row.participants.remove(reviewer)
     if not released:
         return request
+    current = await HumanReviewRequest.get(request.id) or request
+    if current.state == "open":
+        await refresh_card(current)
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     for reviewer in released:
         logger.info(
@@ -735,15 +757,16 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
         )
         await _unrequest_github_review(request, reviewer.github_login, token)
         if reviewer.user.slack_user_id:
+            text = (
+                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+                "Open SWE removed you as a reviewer."
+            )
             await send_dm(
                 reviewer.user.slack_user_id,
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer.",
+                text,
+                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
             )
-    current = await HumanReviewRequest.get(request.id) or request
-    if current.state == "open":
-        await refresh_card(current)
-    return current
+    return await HumanReviewRequest.get(request.id) or current
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:

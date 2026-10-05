@@ -24,9 +24,13 @@ class _FakeRequest:
         return self._body
 
 
-def test_untagged_code_channel_message_does_not_interrupt_active_work() -> None:
+@pytest.mark.parametrize("text", ["talking to a teammate", "talking about @openswe"])
+def test_untagged_code_channel_message_does_not_interrupt_active_work(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     assert not slack_service._interrupts_active_run(
-        "talking to a teammate",
+        text,
         "BOT",
         treat_all_messages_as_mentions=True,
         code_channel=True,
