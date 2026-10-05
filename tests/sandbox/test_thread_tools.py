@@ -205,6 +205,79 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
     assert "integration_echo" in tools.tools
 
 
+async def test_proxy_invocation_traces_with_proxy_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = surface()
+    await tools.prepare({"messages": []})
+    captured: dict[str, object] = {}
+
+    class Executor:
+        async def astream(
+            self,
+            state: dict[str, object],
+            config: RunnableConfig,
+            *,
+            stream_mode: str,
+        ) -> AsyncIterator[dict[str, object]]:
+            captured["config"] = config
+            assert stream_mode == "updates"
+            messages = state["messages"]
+            assert isinstance(messages, list)
+            call = messages[-1]
+            call_id = call.tool_calls[0]["id"]
+            yield {"tools": {"messages": [ToolMessage(content="ok", tool_call_id=call_id)]}}
+
+    executor = Executor()
+    monkeypatch.setattr(tool_runtime.StateGraph, "compile", lambda self, **kwargs: executor)
+    config: RunnableConfig = {
+        "configurable": {"thread_id": "thread-a"},
+        "tags": ["existing"],
+        "metadata": {"thread_id": "thread-a"},
+    }
+    result = await tools.invoke(
+        "thread-a",
+        config,
+        {"messages": []},
+        "integration_echo",
+        {"value": "hello"},
+    )
+
+    assert result == {"status": "success", "content": "ok"}
+    assert captured["config"] == {
+        "configurable": {"thread_id": "thread-a"},
+        "tags": ["existing", "sandbox-tool-proxy"],
+        "metadata": {
+            "thread_id": "thread-a",
+            "invoked_via": "sandbox_tool_proxy",
+            "tool_name": "integration_echo",
+        },
+        "run_name": "sandbox_tool:integration_echo",
+    }
+
+
+async def test_proxy_invocation_uses_forwarded_trace_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = surface()
+    await tools.prepare({"messages": []})
+    tracing = MagicMock()
+    tracing.return_value.__enter__.return_value = None
+    tracing.return_value.__exit__.return_value = None
+    monkeypatch.setattr(tool_runtime, "tracing_context", tracing)
+
+    await tools.invoke(
+        "thread-a",
+        {"configurable": {"thread_id": "thread-a"}},
+        {"messages": []},
+        "integration_echo",
+        {"value": "hello"},
+        trace_headers={"langsmith-trace": "trace-id"},
+    )
+
+    tracing.assert_called_once_with(parent={"langsmith-trace": "trace-id"})
+
+
 async def test_http_list_search_invoke_and_reject_context_overrides(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,

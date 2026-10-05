@@ -99,12 +99,25 @@ async def invoke_tool(
     tool_name: Annotated[str, Path(min_length=1, max_length=256)],
     arguments: ToolArguments,
     access: Access,
+    request: Request,
 ) -> ToolResult:
     from agent.sandboxes.tool_runtime import load_tool_surface
 
     surface, config, state = await load_tool_surface(access.thread_id)
+    trace_headers = {
+        name: value
+        for name in ("langsmith-trace", "baggage")
+        if (value := request.headers.get(name)) is not None
+    }
     try:
-        result = await surface.invoke(access.thread_id, config, state, tool_name, arguments.root)
+        result = await surface.invoke(
+            access.thread_id,
+            config,
+            state,
+            tool_name,
+            arguments.root,
+            trace_headers=trace_headers or None,
+        )
         return ToolResult.model_validate(result)
     except HTTPException:
         raise

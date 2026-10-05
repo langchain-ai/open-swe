@@ -1,6 +1,7 @@
 """Execute the agent's tool node without invoking its model."""
 
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph_sdk import get_client
+from langsmith import get_current_run_tree, tracing_context
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
@@ -84,6 +86,7 @@ class ToolSurface:
         state: dict[str, object],
         name: str,
         arguments: dict[str, JsonValue],
+        trace_headers: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
         tool = self.tools.get(name)
         if tool is None:
@@ -112,11 +115,24 @@ class ToolSurface:
             "messages": [*(messages if isinstance(messages, list) else []), call],
             "loaded_integration_tools": integration_names,
         }
+        traced_config: RunnableConfig = {
+            **config,
+            "run_name": f"sandbox_tool:{name}",
+            "tags": [*(config.get("tags") or []), "sandbox-tool-proxy"],
+            "metadata": {
+                **(config.get("metadata") or {}),
+                "invoked_via": "sandbox_tool_proxy",
+                "tool_name": name,
+            },
+        }
         update: dict[str, object] = {}
-        async for chunk in executor.astream(state, config, stream_mode="updates"):
-            values = chunk.get("tools")
-            if isinstance(values, dict):
-                update.update(values)
+        parent = trace_headers or get_current_run_tree()
+        context = tracing_context(parent=parent) if parent else nullcontext()
+        with context:
+            async for chunk in executor.astream(state, traced_config, stream_mode="updates"):
+                values = chunk.get("tools")
+                if isinstance(values, dict):
+                    update.update(values)
         results = update.get("messages", [])
         result = (
             next(
