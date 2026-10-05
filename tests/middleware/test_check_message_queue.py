@@ -42,7 +42,8 @@ def _envelope(message: dict) -> str:
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_announces_the_move_to_web_only_once() -> None:
+@pytest.mark.parametrize("delegated", [False, True])
+async def test_check_message_queue_announces_the_move_to_web_only_once(delegated: bool) -> None:
     store = _FakeStore(
         {
             (("queue", "thread-1"), "pending_messages"): {
@@ -52,6 +53,17 @@ async def test_check_message_queue_announces_the_move_to_web_only_once() -> None
                             "text": "and another thing",
                             "source": "dashboard",
                             "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777002",
+                            **(
+                                {
+                                    "author": {
+                                        "id": "system:concierge-github:octocat",
+                                        "display_name": "Concierge on behalf of Octocat",
+                                        "sender_type": "bot",
+                                    }
+                                }
+                                if delegated
+                                else {}
+                            ),
                             "sender": {
                                 "id": "github:octocat",
                                 "platform": "github",
@@ -79,6 +91,8 @@ async def test_check_message_queue_announces_the_move_to_web_only_once() -> None
     assert result is not None
     envelopes = [_envelope(message) for message in result["messages"]]
     assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
+    assert ('kind="system"' if delegated else 'kind="human"') in envelopes[-1]
+    assert ('on_behalf_of="github:octocat"' in envelopes[-1]) is delegated
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from agent.github.pull_request_checks import PullRequestState, get_pull_request_
 from agent.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
+from agent.input_messages import SystemIdentity
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
@@ -196,7 +197,12 @@ async def get_dashboard_thread(
 
 
 async def send_dashboard_message(
-    thread_id: str, login: str, body: ThreadMessageBody, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    body: ThreadMessageBody,
+    *,
+    email: str | None = None,
+    author: SystemIdentity | None = None,
 ) -> dict[str, Any]:
     client = langgraph_client()
     try:
@@ -271,6 +277,8 @@ async def send_dashboard_message(
             **({"email": email} if email else {}),
         },
     }
+    if author is not None:
+        queue_payload["author"] = author
     if isinstance(content, list):
         queue_payload["images"] = [
             block for block in content if isinstance(block, dict) and block.get("type") != "text"

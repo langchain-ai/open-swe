@@ -48,6 +48,7 @@ from agent.input_messages import (
     injected_dynamic_context_hashes_from_metadata,
 )
 from agent.invocation import new_invocation_id, with_invocation_id
+from agent.message_authorship import message_context
 from agent.prompts import prompt
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
@@ -423,6 +424,7 @@ async def start_dashboard_thread(
     prompt: str,
     repos: Sequence[str],
     visibility: Literal["public", "private"],
+    author: SystemIdentity | None = None,
 ) -> str:
     """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
@@ -448,11 +450,25 @@ async def start_dashboard_thread(
     client = langgraph_client()
     await dispatch_agent_run(
         thread_id,
-        prompt,
+        None,
         await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
         source=DASHBOARD_SOURCE,
         thread_title=None,
         client=client,
+        input={
+            "messages": (
+                await _attributed_run_messages(
+                    thread_id,
+                    login,
+                    metadata=thread_metadata(thread),
+                    content=prompt,
+                    creating=True,
+                    email=email,
+                    client=client,
+                    author=author,
+                )
+            )[0]
+        },
     )
     return thread_id
 
@@ -699,6 +715,7 @@ async def _attributed_run_messages(
     creating: bool,
     email: str | None,
     client: Any,
+    author: SystemIdentity | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -742,8 +759,8 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        {"sender_id": sender_id, "surface": "web", "kind": "human"},
-        systems=[system for system, _ in notices] or None,
+        message_context(sender_id, author),
+        systems=([author] if author else []) + [system for system, _ in notices],
         injected_dynamic_context_hashes=injected,
     )
     for system, body in notices:
@@ -766,6 +783,7 @@ async def _enrich_run_start_command(
     metadata: dict[str, Any],
     creating: bool = False,
     email: str | None = None,
+    author: SystemIdentity | None = None,
 ) -> dict[str, Any]:
     if command.get("method") != "run.start":
         return command
@@ -873,6 +891,7 @@ async def _enrich_run_start_command(
         creating=creating,
         email=email,
         client=client,
+        author=author,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -960,12 +979,17 @@ async def _enrich_run_start_command(
                             # carries the sender and surface a reader attributes
                             # the message by.
                             text=_command_prompt_text(structured[-1].get("content")),
-                            sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                            sender=MessageSender(
+                                login=author["id"] if author else login,
+                                kind="concierge" if author else DASHBOARD_SOURCE,
+                                display_name=author["display_name"] if author else None,
+                                **({"on_behalf_of": login} if author else {}),
+                            ),
                             attachments=attachments,
                             model_id=run_model,
                             effort=run_effort,
                         ),
-                        actor_kind="user",
+                        actor_kind="system" if author else "user",
                         turn_id=turn_id,
                         attachments=pending,
                     )
@@ -1063,6 +1087,7 @@ async def steer_running_thread(
     *,
     metadata: dict[str, Any],
     email: str | None = None,
+    author: SystemIdentity | None = None,
 ) -> dict[str, Any]:
     """Deliver a ``run.start`` sent while a run is live into that run.
 
@@ -1098,6 +1123,7 @@ async def steer_running_thread(
         creating=False,
         email=email,
         client=client,
+        author=author,
     )
     client_message_id = _command_message_id(params)
     message_id = (
@@ -1125,11 +1151,16 @@ async def steer_running_thread(
                         message_id=message_id,
                         role="human",
                         text=_command_prompt_text(structured[-1].get("content")),
-                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        sender=MessageSender(
+                            login=author["id"] if author else login,
+                            kind="concierge" if author else DASHBOARD_SOURCE,
+                            display_name=author["display_name"] if author else None,
+                            **({"on_behalf_of": login} if author else {}),
+                        ),
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),
-                    actor_kind="user",
+                    actor_kind="system" if author else "user",
                     turn_id=turn_id,
                     attachments=pending,
                 )
@@ -1227,6 +1258,7 @@ async def queue_follow_up_run(
     *,
     metadata: dict[str, Any],
     email: str | None = None,
+    author: SystemIdentity | None = None,
 ) -> dict[str, Any]:
     """Hold a ``run.start`` sent while a run is live until that run ends.
 
@@ -1236,7 +1268,7 @@ async def queue_follow_up_run(
     right away and learns the run id so it can be cancelled before it starts.
     """
     enriched = await _enrich_run_start_command(
-        thread_id, login, command, metadata=metadata, email=email
+        thread_id, login, command, metadata=metadata, email=email, author=author
     )
     enriched_params: dict[str, Any] = enriched["params"]
     configurable: dict[str, Any] = enriched_params["config"]["configurable"]
@@ -1302,7 +1334,7 @@ async def queue_follow_up_run(
                     Command(
                         command_id=f"turn:{turn_id}:queued",
                         event=TurnQueued(turn_id=turn_id, run_id=run_id),
-                        actor_kind="user",
+                        actor_kind="system" if author else "user",
                         run_id=run_id,
                         turn_id=turn_id,
                     )

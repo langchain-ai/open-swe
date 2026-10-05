@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.config import ENV
 from agent.dashboard.ttft import AssistantTextEventDetector, record_dashboard_thread_ttft
+from agent.input_messages import SystemIdentity
 from agent.threads.access import (
     _authorized_thread_metadata,
     _readable_thread_metadata,
@@ -157,6 +158,7 @@ async def proxy_dashboard_thread_commands(
     email: str | None = None,
     content_type: str = "application/json",
     principal: Principal | None = None,
+    author: SystemIdentity | None = None,
 ) -> tuple[int, bytes, str | None]:
     """Forward one command, enriched for whoever sent it.
 
@@ -221,9 +223,13 @@ async def proxy_dashboard_thread_commands(
         # run of its own, or joins it. Either reply keeps the protocol's shape
         # so the client cannot tell them from a plain start.
         handled = await (
-            queue_follow_up_run(thread_id, login, parsed, metadata=metadata, email=email)
+            queue_follow_up_run(
+                thread_id, login, parsed, metadata=metadata, email=email, author=author
+            )
             if enqueue
-            else steer_running_thread(thread_id, login, parsed, metadata=metadata, email=email)
+            else steer_running_thread(
+                thread_id, login, parsed, metadata=metadata, email=email, author=author
+            )
         )
         return 200, json.dumps(handled).encode(), "application/json"
 
@@ -246,6 +252,7 @@ async def proxy_dashboard_thread_commands(
             metadata=metadata,
             creating=creating,
             email=email,
+            author=author,
         )
     outgoing = json.dumps(enriched).encode()
 
