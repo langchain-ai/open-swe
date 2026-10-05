@@ -16,12 +16,18 @@ tool = import_module("agent.tools.expedite_pr_approval")
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("thread_id", ["thread-1", "another-thread"])
+@pytest.mark.parametrize(
+    "reason", ["dismissed", "cancelled by the agent", "the pull request was closed"]
+)
 async def test_dismissal_prevents_recreating_expedited_request(
-    monkeypatch: pytest.MonkeyPatch, open_approval: OpenApproval, thread_id: str
+    monkeypatch: pytest.MonkeyPatch, open_approval: OpenApproval, thread_id: str, reason: str
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     monkeypatch.setattr(lifecycle, "refresh_card_in_thread", AsyncMock())
-    await lifecycle.dismiss_request(approval, "U_ADA")
+    if reason == "dismissed":
+        await lifecycle.dismiss_request(approval, "U_ADA")
+    else:
+        await lifecycle.retire(approval, "cancelled", reason)
     monkeypatch.setattr(tool, "get_config", lambda: {})
     monkeypatch.setattr(
         tool.RunConfig, "from_config", lambda _: SimpleNamespace(thread_id=thread_id)
@@ -31,9 +37,13 @@ async def test_dismissal_prevents_recreating_expedited_request(
         "get_workspace_settings",
         AsyncMock(return_value=SimpleNamespace(expedited_review_enabled=True)),
     )
+    monkeypatch.setattr(tool, "run_slack_location", AsyncMock(return_value=(None, None)))
     result = await tool.expedite_pr_approval("https://github.com/lc/repo/pull/7")
     assert result["success"] is False
-    assert "dismissed" in result["error"]
+    if reason == "dismissed":
+        assert "dismissed" in result["error"]
+    else:
+        assert "no Slack location" in result["error"]
     assert await HumanReviewRequest.active_for("lc", "repo", 7) is None
 
 

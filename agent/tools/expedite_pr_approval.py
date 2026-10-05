@@ -121,7 +121,11 @@ async def expedite_pr_approval(
         return {"success": True, "cancelled": True}
 
     latest = await HumanReviewRequest.latest_expedited_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
-    if latest is not None and latest.state == "cancelled":
+    if (
+        latest is not None
+        and latest.state == "cancelled"
+        and latest.detail.startswith("dismissed by ")
+    ):
         return _failure(
             "The previous expedited review was dismissed. Do not automatically create "
             "another card for this pull request; ask for a standard review instead."
