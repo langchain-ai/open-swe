@@ -309,3 +309,34 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.deleted == ["expired-1", "expired-2"]
     # Search is scoped to the thread_wakeup kind so other crons are never seen.
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
+
+
+async def test_sync_points_at_earliest_pending_wakeup_and_clears_when_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalidated: list[str] = []
+
+    async def _record(*topics: str) -> None:
+        invalidated.extend(topics)
+
+    monkeypatch.setattr(wakeup_tool, "invalidate_standalone", _record)
+    padding = timedelta(seconds=wakeup_tool._END_TIME_PADDING_SECONDS)
+    now = datetime.now(UTC).replace(microsecond=0)
+    soon, later = now + timedelta(minutes=5), now + timedelta(hours=1)
+    client = _FakeClient(
+        [
+            _wakeup_cron("fired", now - timedelta(minutes=1) + padding),
+            _wakeup_cron("later", later + padding),
+            _wakeup_cron("soon", soon + padding),
+        ]
+    )
+
+    await wakeup_tool.sync_next_wakeup(client, "thread-1")
+
+    assert client.threads.metadata["next_wakeup_at_ms"] == int(soon.timestamp() * 1000)
+    assert invalidated == ["thread/thread-1"]
+
+    client.crons._crons = []
+    await wakeup_tool.sync_next_wakeup(client, "thread-1")
+
+    assert client.threads.metadata["next_wakeup_at_ms"] is None

@@ -16,6 +16,8 @@ from agent.input_messages import build_run_input
 from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
+from agent.ui_invalidations.outbox import invalidate_standalone
+from agent.ui_invalidations.topics import thread_topic
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -139,17 +141,54 @@ async def _record_wakeup(client: Any, thread_id: str, generation: str, count: in
     )
 
 
-async def _record_next_wakeup(client: Any, thread_id: str, fire_time: datetime) -> None:
-    """Expose the pending wakeup to the dashboard; never raises."""
+async def _wakeup_crons(client: Any, *, thread_id: str | None = None) -> list[dict[str, Any]]:
+    """Every ``thread_wakeup`` cron, optionally of one thread, fully paginated."""
+    crons: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            thread_id=thread_id,
+            metadata={"kind": _WAKEUP_KIND},
+            limit=_PURGE_PAGE_SIZE,
+            offset=offset,
+        )
+        if not page:
+            break
+        crons.extend(cron for cron in page if isinstance(cron, dict))
+        if len(page) < _PURGE_PAGE_SIZE:
+            break
+        offset += len(page)
+    return crons
+
+
+async def sync_next_wakeup(client: Any, thread_id: str) -> None:
+    """Point ``next_wakeup_at_ms`` at the thread's earliest pending wakeup; never raises.
+
+    Recomputed from the crons rather than written once, so the dashboard stops
+    showing a wakeup once it has run, and shows the next one when several are armed.
+    """
+    now = datetime.now(UTC)
     try:
+        fire_times = [
+            end_time - timedelta(seconds=_END_TIME_PADDING_SECONDS)
+            for cron in await _wakeup_crons(client, thread_id=thread_id)
+            if (end_time := _parse_iso(cron.get("end_time"))) is not None
+        ]
+        pending = [fire_time for fire_time in fire_times if fire_time > now]
         await client.threads.update(
             thread_id=thread_id,
-            metadata={_NEXT_WAKEUP_METADATA_KEY: int(fire_time.timestamp() * 1000)},
+            metadata={
+                _NEXT_WAKEUP_METADATA_KEY: (
+                    int(min(pending).timestamp() * 1000) if pending else None
+                )
+            },
         )
     except Exception:
         logger.warning(
-            "Failed to record next thread wakeup", extra={"thread_id": thread_id}, exc_info=True
+            "Failed to sync next thread wakeup", extra={"thread_id": thread_id}, exc_info=True
         )
+        return
+    await invalidate_standalone(thread_topic(thread_id))
 
 
 async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[str]:
@@ -160,25 +199,11 @@ async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[st
     fully before returning so the result is stable to delete afterwards.
     """
     expired_ids: list[str] = []
-    offset = 0
-    while True:
-        page = await client.crons.search(
-            metadata={"kind": _WAKEUP_KIND},
-            limit=_PURGE_PAGE_SIZE,
-            offset=offset,
-        )
-        if not page:
-            break
-        for cron in page:
-            if not isinstance(cron, dict):
-                continue
-            end_time = _parse_iso(cron.get("end_time"))
-            cron_id = cron.get("cron_id")
-            if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
-                expired_ids.append(cron_id)
-        if len(page) < _PURGE_PAGE_SIZE:
-            break
-        offset += len(page)
+    for cron in await _wakeup_crons(client):
+        end_time = _parse_iso(cron.get("end_time"))
+        cron_id = cron.get("cron_id")
+        if end_time is not None and end_time < now and isinstance(cron_id, str) and cron_id:
+            expired_ids.append(cron_id)
     return expired_ids
 
 
@@ -338,5 +363,5 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
             return {"success": False, "error": str(exc)}
-    await _record_next_wakeup(client, thread_id, fire_time)
+    await sync_next_wakeup(client, thread_id)
     return result

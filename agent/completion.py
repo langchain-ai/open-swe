@@ -34,6 +34,7 @@ from agent.slack.code_channels import is_code_channel_session, set_session_statu
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.thread_feedback import schedule_answer_feedback
+from agent.tools.schedule_thread_wakeup import sync_next_wakeup
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from agent.utils.json_types import thread_metadata
@@ -473,6 +474,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup":
+        await sync_next_wakeup(langgraph_client(), thread_id)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
     if status == "success" and not (

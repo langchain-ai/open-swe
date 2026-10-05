@@ -29,7 +29,7 @@ import type {
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
-import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
+import { INVALIDATION_TOPICS, threadTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -638,6 +638,9 @@ export function useSidebarActiveThread({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
     enabled: enabled && Boolean(activeThreadId) && !loaded,
+    meta: {
+      invalidatedBy: activeThreadId ? [threadTopic(activeThreadId)] : [],
+    },
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
@@ -755,6 +758,7 @@ export function useAgentThread(threadId: string) {
     // its stop button — believing the run already ended.
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 3000 : false,
+    meta: { invalidatedBy: [threadTopic(threadId)] },
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.

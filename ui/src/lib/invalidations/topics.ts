@@ -9,3 +9,8 @@ export const INVALIDATION_TOPICS = {
 } as const
 
 export type InvalidationTopic = string
+
+/** One thread's summary, such as its pending wakeup. */
+export function threadTopic(threadId: string): InvalidationTopic {
+  return `thread/${threadId}`
+}
