@@ -171,8 +171,27 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
         {
             "failure_reply_posted_run_id": "run-2",
             "failure_reply_posted_run_ids": ["run-1", "run-2"],
+            "consecutive_failed_runs": 1,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_repeated_failures_stop_posting_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeClient(_slack_metadata() | {"consecutive_failed_runs": 3})
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-4", "status": "error"}
+    )
+
+    assert result == {"status": "ignored", "reason": "repeated failures"}
+    reply.assert_not_awaited()
+    assert client.threads.updates == [{"consecutive_failed_runs": 4}]
 
 
 class _FakeRuns:
