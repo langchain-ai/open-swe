@@ -25,6 +25,12 @@ falling back to the default branch when the head has no settings file. The
 `request_human_review` tool accepts a `channel` that overrides it or stands in when
 the repository sets none.
 
+Workspace admins can override the two-hour auto-assignment wait through
+`PUT /dashboard/api/workspaces/{workspace}/settings` with
+`human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance
+setting). The instance default can be set through `PUT /dashboard/api/settings`.
+This affects reviewer assignment, not the two-hour auto-merge deadline.
+
 ## Requesting
 
 - Asking is a per-person feature flag, **Request human reviews in Slack** on the
@@ -58,7 +64,7 @@ the repository sets none.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.
-- If nobody signs up within 30 minutes, the agent that asked is woken (for a dashboard
+- If nobody signs up within 2 hours (or the workspace’s configured timeout), the agent that asked is woken (for a dashboard
   request, the requester's pull request thread) to pick one from CODEOWNERS and the
   review history of the changed files. It calls `assign_human_reviewer`, which adds the
   person to the card, tags them in the card's thread, and DMs them. In concierge mode

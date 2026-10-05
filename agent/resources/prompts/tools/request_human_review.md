@@ -8,4 +8,4 @@ Pass `channel` (a Slack channel name like `#eng-reviews` or a channel id) to pos
 
 The card is the announcement. Do not follow it with a status update, and never link to the card: Slack unfurls that link into a second copy of it.
 
-If nobody signs up within 30 minutes you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary`, which is how you correct it. To take the request down instead, use `dismiss_human_review_request`.
+If nobody signs up within 2 hours (or the workspace’s configured timeout) you are woken to pick a reviewer with `assign_human_reviewer`. Calling this again for a pull request with an open request returns the existing card; when the request came from this thread or the person you are working for, the card's summary is replaced with the new `inline_summary`, which is how you correct it. To take the request down instead, use `dismiss_human_review_request`.
