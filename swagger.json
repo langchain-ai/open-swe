@@ -644,6 +644,15 @@
             ],
             "title": "Bridge Id"
           },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
+          },
           "hostname": {
             "title": "Hostname",
             "type": "string"
@@ -3442,6 +3451,17 @@
               }
             ],
             "title": "Model Routing Enabled"
+          },
+          "pr_failure_reactions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Failure Reactions"
           },
           "pr_review_links": {
             "anyOf": [
