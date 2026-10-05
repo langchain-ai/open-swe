@@ -28,6 +28,7 @@ import type { ReviewsSearch } from "./search"
 vi.mock("@/lib/api", () => ({
   api: {
     myPullRequests: vi.fn(),
+    searchPullRequests: vi.fn(),
     myPullRequestDetails: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
@@ -181,6 +182,10 @@ beforeEach(() => {
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
   vi.mocked(api.myPullRequests).mockResolvedValue(payload)
+  vi.mocked(api.searchPullRequests).mockResolvedValue({
+    pull_requests: [],
+    has_more: false,
+  })
   vi.mocked(api.repos).mockResolvedValue({
     installations: [],
     repositories: [],
@@ -210,10 +215,10 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fix in progress",
+      name: "Fixing checks",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole("button", { name: "Fix" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
     fireEvent.click(button)
     expect(api.fixPullRequest).not.toHaveBeenCalled()
   })
@@ -285,8 +290,7 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
     fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
-    const merging = await screen.findByRole("button", { name: "Merging…" })
-    expect((merging as HTMLButtonElement).disabled).toBe(true)
+    expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
       expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
@@ -302,7 +306,7 @@ describe("My PRs", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it("keeps a rejected merge visible with a retry action", async () => {
+  it("rolls a rejected merge back to a retry action", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
@@ -319,9 +323,13 @@ describe("My PRs", () => {
       "Required checks have not passed"
     )
     expect(screen.getByText("Change 1")).toBeTruthy()
+    expect(screen.queryByText(/^Merged ·/)).toBeNull()
     expect(
-      (screen.getByRole("button", { name: "Retry merge" }) as HTMLButtonElement)
-        .disabled
+      (
+        (await screen.findByRole("button", {
+          name: "Retry merge",
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 
@@ -343,7 +351,7 @@ describe("My PRs", () => {
       within(card).getByRole("link", { name: "Reviewer" }).getAttribute("href")
     ).toBe("/agents/reviews/acme/app/1")
   })
-  it("shows pending checks as Pending, preserving draft and conflict priority", async () => {
+  it("shows pending checks as Pending alongside the PR's other conditions", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -357,15 +365,15 @@ describe("My PRs", () => {
     await screen.findByText("Change 4")
     expect(cards().map(statuses)).toEqual([
       ["Pending"],
-      ["Pending"],
-      ["Draft"],
-      ["Conflicted"],
+      ["Pending", "Approved"],
+      ["Draft", "Pending"],
+      ["Conflicted", "Pending"],
     ])
     fireEvent.click(screen.getByLabelText("Filter by status"))
     fireEvent.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Pending" })
+      await screen.findByRole("menuitemcheckbox", { name: "Conflicted" })
     )
-    expect(titles()).toEqual(["Change 1", "Change 2"])
+    expect(titles()).toEqual(["Change 4"])
   })
   it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
@@ -384,9 +392,13 @@ describe("My PRs", () => {
     expect(within(shown[0]!).getByText("Conflicted")).toBeTruthy()
     expect(within(shown[1]!).getByText("Failing")).toBeTruthy()
     expect(within(shown[2]!).queryByText("Conflicted")).toBeNull()
-    expect(within(shown[0]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(shown[1]!).getByRole("button", { name: "Fix" })).toBeTruthy()
-    expect(within(shown[2]!).queryByRole("button", { name: "Fix" })).toBeNull()
+    const fixes = (card: HTMLElement) =>
+      within(card)
+        .queryAllByRole("button", { name: /^Fix / })
+        .map((button) => button.textContent)
+    expect(fixes(shown[0]!)).toEqual(["Fix conflicts"])
+    expect(fixes(shown[1]!)).toEqual(["Fix checks"])
+    expect(fixes(shown[2]!)).toEqual([])
   })
 
   it("hides the review node and banner when the review backend is unavailable", async () => {
@@ -574,7 +586,9 @@ describe("My PRs", () => {
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Failing")).toBeTruthy()
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Fix" })).toBeTruthy()
+    expect(
+      within(card).getByRole("button", { name: "Fix checks" })
+    ).toBeTruthy()
     expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
   })
 
@@ -904,7 +918,7 @@ describe("My PRs", () => {
     expect(screen.getByText("Not reviewed")).toBeTruthy()
   })
 
-  it("ranks conflicts and failing checks above review decisions, and keeps both on a draft", async () => {
+  it("shows a pill for every condition a PR is in", async () => {
     vi.mocked(api.myPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
@@ -920,8 +934,8 @@ describe("My PRs", () => {
     await screen.findByText("Change 6")
     expect(cards().map(statuses)).toEqual([
       ["Draft", "Conflicted", "Failing"],
-      ["Conflicted"],
-      ["Failing"],
+      ["Conflicted", "Failing"],
+      ["Failing", "Approved"],
       ["Changes Requested"],
       ["Approved"],
       ["Reviewable"],
@@ -937,19 +951,22 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Fix checks" }))
     expect(
       (
         (await screen.findByRole("button", {
-          name: "Queuing fix…",
+          name: "Check fix queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)
     expect(api.fixPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining(payload.pullRequests[0]!)
+      expect.objectContaining(payload.pullRequests[0]!),
+      "checks"
     )
     resolve({ thread_id: "fix-thread", already_running: false })
-    const queued = await screen.findByRole("button", { name: "Fix queued" })
+    const queued = await screen.findByRole("button", {
+      name: "Check fix queued",
+    })
     expect((queued as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(queued)
     expect(api.fixPullRequest).toHaveBeenCalledTimes(1)
@@ -1107,7 +1124,7 @@ describe("My PRs", () => {
     expect(
       (
         (await within(card).findByRole("button", {
-          name: "Queuing comment fixes…",
+          name: "Comment fixes queued",
         })) as HTMLButtonElement
       ).disabled
     ).toBe(true)

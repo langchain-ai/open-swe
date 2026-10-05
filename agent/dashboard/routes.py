@@ -9,6 +9,7 @@ from agent.bridge.routes import router as bridge_router
 from agent.dashboard.agent_instructions import router as agent_instructions_router
 from agent.dashboard.auth_routes import router as auth_router
 from agent.dashboard.client_errors import router as client_errors_router
+from agent.dashboard.langsmith_routes import router as langsmith_router
 from agent.dashboard.notion_routes import router as notion_router
 from agent.dashboard.oauth import require_same_origin_for_mutations
 from agent.dashboard.options_routes import router as options_router
@@ -21,6 +22,7 @@ from agent.github.pull_request_dashboard_routes import router as pull_requests_r
 from agent.human_review.routes import router as human_review_router
 from agent.incidents.document_routes import router as incident_documents_router
 from agent.incidents.routes import router as incidents_router
+from agent.mcp.cli_tools import router as cli_mcp_tools_router
 from agent.mcp.routes import router as mcp_router
 from agent.review.conversation import router as review_conversation_router
 from agent.review.routes import router as review_router
@@ -47,9 +49,11 @@ router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)
 router.include_router(notion_router)
+router.include_router(langsmith_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)
 router.include_router(mcp_router)
+router.include_router(cli_mcp_tools_router)
 router.include_router(workspaces_router)
 router.include_router(repos_router)
 router.include_router(pull_requests_router)

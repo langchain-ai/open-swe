@@ -1,12 +1,12 @@
 """Per-user third-party service credentials."""
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agent.dashboard.notion_oauth import is_reauth_required_error, refresh_notion_access_token
+from agent.dashboard.oauth_refresh import refresh_guard
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
 
@@ -165,17 +165,6 @@ def _decrypt_notion_client_secret(record: dict[str, Any]) -> str | None:
     return token or None
 
 
-_notion_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _notion_refresh_lock(login: str) -> asyncio.Lock:
-    lock = _notion_refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _notion_refresh_locks[login] = lock
-    return lock
-
-
 async def _refresh_stored_notion_token(
     login: str,
     record: dict[str, Any],
@@ -235,7 +224,7 @@ async def _load_notion_credentials(
         )
     if not _decrypt_notion_refresh_token(record):
         return None
-    async with _notion_refresh_lock(login):
+    async with refresh_guard("notion", login):
         record = await _get_provider(login, NOTION_KEY)
         if not record:
             return None

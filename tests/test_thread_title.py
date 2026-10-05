@@ -171,6 +171,46 @@ async def test_title_generation_renames_channel_promoted_during_update(
     rename.assert_awaited_once_with("C-code", "Review thread title generation")
 
 
+@pytest.mark.parametrize("suffix", [None, "", " · <https://slack/source|(source)> · <@U1>"])
+async def test_generated_title_updates_only_manual_breakout_roots(
+    monkeypatch: pytest.MonkeyPatch, suffix: str | None
+) -> None:
+    threads = _Threads(
+        {
+            "source": "slack",
+            "title": "fix it",
+            "title_seed": "fix it",
+            "source_context": {
+                "slack_thread": {
+                    "channel_id": "C1",
+                    "thread_ts": "200.0",
+                    "breakout_root_suffix": suffix,
+                }
+            },
+        }
+    )
+    update = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr("agent.thread_title.update_slack_message", update)
+
+    await generate_and_store_thread_title(
+        thread_id="thread-123",
+        conversation="fix it",
+        model=cast(BaseChatModel, _Model()),
+        client=SimpleNamespace(threads=threads),
+    )
+
+    if suffix is None:
+        update.assert_not_awaited()
+    else:
+        update.assert_awaited_once_with(
+            "C1",
+            "200.0",
+            f"`/breakout`: Review thread title generation{suffix}",
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+
+
 @pytest.mark.asyncio
 async def test_title_generation_never_inherits_the_runs_context() -> None:
     """The background task must not run inside the caller's context.

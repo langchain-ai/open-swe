@@ -2,8 +2,8 @@
 
 In a thread with more than one participant anyone can steer the run, so the
 person the PR opens as gets the final say, once per thread. They get a DM card
-and the tool waits for their answer; an answer that comes later still applies to
-the next attempt. "Always allow" skips the card, and a thread with a single
+and the tool waits briefly for their answer; an answer that comes later wakes
+the thread with a follow-up run. "Always allow" skips the card, and a thread with a single
 participant never asks. Only people who turned on the
 ``experimental_act_as_approval`` feature flag are asked.
 """
@@ -14,11 +14,12 @@ from typing import Literal, TypedDict
 
 from langgraph_sdk import get_client
 
-from agent.act_as.records import ActAsRequest, ThreadActAs
+from agent.act_as.records import ActAsRequest, Decision, ThreadActAs
 from agent.act_as.slack import card_blocks
 from agent.credential_scope import pr_author_login
 from agent.prompts import prompt
 from agent.slack.blocks import block_payload, escape
+from agent.slack.cards import origin_footer
 from agent.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -30,7 +31,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
-_WAIT_SECONDS = 120.0
+_WAIT_SECONDS = 30.0
 _POLL_SECONDS = 2.0
 
 Refusal = Literal["pending", "denied", "unreachable"]
@@ -47,9 +48,8 @@ class ActAsRefusal(TypedDict):
 def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
     reason = {
         "pending": (
-            f"{login} did not answer within {int(_WAIT_SECONDS)} seconds. Their answer stays "
-            "recorded for this thread, so calling open_pull_request again after they approve "
-            "opens the PR."
+            f"{login} did not answer within {int(_WAIT_SECONDS)} seconds. Their answer will "
+            "arrive as a new message in this thread."
         ),
         "denied": f"{login} denied Open SWE acting as them in this thread.",
         "unreachable": f"{login} could not be sent the approval DM in Slack.",
@@ -93,7 +93,7 @@ async def require_consent(
         return None
     decision = thread.decision_for(login)
     if decision is not None:
-        return None if decision == "approved" else _refusal(login, "denied", token_kind)
+        return _outcome(decision, login, token_kind)
 
     slack_user_id = person.slack_user_id
     if not slack_user_id:
@@ -103,7 +103,7 @@ async def require_consent(
         if not await _send_card(slack_user_id, request, thread_id):
             return _refusal(login, "unreachable", token_kind)
         await thread.mark_notified(request)
-    return await _wait_for_answer(thread_id, login, token_kind)
+    return await _wait_for_answer(thread, request, token_kind)
 
 
 async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) -> bool:
@@ -129,7 +129,11 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     message_ts, error = None, "dm_not_opened"
     if dm_channel_id:
         message_ts, error = await post_slack_top_level_message_with_ts(
-            dm_channel_id, message, blocks=block_payload(card_blocks(message, request, thread_id))
+            dm_channel_id,
+            message,
+            blocks=block_payload(
+                [*card_blocks(message, request, thread_id), *await origin_footer(thread_id)]
+            ),
         )
     if not dm_channel_id or not message_ts:
         logger.error(
@@ -145,12 +149,24 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     return True
 
 
-async def _wait_for_answer(thread_id: str, login: str, token_kind: str) -> ActAsRefusal | None:
+def _outcome(decision: Decision, login: str, token_kind: str) -> ActAsRefusal | None:
+    return None if decision == "approved" else _refusal(login, "denied", token_kind)
+
+
+async def _wait_for_answer(
+    thread: ThreadActAs, request: ActAsRequest, token_kind: str
+) -> ActAsRefusal | None:
+    login = request.login
+    if request.wake_on_answer:
+        await thread.set_wake_on_answer(request, False)
     for _ in range(int(_WAIT_SECONDS / _POLL_SECONDS)):
         await asyncio.sleep(_POLL_SECONDS)
-        decision = (await ThreadActAs.load(thread_id)).decision_for(login)
-        if decision == "approved":
-            return None
-        if decision == "denied":
-            return _refusal(login, "denied", token_kind)
+        decision = (await ThreadActAs.load(thread.thread_id)).decision_for(login)
+        if decision is not None:
+            return _outcome(decision, login, token_kind)
+    await thread.set_wake_on_answer(request, True)
+    # An answer recorded before the flag landed will not wake the thread, so act on it here.
+    decision = (await ThreadActAs.load(thread.thread_id)).decision_for(login)
+    if decision is not None:
+        return _outcome(decision, login, token_kind)
     return _refusal(login, "pending", token_kind)

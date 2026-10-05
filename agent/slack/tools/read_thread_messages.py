@@ -5,10 +5,12 @@ from agent.slack.client import (
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_names,
+    slack_message_bot_id,
 )
+from agent.tools.sandbox_preference import sandbox_only
 
 
-async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
+async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Fetch thread messages and resolve author names."""
     messages = await fetch_slack_thread_messages(channel_id, message_ts)
     if not messages:
@@ -30,9 +32,15 @@ async def _fetch_and_format(channel_id: str, message_ts: str) -> dict[str, Any]:
         "formatted": formatted,
         "count": len(messages),
         "truncated": truncated,
+        "human_timestamps": [
+            msg["ts"]
+            for msg in messages
+            if not slack_message_bot_id(msg) and isinstance(msg.get("ts"), str)
+        ],
     }
 
 
+@sandbox_only
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():
@@ -40,7 +48,7 @@ async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[s
     if not message_ts or not message_ts.strip():
         return {"success": False, "error": "message_ts is required"}
 
-    result = await _fetch_and_format(channel_id.strip(), message_ts.strip())
+    result = await fetch_and_format_thread(channel_id.strip(), message_ts.strip())
     if not result.get("success"):
         return {
             "success": False,

@@ -9,25 +9,32 @@ import type {
 import { githubActions } from "./githubActions"
 import { pullRequestKey } from "./status"
 
-/** Runs one GitHub action on one pull request and reports it in a toast. */
+/**
+ * Runs one GitHub action on one pull request and reports it in a toast.
+ * `apply` shows the result before GitHub answers and returns its undo.
+ */
 export function usePullRequestAction({
   pr,
   action,
+  apply,
   onDone,
   method,
 }: {
   pr: OpenPullRequest
   action: PullRequestActionName
-  onDone: () => void
+  apply?: () => () => void
+  onDone?: () => void
   method?: MergeMethod
 }) {
   const { run, succeeded, failed } = githubActions[action]
   return useMutation({
     mutationFn: (reason: string | void) => run(pr, method, reason || undefined),
     meta: { errorTitle: failed(pullRequestKey(pr)) },
+    onMutate: () => ({ undo: apply?.() }),
+    onError: (_error, _reason, context) => context?.undo?.(),
     onSuccess: () => {
       toast.success(succeeded(pullRequestKey(pr)))
-      onDone()
+      onDone?.()
     },
     retry: false,
   })
