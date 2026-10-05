@@ -10,23 +10,11 @@ from agent.middleware.check_message_queue import (
 )
 
 
-class _QueuedItem:
-    def __init__(self, value: dict[str, Any]) -> None:
-        self.value = value
-
-
 class _GraphStore:
-    """The graph's LangGraph Store, holding auto-fix events and the legacy queue."""
+    """The graph's LangGraph Store, which this middleware only reads auto-fix events from."""
 
-    def __init__(self, items: dict[tuple[tuple[str, ...], str], dict[str, Any]] | None = None):
-        self.items = items or {}
-
-    async def aget(self, namespace: tuple[str, ...], key: str) -> _QueuedItem | None:
-        value = self.items.get((namespace, key))
-        return _QueuedItem(value) if value is not None else None
-
-    async def adelete(self, namespace: tuple[str, ...], key: str) -> None:
-        self.items.pop((namespace, key), None)
+    async def aget(self, namespace: tuple[str, ...], key: str) -> None:
+        return None
 
 
 def _envelope(message: dict) -> str:
@@ -100,15 +88,3 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]
-
-
-@pytest.mark.asyncio
-async def test_check_message_queue_drains_the_legacy_store_list(registry_db: None) -> None:
-    legacy = (("queue", "thread-1"), "pending_messages")
-    store = _GraphStore({legacy: {"messages": [{"content": "queued before the move"}]}})
-
-    result = await _run(store, {"messages": []})
-
-    assert result is not None
-    assert "queued before the move" in _envelope(result["messages"][-1])
-    assert legacy not in store.items

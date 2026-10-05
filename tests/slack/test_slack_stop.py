@@ -163,9 +163,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     _map_reply(client, "2.000")
     client.runs.by_status["pending"] = [{"run_id": "run-pending"}]
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    client.store.items[(("queue", thread_id), "pending_messages")] = {
-        "value": {"messages": [{"content": "later"}]}
-    }
     client.store.items[(("autofix", thread_id), "pending_event")] = {"value": {"reason": "ci"}}
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
@@ -180,7 +177,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
         }
     ]
     assert client.cleared_queues == [thread_id]
-    assert (("queue", thread_id), "pending_messages") in client.store.deleted
     assert (("autofix", thread_id), "pending_event") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
     assert len(dispatched) == 1
