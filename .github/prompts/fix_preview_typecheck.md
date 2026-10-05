@@ -2,6 +2,6 @@ This checkout is the preview deployment being assembled: `main` plus every label
 
 Fix the errors so the result behaves the way every merged pull request intended, then commit the fix on `HEAD`. Change only what the errors require. Do not revert a pull request's change to make the errors go away. Whatever is committed on `HEAD` when you finish is what deploys.
 
-Verify with `pnpm --filter open-swe-dashboard run typecheck` before committing. Dependencies are already installed; do not run install scripts.
+Do not run the typecheck, package scripts, or anything else from this tree: this checkout holds a write credential, and the build typechecks your commit itself, in isolation, once you finish.
 
-Finish with `cli_result`: `exit_code` 0 if the typecheck passes after your commit, 1 otherwise, and a one-sentence `stdout` saying what you changed.
+Finish with `cli_result`: `exit_code` 0 if you committed a fix, 1 otherwise, and a one-sentence `stdout` saying what you changed.

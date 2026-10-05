@@ -25,11 +25,12 @@ CONFLICT_LIMIT = 10
 PROMPT_PATH = Path(".github/prompts/resolve_preview_conflict.md")
 FIX_PROMPT_PATH = Path(".github/prompts/fix_preview_typecheck.md")
 FIXUP_MESSAGE = "preview: fix typecheck errors (oswe)"
-TYPECHECK_STEPS: tuple[tuple[str, ...], ...] = (
-    ("pnpm", "install", "--frozen-lockfile", "--ignore-scripts", "--ignore-pnpmfile"),
-    ("pnpm", "--filter", "open-swe-dashboard", "run", "typecheck"),
+FORCE_MESSAGE = "preview: force deployment"
+TYPECHECK_IMAGE = "node:24-bookworm-slim"
+TYPECHECK_SCRIPT = (
+    "corepack pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile"
+    " && corepack pnpm --filter open-swe-dashboard run typecheck"
 )
-TYPECHECK_ENV = frozenset({"PATH", "HOME", "LANG", "TMPDIR"})
 TYPECHECK_OUTPUT_LIMIT = 20_000
 FAILED_REF = "refs/preview-failed"
 PUBLISHED_REF = "refs/preview-published"
@@ -371,19 +372,44 @@ async def resolve_with_agent(
 
 
 async def typecheck() -> str | None:
-    """Errors from typechecking the dashboard in the working tree, or None when it is clean.
+    """Errors from typechecking the dashboard at HEAD, or None when it is clean.
 
     The Docker build installs and bundles the UI the same way but swallows failures, so this
     is the only place a broken UI stops the preview instead of shipping without a dashboard.
+    The check runs the PRs' own toolchain, so it gets an exported copy of the tree in a
+    container: no ``.git`` credentials, no runner environment, no view of this process.
     """
-    env = {name: value for name, value in os.environ.items() if name in TYPECHECK_ENV}
-    env["COREPACK_ENABLE_DOWNLOAD_PROMPT"] = "0"
-    for step in TYPECHECK_STEPS:
-        result = await run(*step, check=False, env=env)
-        if result.code != 0:
-            output = f"$ {' '.join(step)}\n{result.stdout}{result.stderr}"
-            return output[-TYPECHECK_OUTPUT_LIMIT:]
-    return None
+    with tempfile.TemporaryDirectory() as scratch:
+        archive = Path(scratch) / "tree.tar"
+        source = Path(scratch) / "src"
+        source.mkdir()
+        await git("archive", "--format=tar", "-o", str(archive), "HEAD")
+        await run("tar", "-xf", str(archive), "-C", str(source))
+        result = await run(
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-e",
+            "HOME=/tmp",
+            "-e",
+            "COREPACK_HOME=/tmp/corepack",
+            "-e",
+            "COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
+            "-v",
+            f"{source}:/src",
+            "-w",
+            "/src",
+            TYPECHECK_IMAGE,
+            "sh",
+            "-c",
+            TYPECHECK_SCRIPT,
+            check=False,
+        )
+    if result.code == 0:
+        return None
+    return f"$ {TYPECHECK_SCRIPT}\n{result.stdout}{result.stderr}"[-TYPECHECK_OUTPUT_LIMIT:]
 
 
 async def fix_with_agent(prompt: str, errors: str, timeout: float) -> None:
@@ -607,6 +633,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
                 await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
 
     def write_summary(self, base_sha: str) -> None:
+        skipped = list(dict.fromkeys(self.skipped))
         summary(
             "## Preview tree",
             "",
@@ -618,9 +645,9 @@ The preview resets to plain `main` every {s.reset_days} days, in the
             "",
             *([f"- {entry}" for entry in self.included] or ["_preview is identical to main_"]),
             "",
-            f"### Skipped ({len(self.skipped)})",
+            f"### Skipped ({len(skipped)})",
             "",
-            *([f"- {entry}" for entry in self.skipped] or ["_nothing skipped_"]),
+            *([f"- {entry}" for entry in skipped] or ["_nothing skipped_"]),
         )
         if self.conflicted:
             summary("", "### Getting a conflicting change in", "", self.manual_instructions())
@@ -639,17 +666,21 @@ The preview resets to plain `main` every {s.reset_days} days, in the
 
     async def reuse_fixup(self) -> None:
         """Replay the published oswe fix-up when it sits on exactly the tree just assembled."""
-        subject = (await git("log", "-1", "--format=%s", PUBLISHED_REF)).stdout.strip()
-        if subject != FIXUP_MESSAGE:
+        history = (
+            await git("log", "--first-parent", "--format=%H%x00%s", "-n", "20", PUBLISHED_REF)
+        ).stdout
+        commits = (line.split("\0", 1) for line in history.splitlines())
+        tip = next((commit for commit in commits if commit[1] != FORCE_MESSAGE), None)
+        if tip is None or tip[1] != FIXUP_MESSAGE:
             return
-        if await rev_parse(f"{PUBLISHED_REF}^^{{tree}}") != await rev_parse("HEAD^{tree}"):
+        fixup = tip[0]
+        if await rev_parse(f"{fixup}^^{{tree}}") != await rev_parse("HEAD^{tree}"):
             return
-        await git("cherry-pick", PUBLISHED_REF)
+        await git("cherry-pick", fixup)
 
     async def assemble(self, prompt: str | None) -> None:
+        """Merge everything onto main; ``skipped`` accumulates, since a skipped PR loses its label."""
         self.included.clear()
-        self.skipped.clear()
-        self.conflicted = False
         await restore_head("origin/main")
         await self.merge_manual_branch()
         pending = await self.merge_pulls(defer_conflicts=prompt is not None)
@@ -659,7 +690,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
     async def verify(self, prompt: str | None, rerere: RerereCache) -> str | None:
         """Typecheck errors left in the tree about to publish, after a reassembly without
         the rerere cache and an oswe fix-up have each had a go; None when it is clean."""
-        if await remote_refs(FAILED_REF):
+        if not self.settings.force and await remote_refs(FAILED_REF):
             await git("fetch", "--no-tags", "--force", "origin", f"{FAILED_REF}:{FAILED_REF}")
             if await rev_parse(f"{FAILED_REF}^{{tree}}") == await rev_parse("HEAD^{tree}"):
                 return "Unchanged since an earlier run failed typecheck on this exact tree; see that run."
@@ -695,7 +726,7 @@ The preview resets to plain `main` every {s.reset_days} days, in the
                 "",
                 f"Preview tree unchanged (`{assembled[:7]}`) — continuing because publication was forced.",
             )
-            await git("commit", "--allow-empty", "-m", "preview: force deployment")
+            await git("commit", "--allow-empty", "-m", FORCE_MESSAGE)
         await git("push", "--force", "origin", f"HEAD:refs/heads/{branch}")
         set_output("changed", "true")
         set_output("sha", await rev_parse("HEAD"))
