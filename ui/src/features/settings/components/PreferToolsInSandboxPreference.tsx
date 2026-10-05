@@ -2,7 +2,7 @@ import { SettingsRow } from "@/components/AppShell"
 import { Switch } from "@/components/ui/switch"
 import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 
-export function SandboxMemoryPreference() {
+export function PreferToolsInSandboxPreference() {
   const profile = useProfile()
   const options = useOptions()
   const save = usePatchProfile()
@@ -12,18 +12,18 @@ export function SandboxMemoryPreference() {
   return (
     <>
       <SettingsRow
-        label="Keep sandbox memory on auto-stop"
-        htmlFor="preserve-sandbox-memory"
-        description="When an idle sandbox stops, save its running processes so the next run resumes where it left off. Applies to sandboxes created after you turn this on."
+        label="Prefer tools through the sandbox"
+        htmlFor="prefer-tools-in-sandbox"
+        description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint instead of loading them as tools, so it can filter their output. Applies to threads you start after turning this on; existing threads keep their mode."
         control={
           <Switch
-            id="preserve-sandbox-memory"
-            checked={profile.data?.preserve_sandbox_memory ?? true}
+            id="prefer-tools-in-sandbox"
+            checked={profile.data?.prefer_tools_in_sandbox ?? false}
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
               save.patch(
-                { preserve_sandbox_memory: value },
+                { prefer_tools_in_sandbox: value },
                 defaults.default_agent_model,
                 defaults.default_agent_reasoning_effort
               )
@@ -33,7 +33,7 @@ export function SandboxMemoryPreference() {
       />
       {(profile.error || options.error) && (
         <p role="alert" className="px-4 py-2 text-xs text-destructive">
-          Could not load the sandbox memory preference. Please try again.
+          Could not load the tools-in-sandbox preference. Please try again.
         </p>
       )}
     </>

@@ -39,6 +39,7 @@ from agent.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
@@ -210,6 +211,7 @@ def _exact_locator_filters(
     return filters
 
 
+@sandbox_only
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -719,6 +721,7 @@ def _available_actions(
     return actions
 
 
+@sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
