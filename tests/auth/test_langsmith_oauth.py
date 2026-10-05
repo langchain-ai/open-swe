@@ -4,35 +4,34 @@ import pytest
 from cryptography.fernet import Fernet
 
 from agent.dashboard import langsmith_oauth
+from agent.dashboard.oauth_credentials import load_credential, save_credential
 from agent.encryption import decrypt_token, encrypt_token
+from agent.users.models import User
 
 TOKEN_ENDPOINT = "https://api.smith.langchain.com/oauth/token"
 
 
 @pytest.fixture(autouse=True)
-def encryption(monkeypatch):
+async def connected(registry_db, monkeypatch):
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_ID", "lsc_open_swe")
     monkeypatch.setenv("LANGSMITH_OAUTH_CLIENT_SECRET", "open-swe-secret")
-
-
-def seed_expired(fake_store, login="alice"):
-    fake_store.seed(
-        ["user_credentials", login],
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="alice")
+    await save_credential(
         "langsmith",
-        {
-            "encrypted_access_token": encrypt_token("old-access"),
-            "encrypted_refresh_token": encrypt_token("old-refresh"),
-            "token_expires_at": (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
-            "client_id": "lsc_open_swe",
-            "token_endpoint": TOKEN_ENDPOINT,
-            "email": "alice@example.com",
-        },
+        "alice",
+        encrypted_access_token=encrypt_token("old-access"),
+        encrypted_refresh_token=encrypt_token("old-refresh"),
+        access_token_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        client_id="lsc_open_swe",
+        token_endpoint=TOKEN_ENDPOINT,
+        account_email="alice@example.com",
     )
 
 
-async def test_expired_token_is_refreshed_and_kept_for_the_next_call(fake_store, monkeypatch):
-    seed_expired(fake_store)
+async def test_expired_token_is_refreshed_and_kept_for_the_next_call(monkeypatch):
     calls = []
 
     async def post(url, *, fallback, json=None, data=None):
@@ -46,14 +45,14 @@ async def test_expired_token_is_refreshed_and_kept_for_the_next_call(fake_store,
     assert calls[0][1]["grant_type"] == "refresh_token"
     assert calls[0][1]["resource"] == "https://api.smith.langchain.com"
     assert calls[0][1]["client_secret"] == "open-swe-secret"
-    stored = fake_store.values(["user_credentials", "alice"])["langsmith"]
+    stored = await load_credential("langsmith", "alice")
+    assert stored is not None
     # A refresh response without a new refresh token keeps the one already stored.
-    assert decrypt_token(stored["encrypted_refresh_token"]) == "old-refresh"
+    assert decrypt_token(stored.encrypted_refresh_token or "") == "old-refresh"
+    assert stored.account_email == "alice@example.com"
 
 
-async def test_revoked_grant_disconnects_instead_of_failing_every_call(fake_store, monkeypatch):
-    seed_expired(fake_store)
-
+async def test_revoked_grant_disconnects_instead_of_failing_every_call(monkeypatch):
     async def post(url, *, fallback, json=None, data=None):
         raise langsmith_oauth.LangSmithOAuthError(400, "revoked", error_code="invalid_grant")
 
@@ -62,9 +61,7 @@ async def test_revoked_grant_disconnects_instead_of_failing_every_call(fake_stor
     assert (await langsmith_oauth.langsmith_status("alice"))["connected"] is False
 
 
-async def test_reconnecting_as_another_account_replaces_the_old_identity(fake_store, monkeypatch):
-    seed_expired(fake_store)
-
+async def test_reconnecting_as_another_account_replaces_the_old_identity(monkeypatch):
     async def email(access_token):
         return "bob@example.com"
 
@@ -76,7 +73,8 @@ async def test_reconnecting_as_another_account_replaces_the_old_identity(fake_st
         token_endpoint=TOKEN_ENDPOINT,
         new_grant=True,
     )
-    stored = fake_store.values(["user_credentials", "alice"])["langsmith"]
-    assert stored["email"] == "bob@example.com"
+    stored = await load_credential("langsmith", "alice")
+    assert stored is not None
+    assert stored.account_email == "bob@example.com"
     # The previous account's refresh token must not be paired with the new grant.
-    assert stored["encrypted_refresh_token"] is None
+    assert stored.encrypted_refresh_token is None

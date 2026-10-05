@@ -3,8 +3,8 @@ calls LangSmith as them. ``langsmith_access_token`` is the entry point for calle
 
 LangSmith is an OAuth 2.1 authorization server. Open SWE uses a confidential client,
 with PKCE, registered in the LangSmith organization (self-registered clients can only reach
-LangSmith's MCP resource, not its API), keeps each user's tokens encrypted under
-``user_credentials/<login>/langsmith`` and refreshes them on demand.
+LangSmith's MCP resource, not its API), keeps each person's tokens encrypted in the
+``user_oauth_credential`` table and refreshes them on demand.
 """
 
 import logging
@@ -15,14 +15,21 @@ import httpx2
 
 from agent.config import ENV
 from agent.dashboard.notion_oauth import code_challenge_for_verifier, generate_code_verifier
+from agent.dashboard.oauth_credentials import (
+    OAuthProvider,
+    UnknownUser,
+    delete_credential,
+    load_credential,
+    save_credential,
+)
 from agent.dashboard.oauth_refresh import refresh_guard
-from agent.dashboard.user_credentials import USER_CREDENTIALS_NAMESPACE
+from agent.database import postgres
 from agent.encryption import decrypt_token, encrypt_token
 from agent.store import delete_value, get_value, now_iso, put_value
 
 logger = logging.getLogger(__name__)
 
-LANGSMITH_KEY = "langsmith"
+LANGSMITH_KEY: OAuthProvider = "langsmith"
 LANGSMITH_STATE_COOKIE_NAME = "osw_langsmith_oauth_state"
 LANGSMITH_OAUTH_FLOW_NAMESPACE = ["langsmith_oauth_flows"]
 _METADATA_PATH = "/.well-known/oauth-authorization-server"
@@ -36,10 +43,6 @@ class LangSmithOAuthError(Exception):
         self.status_code = status_code
         self.detail = detail
         self.error_code = error_code
-
-
-def _credentials(login: str) -> list[str]:
-    return [*USER_CREDENTIALS_NAMESPACE, login.strip().lower()]
 
 
 def langsmith_issuer() -> str:
@@ -109,7 +112,12 @@ async def _metadata() -> dict[str, str]:
 
 
 def langsmith_oauth_configured() -> bool:
-    return ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set() and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
+    """Credentials live in PostgreSQL, so the connection needs it alongside the client."""
+    return (
+        ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set()
+        and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
+        and postgres.configured()
+    )
 
 
 def _client_id() -> str:
@@ -159,11 +167,11 @@ async def start_langsmith_oauth(
     return f"{endpoints['authorization_endpoint']}?{urlencode(params)}"
 
 
-def _expires_at(data: dict[str, object]) -> str | None:
+def _expires_at(data: dict[str, object]) -> datetime | None:
     seconds = data.get("expires_in")
     if not isinstance(seconds, int | float) or seconds <= 0:
         return None
-    return (datetime.now(UTC) + timedelta(seconds=int(seconds))).isoformat()
+    return datetime.now(UTC) + timedelta(seconds=int(seconds))
 
 
 async def _email(access_token: str) -> str | None:
@@ -194,28 +202,28 @@ async def _save_tokens(
     if not isinstance(access_token, str) or not access_token:
         raise LangSmithOAuthError(502, "LangSmith OAuth returned no access token")
     refresh_token = data.get("refresh_token")
-    previous = await get_value(_credentials(login), LANGSMITH_KEY) or {}
+    previous = None if new_grant else await load_credential(LANGSMITH_KEY, login)
     # A new sign-in may be a different LangSmith account; a refresh keeps the same one.
-    email = (None if new_grant else previous.get("email")) or await _email(access_token)
-    await put_value(
-        _credentials(login),
-        LANGSMITH_KEY,
-        {
-            "encrypted_access_token": encrypt_token(access_token),
-            "encrypted_refresh_token": (
+    email = (previous.account_email if previous else None) or await _email(access_token)
+    try:
+        await save_credential(
+            LANGSMITH_KEY,
+            login,
+            encrypted_access_token=encrypt_token(access_token),
+            encrypted_refresh_token=(
                 encrypt_token(refresh_token)
                 if isinstance(refresh_token, str) and refresh_token
+                else previous.encrypted_refresh_token
+                if previous
                 else None
-                if new_grant
-                else previous.get("encrypted_refresh_token")
             ),
-            "token_expires_at": _expires_at(data),
-            "client_id": client_id,
-            "token_endpoint": token_endpoint,
-            "email": email,
-            "updated_at": now_iso(),
-        },
-    )
+            access_token_expires_at=_expires_at(data),
+            client_id=client_id,
+            token_endpoint=token_endpoint,
+            account_email=email,
+        )
+    except UnknownUser:
+        raise LangSmithOAuthError(400, "Sign in to Open SWE again, then reconnect") from None
 
 
 async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> None:
@@ -251,52 +259,47 @@ async def complete_langsmith_oauth(login: str, nonce_hash: str, code: str) -> No
 
 
 async def langsmith_status(login: str) -> dict[str, object]:
-    record = await get_value(_credentials(login), LANGSMITH_KEY)
-    connected = isinstance(record, dict)
+    available = langsmith_oauth_configured()
+    credential = await load_credential(LANGSMITH_KEY, login) if available else None
     return {
-        "available": langsmith_oauth_configured(),
-        "connected": connected,
-        "email": record.get("email") if connected else None,
-        "updated_at": record.get("updated_at") if connected else None,
+        "available": available,
+        "connected": credential is not None,
+        "email": credential.account_email if credential else None,
+        "updated_at": (
+            credential.updated_at.isoformat() if credential and credential.updated_at else None
+        ),
     }
 
 
 async def disconnect_langsmith(login: str) -> None:
-    await delete_value(_credentials(login), LANGSMITH_KEY)
+    await delete_credential(LANGSMITH_KEY, login)
 
 
-def _expired(expires_at: object) -> bool:
-    if not isinstance(expires_at, str):
-        return False
-    try:
-        expiry = datetime.fromisoformat(expires_at)
-    except ValueError:
-        logger.warning("Unreadable LangSmith token expiry; refreshing")
-        return True
-    return datetime.now(UTC) + _EXPIRY_SKEW >= expiry
+def _expired(expires_at: datetime | None) -> bool:
+    return expires_at is not None and datetime.now(UTC) + _EXPIRY_SKEW >= expires_at
 
 
 async def langsmith_access_token(login: str) -> str | None:
     """The user's current LangSmith access token, refreshed when near expiry; None if unlinked."""
-    login = login.strip().lower()
-    namespace = _credentials(login)
-    record = await get_value(namespace, LANGSMITH_KEY)
-    if not isinstance(record, dict):
+    if not langsmith_oauth_configured():
         return None
-    if not _expired(record.get("token_expires_at")):
-        return decrypt_token(record.get("encrypted_access_token", "")) or None
-    async with refresh_guard("langsmith", login):
-        record = await get_value(namespace, LANGSMITH_KEY)
-        if not isinstance(record, dict):
+    credential = await load_credential(LANGSMITH_KEY, login)
+    if credential is None:
+        return None
+    if not _expired(credential.access_token_expires_at):
+        return decrypt_token(credential.encrypted_access_token) or None
+    async with refresh_guard(LANGSMITH_KEY, login):
+        credential = await load_credential(LANGSMITH_KEY, login)
+        if credential is None:
             return None
-        if not _expired(record.get("token_expires_at")):
-            return decrypt_token(record.get("encrypted_access_token", "")) or None
-        refresh_token = decrypt_token(record.get("encrypted_refresh_token") or "")
+        if not _expired(credential.access_token_expires_at):
+            return decrypt_token(credential.encrypted_access_token) or None
+        refresh_token = decrypt_token(credential.encrypted_refresh_token or "")
         if not refresh_token:
-            await delete_value(namespace, LANGSMITH_KEY)
+            await delete_credential(LANGSMITH_KEY, login)
             logger.info("LangSmith token expired without a refresh token", extra={"login": login})
             return None
-        token_endpoint = _same_origin(str(record["token_endpoint"]))
+        token_endpoint = _same_origin(credential.token_endpoint)
         try:
             data = await _post(
                 token_endpoint,
@@ -304,7 +307,7 @@ async def langsmith_access_token(login: str) -> str | None:
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
-                    "client_id": record["client_id"],
+                    "client_id": credential.client_id,
                     "client_secret": _client_secret(),
                     "resource": langsmith_issuer(),
                 },
@@ -313,15 +316,13 @@ async def langsmith_access_token(login: str) -> str | None:
             if exc.error_code != "invalid_grant":
                 raise
             # The connect callback does not take the guard; keep a grant it wrote meanwhile.
-            latest = await get_value(namespace, LANGSMITH_KEY)
-            if isinstance(latest, dict) and latest.get("encrypted_refresh_token") != record.get(
-                "encrypted_refresh_token"
-            ):
-                return decrypt_token(latest.get("encrypted_access_token", "")) or None
-            await delete_value(namespace, LANGSMITH_KEY)
+            latest = await load_credential(LANGSMITH_KEY, login)
+            if latest and latest.encrypted_refresh_token != credential.encrypted_refresh_token:
+                return decrypt_token(latest.encrypted_access_token) or None
+            await delete_credential(LANGSMITH_KEY, login)
             logger.info("LangSmith grant revoked; user must reconnect", extra={"login": login})
             return None
         await _save_tokens(
-            login, data, client_id=str(record["client_id"]), token_endpoint=token_endpoint
+            login, data, client_id=credential.client_id, token_endpoint=token_endpoint
         )
         return str(data["access_token"])
