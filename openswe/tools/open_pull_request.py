@@ -12,6 +12,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
+from openswe.analytics.pr_links import tracked_pr_link
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
@@ -39,7 +40,11 @@ from openswe.slack.code_channels import (
 from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.transcript.mirror import mirror_thread_metadata
-from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
+from openswe.utils.authorship import (
+    PR_ATTRIBUTION_DEFAULT_URL,
+    PR_ATTRIBUTION_TEXT,
+    add_pr_collaboration_note,
+)
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -898,6 +903,7 @@ async def _plan_reference_line(cfg: RunConfig) -> str | None:
     plan_url = dashboard_plan_url(thread_id)
     if not plan_url:
         return None
+    plan_url = tracked_pr_link(plan_url, thread_id=thread_id, kind="plan")
     return f"- [Plan]({plan_url})"
 
 
@@ -920,11 +926,13 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
             if channel_id and thread_ts:
                 permalink = await get_slack_permalink(channel_id, thread_ts)
         if isinstance(permalink, str) and permalink.strip():
-            lines.append(f"- [Slack thread]({permalink.strip()})")
+            url = tracked_pr_link(permalink.strip(), thread_id=cfg.thread_id, kind="slack_thread")
+            lines.append(f"- [Slack thread]({url})")
     elif cfg.source == "linear" and cfg.linear_issue:
         url, identifier = cfg.linear_issue.url, cfg.linear_issue.identifier
         if url:
             label = f"Linear ticket {identifier}" if identifier else "Linear ticket"
+            url = tracked_pr_link(url, thread_id=cfg.thread_id, kind="linear_issue")
             lines.append(f"- [{label}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
@@ -932,6 +940,7 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
         url, number = cfg.github_issue.url, cfg.github_issue.number
         if url:
             label = f"GitHub issue #{number}" if number else "GitHub issue"
+            url = tracked_pr_link(url, thread_id=cfg.thread_id, kind="github_issue")
             lines.append(f"- [{label}]({url})")
         elif number:
             lines.append(f"- GitHub issue: #{number}")
@@ -974,11 +983,19 @@ async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = No
                     effort = value
         except Exception:
             logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
+    thread_url = dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None
     return add_pr_collaboration_note(
         body,
-        thread_url=dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None,
+        thread_url=(
+            tracked_pr_link(thread_url, thread_id=cfg.thread_id, kind="thread")
+            if thread_url
+            else None
+        ),
         model_id=model_id,
         reasoning_effort=effort,
+        project_url=tracked_pr_link(
+            PR_ATTRIBUTION_DEFAULT_URL, thread_id=cfg.thread_id, kind="project"
+        ),
     )
 
 

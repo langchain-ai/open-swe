@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.analytics.pr_links import router as pr_links_router
 from openswe.analytics.queries import (
     InvalidUsageCursor,
     SortDirection,
@@ -18,6 +19,7 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analytics"])
+router.include_router(pr_links_router)
 
 
 class TelemetryConfig(BaseModel):
