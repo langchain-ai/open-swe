@@ -65,6 +65,39 @@ async def test_migration_preserves_existing_workspace_and_history(deployment_db,
     assert database.workspace_id() == old_workspace
 
 
+async def test_preview_recovers_screenshot_migration_head(
+    deployment_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENSWE_ENV", "preview")
+    workspace_id = uuid4()
+    migrations = postgres.load_migrations()
+    async with postgres.engine().begin() as conn:
+        await conn.execute(text("CREATE SCHEMA open_swe"))
+        for revision in ("1a27b64154a3", "52fab62a7608"):
+            await conn.run_sync(postgres.upgrade, migrations, "open_swe", revision)
+        await conn.execute(
+            text(
+                "ALTER TABLE human_review_request ADD COLUMN screenshot_body text NOT NULL DEFAULT ''"
+            )
+        )
+        await conn.execute(text("DELETE FROM open_swe.alembic_version"))
+        await conn.execute(text("INSERT INTO open_swe.alembic_version VALUES ('3cce7935a681')"))
+        await conn.execute(
+            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'preview', 'Preview')"),
+            {"id": workspace_id},
+        )
+    for _ in range(2):
+        await postgres.migrate()
+    async with postgres.connection() as conn:
+        assert (
+            await conn.scalar(text("SELECT id FROM workspace WHERE slug = 'preview'"))
+            == workspace_id
+        )
+        assert set(await conn.scalars(text("SELECT version_num FROM alembic_version"))) == set(
+            migrations.get_heads()
+        )
+
+
 @pytest.mark.parametrize(
     "query",
     ["ssl=require&sslmode=require", "sslmode=require&sslmode=disable"],
