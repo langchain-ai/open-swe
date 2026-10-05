@@ -94,7 +94,10 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
-async def test_kinds_preserves_json_actions_counts_and_window(registry_db: None) -> None:
+async def test_kinds_preserves_json_actions_counts_and_window(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     await EventLog.ensure_partitions()
     since = datetime.now(UTC)
     async with transaction() as conn:
