@@ -410,10 +410,9 @@ async function diffThread(threadId) {
 /** Whether the backend has a run in flight on this thread. */
 async function threadRunning(threadId) {
   if (legacyThreadStore.get(threadId)) {
+    // A local backend that is booting or has crashed is running nothing.
     const activity = await backendSupervisor.threadActivity();
-    if (!activity)
-      throw new Error("Could not reach the local Open SWE backend");
-    return activity[threadId] === "running";
+    return activity?.[threadId] === "running";
   }
   if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
   const response = await backendFetch(
@@ -442,7 +441,10 @@ async function sendBridgeRequest(method, apiPath, { body, signal }) {
       method,
       headers: body ? { "content-type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
-      signal: signal ?? AbortSignal.timeout(15_000),
+      // A reply carries a command's output, which can take a while to upload.
+      signal:
+        signal ??
+        AbortSignal.timeout(apiPath.includes("/requests/") ? 120_000 : 15_000),
     },
   );
   const text = await response.text();
@@ -519,10 +521,6 @@ async function ensureThreadWorktree(thread) {
   return thread;
 }
 
-/**
- * Every worktree this app made for the thread, including ones it has since
- * moved off, minus any another thread is in or owns.
- */
 async function discardLocalThread(thread) {
   await localBridges.close(thread.id);
   await closeThreadTerminals(thread.id);
@@ -534,6 +532,10 @@ async function discardLocalThread(thread) {
   );
 }
 
+/**
+ * Every worktree this app made for the thread, including ones it has since
+ * moved off, minus any another thread is in or owns.
+ */
 async function discardThreadWorktree(thread) {
   const others = allLocalThreads().filter((it) => it.id !== thread.id);
   const owned = thread.ownedWorktrees.filter(

@@ -10,6 +10,8 @@ this deploy replaces.
 the CLI a printable result.
 """
 
+from datetime import UTC, datetime, timedelta
+
 from alembic import op
 
 revision = "3a061d17ed2a"
@@ -47,6 +49,14 @@ def upgrade() -> None:
         ON sandbox_bridge_request (bridge_id, status, created_at)
         """
     )
+    # Pods still on the previous release insert here before any new pod rotates.
+    today = datetime.now(UTC).date()
+    for day in (today, today + timedelta(days=1)):
+        op.execute(
+            f"CREATE TABLE sandbox_bridge_request_{day:%Y%m%d} "
+            "PARTITION OF sandbox_bridge_request "
+            f"FOR VALUES FROM ('{day} 00:00+00') TO ('{day + timedelta(days=1)} 00:00+00')"
+        )
     op.execute(
         "COMMENT ON TABLE sandbox_bridge_request IS 'One partition per UTC day "
         "(sandbox_bridge_request_YYYYMMDD); BridgeStore.ensure_partitions() creates today''s "

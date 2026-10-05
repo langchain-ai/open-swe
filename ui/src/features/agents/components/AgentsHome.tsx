@@ -490,7 +490,8 @@ export function AgentsHome({
             baseBranch: localRepoBranch,
           })
           prepared = true
-          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+          // Awaited so the thread route already knows it is This Mac's.
+          await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
           configurable.sandbox_bridge_id = local.bridgeId
           if (local.repo) configurable.repo = local.repo
           else configurable.repo_explicitly_none = true

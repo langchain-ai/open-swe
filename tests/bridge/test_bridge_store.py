@@ -207,15 +207,16 @@ async def _request_partitions() -> set[str]:
 async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
     registry_db: None,
 ) -> None:
-    await BridgeStore.rotate_partitions(date(2026, 9, 1))
+    # Past the days the migration partitioned, so those are dropped too.
+    await BridgeStore.rotate_partitions(date(2099, 9, 1))
     assert await _request_partitions() == {
-        "sandbox_bridge_request_20260901",
-        "sandbox_bridge_request_20260902",
+        "sandbox_bridge_request_20990901",
+        "sandbox_bridge_request_20990902",
     }
 
-    await BridgeStore.rotate_partitions(date(2026, 9, 3))
+    await BridgeStore.rotate_partitions(date(2099, 9, 3))
     assert await _request_partitions() == {
-        "sandbox_bridge_request_20260902",
-        "sandbox_bridge_request_20260903",
-        "sandbox_bridge_request_20260904",
+        "sandbox_bridge_request_20990902",
+        "sandbox_bridge_request_20990903",
+        "sandbox_bridge_request_20990904",
     }
