@@ -42,6 +42,7 @@ from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
+from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -633,7 +634,7 @@ def _general_purpose_subagent(
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     offloading: ConversationOffloadingMiddleware | None = None,
-    workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    skills: SkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
@@ -655,7 +656,7 @@ def _general_purpose_subagent(
                 _SubagentToolGuard(),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
-                *([workspace_skills] if workspace_skills else []),
+                *([skills] if skills else []),
                 *_subagent_middleware(dynamic_tools),
                 *guard_middleware,
                 *([offloading] if offloading else []),
@@ -1964,12 +1965,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         use_gateway=use_gateway,
         **title_model_kwargs,
     )
-    workspace_skills = (
-        WorkspaceSkillsMiddleware(
-            backend=agent_backend, sources=skill_sources, skill_tools=skill_tools
-        )
+    # Private threads need one too: the default SkillsMiddleware resolves no skill tools.
+    skills_middleware_type = (
+        WorkspaceSkillsMiddleware
         if credential_login is None and not local_run
-        else None
+        else SkillsMiddleware
+    )
+    skills_middleware = skills_middleware_type(
+        backend=agent_backend, sources=skill_sources, tools=skill_tools
     )
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
@@ -1985,7 +1988,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if tool is not save_user_settings
                         and _registered_tool_name(tool) not in sandbox_only_tools
                     ],
-                    workspace_skills=workspace_skills,
+                    skills=skills_middleware,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
@@ -2000,7 +2003,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 ),
             ],
             skills=skill_sources,
-            skill_tools=skill_tools,
             backend=agent_backend,
             state_schema=DesktopAgentState if local_run else None,
             middleware=cast(
@@ -2044,7 +2046,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if incident_session is not None
                         else []
                     ),
-                    *([workspace_skills] if workspace_skills else []),
+                    skills_middleware,
                     ValidateImageReadsMiddleware(),
                     ModelCallLimitMiddleware(
                         run_limit=incident_session.policy.max_model_calls

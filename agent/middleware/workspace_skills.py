@@ -4,16 +4,9 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import cast
 
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
-from langchain.agents.middleware.types import (
-    ExtendedModelResponse,
-    ModelRequest,
-    ModelResponse,
-    ToolCallRequest,
-)
-from langchain_core.messages import ToolMessage
+from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 
 
 class WorkspaceSkillsMiddleware(SkillsMiddleware):
@@ -53,11 +46,3 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
     ) -> ModelResponse | ExtendedModelResponse:
         request = request.override(state=self._scoped_state(request.state))
         return await super().awrap_model_call(request, handler)
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[object]]],
-    ) -> ToolMessage | Command[object]:
-        request = request.override(state=self._scoped_state(request.state))
-        return await super().awrap_tool_call(request, handler)

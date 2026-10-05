@@ -239,7 +239,7 @@ async def test_reading_a_skill_that_names_a_connection_offers_its_allowed_tools(
     await servers.connect("github", ["search"])
     script = _Script([[_read("file-tickets")], "Done."])
 
-    await _run(script, skills={"file-tickets": "linear"})
+    await _run(script, skills={"file-tickets": "mcp_linear"})
 
     assert [_integration_offer(payload) for payload in script.sent] == [
         set(),
@@ -255,7 +255,7 @@ async def test_a_disclosed_tool_runs_without_being_loaded(
     url = await servers.connect("linear", ["list_issues"])
     script = _Script([[_read("file-tickets")], [_call(_LIST_ISSUES)], "Done."])
 
-    messages = await _run(script, skills={"file-tickets": "linear:list_issues"})
+    messages = await _run(script, skills={"file-tickets": "mcp_linear:list_issues"})
 
     assert _integration_offer(script.sent[1]) == {_LIST_ISSUES}
     assert _tool_results(messages, _LIST_ISSUES) == ["list_issues ran"]
@@ -265,14 +265,15 @@ async def test_a_disclosed_tool_runs_without_being_loaded(
 @pytest.mark.parametrize(
     ("include_tools", "offered"),
     [
-        ("server_a:create_foo", {"mcp_server_a_create_foo_5c0291cede"}),
-        ("server_b:create_foo", {"mcp_server_b_create_foo_bf8aec4031"}),
-        ("server:a_create_foo", {"mcp_server_a_create_foo_fd899b21e8"}),
-        ("my-crm:get.customer", {"mcp_my-crm_get_customer_ac88672888"}),
+        ("mcp_server_a:create_foo", {"mcp_server_a_create_foo_5c0291cede"}),
+        ("mcp_server_b:create_foo", {"mcp_server_b_create_foo_bf8aec4031"}),
+        ("mcp_server:a_create_foo", {"mcp_server_a_create_foo_fd899b21e8"}),
+        ("mcp_my-crm:get.customer", {"mcp_my-crm_get_customer_ac88672888"}),
         (
-            "langsmith-prod:list_prompts_with_extended_metadata_filters",
+            "mcp_langsmith-prod:list_prompts_with_extended_metadata_filters",
             {"mcp_langsmith-prod_list_prompts_with_extended_metadat_012f8d599f"},
         ),
+        ("server_a", set()),
         ("create_foo", set()),
         ("unknown", set()),
     ],
@@ -316,7 +317,7 @@ async def test_a_users_connection_replaces_the_workspaces_of_the_same_name(
     await servers.connect("linear", ["create_issue"], tier="user")
     script = _Script([[_read("file-tickets")], "Done."])
 
-    await _run(script, skills={"file-tickets": "linear"})
+    await _run(script, skills={"file-tickets": "mcp_linear"})
 
     assert _integration_offer(script.sent[1]) == {"mcp_linear_create_issue_fd6622409c"}
 
@@ -332,7 +333,7 @@ async def test_a_call_to_an_integration_tool_the_model_was_not_shown_is_refused(
     await servers.connect("linear", ["list_issues"])
     script = _Script([first_turn, "Done."])
 
-    messages = await _run(script, skills={"file-tickets": "linear"})
+    messages = await _run(script, skills={"file-tickets": "mcp_linear"})
 
     assert _tool_results(messages, _LIST_ISSUES) == [
         f"Load {_LIST_ISSUES} with load_integration_tools before calling it."
@@ -345,7 +346,7 @@ async def test_a_loaded_tool_that_a_read_skill_names_still_runs(servers: _Server
     load = ToolCall(name="load_integration_tools", args={"tool_names": [_LIST_ISSUES]}, id=None)
     script = _Script([[load], [_read("file-tickets")], [_call(_LIST_ISSUES)], "Done."])
 
-    messages = await _run(script, skills={"file-tickets": "linear"})
+    messages = await _run(script, skills={"file-tickets": "mcp_linear"})
 
     assert [_integration_offer(payload) for payload in script.sent] == [
         set(),
@@ -380,7 +381,7 @@ async def test_the_general_purpose_subagent_runs_a_tool_its_read_skill_names(
         ]
     )
 
-    await _run(script, skills={"file-tickets": "linear"})
+    await _run(script, skills={"file-tickets": "mcp_linear"})
 
     assert [_integration_offer(payload) for payload in script.sent] == [
         set(),

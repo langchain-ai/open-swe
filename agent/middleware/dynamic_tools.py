@@ -20,6 +20,7 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import InjectedState
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.mcp import match_skill_tools
@@ -204,7 +205,9 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         return [tool for name in self._group_of if (tool := self._tool(name)) is not None]
 
     async def resolve_skill_tools(self, name: str, runtime: Runtime) -> list[BaseTool]:  # noqa: ARG002
-        """Resolve one skill ``include_tools`` entry to integration tools"""
+        """Resolve one skill ``include_tools`` entry to integration tools."""
+        if not self._model_visible:
+            return []
         return match_skill_tools(name, await self.catalog_tools())
 
     async def _resolve(self, group: str) -> dict[str, BaseTool]:

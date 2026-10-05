@@ -40,6 +40,7 @@ _CATALOG_MAX_AGE = timedelta(hours=24)
 
 _TOOL_NAME_KEY = "mcp_tool_name"
 _CONNECTION_KEY = "mcp_connection"
+_SKILL_CONNECTION_PREFIX = "mcp_"
 
 
 @dataclass(frozen=True)
@@ -149,20 +150,21 @@ def _tool_name(connection_name: str, tool_name: str) -> str:
 def match_skill_tools(name: str, tools: Sequence[BaseTool]) -> list[BaseTool]:
     """Return the tools a skill's ``include_tools`` entry names, in the order given.
 
-    ``connection:tool`` names one MCP tool by its connection and raw MCP name. A name
-    without ``:`` names every tool on that connection, and any tool of exactly that
-    name, such as a built-in Notion tool.
+    ``mcp_<connection>`` names every tool on an MCP connection, and
+    ``mcp_<connection>:<tool>`` one tool on it by its raw MCP name. Any other name is a
+    tool's exact name, such as a built-in Notion tool. The prefix keeps a connection
+    from sharing a name with a tool.
     """
-    connection, separator, mcp_tool_name = name.partition(":")
-    if separator:
-        return [
-            tool
-            for tool in tools
-            if _mcp_metadata(tool, _CONNECTION_KEY) == connection
-            and _mcp_metadata(tool, _TOOL_NAME_KEY) == mcp_tool_name
-        ]
+    if not name.startswith(_SKILL_CONNECTION_PREFIX):
+        return [tool for tool in tools if tool.name == name]
+    connection, separator, mcp_tool_name = name.removeprefix(_SKILL_CONNECTION_PREFIX).partition(
+        ":"
+    )
     return [
-        tool for tool in tools if tool.name == name or _mcp_metadata(tool, _CONNECTION_KEY) == name
+        tool
+        for tool in tools
+        if _mcp_metadata(tool, _CONNECTION_KEY) == connection
+        and (not separator or _mcp_metadata(tool, _TOOL_NAME_KEY) == mcp_tool_name)
     ]
 
 
