@@ -491,12 +491,12 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "missing thread_id"}
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
+    is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from agent.tasks.events import worker_finished
 
         try:
-            if await worker_finished(thread_id, run_id, status, payload):
-                return {"status": "ok", "reason": "worker completion handled"}
+            is_worker = await worker_finished(thread_id, run_id, status, payload)
         except Exception:
             logger.exception(
                 "Could not persist worker completion",
@@ -511,7 +511,16 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     if status == "success" and not (
         isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
     ):
-        await _start_run_for_pending_follow_ups(thread_id)
+        pickup_allowed = True
+        if is_worker:
+            from agent.tasks.store import get_delegation
+
+            delegation = await get_delegation(thread_id)
+            pickup_allowed = delegation is not None and not delegation.cancelled
+        if pickup_allowed:
+            await _start_run_for_pending_follow_ups(thread_id)
+    if is_worker:
+        return {"status": "ok", "reason": "worker completion handled"}
     if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
