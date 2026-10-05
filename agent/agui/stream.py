@@ -89,7 +89,8 @@ class _RunStartCommand(BaseModel):
 class _CommandResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    run_id: str
+    # A message steered into a run started outside the dashboard can come back without one.
+    run_id: str | None = None
 
 
 class _CommandResponse(BaseModel):
@@ -226,9 +227,17 @@ async def start_run(input: RunAgentInput, login: str, email: str | None) -> Asyn
         run_id = _CommandResponse.model_validate_json(content).result.run_id
     except ValidationError as exc:
         raise HTTPException(502, "LangGraph did not start a run") from exc
+    run_id = run_id or await _running_run_id(input.thread_id)
     translator = AgUiTranslator({message.id for message in input.messages})
     run = RunStartedEvent(thread_id=input.thread_id, run_id=input.run_id)
-    return _stream(input.thread_id, run, [], run_id, translator)
+    # With no run left to follow, the snapshot is the only way the reply reaches the client.
+    head: list[BaseEvent] = [] if run_id else [await _snapshot(input.thread_id)]
+    return _stream(input.thread_id, run, head, run_id, translator)
+
+
+async def _running_run_id(thread_id: str) -> str | None:
+    running = await langgraph_client().runs.list(thread_id, status="running", limit=1)
+    return running[0]["run_id"] if running else None
 
 
 async def connect(thread_id: str, login: str, email: str | None) -> AsyncIterator[str]:
@@ -239,8 +248,7 @@ async def connect(thread_id: str, login: str, email: str | None) -> AsyncIterato
     except NotFoundError as exc:
         raise HTTPException(404, "thread not found") from exc
     assert_thread_readable(thread_metadata(thread), login, email)
-    running = await client.runs.list(thread_id, status="running", limit=1)
-    live_run_id = running[0]["run_id"] if running else None
+    live_run_id = await _running_run_id(thread_id)
     snapshot = await _snapshot(thread_id)
     translator = AgUiTranslator({message.id for message in snapshot.messages})
     run = RunStartedEvent(thread_id=thread_id, run_id=live_run_id or f"connect-{thread_id}")
