@@ -763,15 +763,21 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
 
 
 async def drop_picks(
-    request: HumanReviewRequest, user_ids: set[UUID], message: str
+    request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
 ) -> list[HumanReviewParticipant]:
-    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and DM each ``message``."""
+    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and DM each ``message``.
+
+    An ``expired`` pick stays on the request so it is never picked for it again.
+    """
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
             return []
         dropped = [pick for pick in row.picks if pick.user_id in user_ids]
         for pick in dropped:
-            row.participants.remove(pick)
+            if expired:
+                pick.decision = "expired"
+            else:
+                row.participants.remove(pick)
     if not dropped:
         return []
     pr = request.pull_request
@@ -779,7 +785,11 @@ async def drop_picks(
     for pick in dropped:
         logger.info(
             "Withdrew a pending reviewer pick",
-            extra={"request_id": str(request.id), "github_login": pick.github_login},
+            extra={
+                "request_id": str(request.id),
+                "github_login": pick.github_login,
+                "expired": expired,
+            },
         )
         if token is not None:
             await _unrequest_github_review(request, pick.github_login, token)

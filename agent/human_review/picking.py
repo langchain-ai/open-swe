@@ -25,7 +25,6 @@ from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.org_membership import team_members
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
-from agent.points.ledger import Point
 from agent.slack.client import get_slack_user_info
 from agent.users import User
 
@@ -261,8 +260,8 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     author = (pr.author or "").lower()
     logins = sorted((owned.keys() | touched.keys()) - {author})
     users = await asyncio.gather(*(User.for_login("github", login) for login in logins))
-    taken = {participant.user_id for participant in request.participants}
-    missed = await Point.missed_pick_user_ids(request.id)
+    taken = {p.user_id for p in request.participants if p.decision != "expired"}
+    missed = {p.user_id for p in request.participants if p.decision == "expired"}
     people: dict[str, User] = {}
     skipped: dict[str, str] = {author: "author"} if author in owned or author in touched else {}
     for login, user in zip(logins, users, strict=True):

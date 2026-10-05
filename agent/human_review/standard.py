@@ -50,7 +50,6 @@ from agent.human_review.merging import merge_pull_request
 from agent.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from agent.human_review.picking import Pick, Wait, choose_reviewer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
-from agent.points.ledger import POINTS, PickExpired, Point
 from agent.prompts import prompt
 from agent.slack.blocks import actions, block_payload, escape, section
 from agent.slack.cards import origin_footer
@@ -74,9 +73,6 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
-_MISSED_PICK_COST = (
-    f"{abs(POINTS['pick_expired'])} point{'s' if abs(POINTS['pick_expired']) != 1 else ''}"
-)
 
 
 class RequestResult(BaseModel):
@@ -488,7 +484,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
-    if user.id in await Point.missed_pick_user_ids(request.id):
+    if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
@@ -508,8 +504,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = (
-        f" Accept within {UNCLAIMED_AFTER_MINUTES} minutes, or Open SWE will ask someone else "
-        f"and you lose {_MISSED_PICK_COST}."
+        f" Accept within {UNCLAIMED_AFTER_MINUTES} minutes, or Open SWE will ask someone else."
     )
     accept = actions(accept_button(added))
     thread_ts = added.slack_thread_ts or added.slack_message_ts
@@ -789,7 +784,7 @@ async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
 async def expire_picks(request: HumanReviewRequest) -> str:
     """Rotate away from picks not accepted in time, when someone else could review instead.
 
-    Reviewing on GitHub counts as accepting. Whoever is rotated away loses points.
+    Reviewing on GitHub counts as accepting.
     """
     wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
@@ -847,22 +842,13 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         },
     )
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    dropped = await drop_picks(
+    await drop_picks(
         request,
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{UNCLAIMED_AFTER_MINUTES} minutes, so Open SWE asked someone else and took "
-        f"{_MISSED_PICK_COST}.",
+        f"{UNCLAIMED_AFTER_MINUTES} minutes, so Open SWE asked someone else.",
+        expired=True,
     )
-    for pick in dropped:
-        await Point.award(
-            pick.user_id,
-            PickExpired(
-                repository=f"{pr.owner}/{pr.repo}".lower(),
-                pr_number=pr.number,
-                request_id=request.id,
-            ),
-        )
     current = await HumanReviewRequest.get(request.id)
     if current is None or current.state != "open":
         return "closed"

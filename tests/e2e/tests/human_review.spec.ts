@@ -133,6 +133,26 @@ async function channelMessages(
   return (await res.json()) as Array<SlackMessage>;
 }
 
+/** The DM telling someone Open SWE picked them, once it arrives. */
+async function pickedDm(
+  request: APIRequestContext,
+  channel: string,
+): Promise<SlackMessage> {
+  let found: SlackMessage | undefined;
+  await expect
+    .poll(
+      async () => {
+        found = (await channelMessages(request, channel)).find(
+          (m) => m.is_bot && m.text.includes("picked you to review"),
+        );
+        return found !== undefined;
+      },
+      { message: "the pick should be DMed", timeout: 30_000 },
+    )
+    .toBe(true);
+  return found!;
+}
+
 function cardText(message: SlackMessage): string {
   return (message.blocks ?? [])
     .flatMap((block) => [
@@ -647,12 +667,8 @@ test.describe("Human review in Slack", () => {
       ),
     ).toBe(true);
     // ...and messaged in his DM, which is his concierge conversation.
-    const dms = await channelMessages(request, "D_BOB");
-    const picked = dms.find(
-      (m) => m.is_bot && m.text.includes("picked you to review"),
-    );
-    expect(picked, "Bob should get a DM").toBeTruthy();
-    expect(picked!.thread_ts).toBe(picked!.ts);
+    const picked = await pickedDm(request, "D_BOB");
+    expect(picked.thread_ts).toBe(picked.ts);
     const state = await request.get(`/threads/${dm.thread_id}/state`);
     expect(JSON.stringify(await state.json())).toContain(
       "picked you to review",
@@ -660,7 +676,7 @@ test.describe("Human review in Slack", () => {
     await shootCard(page, "picked");
 
     // 3. Bob accepts from his DM and becomes the reviewer.
-    const accept = (picked!.blocks ?? [])
+    const accept = (picked.blocks ?? [])
       .filter((block) => block.type === "actions")
       .flatMap((block) => block.elements ?? [])
       .find(
@@ -673,8 +689,8 @@ test.describe("Human review in Slack", () => {
     await control(request, "/mock/slack/action", {
       action: accept,
       channel: "D_BOB",
-      message_ts: picked!.ts,
-      thread_ts: picked!.thread_ts,
+      message_ts: picked.ts,
+      thread_ts: picked.thread_ts,
       user: BOB.slack,
     });
     await expect
@@ -767,11 +783,8 @@ test.describe("Human review in Slack", () => {
     ).toBe(true);
 
     // 3. Bob accepts from his DM.
-    const picked = (await channelMessages(request, "D_BOB")).find(
-      (m) => m.is_bot && m.text.includes("picked you to review"),
-    );
-    expect(picked, "Bob should get a DM").toBeTruthy();
-    const accept = (picked!.blocks ?? [])
+    const picked = await pickedDm(request, "D_BOB");
+    const accept = (picked.blocks ?? [])
       .filter((block) => block.type === "actions")
       .flatMap((block) => block.elements ?? [])
       .find(
@@ -784,8 +797,8 @@ test.describe("Human review in Slack", () => {
     await control(request, "/mock/slack/action", {
       action: accept,
       channel: "D_BOB",
-      message_ts: picked!.ts,
-      thread_ts: picked!.thread_ts,
+      message_ts: picked.ts,
+      thread_ts: picked.thread_ts,
       user: BOB.slack,
     });
     await expect

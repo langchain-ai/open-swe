@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
-from agent.points.github import award_review
+from agent.human_review.leaderboard import CompletedReview
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
@@ -168,7 +168,7 @@ async def github_webhook(
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
         background_tasks.add_task(service.settle_human_reviews, payload)
         if payload.get("action") == "submitted":
-            background_tasks.add_task(award_review, payload)
+            background_tasks.add_task(CompletedReview.record, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

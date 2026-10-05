@@ -453,19 +453,17 @@ export interface LeaderboardUser {
   avatar_url?: string | null
 }
 
-export interface PointsLeaderboardRow {
+export interface ReviewLeaderboardRow {
   rank: number
   user: LeaderboardUser
-  points: number
-  reviewed: number
-  missed_picks: number
+  reviews: number
   is_current: boolean
 }
 
-export interface PointsLeaderboardPayload {
+export interface ReviewLeaderboardPayload {
   period: UsageLeaderboardPeriod
-  rows: Array<PointsLeaderboardRow>
-  current_user: PointsLeaderboardRow | null
+  rows: Array<ReviewLeaderboardRow>
+  current_user: ReviewLeaderboardRow | null
 }
 
 export interface UsageLeaderboardRow {
@@ -1678,9 +1676,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  pointsLeaderboard: (period: UsageLeaderboardPeriod, limit = 25) =>
-    request<PointsLeaderboardPayload>(
-      `/points/leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
+  reviewLeaderboard: (period: UsageLeaderboardPeriod, limit = 25) =>
+    request<ReviewLeaderboardPayload>(
+      `/human-review/leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
     ),
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",

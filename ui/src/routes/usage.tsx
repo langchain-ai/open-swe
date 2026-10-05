@@ -418,7 +418,7 @@ function UsageAnalyticsPeriod({
           </div>
         )}
       </SettingsSection>
-      <PointsLeaderboardSection
+      <ReviewLeaderboardSection
         period={activePeriod}
         login={login}
         isAdmin={isAdmin}
@@ -1568,7 +1568,7 @@ function CounterList({
   )
 }
 
-function PointsLeaderboardSection({
+function ReviewLeaderboardSection({
   period,
   login,
   isAdmin,
@@ -1578,8 +1578,8 @@ function PointsLeaderboardSection({
   isAdmin: boolean
 }) {
   const leaderboard = useQuery({
-    queryKey: ["pointsLeaderboard", period, login, isAdmin],
-    queryFn: () => api.pointsLeaderboard(period),
+    queryKey: ["reviewLeaderboard", period, login, isAdmin],
+    queryFn: () => api.reviewLeaderboard(period),
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
     retry: (count, error) =>
@@ -1594,8 +1594,8 @@ function PointsLeaderboardSection({
 
   return (
     <SettingsSection
-      title="Points leaderboard"
-      description="+1 for each pull request you review on GitHub; −1 when Open SWE picks you to review and you don't accept in time."
+      title="Review leaderboard"
+      description="Pull requests reviewed on GitHub, counted once per pull request."
     >
       {leaderboard.isLoading ? (
         <div className="space-y-2 p-4">
@@ -1605,7 +1605,7 @@ function PointsLeaderboardSection({
       ) : leaderboard.isError ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
           <p className="text-destructive">
-            Could not load the points leaderboard.
+            Could not load the review leaderboard.
           </p>
           <button
             type="button"
@@ -1617,8 +1617,8 @@ function PointsLeaderboardSection({
         </div>
       ) : !data?.rows.length ? (
         <div className="p-6 text-center text-xs text-muted-foreground">
-          No points have been awarded for {PERIOD_LABELS[period].toLowerCase()}{" "}
-          yet.
+          No reviews have been completed for{" "}
+          {PERIOD_LABELS[period].toLowerCase()} yet.
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -1627,12 +1627,8 @@ function PointsLeaderboardSection({
               <tr>
                 <th className="w-14 py-2 pl-4 text-left font-medium">Rank</th>
                 <th className="px-2 py-2 text-left font-medium">Reviewer</th>
-                <th className="px-2 py-2 text-right font-medium">Points</th>
-                <th className="px-2 py-2 text-right font-medium">
-                  PRs reviewed
-                </th>
                 <th className="py-2 pr-4 text-right font-medium">
-                  Missed picks
+                  PRs reviewed
                 </th>
               </tr>
             </thead>
@@ -1649,14 +1645,8 @@ function PointsLeaderboardSection({
                     <td className="px-2 py-3">
                       <UserCell row={row} isCurrentUser={row.is_current} />
                     </td>
-                    <td className="px-2 py-3 text-right font-medium tabular-nums">
-                      {formatNumber(row.points)}
-                    </td>
-                    <td className="px-2 py-3 text-right tabular-nums">
-                      {formatNumber(row.reviewed)}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {formatNumber(row.missed_picks)}
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">
+                      {formatNumber(row.reviews)}
                     </td>
                   </tr>
                 )

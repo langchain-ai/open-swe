@@ -37,8 +37,9 @@ RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``approve`` and ``reject`` are Slack votes on an expedited card; ``review`` is a
 # person signed up to review a standard request on GitHub; ``picked`` is someone
-# Open SWE asked who has not accepted yet, so the request is still open to anyone.
-ParticipantDecision = Literal["approve", "reject", "review", "picked"]
+# Open SWE asked who has not accepted yet, so the request is still open to anyone;
+# ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
+ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
 
 
 class ChannelChoice(TypedDict):
