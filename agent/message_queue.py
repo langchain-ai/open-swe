@@ -29,6 +29,8 @@ class QueuedMessage(Base):
 
     thread_id: Mapped[str]
     content: Mapped[QueuedContent] = mapped_column(JSONB)
+    # The dashboard message's own id, shared with its transcript row; unset for
+    # Slack and other writers. Unique per thread, so a retried send is not queued twice.
     queue_id: Mapped[str | None] = mapped_column(default=None)
     seq: Mapped[int] = mapped_column(
         BigInteger, Identity(always=True), primary_key=True, init=False
