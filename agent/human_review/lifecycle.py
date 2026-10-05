@@ -651,7 +651,12 @@ async def update_blocked_reactions(
             and snapshot.state == "open"
             and not snapshot.merged
         ):
-            failing = snapshot.check_state in {"failure", "blocked"}
+            author = snapshot.author or row.pull_request.author
+            preferences = await User.preferences_for_login(author)
+            failing = preferences.pr_failure_reactions and snapshot.check_state in {
+                "failure",
+                "blocked",
+            }
             conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
         for emoji, blocked in (("x", failing), ("construction", conflicted)):
             react = add_slack_reaction if blocked else remove_slack_reaction

@@ -8,6 +8,7 @@ from agent.github.pull_requests import PullRequest
 from agent.human_review import lifecycle, standard
 from agent.human_review.posted import linked_pull_request
 from agent.human_review.requests import HumanReviewRequest
+from agent.users import User, UserPreferences
 from tests.support.slack_api import SlackAPI
 
 
@@ -77,9 +78,24 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
             for _, params in slack_api.calls[start:]
         )
 
+    preferences = UserPreferences()
+
+    async def owner_preferences(login: str) -> UserPreferences:
+        assert login == "ada"
+        return preferences
+
+    monkeypatch.setattr(User, "preferences_for_login", owner_preferences)
     await settle_with_reactions(set())
     snapshot.check_state = "failure"
+    await settle_with_reactions(set())
+    snapshot.mergeable = False
+    await settle_with_reactions({"construction"})
+    snapshot.mergeable = None
+    preferences.pr_failure_reactions = True
     await settle_with_reactions({"x"})
+    preferences.pr_failure_reactions = False
+    await settle_with_reactions(set())
+    preferences.pr_failure_reactions = True
     snapshot.mergeable = False
     snapshot.mergeable_state = "dirty"
     await settle_with_reactions({"x", "construction"})

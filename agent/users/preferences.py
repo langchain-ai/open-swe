@@ -11,6 +11,7 @@ class UserPreferences(BaseModel):
     # Sandboxes created for this person's threads suspend RAM on idle stop and resume warm.
     preserve_sandbox_memory: bool = True
     pr_review_links: bool = False
+    pr_failure_reactions: bool = False
     # Threads this person starts reach MCP and large-result tools only through the sandbox.
     prefer_tools_in_sandbox: bool = False
     # Ask this person before Open SWE opens a PR as them in a shared thread.
@@ -25,6 +26,9 @@ class UserPreferencesPatch(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     pr_review_links: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    pr_failure_reactions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     prefer_tools_in_sandbox: bool | None = Field(
