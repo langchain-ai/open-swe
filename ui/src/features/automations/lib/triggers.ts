@@ -29,7 +29,7 @@ export function buildTriggers(
   return triggers
 }
 
-/** One line per provider, e.g. "GitHub: Pull request closed, Pull request merged". */
+/** One line per provider, e.g. "GitHub: PR closed, PR merged". */
 export function describeTriggers(schedule: AgentSchedule): string {
   const parts = schedule.triggers.map((trigger) => {
     if (trigger.kind === "schedule") return describeCron(trigger.cron)

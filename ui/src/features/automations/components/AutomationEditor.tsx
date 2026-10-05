@@ -1,6 +1,13 @@
 import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
+import {
+  CheckIcon,
+  ClockIcon,
+  GithubLogoIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
 import type {
@@ -14,7 +21,7 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
-import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { SlackUserMention } from "@/features/agents/components/messages/SlackMrkdwn"
@@ -48,6 +55,7 @@ import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedC
 import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
 const GITHUB = AUTOMATION_EVENT_PROVIDERS.github
 const GITHUB_EVENT_ITEMS = (
@@ -102,6 +110,8 @@ export function AutomationEditor({
     : (template?.schedule ?? null)
   const initialEvents = githubEvents(schedule)
   const [events, setEvents] = useState<Array<GitHubTriggerEvent>>(initialEvents)
+  // The GitHub card stays while it is being set up, before any event is picked.
+  const [githubOn, setGithubOn] = useState(initialEvents.length > 0)
   const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
@@ -153,6 +163,7 @@ export function AutomationEditor({
     (name !== (schedule?.name ?? template?.name ?? "") ||
       prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
       events.join() !== initialEvents.join() ||
+      githubOn !== initialEvents.length > 0 ||
       cron !== initialCron ||
       repo !== (schedule?.repo ?? null) ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
@@ -172,15 +183,20 @@ export function AutomationEditor({
     prompt.trim().length > 0 &&
     workspace !== null &&
     !savedWorkspaceMissing &&
-    buildTriggers(cron, events).length > 0 &&
-    (events.length === 0 || !!repo)
+    (!!cron || githubOn) &&
+    (!githubOn || (events.length > 0 && !!repo))
 
-  const toggleEvent = (event: GitHubTriggerEvent, checked: boolean) =>
+  const toggleEvent = (event: GitHubTriggerEvent) =>
     setEvents((current) =>
       GITHUB_EVENT_ITEMS.map((item) => item.value).filter((value) =>
-        value === event ? checked : current.includes(value)
+        value === event ? !current.includes(value) : current.includes(value)
       )
     )
+
+  const removeGitHub = () => {
+    setGithubOn(false)
+    setEvents([])
+  }
 
   const onPickTrigger = (value: string | null) => {
     if (value === null) {
@@ -203,7 +219,7 @@ export function AutomationEditor({
         {
           name: name.trim(),
           prompt: prompt.trim(),
-          triggers: buildTriggers(cron, events),
+          triggers: buildTriggers(cron, githubOn ? events : []),
           repo,
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -228,7 +244,7 @@ export function AutomationEditor({
         body: {
           name: name.trim(),
           prompt: prompt.trim(),
-          triggers: buildTriggers(cron, events),
+          triggers: buildTriggers(cron, githubOn ? events : []),
           repo: repo ?? "",
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
@@ -354,75 +370,115 @@ export function AutomationEditor({
         )}
 
         <SectionLabel>Triggers</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-1.5">
-          <TriggerGroupLabel>Schedule</TriggerGroupLabel>
+        <div className="flex flex-col gap-2">
           {cron && (
-            <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
-              <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
+            <TriggerCard
+              icon={<ClockIcon className="size-4" />}
+              removeLabel="Remove schedule"
+              onRemove={() => {
+                setCron(null)
+                setCustomMode(false)
+              }}
+              canManage={canManage}
+              actions={
+                canManage && (
+                  <TriggerMenu
+                    onSchedule={onPickTrigger}
+                    aria-label="Change schedule"
+                    className={CARD_ACTION}
+                  >
+                    <PencilSimpleIcon className="size-3.5" />
+                  </TriggerMenu>
+                )
+              }
+            >
               {customMode ? (
                 <input
                   value={cron}
                   onChange={(e) => setCron(e.target.value)}
                   disabled={!canManage}
                   placeholder="0 9 * * 1-5"
-                  className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+                  aria-label="Cron schedule"
+                  className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
                 />
               ) : (
-                <span className="flex-1 text-sm text-foreground">
-                  {describeCron(cron)}
-                </span>
+                <>
+                  <p className="text-sm text-foreground">
+                    {describeCron(cron)}
+                  </p>
+                  <p className="font-mono text-xs text-muted-foreground/70">
+                    {cron}
+                  </p>
+                </>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setCron(null)
-                  setCustomMode(false)
-                }}
-                aria-label="Remove schedule"
-                disabled={!canManage}
-                className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-              >
-                <TrashIcon className="size-3.5" />
-              </button>
-            </div>
+            </TriggerCard>
           )}
-          {canManage && (
-            <ScheduleTriggerPicker
-              onSelect={onPickTrigger}
-              triggerLabel={cron ? "Change schedule" : "Add schedule"}
-            />
-          )}
-          <div className="mx-3 my-1.5 h-px bg-border/60" />
-          <TriggerGroupLabel>{GITHUB.label}</TriggerGroupLabel>
-          <div className="grid gap-0.5 px-1.5 pb-1.5 sm:grid-cols-2">
-            {GITHUB_EVENT_ITEMS.map((item) => (
-              <label
-                key={item.value}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-sm text-foreground hover:bg-accent/50"
-              >
-                <input
-                  type="checkbox"
-                  checked={events.includes(item.value)}
-                  onChange={(e) => toggleEvent(item.value, e.target.checked)}
-                  disabled={!canManage}
-                  className="size-4"
-                />
-                {item.label}
-              </label>
-            ))}
-          </div>
-          {events.length > 0 && (
-            <p
-              className={
-                repo
-                  ? "px-3 pb-2 text-xs text-muted-foreground/70"
-                  : "px-3 pb-2 text-xs text-destructive"
-              }
+          {githubOn && (
+            <TriggerCard
+              icon={<GithubLogoIcon className="size-4" />}
+              removeLabel="Remove GitHub trigger"
+              onRemove={removeGitHub}
+              canManage={canManage}
             >
-              {repo
-                ? `Runs on these events in ${repo}. Closed also fires for merged pull requests.`
-                : "Pick a repository: GitHub events fire for the automation's repository."}
-            </p>
+              <p
+                className={cn(
+                  "text-sm",
+                  repo ? "text-foreground" : "text-muted-foreground"
+                )}
+              >
+                {repo ?? "No repository"}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {GITHUB_EVENT_ITEMS.map((item) => {
+                  const on = events.includes(item.value)
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleEvent(item.value)}
+                      disabled={!canManage}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
+                        on
+                          ? "border-primary/60 bg-primary/20 text-foreground"
+                          : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                      )}
+                    >
+                      {on && <CheckIcon className="size-3 text-primary" />}
+                      {item.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p
+                className={cn(
+                  "mt-2 text-xs",
+                  repo ? "text-muted-foreground/70" : "text-destructive"
+                )}
+              >
+                {!repo
+                  ? "Pick a repository above. GitHub events fire for that repository."
+                  : events.length === 0
+                    ? "Pick at least one event."
+                    : events.includes("pull_request.closed")
+                      ? "PR closed also fires when a pull request is merged."
+                      : "Event details reach the run as untrusted context."}
+              </p>
+            </TriggerCard>
+          )}
+          {canManage && (!cron || !githubOn) && (
+            <TriggerMenu
+              onSchedule={cron ? undefined : onPickTrigger}
+              onGitHub={githubOn ? undefined : () => setGithubOn(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            >
+              <PlusIcon className="size-3.5" />
+              Add trigger
+            </TriggerMenu>
+          )}
+          {!canManage && !cron && !githubOn && (
+            <p className="text-xs text-muted-foreground/70">No triggers.</p>
           )}
         </div>
 
@@ -540,11 +596,44 @@ export function AutomationEditor({
   )
 }
 
-function TriggerGroupLabel({ children }: { children: React.ReactNode }) {
+const CARD_ACTION =
+  "rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+
+function TriggerCard({
+  icon,
+  children,
+  actions,
+  removeLabel,
+  onRemove,
+  canManage,
+}: {
+  icon: React.ReactNode
+  children: React.ReactNode
+  actions?: React.ReactNode
+  removeLabel: string
+  onRemove: () => void
+  canManage: boolean
+}) {
   return (
-    <h3 className="px-3 pt-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-      {children}
-    </h3>
+    <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-3 py-2.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1 py-0.5">{children}</div>
+      {canManage && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {actions}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={removeLabel}
+            className={CARD_ACTION}
+          >
+            <TrashIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -67,8 +67,9 @@ vi.mock("@/features/settings/components/RepoSelector", () => ({
 vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
 }))
-vi.mock("@/features/automations/components/ScheduleTriggerPicker", () => ({
-  ScheduleTriggerPicker: () => <div />,
+vi.mock("@/features/automations/components/TriggerMenu", () => ({
+  TriggerMenu: ({ onGitHub }: { onGitHub?: () => void }) =>
+    onGitHub ? <button onClick={onGitHub}>Add GitHub trigger</button> : null,
 }))
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
@@ -248,8 +249,9 @@ describe("AutomationEditor", () => {
       />
     )
 
-    fireEvent.click(screen.getByLabelText("Pull request merged"))
-    fireEvent.click(screen.getByLabelText("Pull request closed"))
+    fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
+    fireEvent.click(screen.getByRole("button", { name: "PR merged" }))
+    fireEvent.click(screen.getByRole("button", { name: "PR closed" }))
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
 
     expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([

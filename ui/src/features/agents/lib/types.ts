@@ -252,9 +252,9 @@ export const AUTOMATION_EVENT_PROVIDERS = {
     label: "GitHub",
     events: {
       "issues.opened": "Issue opened",
-      "pull_request.opened": "Pull request opened",
-      "pull_request.closed": "Pull request closed",
-      "pull_request.merged": "Pull request merged",
+      "pull_request.opened": "PR opened",
+      "pull_request.closed": "PR closed",
+      "pull_request.merged": "PR merged",
     } satisfies Record<GitHubTriggerEvent, string>,
   },
 } as const
