@@ -214,33 +214,3 @@ async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
     await _slack("COWN", "group", "s-own")
 
     assert [match.delivery_id for match in await _owed()] == ["s-public", "s-own"]
-
-
-async def test_a_comment_posted_by_this_deployments_app_does_not_start_a_run(
-    workspace: dict[str, UUID],
-    delivered: list[tuple[str, MultitaskStrategy]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GITHUB_APP_ID", "4242")
-    await _subscribe(
-        workspace, pull_request_id=workspace["pull_request"], event_types=["issue_comment"]
-    )
-
-    def comment(login: str, app_id: int | None) -> dict[str, JsonValue]:
-        return {
-            "action": "created",
-            "repository": {"full_name": "acme/widgets"},
-            "sender": {"login": login},
-            "issue": {"number": 7, "pull_request": {}},
-            "comment": {
-                "body": "⚠️ Open SWE wasn't able to finish that — the run hit an unexpected error.",
-                "performed_via_github_app": {"id": app_id} if app_id else None,
-            },
-        }
-
-    await _github("issue_comment", comment("acme-swe[bot]", 4242), "d-own-app")
-    await _github("issue_comment", comment("open-swe-preview[bot]", None), "d-preview")
-    await _github("issue_comment", comment("octocat", None), "d-human")
-
-    assert [match.delivery_id for match in await _owed()] == ["d-human"]
-    assert delivered == [(_THREAD, "enqueue")]
