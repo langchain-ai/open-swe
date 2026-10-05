@@ -33,6 +33,13 @@ def test_task_retry_on_subagent_model_deadline() -> None:
     assert task_retry_on(ModelCallTimeoutError("wedged")) is True
 
 
+def test_task_retry_on_stream_chunk_timeout() -> None:
+    class StreamChunkTimeoutError(TimeoutError):
+        pass
+
+    assert task_retry_on(StreamChunkTimeoutError("stream stalled")) is True
+
+
 def test_task_retry_on_httpx_transport_subclasses() -> None:
     assert task_retry_on(httpx2.RemoteProtocolError("stream dropped")) is True
     assert task_retry_on(httpx2.ConnectError("connect failed")) is True

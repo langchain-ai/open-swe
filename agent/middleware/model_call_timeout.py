@@ -53,8 +53,11 @@ class ModelCallTimeoutMiddleware(OpenSWEMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         try:
-            return await asyncio.wait_for(handler(request), timeout=self._timeout_seconds)
+            async with asyncio.timeout(self._timeout_seconds) as timeout:
+                return await handler(request)
         except TimeoutError as exc:
+            if not timeout.expired():
+                raise
             logger.warning("Model call exceeded %ss deadline; aborting", self._timeout_seconds)
             raise ModelCallTimeoutError(
                 f"Model call exceeded the {self._timeout_seconds}s deadline"

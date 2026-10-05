@@ -13,6 +13,7 @@ _TRANSIENT_ERROR_NAMES = frozenset(
         # escalation path.
         "ModelCallTimeoutError",
         "ReadTimeout",
+        "StreamChunkTimeoutError",
         "TimeoutException",
         "TransportError",
     }

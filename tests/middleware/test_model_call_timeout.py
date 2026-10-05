@@ -46,6 +46,20 @@ class TestModelCallTimeoutMiddleware:
 
         assert started.is_set()
 
+    @pytest.mark.asyncio
+    async def test_preserves_provider_timeout_errors(self) -> None:
+        class StreamChunkTimeoutError(TimeoutError):
+            pass
+
+        async def handler(_req: ModelRequest[None]) -> ModelResponse[Any]:
+            await asyncio.sleep(0.01)
+            raise StreamChunkTimeoutError("No streaming chunk received")
+
+        with pytest.raises(StreamChunkTimeoutError, match="No streaming chunk received"):
+            await ModelCallTimeoutMiddleware(timeout_seconds=1).awrap_model_call(
+                _request(), handler
+            )
+
     def test_timeout_reads_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "120")
         assert ModelCallTimeoutMiddleware()._timeout_seconds == 120
