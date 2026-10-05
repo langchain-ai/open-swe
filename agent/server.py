@@ -62,7 +62,9 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.bridge.cli_result import cli_result
+from agent.bridge.constants import BridgeClient
 from agent.bridge.store import Bridge
+from agent.bridge.worktree_branch import schedule_worktree_branch_rename
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -84,8 +86,12 @@ from agent.dashboard.options import (
 from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
-from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
-from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.desktop import (
+    create_desktop_backend,
+    desktop_artifact_routes,
+    is_desktop_run,
+    is_desktop_worktree,
+)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     dynamic_context_hash,
@@ -164,12 +170,13 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.sandboxes.tool_access import tools_base_url
+from agent.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.blobs import blob_namespace
+from agent.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -245,6 +252,7 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -690,21 +698,25 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
-async def _bridged_thread(thread_id: str | None) -> bool:
-    """Whether this thread's sandbox is a CLI bridge on the user's machine."""
+async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
+    """The app serving this thread's bridge to the user's machine, if it has one."""
     if not thread_id:
-        return False
+        return None
     try:
         thread = await client.threads.get(thread_id=thread_id)
     except Exception:
         logger.warning(
-            "Could not read the thread's sandbox; omitting cli_result",
+            "Could not read the thread's sandbox; treating it as hosted",
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
-        return False
-    sandbox_id = thread_metadata(thread).get("sandbox_id")
-    return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+        return None
+    metadata = thread_metadata(thread)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is None:
+        return None
+    # Bound before bridges recorded their client, which only the CLI served then.
+    return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -762,11 +774,15 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
-    """Return whether signed sandbox file downloads are available for this run."""
+def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
+    """Return whether signed sandbox file downloads are available for this run.
+
+    They are served by the LangSmith box itself, which a bridged thread does not have.
+    """
     return (
         ENV.SANDBOX_TYPE.get() == "langsmith"
         and cfg.stop_summary is not True
+        and not bridged
         and not is_desktop_run(cfg)
     )
 
@@ -855,8 +871,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
+        bridge_client: BridgeClient | None = None,
+        prefer_tools_in_sandbox: bool = False,
     ) -> None:
+        self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
+        self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -1103,12 +1123,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
         if is_desktop_run(cfg):
-            if cfg.local_project_path:
-                schedule_worktree_branch_rename(
-                    worktree_path=cfg.local_project_path,
-                    messages=state.get("messages") or [],
-                    model=self._title_model,
-                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 try:
                     sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
@@ -1125,6 +1139,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         else None,
                     )
                     raise
+            if cfg.local_project_path and is_desktop_worktree(cfg.local_project_path):
+                schedule_worktree_branch_rename(
+                    thread_id=self._thread_id,
+                    backend=sandbox_backend,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -1167,6 +1188,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
+        if bridged and self._bridge_client == "desktop":
+            schedule_worktree_branch_rename(
+                thread_id=self._thread_id,
+                backend=sandbox_backend,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+            )
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -1312,9 +1340,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+                prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
+                local_checkout_client=self._bridge_client or "cli",
                 recent_thread_context=recent_thread_context,
             ),
         }
@@ -1386,9 +1416,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
+    async with aphase(thread_id, "factory.bridged_thread"):
+        bridge_client = await _bridge_client(thread_id)
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
+        )
+        # Bridged threads and deployments without a tools endpoint have no way to
+        # reach sandbox-only tools, so they keep every tool direct.
+        prefer_tools_in_sandbox = (
+            not local_run
+            and bridge_client is None
+            and tools_endpoint_configured()
+            and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1575,6 +1615,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        PREFER_TOOLS_IN_SANDBOX_KEY: prefer_tools_in_sandbox,
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1631,11 +1672,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         tool_access = await resolve_access(cfg, login=profile_login)
 
     stop_summary_mode = cfg.stop_summary is True
-    async with aphase(thread_id, "factory.bridged_thread"):
-        cli_result_required = (
-            not local_run and not stop_summary_mode and await _bridged_thread(thread_id)
-        )
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
+    cli_result_required = not stop_summary_mode and bridge_client == "cli"
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run and credential_scope_known:
@@ -1777,6 +1815,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
+    if prefer_tools_in_sandbox:
+        static_tools = [
+            tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
+        ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
@@ -1787,6 +1829,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    sandbox_only_tools = (
+        frozenset(SANDBOX_ONLY_TOOLS)
+        if prefer_tools_in_sandbox and not stop_summary_mode
+        else frozenset()
+    )
+    excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
@@ -1808,6 +1856,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+            model_visible=not prefer_tools_in_sandbox,
         )
         if candidate.has_groups:
             dynamic_tool_middleware = candidate
@@ -1951,7 +2000,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[tool for tool in static_tools if tool is not save_user_settings],
+                    tools=[
+                        tool
+                        for tool in static_tools
+                        if tool is not save_user_settings
+                        and _registered_tool_name(tool) not in sandbox_only_tools
+                    ],
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -2001,6 +2055,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),
+                        bridge_client=bridge_client,
+                        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
                     ),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),

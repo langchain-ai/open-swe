@@ -84,6 +84,8 @@ class SandboxCreateConfig:
         workspace, preserve_memory = await asyncio.gather(
             workspace_for_source(), cls._owner_preserves_memory(owner_login)
         )
+        if workspace is not None and workspace.inherit_default_sandbox:
+            workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
         if preserve_memory:
             create_params = {**create_params, "preserve_memory_on_stop": True}

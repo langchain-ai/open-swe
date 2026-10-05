@@ -6,6 +6,7 @@ import { ActAsApprovalPreference } from "@/features/settings/components/ActAsApp
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { BackgroundCallbacksPreference } from "@/features/settings/components/BackgroundCallbacksPreference"
 import { HumanReviewPreference } from "@/features/settings/components/HumanReviewPreference"
+import { PreferToolsInSandboxPreference } from "@/features/settings/components/PreferToolsInSandboxPreference"
 import { SandboxMemoryPreference } from "@/features/settings/components/SandboxMemoryPreference"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -38,6 +39,7 @@ function FeatureFlagsPage() {
         <AssistantUiPreference />
         <BackgroundCallbacksPreference />
         <SandboxMemoryPreference />
+        <PreferToolsInSandboxPreference />
         <HumanReviewPreference />
         <ActAsApprovalPreference />
       </SettingsSection>
