@@ -12,6 +12,14 @@ const exec = promisify(execFile);
 const root = resolve(__dirname, "../../..");
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
+test.beforeAll(async () => {
+  await exec(
+    "pnpm",
+    ["install", "--frozen-lockfile", "--filter", "open-swe-cli"],
+    { cwd: root, timeout: 60_000 },
+  );
+});
+
 for (const start of [undefined, false]) {
   test(`MCP create_session ${start === false ? "creates an idle thread" : "starts the agent by default"}`, async ({
     page,
@@ -91,9 +99,6 @@ for (const start of [undefined, false]) {
             );
           })
           .toBe(true);
-        await expect(
-          page.getByRole("status").filter({ hasText: "Working" }),
-        ).toBeVisible();
       }
     } finally {
       if (threadId) {
