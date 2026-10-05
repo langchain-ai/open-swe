@@ -262,7 +262,6 @@ from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOO
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.tools.task_threads import (
     assess_task,
-    configure_task,
     control_worker,
     message_task_thread,
     spawn_worker,
@@ -1742,7 +1741,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
-        configure_task,
         spawn_worker,
         task_status,
         message_task_thread,

@@ -149,16 +149,11 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
 ) -> None:
     from agent.tasks import service
 
-    task = await store.configure(
-        _COORDINATOR,
-        title="Repair login",
-        acceptance_criteria=["Login succeeds"],
-        workspace="default",
-    )
     await store.reserve_worker(
-        task.id,
         _COORDINATOR,
         _WORKER,
+        title="Repair login",
+        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",

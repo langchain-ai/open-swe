@@ -196,9 +196,8 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
-    configured = await service.configure_task(
-        actor, title="Fix login", acceptance_criteria=["Login succeeds"]
-    )
+    client.metadata[COORDINATOR]["title"] = "Fix login"
+    assert await store.load_context(COORDINATOR) is None
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     client.fail_after_accept = True
     result = await asyncio.wait_for(
@@ -213,6 +212,17 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     )
     assert result["success"] is False
     worker_id = str(result["worker_thread_id"])
+    context = await store.load_context(COORDINATOR)
+    assert context is not None
+    assert context.membership.role == "coordinator"
+    assert context.task.coordinator_thread_id == COORDINATOR
+    assert context.task.title == "Fix login"
+    assert context.task.acceptance_criteria == []
+    assert context.task.delegated is True
+    worker_context = await store.load_context(worker_id)
+    assert worker_context is not None
+    assert worker_context.task.id == context.task.id
+    assert worker_context.membership.role == "worker"
     assert client.created_runs[0]["status"] == "pending"
     assert (await store.get_delegation(worker_id)).launch_error
     retried = await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
@@ -224,6 +234,7 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
         request_id="stable-call",
     )
     assert retried["worker_thread_id"] == replayed["worker_thread_id"] == worker_id
+    assert retried["task_id"] == replayed["task_id"] == str(context.task.id)
     assert len(client.created_runs) == 1
     assert client.created_runs[0]["assistant_id"] == "agent"
     worker_config = client.created_runs[0]["config"]["configurable"]
@@ -231,7 +242,7 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert worker_config["agent_effort"] == "low"
     assert worker_config["model_selection"] == "explicit"
     assert "slack_thread" not in worker_config
-    assert len(await store.list_delegations(configured.id)) == 1
+    assert len(await store.list_delegations(context.task.id)) == 1
     assert client.metadata[worker_id]["sandbox_id"] == "shared-sandbox"
     assert client.metadata[worker_id]["github_token_repositories"] == ["langchain-ai/open-swe"]
     assert "source_context" not in client.metadata[worker_id]
@@ -248,11 +259,46 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
 
 
 @pytest.mark.usefixtures("registry_db")
+async def test_concurrent_first_spawns_and_replay_share_one_task(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    actor = service.Actor(COORDINATOR, OWNER)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    results = await asyncio.gather(
+        *(
+            service.spawn_worker(
+                actor, instructions="Implement", model=None, effort=None, request_id=request_id
+            )
+            for request_id in ("first", "second", "first")
+        )
+    )
+    assert all(result["success"] for result in results)
+    assert results[0]["worker_thread_id"] == results[2]["worker_thread_id"]
+    assert results[0]["worker_thread_id"] != results[1]["worker_thread_id"]
+    context = await store.load_context(COORDINATOR)
+    assert context is not None
+    assert {result["task_id"] for result in results} == {str(context.task.id)}
+    assert context.task.title == "Delegated work"
+    assert context.task.acceptance_criteria == []
+    assert len(await store.list_delegations(context.task.id)) == 2
+    assert len(client.created_runs) == 2
+    async with postgres.session() as session:
+        assert await session.scalar(select(func.count()).select_from(store.CoordinatedTask)) == 1
+        memberships = list(await session.scalars(select(store.TaskMembership)))
+    assert {member.thread_id for member in memberships if member.role == "coordinator"} == {
+        COORDINATOR
+    }
+    assert {member.thread_id for member in memberships if member.role == "worker"} == {
+        str(result["worker_thread_id"]) for result in results
+    }
+    assert {member.task_id for member in memberships} == {context.task.id}
+
+
+@pytest.mark.usefixtures("registry_db")
 async def test_cancel_discards_owed_assignment_without_reviving_worker(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
-    await service.configure_task(actor, title="Fix login", acceptance_criteria=["Login succeeds"])
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     result = await service.spawn_worker(
         actor, instructions="Implement", model=None, effort=None, request_id="call"
@@ -269,13 +315,31 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_assessment_covers_criteria_and_is_invalidated_by_task_edits(
-    client: MagicMock,
+async def test_assessment_records_criteria_and_rejects_stale_evidence(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
-    configured = await service.configure_task(
-        actor, title="Fix login", acceptance_criteria=["Login succeeds", "Regression passes"]
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    await service.spawn_worker(
+        actor, instructions="Implement login fix", model=None, effort=None, request_id="call"
     )
+    context = await store.load_context(COORDINATOR)
+    assert context is not None
+    with pytest.raises(ValueError, match="acceptance criteria"):
+        await service.assess_task(
+            actor, evidence=[], completed=True, revision=context.task.revision
+        )
+    criteria = ["Login succeeds", "Regression passes"]
+    configured = await service.assess_task(
+        actor,
+        acceptance_criteria=criteria,
+        evidence=[],
+        completed=False,
+        revision=context.task.revision,
+    )
+    assert configured.acceptance_criteria == criteria
+    assert configured.status == "active"
+    assert configured.assessment == []
     with pytest.raises(ValueError, match="each acceptance criterion"):
         await service.assess_task(
             actor, evidence=["works"], completed=True, revision=configured.revision
@@ -287,15 +351,26 @@ async def test_assessment_covers_criteria_and_is_invalidated_by_task_edits(
         revision=configured.revision,
     )
     assert completed.status == "completed"
-    revised = await service.configure_task(
+    assert completed.acceptance_criteria == criteria
+    revised = await service.assess_task(
         actor,
-        title="Fix login",
-        acceptance_criteria=["Login succeeds", "Regression passes", "No error on logout"],
+        acceptance_criteria=[*criteria, "No error on logout"],
+        evidence=[],
+        completed=False,
+        revision=completed.revision,
     )
     assert revised.status == "active"
     assert revised.assessment == []
     assert revised.id == completed.id
     with pytest.raises(ValueError, match="task changed"):
         await service.assess_task(
-            actor, evidence=["done", "done", "done"], completed=True, revision=completed.revision
+            actor,
+            acceptance_criteria=["Outdated criterion"],
+            evidence=["done"],
+            completed=True,
+            revision=completed.revision,
         )
+    current = await store.load_context(COORDINATOR)
+    assert current is not None
+    assert current.task.acceptance_criteria == [*criteria, "No error on logout"]
+    assert current.task.status == "active"

@@ -21,8 +21,8 @@ def upgrade() -> None:
             delegated boolean NOT NULL DEFAULT false,
             revision integer NOT NULL DEFAULT 1,
             UNIQUE (id, coordinator_thread_id),
-            CHECK (jsonb_typeof(acceptance_criteria) = 'array'
-                   AND jsonb_array_length(acceptance_criteria) > 0)
+            CHECK (jsonb_typeof(acceptance_criteria) = 'array'),
+            CHECK (status <> 'completed' OR jsonb_array_length(acceptance_criteria) > 0)
         )
     """)
     op.execute("""

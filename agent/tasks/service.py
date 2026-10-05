@@ -62,7 +62,7 @@ async def authorized_context(actor: Actor, *, coordinator: bool = False) -> stor
     metadata = await authorized_metadata(actor)
     context = await store.load_context(actor.thread_id)
     if context is None:
-        raise ValueError("Configure a task first")
+        raise ValueError("No task exists yet; spawn_worker creates it on first delegation")
     workspace = metadata.get("workspace") or metadata.get("environment")
     if workspace and workspace != context.task.workspace:
         raise PermissionError("The thread no longer belongs to the task's workspace")
@@ -74,35 +74,13 @@ async def authorized_context(actor: Actor, *, coordinator: bool = False) -> stor
     return context
 
 
-async def configure_task(
-    actor: Actor, *, title: str, acceptance_criteria: list[str]
-) -> store.CoordinatedTask:
-    metadata = await authorized_metadata(actor)
-    if metadata.get(SANDBOX_HOST_THREAD_KEY):
-        raise PermissionError("Sandbox guest threads cannot configure independent tasks")
-    existing = await store.load_context(actor.thread_id)
-    if existing is not None:
-        await authorized_context(actor, coordinator=True)
-    workspace_value = metadata.get("workspace") or metadata.get("environment")
-    workspace = await resolve_workspace(
-        thread_workspace=workspace_value if isinstance(workspace_value, str) else None,
-        login=actor.login,
-    )
-    return await store.configure(
-        actor.thread_id,
-        title=title,
-        acceptance_criteria=acceptance_criteria,
-        workspace=workspace.slug,
-    )
-
-
 async def model_choice(
-    task: store.CoordinatedTask,
+    workspace: str,
     metadata: Mapping[str, object],
     model: str | None,
     effort: str | None,
 ) -> tuple[str, str]:
-    settings = await get_workspace_settings(task.workspace)
+    settings = await get_workspace_settings(workspace)
     choices = available_requested_models(fable_enabled=settings.fable_enabled)
     default_model, default_effort = settings.default_model("agent")
     inherited_model = metadata.get("resolved_model")
@@ -334,23 +312,40 @@ async def spawn_worker(
         raise ValueError("Assignment instructions and a stable tool-call identity are required")
     if not COMPLETION_WEBHOOK_URL:
         raise ValueError("Worker delegation requires a configured completion webhook")
-    context = await authorized_context(actor, coordinator=True)
-    if context.task.status != "active":
-        raise ValueError("Reconfigure the completed task before assigning more work")
     metadata = await authorized_metadata(actor)
+    context = await store.load_context(actor.thread_id)
+    if context is not None:
+        context = await authorized_context(actor, coordinator=True)
+        if context.task.status != "active":
+            raise ValueError("Reopen the task with assess_task before assigning more work")
+    if metadata.get(SANDBOX_HOST_THREAD_KEY):
+        raise PermissionError("Sandbox guests must ask their coordinator for additional workers")
     if not metadata.get("sandbox_id"):
         raise ValueError("The coordinator needs an attached sandbox before delegation")
-    chosen_model, chosen_effort = await model_choice(context.task, metadata, model, effort)
+    workspace_value = metadata.get("workspace") or metadata.get("environment")
+    workspace = await resolve_workspace(
+        thread_workspace=(
+            context.task.workspace
+            if context is not None
+            else workspace_value
+            if isinstance(workspace_value, str)
+            else None
+        ),
+        login=actor.login,
+    )
+    chosen_model, chosen_effort = await model_choice(workspace.slug, metadata, model, effort)
+    title = metadata.get("title")
     worker_id = str(uuid5(NAMESPACE_URL, f"open-swe:task-worker:{actor.thread_id}:{request_id}"))
-    delegation = await store.reserve_worker(
-        context.task.id,
+    task, delegation = await store.reserve_worker(
         actor.thread_id,
         worker_id,
+        title=title.strip() if isinstance(title, str) and title.strip() else "Delegated work",
+        workspace=workspace.slug,
         instructions=instructions.strip(),
         model=chosen_model,
         effort=chosen_effort,
     )
-    return await dispatch_reserved_worker(actor, context.task, delegation)
+    return await dispatch_reserved_worker(actor, task, delegation)
 
 
 async def worker_status(delegation: store.TaskDelegation) -> dict[str, object]:
@@ -418,7 +413,7 @@ async def message_task_thread(
             raise ValueError("Choose an explicit worker_thread_id")
         await owned_worker(actor, worker_thread_id)
         if context.task.status != "active":
-            raise ValueError("Reconfigure the completed task before assigning more work")
+            raise ValueError("Reopen the task with assess_task before assigning more work")
         recipient = worker_thread_id
     else:
         if worker_thread_id is not None:
@@ -502,7 +497,12 @@ async def control_worker(
 
 
 async def assess_task(
-    actor: Actor, *, evidence: list[str], completed: bool, revision: int
+    actor: Actor,
+    *,
+    evidence: list[str],
+    completed: bool,
+    revision: int,
+    acceptance_criteria: list[str] | None = None,
 ) -> store.CoordinatedTask:
     context = await authorized_context(actor, coordinator=True)
     return await store.assess(
@@ -511,4 +511,5 @@ async def assess_task(
         revision=revision,
         evidence=evidence,
         completed=completed,
+        acceptance_criteria=acceptance_criteria,
     )
