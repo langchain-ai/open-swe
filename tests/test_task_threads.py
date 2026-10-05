@@ -23,7 +23,6 @@ def task() -> store.CoordinatedTask:
     return store.CoordinatedTask(
         coordinator_thread_id=COORDINATOR,
         title="Fix login",
-        acceptance_criteria=["Login succeeds", "Regression check passes"],
         workspace="default",
     )
 
@@ -217,7 +216,6 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert context.membership.role == "coordinator"
     assert context.task.coordinator_thread_id == COORDINATOR
     assert context.task.title == "Fix login"
-    assert context.task.acceptance_criteria == []
     assert context.task.delegated is True
     worker_context = await store.load_context(worker_id)
     assert worker_context is not None
@@ -246,7 +244,6 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert client.metadata[worker_id]["sandbox_id"] == "shared-sandbox"
     assert client.metadata[worker_id]["github_token_repositories"] == ["langchain-ai/open-swe"]
     assert "source_context" not in client.metadata[worker_id]
-    assert (await store.load_context(COORDINATOR)).task.status == "active"
     async with postgres.session() as session:
         assert (
             await session.scalar(
@@ -279,7 +276,6 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
     assert context is not None
     assert {result["task_id"] for result in results} == {str(context.task.id)}
     assert context.task.title == "Delegated work"
-    assert context.task.acceptance_criteria == []
     assert len(await store.list_delegations(context.task.id)) == 2
     assert len(client.created_runs) == 2
     async with postgres.session() as session:
@@ -315,62 +311,52 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_assessment_records_criteria_and_rejects_stale_evidence(
+async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
-    await service.spawn_worker(
-        actor, instructions="Implement login fix", model=None, effort=None, request_id="call"
+    first = await service.spawn_worker(
+        actor, instructions="Implement login fix", model=None, effort=None, request_id="first"
     )
-    context = await store.load_context(COORDINATOR)
+    worker_id = str(first["worker_thread_id"])
+    initial_messages = EventMatch.messages(await EventMatch.owed(worker_id, []))
+    client.threads.get_state.return_value = {"values": {"messages": initial_messages}}
+    client.created_runs[0]["status"] = "success"
+    client.statuses[worker_id] = "idle"
+
+    status = await service.task_status(actor)
+    workers = status["workers"]
+    assert isinstance(workers, list)
+    (worker,) = workers
+    assert status["task_id"] == first["task_id"]
+    assert worker["worker_thread_id"] == worker_id
+    assert worker["status"] == "idle"
+    assert worker["latest_run"]["status"] == "success"
+
+    sent = await service.message_task_thread(
+        actor,
+        message="Check logout too",
+        worker_thread_id=worker_id,
+        request_id="follow-up",
+    )
+    assert sent["success"] is True
+    assert sent["recipient_thread_id"] == worker_id
+    (follow_up,) = await EventMatch.owed(worker_id, initial_messages)
+    assert "Check logout too" in follow_up.content
+    assert len(client.created_runs) == 2
+    assert client.created_runs[-1]["thread_id"] == worker_id
+    assert client.created_runs[-1]["status"] == "pending"
+
+    sibling = await service.spawn_worker(
+        actor, instructions="Review login fix", model=None, effort=None, request_id="sibling"
+    )
+    assert sibling["success"] is True
+    assert sibling["task_id"] == first["task_id"]
+    assert sibling["worker_thread_id"] != worker_id
+    assert len(client.created_runs) == 3
+    context = await store.load_context(worker_id)
     assert context is not None
-    with pytest.raises(ValueError, match="acceptance criteria"):
-        await service.assess_task(
-            actor, evidence=[], completed=True, revision=context.task.revision
-        )
-    criteria = ["Login succeeds", "Regression passes"]
-    configured = await service.assess_task(
-        actor,
-        acceptance_criteria=criteria,
-        evidence=[],
-        completed=False,
-        revision=context.task.revision,
-    )
-    assert configured.acceptance_criteria == criteria
-    assert configured.status == "active"
-    assert configured.assessment == []
-    with pytest.raises(ValueError, match="each acceptance criterion"):
-        await service.assess_task(
-            actor, evidence=["works"], completed=True, revision=configured.revision
-        )
-    completed = await service.assess_task(
-        actor,
-        evidence=["Fixed in commit abc", "Focused test passes"],
-        completed=True,
-        revision=configured.revision,
-    )
-    assert completed.status == "completed"
-    assert completed.acceptance_criteria == criteria
-    revised = await service.assess_task(
-        actor,
-        acceptance_criteria=[*criteria, "No error on logout"],
-        evidence=[],
-        completed=False,
-        revision=completed.revision,
-    )
-    assert revised.status == "active"
-    assert revised.assessment == []
-    assert revised.id == completed.id
-    with pytest.raises(ValueError, match="task changed"):
-        await service.assess_task(
-            actor,
-            acceptance_criteria=["Outdated criterion"],
-            evidence=["done"],
-            completed=True,
-            revision=completed.revision,
-        )
-    current = await store.load_context(COORDINATOR)
-    assert current is not None
-    assert current.task.acceptance_criteria == [*criteria, "No error on logout"]
-    assert current.task.status == "active"
+    assert str(context.task.id) == first["task_id"]
+    assert context.membership.role == "worker"
+    assert len(await store.list_delegations(context.task.id)) == 2

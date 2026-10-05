@@ -261,7 +261,6 @@ from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.tools.task_threads import (
-    assess_task,
     control_worker,
     message_task_thread,
     spawn_worker,
@@ -1745,7 +1744,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         task_status,
         message_task_thread,
         control_worker,
-        assess_task,
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
