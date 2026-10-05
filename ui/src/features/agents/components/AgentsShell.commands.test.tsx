@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest"
 
 import { AgentsShell } from "./AgentsSidebar"
 import { AppCommandProvider, useAppCommand } from "@/lib/appCommands"
+import type { SessionUser } from "@/lib/api"
 
 // Every mocked hook must return a stable reference, the way the real hooks do.
 // A factory that rebuilds its result each render reintroduces the very churn
@@ -93,12 +94,12 @@ vi.mock("@/features/agents/lib/useRunCompletionNotifier", () => ({
   useRunCompletionNotifier: () => {},
 }))
 
-vi.mock("@/features/agents/lib/desktopLocal", async (actual) => ({
+vi.mock("@/features/agents/lib/legacyLocal", async (actual) => ({
   ...((await actual()) as object),
-  useDesktopLocalThreads: () => stub.localThreads,
-  useLocalThreadActivity: () => stub.activity,
-  useRefreshLocalThreads: () => stub.noop,
-  useMarkLocalThreadViewed: () => stub.noop,
+  useLegacyLocalThreads: () => stub.localThreads,
+  useLegacyLocalActivity: () => stub.activity,
+  useRefreshLegacyLocalThreads: () => stub.noop,
+  useMarkLegacyLocalThreadViewed: () => stub.noop,
 }))
 
 vi.mock("@/features/agents/lib/desktopProjects", () => ({
@@ -118,6 +119,12 @@ afterEach(() => cleanup())
 // the run rather than fail it. The probe re-renders on every change to the
 // command list, so it aborts the loop itself once the count is clearly wrong.
 const RENDER_BUDGET = 25
+const USER: SessionUser = {
+  login: "alice",
+  email: null,
+  avatar_url: null,
+  is_admin: false,
+}
 let probeRenders = 0
 function Probe() {
   useAppCommand("archive-thread")
@@ -135,7 +142,7 @@ it("registers the active thread's commands once and then stops", async () => {
   render(
     <QueryClientProvider client={client}>
       <AppCommandProvider>
-        <AgentsShell user={null} activeThreadId="thread-1">
+        <AgentsShell user={USER} activeThreadId="thread-1">
           <Probe />
         </AgentsShell>
       </AppCommandProvider>

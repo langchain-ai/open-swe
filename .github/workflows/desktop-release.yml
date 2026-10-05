@@ -178,6 +178,9 @@ jobs:
           fi
 
           test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
+          # "This Mac" threads are served by the bridge client the main process requires.
+          pnpm dlx @electron/asar list "${apps[0]}/Contents/Resources/app.asar" \
+            | grep -q '/node_modules/open-swe-bridge-client/dist/index.js'
           test "$("${apps[0]}/Contents/Resources/bin/oswe" --version)" = "$VERSION"
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"
