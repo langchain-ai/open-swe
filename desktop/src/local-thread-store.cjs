@@ -2,14 +2,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const MUTABLE_FIELDS = new Set([
-  "title",
-  "modelId",
-  "effort",
-  "viewed",
-  "archived",
-]);
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/**
+ * What this Mac knows about its "This Mac" threads that the backend does not:
+ * which checkout each one works in, the worktrees the app made for it, the
+ * diff baseline, and the bridge that lets the cloud agent reach it.
+ *
+ * Everything else about a thread — its title, transcript, read state — is the
+ * backend's, as for any cloud thread. Ids are the cloud thread ids.
+ */
+
+const BRIDGE_ID = /^[0-9a-f]{32}$/;
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -17,49 +19,6 @@ function isRecord(value) {
 
 function stringOrNull(value, maximum = 512) {
   return typeof value === "string" && value.length <= maximum ? value : null;
-}
-
-function cleanImages(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(
-      (image) =>
-        isRecord(image) &&
-        typeof image.base64 === "string" &&
-        image.base64.length <= 20_000_000 &&
-        typeof image.mimeType === "string" &&
-        image.mimeType.length <= 200,
-    )
-    .map((image) => ({
-      kind: typeof image.kind === "string" ? image.kind : "image",
-      base64: image.base64,
-      mimeType: image.mimeType,
-      ...(typeof image.fileName === "string"
-        ? { fileName: image.fileName }
-        : {}),
-    }));
-}
-
-function cleanSkills(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(
-      (skill) =>
-        isRecord(skill) &&
-        typeof skill.name === "string" &&
-        skill.name.length <= 64 &&
-        SKILL_NAME.test(skill.name) &&
-        typeof skill.description === "string" &&
-        skill.description.trim() &&
-        skill.description.length <= 1_024 &&
-        typeof skill.instructions === "string" &&
-        skill.instructions.length <= 20_000,
-    )
-    .map(({ name, description, instructions }) => ({
-      name,
-      description: description.trim(),
-      instructions,
-    }));
 }
 
 function cleanPaths(value) {
@@ -75,6 +34,10 @@ function cleanPaths(value) {
   return [...new Set(paths)];
 }
 
+function cleanBridgeId(value) {
+  return typeof value === "string" && BRIDGE_ID.test(value) ? value : null;
+}
+
 function normalizeThread(value) {
   if (
     !isRecord(value) ||
@@ -82,7 +45,6 @@ function normalizeThread(value) {
     !value.id ||
     typeof value.cwd !== "string" ||
     !path.isAbsolute(value.cwd) ||
-    typeof value.title !== "string" ||
     !Number.isFinite(value.createdAt) ||
     !Number.isFinite(value.updatedAt)
   ) {
@@ -95,13 +57,6 @@ function normalizeThread(value) {
         branch: stringOrNull(value.checkpoint.branch, 1_024),
       }
     : { repo: null, ref: null, branch: null };
-  const pending = isRecord(value.pending)
-    ? {
-        prompt: stringOrNull(value.pending.prompt, 2_000_000) || "",
-        images: cleanImages(value.pending.images),
-        skills: cleanSkills(value.pending.skills),
-      }
-    : null;
   const worktreePath = stringOrNull(value.worktreePath, 8_192);
   return {
     id: value.id,
@@ -110,22 +65,11 @@ function normalizeThread(value) {
       worktreePath && path.isAbsolute(worktreePath)
         ? path.normalize(worktreePath)
         : null,
-    // Threads written before ownership was tracked only ever ran in a worktree
-    // this app created for them.
-    ownedWorktrees: cleanPaths(
-      value.ownedWorktrees === undefined
-        ? [worktreePath]
-        : value.ownedWorktrees,
-    ),
-    title: value.title.slice(0, 80) || "New local agent",
-    modelId: stringOrNull(value.modelId),
-    effort: stringOrNull(value.effort),
-    viewed: value.viewed !== false,
-    archived: value.archived === true,
+    ownedWorktrees: cleanPaths(value.ownedWorktrees),
+    bridgeId: cleanBridgeId(value.bridgeId),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     checkpoint,
-    pending,
   };
 }
 
@@ -144,17 +88,11 @@ function atomicWrite(filePath, value, fileSystem = fs) {
   }
 }
 
-function sessionTitle(text) {
-  const value = text.trim().replace(/\s+/g, " ");
-  return value.slice(0, 80) || "New local agent";
-}
-
 class LocalThreadStore {
   constructor(filePath, options = {}) {
     this.filePath = filePath;
     this.fs = options.fs || fs;
     this.now = options.now || Date.now;
-    this.uuid = options.uuid || randomUUID;
     this.threads = new Map();
     this.load();
   }
@@ -164,7 +102,10 @@ class LocalThreadStore {
     try {
       const parsed = JSON.parse(this.fs.readFileSync(this.filePath, "utf8"));
       values = Array.isArray(parsed) ? parsed : [];
-    } catch {}
+    } catch (error) {
+      if (error?.code !== "ENOENT")
+        console.warn("Could not read the local thread store", error);
+    }
     for (const value of values) {
       const thread = normalizeThread(value);
       if (thread) this.threads.set(thread.id, thread);
@@ -189,65 +130,31 @@ class LocalThreadStore {
     return thread ? structuredClone(thread) : null;
   }
 
-  create(input) {
+  /** Record a thread the renderer is about to create in the cloud under `id`. */
+  create({ id, cwd }) {
+    if (typeof id !== "string" || !id || this.threads.has(id))
+      throw new Error("Invalid local thread id");
     const now = this.now();
-    const prompt = typeof input.prompt === "string" ? input.prompt : "";
-    const thread = {
-      id: this.uuid(),
-      cwd: input.cwd,
+    this.threads.set(id, {
+      id,
+      cwd,
       worktreePath: null,
       ownedWorktrees: [],
-      title: sessionTitle(prompt),
-      modelId: stringOrNull(input.modelId),
-      effort: stringOrNull(input.effort),
-      viewed: true,
-      archived: false,
+      bridgeId: null,
       createdAt: now,
       updatedAt: now,
       checkpoint: { repo: null, ref: null, branch: null },
-      pending: {
-        prompt,
-        images: cleanImages(input.images),
-        skills: cleanSkills(input.skills),
-      },
-    };
-    this.threads.set(thread.id, thread);
+    });
     this.persist();
-    return this.get(thread.id);
+    return this.get(id);
   }
 
-  update(id, patch) {
+  setBridge(id, bridgeId) {
     const current = this.threads.get(id);
     if (!current) return null;
-    if (!isRecord(patch)) throw new Error("Invalid local thread update");
-    for (const key of Object.keys(patch)) {
-      if (!MUTABLE_FIELDS.has(key))
-        throw new Error(`Cannot update local thread field: ${key}`);
-    }
-    const next = { ...current };
-    if ("title" in patch) {
-      if (typeof patch.title !== "string" || !patch.title.trim())
-        throw new Error("Invalid title");
-      next.title = patch.title.trim().slice(0, 80);
-    }
-    if ("modelId" in patch) next.modelId = stringOrNull(patch.modelId);
-    if ("effort" in patch) next.effort = stringOrNull(patch.effort);
-    if ("viewed" in patch) {
-      if (typeof patch.viewed !== "boolean")
-        throw new Error("Invalid viewed state");
-      next.viewed = patch.viewed;
-    }
-    if ("archived" in patch) {
-      if (typeof patch.archived !== "boolean")
-        throw new Error("Invalid archived state");
-      next.archived = patch.archived;
-    }
-    // Neither reading nor archiving is an edit, so neither reorders the list.
-    if (
-      Object.keys(patch).some((key) => key !== "viewed" && key !== "archived")
-    )
-      next.updatedAt = this.now();
-    this.threads.set(id, next);
+    const next = cleanBridgeId(bridgeId);
+    if (!next) throw new Error("Invalid bridge id");
+    this.threads.set(id, { ...current, bridgeId: next, updatedAt: this.now() });
     this.persist();
     return this.get(id);
   }
@@ -296,19 +203,6 @@ class LocalThreadStore {
     return this.get(id);
   }
 
-  pendingPrompt(id) {
-    const pending = this.threads.get(id)?.pending;
-    return pending ? structuredClone(pending) : null;
-  }
-
-  clearPrompt(id) {
-    const current = this.threads.get(id);
-    if (!current?.pending) return null;
-    this.threads.set(id, { ...current, pending: null, updatedAt: this.now() });
-    this.persist();
-    return this.get(id);
-  }
-
   delete(id) {
     const current = this.threads.get(id);
     if (!current) return null;
@@ -318,4 +212,4 @@ class LocalThreadStore {
   }
 }
 
-module.exports = { LocalThreadStore, atomicWrite, sessionTitle };
+module.exports = { LocalThreadStore, atomicWrite };

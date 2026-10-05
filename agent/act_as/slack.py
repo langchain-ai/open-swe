@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.prompts import prompt
 from agent.slack.blocks import Block, actions, block_payload, button, context, section
+from agent.slack.cards import origin_footer
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
@@ -99,7 +100,7 @@ async def handle_button(
             channel_id, user_id, "You already answered this request; the first answer stands."
         )
         return ignored("act-as request already answered")
-    background_tasks.add_task(_close_card, interaction, _LABELS[action])
+    background_tasks.add_task(_close_card, interaction, _LABELS[action], button.thread_id)
     await note_for_concierge(
         user_id,
         channel_id,
@@ -142,13 +143,19 @@ async def _wake_thread(thread_id: str, login: str, approved: bool) -> None:
         )
 
 
-async def _close_card(interaction: SlackInteraction, label: str) -> None:
+async def _close_card(interaction: SlackInteraction, label: str, thread_id: str) -> None:
     text = interaction.message.text or label
     ok, error = await update_slack_message(
         interaction.channel_id,
         interaction.message_ts,
         text,
-        blocks=block_payload([section(text), context(label)]),
+        blocks=block_payload(
+            [
+                section(text),
+                context(label),
+                *await origin_footer(thread_id),
+            ]
+        ),
     )
     if not ok:
         logger.warning(

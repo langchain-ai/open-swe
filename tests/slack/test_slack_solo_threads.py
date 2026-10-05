@@ -132,6 +132,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
 
 
 async def test_mention_arms_owner_followups_but_not_other_threads(harness: _Harness) -> None:
+    assert (await harness.send("@openswe help"))["status"] == "ignored"
     assert (await harness.send("before a mention"))["status"] == "ignored"
     assert (await harness.send("<@BOT> fix this"))["status"] == "accepted"
     assert (await harness.send("still wrong", subtype="file_share"))["status"] == "accepted"
@@ -146,7 +147,7 @@ async def test_mention_arms_owner_followups_but_not_other_threads(harness: _Harn
 async def test_second_human_permanently_disarms_even_after_another_mention(
     harness: _Harness,
 ) -> None:
-    await harness.send("@openswe help")
+    assert (await harness.send("<@BOT> help"))["status"] == "accepted"
     assert (await harness.send("I have thoughts", user="U2"))["status"] == "ignored"
     harness.history = [message for message in harness.history if message.get("user") != "U2"]
     assert (await harness.send("<@BOT> continue"))["status"] == "accepted"

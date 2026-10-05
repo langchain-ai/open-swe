@@ -245,8 +245,8 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
+  pr_review_links?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -270,8 +270,8 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
+  pr_review_links?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -373,6 +373,13 @@ export interface MCPConnectionUpdate {
   allowed_tools: string[]
   headers?: Record<string, string> | null
   oauth?: MCPOAuthUpdate | null
+}
+
+export interface LangSmithConnectionStatus {
+  available: boolean
+  connected: boolean
+  email?: string | null
+  updated_at?: string | null
 }
 
 export interface NotionCredentialStatus {
@@ -728,6 +735,7 @@ export interface WorkspaceOptionList {
 
 /** Body for `POST /workspaces`; `name` is the only required field. */
 export interface WorkspaceCreate {
+  inherit_default_sandbox?: boolean
   name: string
   prompt?: string
   repos?: Array<string>
@@ -747,6 +755,7 @@ export type JsonValue =
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
@@ -768,6 +777,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   slug: string
   name: string
@@ -1646,6 +1656,12 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  getMyLangSmithStatus: () =>
+    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
+  disconnectLangSmith: () =>
+    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -1943,6 +1959,12 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
+/** Starts Sign in with LangSmith, returning to `redirectTo` afterwards. */
+export function connectLangSmith(redirectTo: string) {
+  const query = new URLSearchParams({ redirect_to: redirectTo })
+  window.location.assign(`${API_BASE}/dashboard/api/langsmith/login?${query}`)
+}
+
 export function connectService(
   provider: "slack" | "notion",
   redirectTo?: string,

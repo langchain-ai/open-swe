@@ -10,7 +10,7 @@ import {
   stringArrayAt,
   stringAt,
   type JsonObject,
-} from "./json.ts"
+} from "./json"
 
 export const DEFAULT_TIMEOUT_SECONDS = 300
 export const OUTPUT_LIMIT_BYTES = 1024 * 1024
@@ -103,7 +103,7 @@ export class OutputWindow {
     }
     const omitted = this.total - OUTPUT_KEEP_BYTES * 2
     return {
-      output: `${decoder.decode(head)}\n[oswe: omitted ${omitted} bytes of output]\n${decoder.decode(tail.subarray(tail.byteLength - OUTPUT_KEEP_BYTES))}`,
+      output: `${decoder.decode(head)}\n[omitted ${omitted} bytes of output]\n${decoder.decode(tail.subarray(tail.byteLength - OUTPUT_KEEP_BYTES))}`,
       truncated: true,
     }
   }
@@ -147,12 +147,34 @@ function fileError(cause: unknown, missing: string): string {
   }
 }
 
+export interface LocalExecutorOptions {
+  /**
+   * The environment commands start from, before secrets are stripped. The
+   * desktop app passes the user's login-shell environment: an app launched from
+   * the Dock inherits neither their PATH nor anything their shell profile sets.
+   */
+  env?: Record<string, string | undefined>
+}
+
 /**
  * Runs the remote agent's sandbox requests against the local checkout. Paths
- * are unconfined, matching the desktop app's local mode.
+ * are unconfined: the agent already has a shell on this machine.
  */
 export class LocalExecutor {
-  constructor(private readonly root: string) {}
+  private readonly env: Record<string, string>
+  private readonly running = new Set<() => void>()
+
+  /** `root` may be a getter: a desktop thread can move between worktrees. */
+  constructor(
+    private readonly root: string | (() => string),
+    options: LocalExecutorOptions = {}
+  ) {
+    this.env = commandEnvironment(options.env)
+  }
+
+  private get cwd(): string {
+    return typeof this.root === "string" ? this.root : this.root()
+  }
 
   async dispatch(
     method: string,
@@ -195,9 +217,9 @@ export class LocalExecutor {
     // Detached puts the shell in its own process group, so a timeout can signal
     // everything it spawned; killing only `sh` leaves children holding the pipes.
     const proc = spawn("sh", ["-c", command], {
-      cwd: this.root,
+      cwd: this.cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: commandEnvironment(),
+      env: this.env,
       detached: true,
     })
     const signalGroup = (signal: NodeJS.Signals): void => {
@@ -211,11 +233,20 @@ export class LocalExecutor {
 
     const captured = new OutputWindow()
     let timedOut = false
+    let stopped = false
     let escalation: ReturnType<typeof setTimeout> | null = null
+    const terminate = () => {
+      signalGroup("SIGTERM")
+      escalation ??= setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
+    }
+    const stop = () => {
+      stopped = true
+      terminate()
+    }
+    this.running.add(stop)
     const deadline = setTimeout(() => {
       timedOut = true
-      signalGroup("SIGTERM")
-      escalation = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
+      terminate()
     }, seconds * 1000)
     proc.stdout.on("data", (chunk: Buffer) => captured.push(chunk))
     proc.stderr.on("data", (chunk: Buffer) => captured.push(chunk))
@@ -227,19 +258,32 @@ export class LocalExecutor {
         proc.once("close", (code) => done(code))
       })
     } finally {
+      this.running.delete(stop)
       clearTimeout(deadline)
       if (escalation !== null) clearTimeout(escalation)
     }
 
     const { output, truncated } = captured.finish()
+    if (stopped) {
+      return {
+        output: `${output}\n[command stopped: this machine stopped serving the thread]`,
+        exit_code: TIMEOUT_EXIT_CODE,
+        truncated,
+      }
+    }
     if (timedOut) {
       return {
-        output: `${output}\n[oswe: command timed out after ${seconds}s]`,
+        output: `${output}\n[command timed out after ${seconds}s]`,
         exit_code: TIMEOUT_EXIT_CODE,
         truncated,
       }
     }
     return { output, exit_code: exitCode, truncated }
+  }
+
+  /** Terminate every running command; each resolves once its process group exits. */
+  stopAll(): void {
+    for (const stop of this.running) stop()
   }
 
   async uploadFiles(
@@ -295,7 +339,7 @@ export class LocalExecutor {
 
   private target(path: string): string | null {
     if (!path || path.includes("\0")) return null
-    return isAbsolute(path) ? normalize(path) : resolve(this.root, path)
+    return isAbsolute(path) ? normalize(path) : resolve(this.cwd, path)
   }
 }
 

@@ -29,6 +29,7 @@ from agent.slack.http import (
     slack_error_details,
     slack_retry_after,
 )
+from agent.slack.review_links import pr_review_links
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.thread_ids import slack_thread_id
 from agent.threads.creation import create_lock_thread
@@ -300,6 +301,49 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
+def _is_forwarded_attachment(attachment: Mapping[str, object]) -> bool:
+    return any(
+        attachment.get(flag) is True for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
+    )
+
+
+def _non_empty_strings(values: Iterable[object]) -> list[str]:
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+def _list_of_dicts(value: object) -> list[dict[str, object]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _slack_block_texts(blocks: object) -> list[str]:
+    """Text of Block Kit blocks, skipping action buttons."""
+    texts: list[str] = []
+    for block in _list_of_dicts(blocks):
+        if block.get("type") == "actions":
+            continue
+        items = [block.get("text"), *_list_of_dicts(block.get("fields"))]
+        items += _list_of_dicts(block.get("elements"))
+        texts += _non_empty_strings(item.get("text") for item in items if isinstance(item, dict))
+    return texts
+
+
+def _slack_attachment_texts(attachment: dict[str, object]) -> list[str]:
+    values = [attachment.get(key) for key in ("pretext", "title", "title_link", "text")]
+    for field in _list_of_dicts(attachment.get("fields")):
+        values += [field.get("title"), field.get("value")]
+    texts = _non_empty_strings(values) + _slack_block_texts(attachment.get("blocks"))
+    return texts or _non_empty_strings([attachment.get("fallback")])
+
+
+def _slack_card_text(message: Mapping[str, object]) -> str:
+    """Readable text of an app message built from blocks or attachments instead of ``text``."""
+    texts = _slack_block_texts(message.get("blocks"))
+    for attachment in _list_of_dicts(message.get("attachments")):
+        if not _is_forwarded_attachment(attachment):
+            texts += _slack_attachment_texts(attachment)
+    return "\n".join(texts)[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
+
+
 def _format_forwarded_slack_attachments(attachments: Any) -> str:
     forwarded: list[str] = []
     rendered_count = 0
@@ -320,11 +364,7 @@ def _format_forwarded_slack_attachments(attachments: Any) -> str:
             if not isinstance(attachment, dict):
                 continue
 
-            is_forwarded = any(
-                attachment.get(flag) is True
-                for flag in ("is_share", "is_msg_unfurl", "is_reply_unfurl")
-            )
-            if is_forwarded:
+            if _is_forwarded_attachment(attachment):
                 author = attachment.get("author_name")
                 author = author.strip() if isinstance(author, str) else ""
                 content = attachment.get("text")
@@ -394,7 +434,8 @@ def format_slack_messages_for_prompt(
                 bot_username=bot_username,
             ),
             user_names_by_id or {},
-        ).strip() or ("[forwarded message]" if forwarded else "[non-text message]")
+        ).strip() or _slack_card_text(message)
+        text = text or ("[forwarded message]" if forwarded else "[non-text message]")
         user_id = message.get("user")
         if is_own_slack_message(message, bot_user_id):
             author = f"@{bot_username or 'Open SWE'}(self)"
@@ -479,6 +520,7 @@ async def _post_slack_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
+    login: str | None = None,
 ) -> tuple[str | None, str | None]:
     if not SLACK_BOT_TOKEN:
         return None, "missing_slack_bot_token"
@@ -488,6 +530,7 @@ async def _post_slack_message_with_ts(
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
+    text, blocks = await pr_review_links(text, blocks, login=login)
 
     try:
         async with SlackClient.bot() as client:
@@ -792,6 +835,7 @@ async def post_slack_thread_reply_with_ts(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
+    login: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a reply in a Slack thread and return its Slack timestamp and error."""
     from agent.slack.code_channels import is_code_channel_session
@@ -809,6 +853,7 @@ async def post_slack_thread_reply_with_ts(
         unfurl_media=unfurl_media,
         blocks=blocks,
         reply_broadcast=reply_broadcast,
+        login=login,
     )
 
 
@@ -839,6 +884,7 @@ async def post_slack_top_level_message_with_ts(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    login: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Post a top-level Slack message and return its timestamp and error."""
     return await _post_slack_message_with_ts(
@@ -847,6 +893,7 @@ async def post_slack_top_level_message_with_ts(
         unfurl_links=unfurl_links,
         unfurl_media=unfurl_media,
         blocks=blocks,
+        login=login,
     )
 
 
@@ -958,11 +1005,13 @@ async def update_slack_message(
     unfurl_links: bool = True,
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
+    login: str | None = None,
 ) -> tuple[bool, str | None]:
     """Update a Slack message and return success plus any Slack error."""
     if not SLACK_BOT_TOKEN:
         return False, "missing_slack_bot_token"
 
+    text, blocks = await pr_review_links(text, blocks, login=login)
     try:
         async with SlackClient.bot() as client:
             await client.chat_update(
@@ -1176,6 +1225,7 @@ async def post_slack_ephemeral_message(
     if not SLACK_BOT_TOKEN:
         return False
 
+    text, blocks = await pr_review_links(text, blocks)
     try:
         async with SlackClient.bot() as client:
             await client.chat_postEphemeral(
@@ -1326,6 +1376,7 @@ async def replace_slack_command_message(
     agent_thread_id: str | None = None,
 ) -> bool:
     """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    text, blocks = await pr_review_links(text, blocks)
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",

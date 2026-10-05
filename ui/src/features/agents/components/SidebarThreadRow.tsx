@@ -40,7 +40,8 @@ import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
-import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
+import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useMarkLegacyLocalThreadViewed } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -288,8 +289,10 @@ export function SidebarThreadRow({
   const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLocalThreadViewed()
+  const markLocalViewed = useMarkLegacyLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
+  const worktreeThread =
+    useLocalThread(item.id) ?? (item.location === "local" ? item.thread : null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -354,7 +357,7 @@ export function SidebarThreadRow({
     setDeletingLocal(true)
     try {
       const deleted =
-        (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
+        (await window.openSweDesktop?.deleteLegacyLocalThread(item.id)) ?? false
       if (!deleted) throw new Error("Local Open SWE thread not found")
       onDeleteLocal(item.id)
       setDeleteOpen(false)
@@ -595,9 +598,9 @@ export function SidebarThreadRow({
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
         detail={
-          item.location !== "local"
+          !worktreeThread
             ? undefined
-            : item.thread.ownedWorktrees?.length
+            : worktreeThread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -688,9 +691,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const LocationIcon =
-    item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const onAMac = item.location === "local" || runsOnAMac(item.thread)
+  const LocationIcon = onAMac ? IoLaptopOutline : IoCloudOutline
+  const locationLabel = onAMac ? "This Mac" : "Cloud"
   const wakeupAt = pendingWakeupAt(item)
 
   return (
