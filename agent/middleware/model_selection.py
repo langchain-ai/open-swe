@@ -17,6 +17,7 @@ from agent.input_messages import input_message_text, message_sender_id
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
 from agent.utils.jev import select_jev_choice
+from agent.utils.run_metadata import tag_root_run_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,15 @@ Route = Literal["fast", "balanced", "performance"]
 SelectedRoute = Route | Literal["default"]
 PersistedRoute = SelectedRoute | Literal["fast_alt"]
 RoutingMode = Literal["auto", "fast"]
+
+#: Metadata key carrying the route on the ROOT run of a turn.
+ROUTE_METADATA_KEY = "open_swe_model_route"
+
+#: Only these values are ever written to run metadata. An allowlist rather than
+#: the raw value, so a malformed or unexpected route cannot reach telemetry.
+_TAGGABLE_ROUTES: frozenset[str] = frozenset(
+    {"fast", "balanced", "performance", "default", "fast_alt"}
+)
 
 
 def _latest_human_task(messages: Sequence[object]) -> str:
@@ -153,6 +163,16 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         route = await self.select_route(state)
         if self._routing_mode == "auto" or state.get("requested_model"):
             await _emit_routed_model(self._models, self._route_model_ids, route)
+        # Tag the ROOT run at DECISION time.
+        #
+        # The returned state update is what persists the route, but state is
+        # only visible to LATER turns: the root run's metadata is already fixed
+        # by the time this update lands. So a thread's first turn -- and
+        # therefore every single-turn thread -- had no route on its root run,
+        # which is most routed traffic. Tagging here closes that gap and makes
+        # the decision answerable from a single `is_root=true` query.
+        if route in _TAGGABLE_ROUTES:
+            tag_root_run_metadata({ROUTE_METADATA_KEY: route})
         return {"model_route": route}
 
     async def awrap_model_call(
