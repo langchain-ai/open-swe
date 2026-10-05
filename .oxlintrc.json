@@ -49,6 +49,7 @@
         "ui/src/features/agents/components/PlanView.tsx",
         "ui/src/features/agents/components/ThreadFeedbackCard.tsx",
         "ui/src/features/agents/lib/desktopLocal.ts",
+        "ui/src/features/agents/lib/legacyLocal.ts",
         "ui/src/features/agents/lib/prChecks.ts",
         "ui/src/features/agents/lib/queries.ts",
         "ui/src/features/assistant/AssistantProvider.tsx",
