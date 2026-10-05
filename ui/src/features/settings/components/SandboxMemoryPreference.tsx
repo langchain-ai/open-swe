@@ -18,7 +18,7 @@ export function SandboxMemoryPreference() {
         control={
           <Switch
             id="preserve-sandbox-memory"
-            checked={profile.data?.preserve_sandbox_memory ?? false}
+            checked={profile.data?.preserve_sandbox_memory ?? true}
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
