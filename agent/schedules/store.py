@@ -46,7 +46,7 @@ from agent.slack.client import (
 )
 from agent.slack.dm import note_for_concierge, open_dm
 from agent.source_context import SourceContext
-from agent.store import delete_value, now_iso, now_ms, search_all_values
+from agent.store import delete_value, get_value, now_iso, now_ms, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_thread
 from agent.users import User
@@ -1273,10 +1273,13 @@ async def _github_trigger_matches(
         )
     matches: list[tuple[dict[str, Any], GitHubEvent]] = []
     for record in records:
+        # Only this repository's triggers: another GitHub trigger on the same
+        # automation configures events for its own repository.
         configured = {
             event
             for trigger in record.get("triggers") or []
             if trigger.get("kind") == "github"
+            and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
             for event in (trigger.get("config") or {}).get("events") or []
         }
         fired = sorted(event for event in events if event in configured)
@@ -1393,6 +1396,13 @@ async def launch_scheduled_agent_run(
     """
     record = await get_agent_schedule(schedule_id)
     if not record:
+        if await get_value(SCHEDULES_NAMESPACE, schedule_id) is not None:
+            # Not imported from the Store yet; the import keeps this cron.
+            logger.warning(
+                "Scheduled automation is awaiting its Store import",
+                extra={"schedule_id": schedule_id},
+            )
+            return {"status": "pending_import", "schedule_id": schedule_id}
         await _delete_orphan_crons(schedule_id, keep=set())
         return {"status": "missing", "schedule_id": schedule_id}
     triggers = record.get("triggers") or []

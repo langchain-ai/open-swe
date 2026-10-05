@@ -293,6 +293,8 @@ async def test_each_trigger_runs_in_its_own_repository(
             triggers=[
                 ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/docs"),
                 GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.closed"]),
+                # Watches docs, but not for closed pull requests.
+                GitHubTrigger(repo="langchain-ai/docs", events=["issues.opened"]),
             ],
         ),
     )
@@ -640,6 +642,20 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
         if "source" in update["metadata"]
     )
     assert opening["workspace"] == "core"
+
+
+async def test_a_cron_firing_before_the_store_import_keeps_its_cron(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    record = _scheduled_record(cron_id="cron_1")
+    await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
+    await fake_client.crons.create("scheduler", metadata={"schedule_id": record["id"]})
+
+    tick = await schedules.launch_scheduled_agent_run(record["id"])
+
+    assert tick["status"] == "pending_import"
+    assert fake_client.crons.deleted == []
+    assert fake_client.runs.created == []
 
 
 async def test_the_startup_import_moves_store_automations_into_postgres(
