@@ -5,6 +5,7 @@ import re
 
 from sqlalchemy.exc import IntegrityError
 
+from agent.config import ENV
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import record_pull_request, settle
@@ -28,6 +29,8 @@ def linked_pull_request(text: str) -> GitHubPrRef | None:
 
 async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text: str) -> None:
     """Start watching the pull request ``text`` links, if the message qualifies."""
+    if ENV.OPENSWE_ENV.optional() == "preview":
+        return
     pr_ref = linked_pull_request(text)
     if pr_ref is None:
         return

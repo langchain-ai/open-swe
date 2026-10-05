@@ -23,6 +23,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from agent.config import ENV
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -578,6 +579,8 @@ async def settle(request: HumanReviewRequest) -> bool:
 
     ``False`` only when GitHub could not be read, so nothing is known to have changed.
     """
+    if ENV.OPENSWE_ENV.optional() == "preview" and request.kind == "posted":
+        return True
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
@@ -661,6 +664,8 @@ async def start_auto_assign(request: HumanReviewRequest, *, asked: bool = False)
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    if ENV.OPENSWE_ENV.optional() == "preview" and not asked:
+        return False
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
@@ -706,6 +711,10 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if ENV.OPENSWE_ENV.optional() == "preview" and (
+        request.kind == "posted" or step == "unclaimed"
+    ):
+        return {"status": "disabled_in_preview"}
     if step == "unclaimed":
         if request.reviewers:
             return {"status": "claimed"}
