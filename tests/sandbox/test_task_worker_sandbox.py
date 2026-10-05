@@ -13,7 +13,6 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     task = CoordinatedTask(
         coordinator_thread_id="coordinator",
         title="Fix login",
-        acceptance_criteria=["Login works"],
         workspace="default",
     )
     metadata: dict[str, dict[str, object]] = {

@@ -7,4 +7,4 @@ Worker thread: {% if worker_url %}[{{ worker_id }}]({{ worker_url }}){% else %}{
 
 {{ result }}
 
-This is the outcome of this invocation, not necessarily the worker's latest invocation. Worker completion does not complete the task. Evaluate the result against the task's acceptance criteria and explicitly assess task completion. Delegate any integration edits, fixes, or tests to a worker.
+This is the outcome of this invocation, not necessarily the worker's latest invocation. Evaluate the result against the user's request and any agreed acceptance criteria, explain remaining gaps, and tell the user when the work is done. A worker finishing is not proof that the request is satisfied. Delegate any integration edits, fixes, or tests to a worker.

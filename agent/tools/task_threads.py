@@ -63,28 +63,5 @@ async def control_worker(
     )
 
 
-async def assess_task(
-    evidence: list[str],
-    completed: bool,
-    revision: int,
-    state: Annotated[dict[str, object], InjectedState],
-    acceptance_criteria: list[str] | None = None,
-) -> dict[str, object]:
-    task = await service.assess_task(
-        await actor_from_state(state),
-        evidence=evidence,
-        completed=completed,
-        revision=revision,
-        acceptance_criteria=acceptance_criteria,
-    )
-    return service.task_details(task)
-
-
-for _tool in (
-    spawn_worker,
-    task_status,
-    message_task_thread,
-    control_worker,
-    assess_task,
-):
+for _tool in (spawn_worker, task_status, message_task_thread, control_worker):
     _tool.__doc__ = prompt(f"tasks/tool_{_tool.__name__}")

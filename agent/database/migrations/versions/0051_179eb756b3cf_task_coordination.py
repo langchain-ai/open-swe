@@ -14,15 +14,9 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             coordinator_thread_id text NOT NULL UNIQUE,
             title text NOT NULL,
-            acceptance_criteria jsonb NOT NULL,
             workspace text NOT NULL,
-            status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed')),
-            assessment jsonb NOT NULL DEFAULT '[]'::jsonb,
             delegated boolean NOT NULL DEFAULT false,
-            revision integer NOT NULL DEFAULT 1,
-            UNIQUE (id, coordinator_thread_id),
-            CHECK (jsonb_typeof(acceptance_criteria) = 'array'),
-            CHECK (status <> 'completed' OR jsonb_array_length(acceptance_criteria) > 0)
+            UNIQUE (id, coordinator_thread_id)
         )
     """)
     op.execute("""

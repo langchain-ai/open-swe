@@ -22,8 +22,6 @@ def worker_context(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         task=SimpleNamespace(
             id=uuid4(),
             coordinator_thread_id=_COORDINATOR,
-            status="active",
-            acceptance_criteria=["Login succeeds"],
         ),
         membership=SimpleNamespace(role="worker"),
     )
@@ -80,7 +78,7 @@ async def test_result_uses_completed_payload_and_invocation_not_newer_thread_sta
         ),
     ],
 )
-async def test_worker_outcome_returns_to_coordinator_without_completing_task(
+async def test_worker_outcome_returns_to_its_task_coordinator(
     worker_context: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
     status: str,
@@ -97,7 +95,7 @@ async def test_worker_outcome_returns_to_coordinator_without_completing_task(
     assert delivery_id == "finished:worker:run"
     assert expected in content
     assert _WORKER in content
-    assert task.status == worker_context.task.status == "active"
+    assert task.id == worker_context.task.id
 
 
 async def test_persistence_failure_fails_webhook_after_usage_and_transcript_settlement(
@@ -211,4 +209,8 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     assert len(dispatched) == 1
     context = await store.load_context(_COORDINATOR)
-    assert context is not None and context.task.status == "active"
+    worker_context = await store.load_context(_WORKER)
+    assert context is not None and worker_context is not None
+    assert context.membership.role == "coordinator"
+    assert worker_context.membership.role == "worker"
+    assert worker_context.task.id == context.task.id

@@ -316,8 +316,6 @@ async def spawn_worker(
     context = await store.load_context(actor.thread_id)
     if context is not None:
         context = await authorized_context(actor, coordinator=True)
-        if context.task.status != "active":
-            raise ValueError("Reopen the task with assess_task before assigning more work")
     if metadata.get(SANDBOX_HOST_THREAD_KEY):
         raise PermissionError("Sandbox guests must ask their coordinator for additional workers")
     if not metadata.get("sandbox_id"):
@@ -394,11 +392,7 @@ def task_details(task: store.CoordinatedTask) -> dict[str, object]:
         "task_id": str(task.id),
         "title": task.title,
         "coordinator_thread_id": task.coordinator_thread_id,
-        "acceptance_criteria": task.acceptance_criteria,
-        "status": task.status,
-        "assessment": task.assessment,
         "delegated": task.delegated,
-        "revision": task.revision,
     }
 
 
@@ -412,8 +406,6 @@ async def message_task_thread(
         if not worker_thread_id:
             raise ValueError("Choose an explicit worker_thread_id")
         await owned_worker(actor, worker_thread_id)
-        if context.task.status != "active":
-            raise ValueError("Reopen the task with assess_task before assigning more work")
         recipient = worker_thread_id
     else:
         if worker_thread_id is not None:
@@ -449,8 +441,8 @@ async def control_worker(
 ) -> dict[str, object]:
     task, delegation = await owned_worker(actor, worker_thread_id)
     if action == "retry":
-        if task.status != "active" or delegation.cancelled:
-            raise ValueError("Only an active, uncancelled worker launch can be retried")
+        if delegation.cancelled:
+            raise ValueError("Only an uncancelled worker launch can be retried")
         async with postgres.session() as session:
             await session.execute(
                 update(EventMatch)
@@ -494,22 +486,3 @@ async def control_worker(
         delegation.cancelled = True
         return {**await worker_status(delegation), "cancellation_requested": True}
     return await worker_status(delegation)
-
-
-async def assess_task(
-    actor: Actor,
-    *,
-    evidence: list[str],
-    completed: bool,
-    revision: int,
-    acceptance_criteria: list[str] | None = None,
-) -> store.CoordinatedTask:
-    context = await authorized_context(actor, coordinator=True)
-    return await store.assess(
-        context.task.id,
-        actor.thread_id,
-        revision=revision,
-        evidence=evidence,
-        completed=completed,
-        acceptance_criteria=acceptance_criteria,
-    )
