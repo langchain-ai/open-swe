@@ -63,7 +63,7 @@ _INSERT = text(
 
 _EVENT_KINDS = text(
     f"""
-    SELECT source, event_type, COALESCE(payload->>'action', '') AS action,
+    SELECT source, event_type, action,
            count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
     WHERE received_at >= :since

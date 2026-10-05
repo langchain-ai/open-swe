@@ -94,6 +94,41 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
+async def test_kinds_preserves_json_actions_counts_and_window(registry_db: None) -> None:
+    await EventLog.ensure_partitions()
+    since = datetime.now(UTC)
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO event_log (received_at, source, endpoint, event_type, payload) "
+                "VALUES (CAST(:since AS timestamptz) - interval '1 second', 'github', '/', 'issues', '{}'), "
+                "(:since, 'github', '/', 'issues', '{\"action\":\"opened\"}'), "
+                "(CAST(:since AS timestamptz) + interval '1 second', 'github', '/', 'issues', '{\"action\":\"opened\"}'), "
+                "(:since, 'slack', '/', 'message', '{}'), "
+                "(:since, 'slack', '/', 'message', '{\"action\": null}')"
+            ),
+            {"since": since},
+        )
+        expected = (
+            (
+                await conn.execute(
+                    text(
+                        "SELECT source, event_type, COALESCE(payload->>'action', '') AS action, "
+                        "count(*) AS count, max(received_at) AS last_received_at "
+                        "FROM event_log WHERE received_at >= :since "
+                        "GROUP BY 1,2,3 ORDER BY 1,2,3"
+                    ),
+                    {"since": since},
+                )
+            )
+            .mappings()
+            .all()
+        )
+    kinds = await EventLog.kinds(since)
+    assert [kind.model_dump(exclude={"payload_shape"}) for kind in kinds] == list(expected)
+    assert [kind.count for kind in kinds] == [2, 2]
+
+
 async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
     await EventLog.rotate_partitions(date(2026, 9, 1))
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
