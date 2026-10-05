@@ -4,6 +4,18 @@ This guide deploys Open SWE for a team. To run it on your own machine while deve
 
 Open SWE is one deployment: a LangGraph server that runs the graphs declared in [`langgraph.json`](../langgraph.json), the FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API, and the web dashboard, served from the same origin at `/`. Webhooks, the dashboard, GitHub login, and the API all share the deployment's URL, so there is no second frontend deploy and no cross-origin cookie or CORS setup.
 
+## Repository trust model
+
+**Open SWE is intended for a team trusted with shared repository access, not for users who require repository-level isolation within one deployment.** Member-started coding sandboxes normally use the GitHub App's installation-wide credentials, not the initiating user's GitHub permissions. A user can therefore have the agent read or write an installed repository they cannot access personally, subject to the App's permissions and GitHub protections.
+
+Before admitting users, limit the App installation and sandbox images to repositories and source that every admitted user is trusted to access. Repository selection, workspace bindings, and private-thread visibility do not narrow sandbox GitHub access. Source preloaded into an image remains readable even if a later token is narrowed. Separate trust groups need separate deployments, App installations, and appropriately restricted images.
+
+Trusted users can still expose the agent to malicious instructions in repository content or other external input. Prompt instructions are not a repository authorization boundary. User-authorized PR creation does not constrain every shell or GitHub API operation in the sandbox.
+
+Some workflows, including reviewers and public-repository event threads, use narrower tokens; see [GitHub access and the sandbox image](reference/workspaces.md#github-access-and-the-sandbox-image). For the distinction between server-side user credentials and sandbox credentials, see [Thread credential scope](#thread-credential-scope).
+
+## Prerequisites
+
 What a deployment needs:
 
 | Value | How you get it |

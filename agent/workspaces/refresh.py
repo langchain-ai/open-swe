@@ -268,6 +268,8 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_workspace", "slug": slug}
+    if record.inherit_default_sandbox:
+        return {"status": "inherited_sandbox", "slug": slug}
     if kind == "full" and not record.setup_script:
         return {"status": "no_setup_script", "slug": slug}
     if kind == "update" and not record.update_script:

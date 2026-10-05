@@ -7,10 +7,8 @@ import { sessionQueryOptions } from "@/lib/session"
 
 export function VersionMismatchBanner() {
   const hydrated = useIsHydrated()
-  const { data: user } = useQuery({
-    ...sessionQueryOptions,
-    refetchInterval: 60_000,
-  })
+  // `InvalidationStream` refetches the session when a stream reports another backend.
+  const { data: user } = useQuery(sessionQueryOptions)
   const running = hydrated ? window.__OPEN_SWE_BUNDLE__?.commit : null
   const deployed = normalizeBuildInfo(user?.build_info)?.backend.commit
   if (!running || !deployed || running === deployed) return null

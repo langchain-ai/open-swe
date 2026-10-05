@@ -25,6 +25,7 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type {
@@ -96,11 +97,7 @@ export function PreferencesSection() {
         ? undefined
         : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
-  const workspaceOptions = useQuery({
-    queryKey: ["workspace-options"],
-    queryFn: api.listWorkspaceOptions,
-    staleTime: 60_000,
-  })
+  const workspaceOptions = useWorkspaceOptions()
   const workspaceItems = [
     { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
     ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({

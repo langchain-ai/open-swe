@@ -127,6 +127,7 @@ def construct_system_prompt(
     slack_breakout: bool = False,
     slack_by_the_way: bool = False,
     sandbox_file_downloads: bool = False,
+    prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     recent_thread_context: str | None = None,
@@ -156,6 +157,7 @@ def construct_system_prompt(
         working_environment_section=prompt(
             _working_environment_prompt(source, local_checkout=local_checkout),
             working_dir=working_dir,
+            prefer_tools_in_sandbox=prefer_tools_in_sandbox,
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",

@@ -129,7 +129,7 @@ The workflow requires these GitHub Actions secrets:
 - `APPLE_SIGNING_CERT`: base64-encoded Developer ID Application `.p12` certificate
 - `APPLE_SIGNING_CERT_PASSWORD`: password for the certificate
 - `APPLE_PROVISIONING_PROFILE`: base64-encoded Developer ID provisioning profile for
-  `com.langchain.openswe` with Associated Domains enabled (required for Universal Links)
+  `com.langchain.openswe` with Associated Domains enabled (optional; enables Universal Links)
 - `APPLE_API_KEY`: App Store Connect `.p8` key contents
 - `APPLE_API_KEY_ID`: App Store Connect key ID
 - `APPLE_API_ISSUER`: App Store Connect issuer ID

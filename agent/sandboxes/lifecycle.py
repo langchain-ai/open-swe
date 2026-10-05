@@ -82,6 +82,8 @@ class SandboxCreateConfig:
         workspace, preserve_memory = await asyncio.gather(
             workspace_for_source(), cls._owner_preserves_memory(owner_login)
         )
+        if workspace is not None and workspace.inherit_default_sandbox:
+            workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
         if preserve_memory:
             create_params = {**create_params, "preserve_memory_on_stop": True}
@@ -131,6 +133,7 @@ async def _create_sandbox_with_proxy(
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
     owner_login: str | None = None,
+    record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
@@ -162,7 +165,12 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
-    if thread_id and config.workspace is not None and is_snapshot_stale(config.workspace):
+    if (
+        record_stale_boot
+        and thread_id
+        and config.workspace is not None
+        and is_snapshot_stale(config.workspace)
+    ):
         _STALE_BOOTS[thread_id] = config.workspace
     _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
@@ -344,6 +352,7 @@ async def ensure_sandbox_for_thread(
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
+    record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -365,6 +374,8 @@ async def ensure_sandbox_for_thread(
     ``allow_replacement`` extends replacement to merely unreachable sandboxes,
     for callers whose sandbox holds nothing but a re-derivable checkout — the
     read-only reviewer, which re-preps the repo every run.
+
+    ``record_stale_boot`` is for callers that collect ``take_stale_boot``.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
     created sandboxes boot from the workspace's snapshot when one is ready,
@@ -407,6 +418,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
             owner_login=owner_login,
+            record_stale_boot=record_stale_boot,
         )
         created = True
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -437,6 +449,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
                     owner_login=owner_login,
+                    record_stale_boot=record_stale_boot,
                 )
                 created = True
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)

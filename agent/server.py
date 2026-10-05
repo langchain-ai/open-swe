@@ -166,12 +166,13 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.sandboxes.tool_access import tools_base_url
+from agent.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.blobs import blob_namespace
+from agent.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -247,6 +248,7 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -857,8 +859,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
+        prefer_tools_in_sandbox: bool = False,
     ) -> None:
         self._saved_requested_model = saved_requested_model
+        self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -1317,6 +1321,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 recent_thread_context=recent_thread_context,
@@ -1373,6 +1378,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return await ensure_sandbox_for_thread(
             _thread_id,
             workspace_slug=workspace_slug(_cfg),
+            record_stale_boot=True,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1393,6 +1399,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
+        )
+        # Bridged threads and deployments without a tools endpoint have no way to
+        # reach sandbox-only tools, so they keep every tool direct.
+        prefer_tools_in_sandbox = (
+            not local_run
+            and tools_endpoint_configured()
+            and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
+            and not await _bridged_thread(thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1579,6 +1593,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        PREFER_TOOLS_IN_SANDBOX_KEY: prefer_tools_in_sandbox,
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1781,6 +1796,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
+    if prefer_tools_in_sandbox:
+        static_tools = [
+            tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
+        ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
@@ -1791,6 +1810,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    sandbox_only_tools = (
+        frozenset(SANDBOX_ONLY_TOOLS)
+        if prefer_tools_in_sandbox and not stop_summary_mode
+        else frozenset()
+    )
+    excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
@@ -1812,6 +1837,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+            model_visible=not prefer_tools_in_sandbox,
         )
         if candidate.has_groups:
             dynamic_tool_middleware = candidate
@@ -1955,7 +1981,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[tool for tool in static_tools if tool is not save_user_settings],
+                    tools=[
+                        tool
+                        for tool in static_tools
+                        if tool is not save_user_settings
+                        and _registered_tool_name(tool) not in sandbox_only_tools
+                    ],
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -2005,6 +2036,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),
+                        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
                     ),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),
