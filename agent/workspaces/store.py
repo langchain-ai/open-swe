@@ -422,6 +422,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
 
 
 class WorkspaceCreate(BaseModel):
+    inherit_default_sandbox: bool = True
     name: str
     prompt: str = ""
     setup_script: str = ""
@@ -484,6 +485,8 @@ class WorkspaceCreate(BaseModel):
 
 class WorkspaceUpdate(BaseModel):
     """Partial update: only the fields present are written."""
+
+    inherit_default_sandbox: bool | None = None
 
     name: str | None = None
     prompt: str | None = None
@@ -573,6 +576,7 @@ class Workspace(BaseModel):
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
     slug: str
+    inherit_default_sandbox: bool = False
     name: str = ""
     prompt: str = ""
     setup_script: str = ""
@@ -629,6 +633,9 @@ class Workspace(BaseModel):
         now = now_iso()
         return cls(
             slug=slugify(create.name),
+            inherit_default_sandbox=(
+                create.inherit_default_sandbox and slugify(create.name) != DEFAULT_WORKSPACE_SLUG
+            ),
             name=create.name.strip(),
             prompt=create.prompt,
             setup_script=create.setup_script,
@@ -1468,6 +1475,10 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
+    if update.inherit_default_sandbox is not None:
+        if record.slug == DEFAULT_WORKSPACE_SLUG and update.inherit_default_sandbox:
+            raise ValueError("The default workspace cannot inherit its own sandbox")
+        record.inherit_default_sandbox = update.inherit_default_sandbox
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:
