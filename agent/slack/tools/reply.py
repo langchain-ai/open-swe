@@ -5,11 +5,14 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
 
+from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import ConflictError
 
+from agent.input_messages import input_message_timestamps
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
@@ -22,10 +25,12 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
+from agent.slack.dm import note_for_concierge
 from agent.slack.events import claim_slack_event
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
@@ -36,6 +41,7 @@ from agent.slack.orphan import (
 )
 from agent.slack.run_feedback import feedback_block
 from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.slack.tools.read_thread_messages import fetch_and_format_thread
 from agent.threads.creation import create_lock_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
@@ -121,6 +127,10 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+        if state and run_id:
+            conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
+            if conflict is not None:
+                return conflict
         if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
@@ -181,10 +191,73 @@ async def slack_reply(
             "message_chars": len(message),
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if cfg.automation_dm_user_id:
+        await note_for_concierge(cfg.automation_dm_user_id, str(channel_id), message)
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _stale_reply_guard(
+    state: Mapping[str, object], channel_id: str, thread_ts: str, run_id: str
+) -> dict[str, object] | None:
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        return None
+    client = get_langgraph_client()
+    namespace = ("slack_reply_freshness", run_id)
+    item = await client.store.get_item(namespace, "progress")
+    progress = item.get("value", {}) if item else {}
+    stored_seen = progress.get("seen", [])
+    seen = (
+        {ts for ts in stored_seen if isinstance(ts, str)}
+        if isinstance(stored_seen, list)
+        else set()
+    )
+    stored_conflicts = progress.get("conflicts", 0)
+    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
+    for message in messages:
+        if not isinstance(message, BaseMessage):
+            continue
+        seen.update(input_message_timestamps(message.content))
+        if isinstance(message, ToolMessage):
+            try:
+                payload = json.loads(message.content) if isinstance(message.content, str) else None
+            except ValueError:
+                continue
+            if isinstance(payload, dict):
+                timestamps = payload.get("human_timestamps")
+                if isinstance(timestamps, list):
+                    seen.update(ts for ts in timestamps if isinstance(ts, str))
+    if conflicts >= 2 or not seen:
+        return None
+    try:
+        latest = await fetch_and_format_thread(channel_id, thread_ts)
+    except Exception:
+        logger.warning("Could not check Slack reply freshness", exc_info=True)
+        return None
+    timestamps = latest.get("human_timestamps")
+    if not isinstance(timestamps, list) or not any(
+        isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
+    ):
+        return None
+    await client.store.put_item(
+        namespace,
+        "progress",
+        {
+            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
+            "conflicts": conflicts + 1,
+        },
+    )
+    return {
+        "success": False,
+        "error": "new_slack_messages",
+        "run_id": run_id,
+        "hint": prompt("tools/slack-reply-conflict"),
+        "formatted": latest.get("formatted"),
+        "human_timestamps": timestamps,
+    }
 
 
 async def _handle_kickoff(
@@ -283,6 +356,10 @@ async def _by_the_way_reply(
             "slack_error": slack_error,
             "hint": _slack_reply_failure_hint(slack_error),
         }
+    if cfg.slack_by_the_way_message_ts:
+        await remove_slack_reaction(
+            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
+        )
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}

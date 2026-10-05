@@ -75,9 +75,7 @@ def _is_explicit_slack_request(
     message_update: bool,
 ) -> bool:
     return not message_update and bool(
-        treat_all_messages_as_mentions
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        treat_all_messages_as_mentions or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
 
 
@@ -1083,6 +1081,8 @@ async def _process_slack_mention_impl(
         "triggering_user_email": user_email or "",
         "triggering_event_ts": event_ts,
     }
+    if request.breakout_root_suffix is not None:
+        slack_thread_context["breakout_root_suffix"] = request.breakout_root_suffix
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
     if allowed_bot is not None:

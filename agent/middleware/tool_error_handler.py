@@ -9,6 +9,7 @@ is notified and the error propagates.
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from time import monotonic
 from typing import Any
 
 from langchain.agents.middleware.types import (
@@ -173,6 +174,7 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        started = monotonic()
         try:
             return await handler(request)
         except NodeCancelledError:
@@ -202,3 +204,14 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
             # Every later sandbox call would hit the same dead backend and notify
             # again, so end the run here now that the user has been told once.
             raise
+        finally:
+            duration_seconds = monotonic() - started
+            if duration_seconds > 5:
+                logger.warning(
+                    "Slow tool call",
+                    extra={
+                        "tool_name": _extract_tool_name(request),
+                        "tool_call_id": _get_tool_call_id(request),
+                        "duration_seconds": duration_seconds,
+                    },
+                )

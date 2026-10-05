@@ -59,6 +59,8 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
+from agent.ui_invalidations.outbox import invalidate
+from agent.ui_invalidations.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -420,6 +422,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
 
 
 class WorkspaceCreate(BaseModel):
+    inherit_default_sandbox: bool = True
     name: str
     prompt: str = ""
     setup_script: str = ""
@@ -482,6 +485,8 @@ class WorkspaceCreate(BaseModel):
 
 class WorkspaceUpdate(BaseModel):
     """Partial update: only the fields present are written."""
+
+    inherit_default_sandbox: bool | None = None
 
     name: str | None = None
     prompt: str | None = None
@@ -571,6 +576,7 @@ class Workspace(BaseModel):
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
     slug: str
+    inherit_default_sandbox: bool = False
     name: str = ""
     prompt: str = ""
     setup_script: str = ""
@@ -627,6 +633,9 @@ class Workspace(BaseModel):
         now = now_iso()
         return cls(
             slug=slugify(create.name),
+            inherit_default_sandbox=(
+                create.inherit_default_sandbox and slugify(create.name) != DEFAULT_WORKSPACE_SLUG
+            ),
             name=create.name.strip(),
             prompt=create.prompt,
             setup_script=create.setup_script,
@@ -834,6 +843,7 @@ class WorkspaceStore:
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
+                await invalidate(session, WORKSPACES_TOPIC)
                 if definition_only:
                     await session.refresh(row)
                     return to_workspace(
@@ -878,6 +888,7 @@ class WorkspaceStore:
     async def delete(self, slug: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            await invalidate(session, WORKSPACES_TOPIC)
 
     async def owner_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository belongs to, if any."""
@@ -1082,6 +1093,7 @@ class WorkspaceStore:
             record.updated_at = now_iso()
             apply_state(row, record)
             stamp_updated(row, record)
+            await invalidate(session, WORKSPACES_TOPIC)
             return record
 
     async def assert_publishable(
@@ -1463,6 +1475,10 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
+    if update.inherit_default_sandbox is not None:
+        if record.slug == DEFAULT_WORKSPACE_SLUG and update.inherit_default_sandbox:
+            raise ValueError("The default workspace cannot inherit its own sandbox")
+        record.inherit_default_sandbox = update.inherit_default_sandbox
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:

@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
+from agent.github.pull_request_context import PullRequestFixScope
 from agent.threads import terminal
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -239,6 +240,7 @@ async def api_get_thread_pull_request_context(
     thread_id: str,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_pull_request_context(
@@ -246,6 +248,7 @@ async def api_get_thread_pull_request_context(
         session["sub"],
         repo_full_name=repo_full_name,
         number=number,
+        scope=scope,
         email=session.get("email"),
     )
 

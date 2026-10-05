@@ -257,7 +257,8 @@ async def test_slack_start_new_thread_success(
     get_permalink.assert_awaited_once_with(target, new_ts)
     assert captured["top_level_post"]["channel_id"] == target
     assert captured["top_level_post"]["text"] == (
-        "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>"
+        "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1> "
+        f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)

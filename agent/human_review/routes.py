@@ -54,8 +54,8 @@ async def api_request_human_review(
     pr_ref = _pr_ref(owner, repo, number)
     login = str(session["sub"])
     requester = await User.for_login("github", login)
-    if requester is None or not requester.typed_preferences.human_review_requests:
-        raise HTTPException(403, "Human review requests are not enabled for you")
+    if requester is None:
+        raise HTTPException(403, "No Open SWE user record for this login")
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     options = body or HumanReviewRequestBody()
     inline_summary = options.inline_summary

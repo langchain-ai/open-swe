@@ -43,6 +43,9 @@ vi.mock("@/features/agents/lib/queries", () => ({
     fetchNextPage: mocks.fetchNextPage,
   }),
 }))
+vi.mock("@/features/reviews/lib/usePullRequestSearch", () => ({
+  usePullRequestSearch: () => ({ data: undefined }),
+}))
 vi.mock("@/features/agents/lib/desktopLocal", () => ({
   useDesktopLocalThreads: () => ({ data: [mocks.localThread] }),
 }))

@@ -972,6 +972,7 @@ SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
 SUPPORTED_GH_PULL_REQUEST_ACTIONS = frozenset(
     [
         "opened",
+        "edited",
         "ready_for_review",
         "converted_to_draft",
         "closed",

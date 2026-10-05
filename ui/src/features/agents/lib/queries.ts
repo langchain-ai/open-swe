@@ -28,6 +28,7 @@ import type {
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
+import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -424,6 +425,7 @@ export function useWorkspaceOptions(enabled = true) {
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
+    meta: { invalidatedBy: [INVALIDATION_TOPICS.workspaces] },
   })
 }
 

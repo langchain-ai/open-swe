@@ -367,6 +367,9 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
+/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
+export type ThreadFixScope = "conflicts" | "checks" | "comments"
+
 export interface AgentPullRequestContextResponse {
   context: {
     repoFullName: string

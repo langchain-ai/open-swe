@@ -32,6 +32,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from agent.slack.dm import note_for_concierge, open_dm
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
@@ -50,7 +51,7 @@ SCHEDULE_RUN_STATE_NAMESPACE: list[str] = ["agent_schedule_run_state"]
 _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-_SLACK_CHANNEL_ID_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
+_SLACK_CHANNEL_ID_RE = re.compile(r"^[CGUW][A-Z0-9]{8,}$")
 SlackNotificationMode = Literal["always", "on_action"]
 AutomationTrigger = Literal["schedule", "github_issue_opened"]
 _DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
@@ -63,8 +64,16 @@ def _normalize_slack_channel_id(value: str | None) -> str | None:
     if not channel_id:
         return None
     if not _SLACK_CHANNEL_ID_RE.fullmatch(channel_id):
-        raise ValueError("slack_channel_id must be a Slack channel ID starting with C or G")
+        raise ValueError(
+            "slack_channel_id must be a Slack channel ID starting with C or G, "
+            "or a member ID starting with U or W to send DMs"
+        )
     return channel_id
+
+
+def _slack_dm_user_id(record: dict[str, Any]) -> str | None:
+    target = record.get("slack_channel_id")
+    return target if isinstance(target, str) and target[:1] in ("U", "W") else None
 
 
 def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
@@ -561,13 +570,20 @@ async def delete_workspace_automations(workspace: str) -> int:
     return deleted
 
 
-def _slack_root_message(record: dict[str, Any], *, test_run: bool = False) -> str:
+def _slack_root_message(
+    record: dict[str, Any], *, test_run: bool = False, concierge: bool = False
+) -> str:
     repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     repo_line = f"\n*Repository:* `{repo}`" if repo else ""
     run_kind = "test" if test_run else "scheduled"
+    follow_up = (
+        "Its updates are shared with this DM; message me here to follow up."
+        if concierge
+        else "Reply in this thread to follow up with the agent."
+    )
     return (
         f"*Open SWE automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
-        f"A {run_kind} run started. Reply in this thread to follow up with the agent."
+        f"A {run_kind} run started. {follow_up}"
     )
 
 
@@ -704,6 +720,8 @@ async def _agent_run_config(
             "schedule_id": record["id"],
             "schedule_name": record.get("name"),
         }
+    if dm_user_id := record.get("slack_dm_user_id"):
+        configurable["automation_dm_user_id"] = dm_user_id
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
@@ -753,6 +771,14 @@ async def _launch_agent_schedule_record(
                 "status_code": exc.status_code,
             }
 
+    if dm_user_id := _slack_dm_user_id(record):
+        dm_channel_id = await open_dm(dm_user_id)
+        if not dm_channel_id:
+            error = "Slack DM could not be opened"
+            await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+            return {"status": "error", "schedule_id": schedule_id, "error": error}
+        record = {**record, "slack_channel_id": dm_channel_id, "slack_dm_user_id": dm_user_id}
+
     client = langgraph_client()
     thread_id = str(uuid.uuid4())
     slack_thread: dict[str, Any] | None = None
@@ -762,9 +788,11 @@ async def _launch_agent_schedule_record(
         and isinstance(slack_channel_id, str)
         and slack_channel_id
     ):
+        concierge = dm_user_id is not None and await User.concierge_mode_for_slack(dm_user_id)
+        root_message = _slack_root_message(record, test_run=test_run, concierge=concierge)
         message_ts, slack_error = await post_slack_top_level_message_with_ts(
             slack_channel_id,
-            _slack_root_message(record, test_run=test_run),
+            root_message,
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -781,6 +809,8 @@ async def _launch_agent_schedule_record(
             "triggering_event_ts": message_ts,
         }
         await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
+        if dm_user_id:
+            await note_for_concierge(dm_user_id, slack_channel_id, root_message)
 
     admin_thread = _admin_thread_enabled(record)
     run_config = await _agent_run_config(

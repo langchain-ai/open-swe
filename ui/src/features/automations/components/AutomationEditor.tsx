@@ -16,6 +16,7 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
+import { SlackUserMention } from "@/features/agents/components/messages/SlackMrkdwn"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -105,6 +106,8 @@ export function AutomationEditor({
   const [slackChannelId, setSlackChannelId] = useState(
     schedule?.slackChannelId ?? ""
   )
+  const mySlackUserId = session.data?.slack_user_id
+  const isDm = /^[UW]/.test(slackChannelId)
   const [slackNotificationMode, setSlackNotificationMode] =
     useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
@@ -400,17 +403,38 @@ export function AutomationEditor({
 
         <SectionLabel>Slack destination</SectionLabel>
         <div className="rounded-xl border border-border bg-card p-3">
-          <SlackChannelCombobox
-            value={slackChannelId.trim() || null}
-            onValueChange={(id) => setSlackChannelId(id ?? "")}
-            disabled={!canManage}
-            placeholder="Search channels or paste a channel ID"
-            aria-label="Slack channel"
-            className="w-full"
-          />
+          <div className="flex items-center gap-2">
+            {isDm ? (
+              <span className="flex-1 text-sm">
+                Direct message to <SlackUserMention userId={slackChannelId} />
+              </span>
+            ) : (
+              <SlackChannelCombobox
+                value={slackChannelId.trim() || null}
+                onValueChange={(id) => setSlackChannelId(id ?? "")}
+                disabled={!canManage}
+                placeholder="Search channels or paste a channel ID"
+                aria-label="Slack channel"
+                className="w-full"
+              />
+            )}
+            {(isDm || mySlackUserId) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canManage}
+                onClick={() =>
+                  setSlackChannelId(isDm ? "" : (mySlackUserId ?? ""))
+                }
+              >
+                {isDm ? "Use a channel" : "DM me"}
+              </Button>
+            )}
+          </div>
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <span className="text-xs text-muted-foreground">
-              Notify channel
+              {isDm ? "Notify" : "Notify channel"}
             </span>
             <Select
               items={NOTIFICATION_ITEMS}
@@ -435,8 +459,8 @@ export function AutomationEditor({
           <p className="mt-2 text-xs text-muted-foreground/70">
             {slackNotificationMode === "on_action"
               ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
-              : "Each run starts a new thread in the channel."}{" "}
-            The Open SWE bot must be a member of the channel.
+              : `Each run starts a new thread in the ${isDm ? "DM" : "channel"}.`}
+            {!isDm && " The Open SWE bot must be a member of the channel."}
           </p>
         </div>
 

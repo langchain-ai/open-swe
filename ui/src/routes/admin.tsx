@@ -1,6 +1,5 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { CaretRightIcon } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
@@ -104,24 +103,6 @@ function AdminPage() {
       </div>
 
       <RunningAgentsSection />
-
-      <SettingsSection title="Evals">
-        <Link
-          to="/admin/evals"
-          className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
-        >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">
-              Reviewer eval
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Run the offline reviewer benchmark and watch its output stream
-              live.
-            </span>
-          </div>
-          <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Link>
-      </SettingsSection>
 
       <UsersSection enabled={!!session.data.is_admin} />
     </AppShell>
