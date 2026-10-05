@@ -326,6 +326,8 @@ async def render(
 
 
 async def refresh_author_dm_card(request: HumanReviewRequest, outcome: str | None) -> bool:
+    if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
+        return False
     async with HumanReviewRequest.locked(request.id) as (_, current):
         if current is None or not current.slack_dm_channel_id or not current.slack_dm_message_ts:
             return False
