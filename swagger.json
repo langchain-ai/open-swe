@@ -644,6 +644,15 @@
             ],
             "title": "Bridge Id"
           },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
+          },
           "hostname": {
             "title": "Hostname",
             "type": "string"
