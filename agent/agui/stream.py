@@ -235,6 +235,11 @@ async def start_run(input: RunAgentInput, login: str, email: str | None) -> Asyn
     return _stream(input.thread_id, run, head, run_id, translator)
 
 
+async def _no_events() -> AsyncIterator[str]:
+    return
+    yield
+
+
 async def _running_run_id(thread_id: str) -> str | None:
     running = await langgraph_client().runs.list(thread_id, status="running", limit=1)
     return running[0]["run_id"] if running else None
@@ -245,8 +250,9 @@ async def connect(thread_id: str, login: str, email: str | None) -> AsyncIterato
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
-    except NotFoundError as exc:
-        raise HTTPException(404, "thread not found") from exc
+    except NotFoundError:
+        # The client mints a new thread's id before its first run creates it.
+        return _no_events()
     assert_thread_readable(thread_metadata(thread), login, email)
     live_run_id = await _running_run_id(thread_id)
     snapshot = await _snapshot(thread_id)

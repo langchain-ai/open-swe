@@ -97,6 +97,29 @@
         "title": "AddressCommentsIntent",
         "type": "object"
       },
+      "AgentInfo": {
+        "properties": {
+          "className": {
+            "title": "Classname",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "className"
+        ],
+        "title": "AgentInfo",
+        "type": "object"
+      },
       "AgentInstructions": {
         "properties": {
           "created_at": {
@@ -5647,6 +5670,67 @@
         "title": "RunAgentInput",
         "type": "object"
       },
+      "RuntimeInfo": {
+        "properties": {
+          "a2uiEnabled": {
+            "default": false,
+            "title": "A2Uienabled",
+            "type": "boolean"
+          },
+          "agents": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentInfo"
+            },
+            "title": "Agents",
+            "type": "object"
+          },
+          "audioFileTranscriptionEnabled": {
+            "default": false,
+            "title": "Audiofiletranscriptionenabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "const": "sse",
+            "default": "sse",
+            "title": "Mode",
+            "type": "string"
+          },
+          "openGenerativeUIEnabled": {
+            "default": false,
+            "title": "Opengenerativeuienabled",
+            "type": "boolean"
+          },
+          "suggestions": {
+            "default": false,
+            "title": "Suggestions",
+            "type": "boolean"
+          },
+          "telemetryDisabled": {
+            "default": true,
+            "title": "Telemetrydisabled",
+            "type": "boolean"
+          },
+          "threadEndpoints": {
+            "$ref": "#/components/schemas/ThreadEndpoints",
+            "default": {
+              "inspect": false,
+              "list": false,
+              "mutations": false,
+              "realtimeMetadata": false
+            }
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "agents"
+        ],
+        "title": "RuntimeInfo",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -6086,6 +6170,19 @@
         "title": "SlashCommandResponse",
         "type": "object"
       },
+      "StopResult": {
+        "properties": {
+          "stopped": {
+            "title": "Stopped",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stopped"
+        ],
+        "title": "StopResult",
+        "type": "object"
+      },
       "SubmittedReview": {
         "properties": {
           "html_url": {
@@ -6312,6 +6409,32 @@
           "comment_url"
         ],
         "title": "ThreadComment",
+        "type": "object"
+      },
+      "ThreadEndpoints": {
+        "properties": {
+          "inspect": {
+            "default": false,
+            "title": "Inspect",
+            "type": "boolean"
+          },
+          "list": {
+            "default": false,
+            "title": "List",
+            "type": "boolean"
+          },
+          "mutations": {
+            "default": false,
+            "title": "Mutations",
+            "type": "boolean"
+          },
+          "realtimeMetadata": {
+            "default": false,
+            "title": "Realtimemetadata",
+            "type": "boolean"
+          }
+        },
+        "title": "ThreadEndpoints",
         "type": "object"
       },
       "ThreadFeedbackResponse": {
@@ -8793,97 +8916,6 @@
         ]
       }
     },
-    "/dashboard/api/ag-ui/run": {
-      "post": {
-        "operationId": "api_ag_ui_run_dashboard_api_ag_ui_run_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunAgentInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Ag Ui Run",
-        "tags": [
-          "dashboard",
-          "ag-ui"
-        ]
-      }
-    },
-    "/dashboard/api/ag-ui/threads/{thread_id}/connect": {
-      "get": {
-        "operationId": "api_ag_ui_connect_dashboard_api_ag_ui_threads__thread_id__connect_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Ag Ui Connect",
-        "tags": [
-          "dashboard",
-          "ag-ui"
-        ]
-      }
-    },
     "/dashboard/api/agent-instructions": {
       "get": {
         "operationId": "api_list_agent_instructions_dashboard_api_agent_instructions_get",
@@ -10203,6 +10235,203 @@
         "summary": "Api Report Client Error",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/copilotkit/agent/{agent_id}/connect": {
+      "post": {
+        "operationId": "api_copilotkit_connect_dashboard_api_copilotkit_agent__agent_id__connect_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunAgentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Copilotkit Connect",
+        "tags": [
+          "dashboard",
+          "copilotkit"
+        ]
+      }
+    },
+    "/dashboard/api/copilotkit/agent/{agent_id}/run": {
+      "post": {
+        "operationId": "api_copilotkit_run_dashboard_api_copilotkit_agent__agent_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunAgentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Copilotkit Run",
+        "tags": [
+          "dashboard",
+          "copilotkit"
+        ]
+      }
+    },
+    "/dashboard/api/copilotkit/agent/{agent_id}/stop/{thread_id}": {
+      "post": {
+        "description": "Runs are stopped through the dashboard's thread cancel endpoint, not here.",
+        "operationId": "api_copilotkit_stop_dashboard_api_copilotkit_agent__agent_id__stop__thread_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Copilotkit Stop",
+        "tags": [
+          "dashboard",
+          "copilotkit"
+        ]
+      }
+    },
+    "/dashboard/api/copilotkit/info": {
+      "get": {
+        "operationId": "api_copilotkit_info_dashboard_api_copilotkit_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Copilotkit Info",
+        "tags": [
+          "dashboard",
+          "copilotkit"
         ]
       }
     },

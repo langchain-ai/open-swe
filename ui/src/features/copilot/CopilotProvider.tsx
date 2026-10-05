@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState } from "react"
 import type { Dispatch, ReactNode, SetStateAction } from "react"
 import { CopilotKitProvider } from "@copilotkit/react-core/v2"
-import { COPILOT_RUNTIME_PATH } from "@/lib/copilotRuntimePath"
+import { agentsLangGraphApiUrl } from "@/features/agents/lib/api"
 import { toolRenderers } from "./tools"
 
 /** The composer's run settings; the backend reads them as the run's `configurable`. */
@@ -41,7 +41,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
   return (
     <RunSettingsContext.Provider value={settings}>
       <CopilotKitProvider
-        runtimeUrl={COPILOT_RUNTIME_PATH}
+        runtimeUrl={`${agentsLangGraphApiUrl}/copilotkit`}
+        credentials="include"
         properties={properties}
         renderToolCalls={toolRenderers}
         enableInspector={false}

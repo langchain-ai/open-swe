@@ -1,4 +1,4 @@
-import type { InputContent, Message } from "@ag-ui/client"
+import type { InputContent, Message } from "@copilotkit/react-core/v2"
 import {
   isSilentSender,
   parseStructuredInput,
