@@ -210,6 +210,23 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
+    async def latest_expedited_for(cls, owner: str, repo: str, number: int) -> Self | None:
+        """The most recent expedited request, including a dismissed one."""
+        async with postgres.session() as session:
+            return await session.scalar(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                    cls.kind == "expedited",
+                )
+                .order_by(cls.created_at.desc(), cls.id.desc())
+                .limit(1)
+            )
+
+    @classmethod
     async def is_expedited_approver(cls, owner: str, repo: str, number: int, login: str) -> bool:
         """Whether ``login`` approved the PR through its open expedited card."""
         request = await cls.active_for(owner, repo, number)
