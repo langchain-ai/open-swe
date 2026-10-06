@@ -16,6 +16,7 @@ from agent.slack.client import (
     update_slack_message,
 )
 from agent.slack.dm import note_for_concierge
+from agent.slack.http import SlackRequestError
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import WebhookResponse, accepted, ignored
 from agent.threads.plan_api import fetch_thread_metadata
@@ -145,20 +146,21 @@ async def _wake_thread(thread_id: str, login: str, approved: bool) -> None:
 
 async def _close_card(interaction: SlackInteraction, label: str, thread_id: str) -> None:
     text = interaction.message.text or label
-    ok, error = await update_slack_message(
-        interaction.channel_id,
-        interaction.message_ts,
-        text,
-        blocks=block_payload(
-            [
-                section(text),
-                context(label),
-                *await origin_footer(thread_id),
-            ]
-        ),
-    )
-    if not ok:
+    try:
+        await update_slack_message(
+            interaction.channel_id,
+            interaction.message_ts,
+            text,
+            blocks=block_payload(
+                [
+                    section(text),
+                    context(label),
+                    *await origin_footer(thread_id),
+                ]
+            ),
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Could not close the act-as card",
-            extra={"channel_id": interaction.channel_id, "error": error},
+            extra={"channel_id": interaction.channel_id, "error": exc.code},
         )

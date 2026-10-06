@@ -127,10 +127,11 @@ async def test_a_stale_id_costs_only_itself(invite_call: dict[str, Any]) -> None
         "errors": [{"user": "U2", "ok": False, "error": "user_not_found"}],
     }
 
-    invited, error = await slack_utils.invite_to_slack_channel("C1", ["U1", "U2", "U3"])
+    with pytest.raises(slack_utils.SlackRequestError) as raised:
+        await slack_utils.invite_to_slack_channel("C1", ["U1", "U2", "U3"])
 
-    assert invited == ["U1", "U3"]
-    assert error == "U2 (user_not_found)"
+    assert raised.value.invited == ["U1", "U3"]
+    assert raised.value.code == "U2 (user_not_found)"
 
 
 async def test_a_refused_call_names_everyone_it_could_not_invite(
@@ -138,7 +139,6 @@ async def test_a_refused_call_names_everyone_it_could_not_invite(
 ) -> None:
     invite_call["response"] = {"ok": False, "error": "missing_scope"}
 
-    assert await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"]) == (
-        [],
-        "U1, U2: missing_scope",
-    )
+    with pytest.raises(slack_utils.SlackRequestError, match="U1, U2: missing_scope") as raised:
+        await slack_utils.invite_to_slack_channel("C1", ["U1", "U2"])
+    assert raised.value.invited == []

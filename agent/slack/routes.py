@@ -1076,7 +1076,7 @@ async def _update_selected_option_message(
         return
 
     try:
-        ok, error = await common.update_slack_message(
+        await common.update_slack_message(
             channel_id,
             message_ts,
             interaction.message.text or label,
@@ -1090,13 +1090,6 @@ async def _update_selected_option_message(
             exc_info=True,
         )
         return
-    if not ok:
-        common.logger.warning(
-            "Could not persist Slack option selection: channel=%s ts=%s error=%s",
-            channel_id,
-            message_ts,
-            error,
-        )
 
 
 def _selected_option_blocks(message: SlackInteractionMessage, label: str) -> list[JsonObject]:
