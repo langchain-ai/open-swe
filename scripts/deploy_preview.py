@@ -2,7 +2,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["httpx>=0.28", "pydantic>=2.12"]
 # ///
-"""Roll the preview deployment to the published preview branch and fail unless it deploys."""
+"""Wait for the automatic preview deployment and verify the published commit deploys."""
 
 import asyncio
 import os
@@ -59,6 +59,7 @@ class Revision(BaseModel):
 
 class Revisions(BaseModel):
     resources: list[Revision]
+    offset: int
 
 
 class LogLine(BaseModel):
@@ -78,29 +79,27 @@ class Deployer:
         self.expected_sha = expected_sha
         self.deadline = time.monotonic() + TIMEOUT_SECONDS
 
-    async def latest(self) -> Revision | None:
-        response = await self.client.get(f"{self.path}/revisions", params={"limit": 1})
-        response.raise_for_status()
-        resources = Revisions.model_validate_json(response.content).resources
-        return resources[0] if resources else None
+    async def wait_for_revision(self) -> Revision:
+        print(f"waiting for automatic deployment of {self.expected_sha}", flush=True)
+        offset = 0
+        while time.monotonic() < self.deadline:
+            response = await self.client.get(
+                f"{self.path}/revisions", params={"limit": 100, "offset": offset}
+            )
+            response.raise_for_status()
+            page = Revisions.model_validate_json(response.content)
+            for revision in page.resources:
+                if revision.commit == self.expected_sha:
+                    return revision
+            if page.resources and page.offset > offset:
+                offset = page.offset
+            else:
+                offset = 0
+                await asyncio.sleep(POLL_SECONDS)
+        raise DeployError(f"no automatic revision for {self.expected_sha} appeared before timeout")
 
     async def revision(self, revision_id: str) -> Revision:
         response = await self.client.get(f"{self.path}/revisions/{revision_id}")
-        response.raise_for_status()
-        return Revision.model_validate_json(response.content)
-
-    async def create(self) -> Revision:
-        body = {"source_revision_config": {"langgraph_config_path": "langgraph.json"}}
-        response = await self.client.post(f"{self.path}/revisions", json=body)
-        if response.status_code == 409:
-            busy = await self.latest()
-            if busy is None:
-                raise DeployError(f"revision creation conflicted: {response.text}")
-            print(
-                f"revision {busy.id} is still rolling out; waiting before creating ours", flush=True
-            )
-            await self.settle(busy)
-            response = await self.client.post(f"{self.path}/revisions", json=body)
         response.raise_for_status()
         return Revision.model_validate_json(response.content)
 
@@ -138,17 +137,17 @@ class Deployer:
         print("::endgroup::", flush=True)
 
     async def deploy(self) -> None:
-        revision = await self.settle(await self.create())
+        revision = await self.settle(await self.wait_for_revision())
         if revision.status != "DEPLOYED":
             await self.print_logs(revision)
             detail = f": {revision.status_message}" if revision.status_message else ""
             raise DeployError(f"revision {revision.id} ended {revision.status}{detail}")
-        if revision.commit and revision.commit != self.expected_sha:
-            print(
-                f"::warning::deployed {revision.commit[:7]}, not the published "
-                f"{self.expected_sha[:7]}; the preview branch moved during the build"
+        if revision.commit != self.expected_sha:
+            raise DeployError(
+                f"revision {revision.id} deployed {revision.commit or 'an unknown commit'}, "
+                f"not the published {self.expected_sha}"
             )
-        print(f"revision {revision.id} deployed {revision.commit or 'an unknown commit'}")
+        print(f"revision {revision.id} deployed {revision.commit}")
 
 
 async def main() -> None:
