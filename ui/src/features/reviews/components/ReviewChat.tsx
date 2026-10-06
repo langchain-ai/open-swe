@@ -11,6 +11,7 @@ import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 
@@ -79,6 +80,15 @@ export function ReviewChat({
 }) {
   const composer = useReviewChatComposer()
   const [composerText, setComposerText] = useState("")
+  const reviewActions = useMemo(
+    () => ({
+      owner,
+      repo,
+      number,
+      showInDiff: (range: DiffRange) => composer?.showInDiff(range),
+    }),
+    [owner, repo, number, composer]
+  )
   useEffect(() => {
     composer?.registerSink((attachment) =>
       setComposerText((text) =>
@@ -92,9 +102,11 @@ export function ReviewChat({
   if (meta.isError || !meta.data.available)
     return <p>Chat is unavailable right now. Reload the page to try again.</p>
   return (
-    <AgentThreadPage
-      threadId={meta.data.thread_id}
-      composerText={composerText}
-    />
+    <ReviewChatActionsContext.Provider value={reviewActions}>
+      <AgentThreadPage
+        threadId={meta.data.thread_id}
+        composerText={composerText}
+      />
+    </ReviewChatActionsContext.Provider>
   )
 }
