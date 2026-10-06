@@ -201,7 +201,9 @@ jobs:
         with:
           bun-version: latest
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+        run: pnpm install --frozen-lockfile --filter "open-swe-cli..." --filter open-swe-bridge-client --filter open-swe
+      - name: Run bridge client checks
+        run: pnpm --filter open-swe-bridge-client run check
       - name: Run CLI checks
         run: pnpm --filter open-swe-cli run check
       - name: Build CLI binary
@@ -242,7 +244,7 @@ jobs:
           else
             echo "browser=true" >> "$GITHUB_OUTPUT"
           fi
-          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop; then
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop bridge-client; then
             echo "desktop=false" >> "$GITHUB_OUTPUT"
           else
             echo "desktop=true" >> "$GITHUB_OUTPUT"

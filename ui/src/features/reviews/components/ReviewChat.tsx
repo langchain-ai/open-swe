@@ -7,19 +7,15 @@ import {
   useState,
 } from "react"
 import { useQuery } from "@tanstack/react-query"
+import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 
-export interface ChatAttachment {
+export interface ChatAttachment extends CodeExcerpt {
   id: string
-  path: string
-  // e.g. "R35-37" / "L12" — the side+line range shown after the filename.
-  lineLabel: string
-  language: string
-  snippet: string
 }
 
 interface ReviewChatComposer {

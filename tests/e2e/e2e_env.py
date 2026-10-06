@@ -122,7 +122,12 @@ TEST_USERS = [
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
-    [*(user["login"] for user in TEST_USERS), "thread-tools-e2e", "threads-workspace-e2e"]
+    [
+        *(user["login"] for user in TEST_USERS),
+        "octocat",
+        "thread-tools-e2e",
+        "threads-workspace-e2e",
+    ]
 )
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 

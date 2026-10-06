@@ -10,6 +10,7 @@ import pytest
 from agent.github import notifications, webhook
 from agent.github.pull_requests import PullRequest
 from agent.slack import thinking
+from agent.slack.http import SlackRequestError
 from agent.users import User
 from agent.webhooks import common
 
@@ -36,7 +37,7 @@ def review_notice(monkeypatch: pytest.MonkeyPatch, fake_store) -> tuple[MagicMoc
         async with lock:
             yield await notifications.get_active_slack_thread(client, thread_id)
 
-    post = AsyncMock(return_value=("1700000001.123456", None))
+    post = AsyncMock(return_value="1700000001.123456")
     monkeypatch.setattr(notifications, "get_client", lambda **kwargs: client)
     monkeypatch.setattr(notifications, "slack_thread_mutation_lock", locked)
     monkeypatch.setattr(notifications, "post_slack_thread_reply_with_ts", post)
@@ -163,11 +164,11 @@ async def test_review_notice_preserves_current_run_status(
     async def list_runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
         return [{"run_id": "run-1"}] if status == run_status else []
 
-    async def post_notice(*args: object, **kwargs: object) -> tuple[str, None]:
+    async def post_notice(*args: object, **kwargs: object) -> str:
         nonlocal slack_status
         slack_status = ""
         client.runs.list.side_effect = list_runs
-        return "1700000001.123456", None
+        return "1700000001.123456"
 
     client.runs.list.return_value = [{"run_id": "run-1"}]
     post.side_effect = post_notice
@@ -268,7 +269,7 @@ async def test_slack_failures_are_logged_without_retrying_uncertain_delivery(
     if raises:
         post.side_effect = TimeoutError("response lost")
     else:
-        post.return_value = (None, "post_failed")
+        post.side_effect = SlackRequestError("post_failed")
     for _ in range(2):
         await notifications.notify_slack_review(
             "agent-thread",
