@@ -21,7 +21,8 @@ import logging
 from collections.abc import AsyncIterator
 
 from agent.bridge.constants import ALIVE_THRESHOLD_SECONDS, CHANNEL
-from agent.database import notifications, postgres
+from agent.database import postgres
+from agent.database.notifications import LISTENER
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ async def start() -> None:
         logger.info("Sandbox bridge listener disabled: PostgreSQL is not configured")
         return
     _STOP.clear()
-    await notifications.listen(CHANNEL, _on_notify)
+    await LISTENER.listen(CHANNEL, _on_notify)
     if _PRUNE_TASK is None or _PRUNE_TASK.done():
         _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="bridge-prune")
 
@@ -100,7 +101,7 @@ async def start() -> None:
 async def stop() -> None:
     global _PRUNE_TASK
     _STOP.set()
-    notifications.unlisten(CHANNEL)
+    LISTENER.unlisten(CHANNEL)
     task = _PRUNE_TASK
     _PRUNE_TASK = None
     if task is not None:

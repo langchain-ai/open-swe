@@ -4,8 +4,20 @@
  * `meta.invalidatedBy`; an invalidation of any of them refetches it, so it
  * never needs a `refetchInterval`.
  */
-export const INVALIDATION_TOPICS = {
-  workspaces: "workspaces",
-} as const
+type Topic = "workspaces" | "incident-settings"
+/** Topics whose records each have one of their own, `<topic>/<key>`. */
+type KeyedTopic = "review-styles" | "incidents"
 
 export type InvalidationTopic = string
+
+export function invalidationTopic(name: Topic | KeyedTopic): InvalidationTopic
+export function invalidationTopic(
+  name: KeyedTopic,
+  key: string
+): InvalidationTopic
+export function invalidationTopic(
+  name: Topic | KeyedTopic,
+  key?: string
+): InvalidationTopic {
+  return key === undefined ? name : `${name}/${key}`
+}

@@ -15,7 +15,7 @@ from langgraph.types import Command
 
 from agent.incidents import documents, service
 from agent.incidents.evidence_tools import EvidenceCollector, source_url
-from agent.incidents.models import Incident, IncidentPolicy, IncidentReportRecord
+from agent.incidents.models import Incident, IncidentId, IncidentPolicy, IncidentReportRecord
 from agent.incidents.presentation import report_message
 from agent.incidents.report import (
     INCIDENT_PROMPT,
@@ -194,7 +194,7 @@ class IncidentSession:
 
     async def _read_incident(self, incident_id: str) -> dict[str, Any]:
         await self.check()
-        context = await documents.document_context(incident_id)
+        context = await documents.document_context(IncidentId(incident_id))
         return self.collector.record_observation(
             source="incident",
             url="",
@@ -219,7 +219,7 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
         raise PermissionError("Thread is not an incident conversation")
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         raise PermissionError("Incident conversation must be system owned and public")
-    incident_id = str(metadata.get("incident_id") or cfg.get("incident_id") or "")
+    incident_id = IncidentId(str(metadata.get("incident_id") or cfg.get("incident_id") or ""))
     record = await service.INCIDENTS.get(incident_id) if incident_id else None
     if record is None or record.thread_id != thread_id:
         raise PermissionError("Incident binding is missing")
