@@ -50,6 +50,7 @@ class ToolSurface:
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
     integration_names: list[str] = field(default_factory=list)
+    mda_sandbox: str | None = None
 
     async def prepare(self, state: Mapping[str, object]) -> None:
         if self.graph is None:
@@ -73,7 +74,12 @@ class ToolSurface:
                 continue
             parameters = tool_parameters(tool)
             results.append(
-                ToolDescription(name=name, description=tool.description, parameters=parameters)
+                ToolDescription(
+                    name=name,
+                    description=tool.description,
+                    parameters=parameters,
+                    integration=name in self.integration_names,
+                )
             )
         return results
 
@@ -136,7 +142,7 @@ class ToolSurface:
 
 
 async def load_tool_surface(
-    thread_id: str,
+    thread_id: str, *, mda_sandbox: str | None = None
 ) -> tuple[ToolSurface, RunnableConfig, dict[str, object]]:
     from agent.server import build_agent
 
@@ -153,7 +159,7 @@ async def load_tool_surface(
             "__is_for_execution__": True,
         },
     }
-    surface = ToolSurface()
+    surface = ToolSurface(mda_sandbox=mda_sandbox)
     await build_agent(config, tool_surface=surface)
     await surface.prepare(state)
     return surface, config, state

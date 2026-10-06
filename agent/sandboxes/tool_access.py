@@ -1,6 +1,8 @@
 """Sandbox capabilities for the associated thread's tools."""
 
+import hashlib
 import shlex
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlsplit
 
@@ -23,6 +25,10 @@ TOOLS_RULE = "open-swe-thread-tools"
 TOOLS_URL_FILE = "/tmp/open-swe-tools-url"
 TOOLS_URL_ENV = "OPEN_SWE_TOOLS_URL"
 TOOLS_AUDIENCE = "open-swe-sandbox-tools"
+MDA_TOOLS_HEADER = "X-Open-SWE-MDA-Token"
+MDA_SANDBOX_HEADER = "X-Open-SWE-MDA-Sandbox"
+MDA_TOOLS_AUDIENCE = "open-swe-mda-tools"
+MDA_TOOLS_TTL = timedelta(hours=12)
 OPENAI_PATH = "/dashboard/api/sandbox-openai/v1"
 OPENAI_API_KEY_PLACEHOLDER = "sk-7kP9mT2vR5xN8qL4bH6wC3jF1dS0aG9uE2zY5rV8nM4pQ6tK"
 SANDBOX_HOST_THREAD_KEY = "sandbox_host_thread_id"
@@ -32,6 +38,13 @@ SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 class ToolAccess(BaseModel):
     thread_id: str = Field(strict=True, min_length=1)
     sandbox_id: str = Field(strict=True, min_length=1)
+
+
+class MdaToolAccess(BaseModel):
+    """A Managed Deep Agents run calling its Open SWE thread's tools from its own sandbox."""
+
+    thread_id: str = Field(strict=True, min_length=1)
+    sandbox_name: str = Field(strict=True, min_length=1, max_length=256)
 
 
 def tools_base_url() -> str | None:
@@ -91,6 +104,46 @@ async def authenticate_tool_access(token: str | None) -> ToolAccess:
             raise HTTPException(401, "Invalid sandbox capability") from exc
         raise
     if (thread.get("metadata") or {}).get("sandbox_id") != access.sandbox_id:
+        raise HTTPException(401, "Invalid sandbox capability")
+    return access
+
+
+def issue_mda_tool_access(thread_id: str) -> tuple[str, str] | None:
+    secret = ENV.DASHBOARD_JWT_SECRET.optional()
+    url = tools_base_url()
+    if not secret or not url:
+        return None
+    claims = {
+        "aud": MDA_TOOLS_AUDIENCE,
+        "thread_id": thread_id,
+        "exp": datetime.now(UTC) + MDA_TOOLS_TTL,
+    }
+    return url, jwt.encode(claims, secret, algorithm="HS256")
+
+
+def _mda_thread_sandbox(thread_id: str, sandbox_name: str) -> bool:
+    """MDA names a thread's sandbox ``<deployment>--<first 12 hex of sha256("thread:<id>")>``."""
+    digest = hashlib.sha256(f"thread:{thread_id}".encode()).hexdigest()[:12]
+    return f"--{digest}" in sandbox_name
+
+
+def authenticate_mda_tool_access(token: str, sandbox_name: str | None) -> MdaToolAccess:
+    """Verify an MDA capability presented from that thread's own MDA sandbox."""
+    secret = ENV.DASHBOARD_JWT_SECRET.optional()
+    if len(token) > 4096 or not secret:
+        raise HTTPException(401, "Invalid sandbox capability")
+    try:
+        claims = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience=MDA_TOOLS_AUDIENCE,
+            options={"require": ["aud", "exp", "thread_id"]},
+        )
+        access = MdaToolAccess(thread_id=claims["thread_id"], sandbox_name=sandbox_name or "")
+    except (jwt.PyJWTError, ValidationError) as exc:
+        raise HTTPException(401, "Invalid sandbox capability") from exc
+    if not _mda_thread_sandbox(access.thread_id, access.sandbox_name):
         raise HTTPException(401, "Invalid sandbox capability")
     return access
 

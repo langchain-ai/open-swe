@@ -1,5 +1,6 @@
 """Sandbox tool authorization, discovery, and server-side execution."""
 
+import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -98,6 +99,19 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
         await tool_access.authenticate_tool_access(token)
     with pytest.raises(HTTPException):
         await tool_access.authenticate_tool_access("x" * 64)
+
+
+def test_mda_capability_only_works_from_its_threads_sandbox(capability_settings: None) -> None:
+    issued = tool_access.issue_mda_tool_access("thread-a")
+    assert issued is not None
+    token = issued[1]
+    digest = hashlib.sha256(b"thread:thread-a").hexdigest()[:12]
+    access = tool_access.authenticate_mda_tool_access(token, f"open-swe--{digest}")
+    assert access.thread_id == "thread-a"
+    other = hashlib.sha256(b"thread:thread-b").hexdigest()[:12]
+    for sandbox in (f"open-swe--{other}", None):
+        with pytest.raises(HTTPException):
+            tool_access.authenticate_mda_tool_access(token, sandbox)
 
 
 @pytest.mark.parametrize("enabled", [False, True])

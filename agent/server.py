@@ -42,6 +42,7 @@ from deepagents.backends.state import StateBackend
 from deepagents.backends.store import StoreBackend
 from deepagents.graph import DeepAgentState
 from deepagents.middleware.filesystem import FilesystemMiddleware, FilesystemState
+from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -103,7 +104,12 @@ from agent.mcp import load_mcp_tools
 from agent.mcp.instance import instance_mcp_source
 from agent.mcp.user import user_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
-from agent.mda import build_mda_agent, mda_agent_enabled
+from agent.mda import (
+    MDA_SURFACE_EXCLUDED_TOOLS,
+    MDA_WORK_DIR,
+    build_mda_agent,
+    mda_agent_enabled,
+)
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -160,6 +166,7 @@ from agent.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
 from agent.runtime.execution import bindable_config, graph_loaded_for_execution
+from agent.sandboxes.connect import connect_sandbox
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -875,7 +882,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         saved_requested_model: str | None = None,
         bridge_client: BridgeClient | None = None,
         prefer_tools_in_sandbox: bool = False,
+        external_work_dir: str | None = None,
     ) -> None:
+        """``external_work_dir`` is set when another runtime owns the sandbox."""
+        self._external_work_dir = external_work_dir
         self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
         self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
@@ -966,6 +976,47 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         )
         blocks = [person_introduction(p.as_person()) for p in ordered]
         return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
+
+    async def _attach_sandbox(
+        self,
+        state: PrepareRunState,
+        triggering_user_identity_task: asyncio.Task[CollaboratorIdentity | None],
+    ) -> tuple[CollaboratorIdentity | None, str, bool]:
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+        sandbox_task = asyncio.create_task(
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
+        )
+        try:
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                triggering_user_identity, sandbox_backend = await asyncio.gather(
+                    triggering_user_identity_task,
+                    sandbox_task,
+                )
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+            # The run is about to die with no sandbox; make sure the user hears
+            # why rather than getting silence.
+            await post_sandbox_unreachable_notification(
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
+            )
+            raise
+        if stale_workspace := take_stale_boot(self._thread_id):
+            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
+        async with aphase(self._thread_id, "prepare.work_dir"):
+            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
+        if bridged and self._bridge_client == "desktop":
+            schedule_worktree_branch_rename(
+                thread_id=self._thread_id,
+                backend=sandbox_backend,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+            )
+        return triggering_user_identity, work_dir, bridged
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, object]:
         decision = ModelSelectionDecision(requested_model=self._saved_requested_model)
@@ -1164,41 +1215,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
-        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
-        sandbox_task = asyncio.create_task(
-            retry_transient_sandbox_errors(
-                sandbox_proxy.ready,
-                description="Sandbox attach",
-                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+        if self._external_work_dir is not None:
+            triggering_user_identity = await triggering_user_identity_task
+            work_dir, bridged = self._external_work_dir, False
+        else:
+            triggering_user_identity, work_dir, bridged = await self._attach_sandbox(
+                state, triggering_user_identity_task
             )
-        )
-        try:
-            async with aphase(self._thread_id, "prepare.await_sandbox"):
-                triggering_user_identity, sandbox_backend = await asyncio.gather(
-                    triggering_user_identity_task,
-                    sandbox_task,
-                )
-        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
-            # The run is about to die with no sandbox; make sure the user hears
-            # why rather than getting silence.
-            await post_sandbox_unreachable_notification(
-                self._config or {},
-                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
-            )
-            raise
         del github_token
-        if stale_workspace := take_stale_boot(self._thread_id):
-            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
-        async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
-        if bridged and self._bridge_client == "desktop":
-            schedule_worktree_branch_rename(
-                thread_id=self._thread_id,
-                backend=sandbox_backend,
-                messages=state.get("messages") or [],
-                model=self._title_model,
-            )
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -1382,10 +1406,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             tools=[],
         ).with_config(bindable_config(config))
 
-    if not is_desktop_run(cfg) and await mda_agent_enabled(workspace_slug(cfg)):
-        logger.info("Routing agent run to MDA deployment", extra={"thread_id": thread_id})
-        return build_mda_agent().with_config(bindable_config(config))
-
     from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
 
     incident_session: IncidentSession | None = None
@@ -1403,20 +1423,31 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         except Exception:
             logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
+    # An MDA run's sandbox belongs to MDA; tool calls it makes back into this
+    # thread name that sandbox, and nothing here creates one.
+    mda = (
+        tool_surface is None
+        and await mda_agent_enabled(cfg)
+        and await _bridge_client(thread_id) is None
+    )
+    mda_sandbox = tool_surface.mda_sandbox if tool_surface is not None else None
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
     ) -> SandboxBackendProtocol:
         if is_desktop_run(_cfg):
             return create_desktop_backend(_cfg)
+        if mda_sandbox is not None:
+            return await connect_sandbox(mda_sandbox, thread_id=_thread_id)
         return await ensure_sandbox_for_thread(
             _thread_id,
             workspace_slug=workspace_slug(_cfg),
             record_stale_boot=True,
         )
 
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    if tool_surface is None:
+    backend = get_cached_sandbox_backend(thread_id, reconnect=None if mda else reconnect_backend)
+    if tool_surface is None and not mda:
         backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
@@ -1440,6 +1471,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         # reach sandbox-only tools, so they keep every tool direct.
         prefer_tools_in_sandbox = (
             not local_run
+            and not mda
+            and mda_sandbox is None
             and bridge_client is None
             and tools_endpoint_configured()
             and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
@@ -2009,6 +2042,67 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if credential_login is None and not local_run
         else None
     )
+    prepare_run = PrepareAgentRunMiddleware(
+        credential_login=credential_login,
+        thread_id=thread_id,
+        config=config,
+        profile_login=profile_login,
+        repo_instructions=repo_instructions,
+        model_id=model_id,
+        effort=profile_effort,
+        title_model=title_model,
+        source=source,
+        user_email=user_email,
+        linear_project_id=linear_project_id,
+        linear_issue_number=linear_issue_number,
+        draft_prs=sender_draft_prs,
+        recent_thread_context_enabled=(
+            sender_profile.get("recent_thread_context_enabled") is True if sender_profile else False
+        ),
+        admin_workspaces=admin_thread,
+        sole_writer=tool_access.sole,
+        model_selection=model_selection,
+        routing_defaults=routing_defaults,
+        requested_models=requested_models,
+        saved_requested_model=thread_settings.get("requested_model"),
+        bridge_client=bridge_client,
+        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
+        external_work_dir=MDA_WORK_DIR if mda else None,
+    )
+    reply_guard = RequireUserReplyMiddleware(
+        _registered_tool_name(slack_reply),
+        _registered_tool_name(slack_no_reply_needed),
+        initial_surface=(_initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE),
+    )
+    if mda:
+        await save_tool_context(thread_id, config)
+        return build_mda_agent(
+            thread_id=thread_id,
+            model=main_model,
+            middleware=[
+                prepare_run,
+                SkillsMiddleware(backend=agent_backend, sources=skill_sources),
+                check_message_queue_before_model,
+                deliver_event_matches_before_model,
+                reply_guard,
+                notify_step_limit_reached,
+                record_run_usage,
+            ],
+            default_model=(model_id, profile_effort),
+            subagent_model=(subagent_model_id, subagent_effort),
+            excluded_tools=excluded_tools,
+            subagent_excluded_tools=[
+                name
+                for name in reserved_tool_names
+                if name == "save_user_settings" or _is_subagent_excluded_tool(name)
+            ],
+            integration_tools_description=(
+                dynamic_tool_middleware.tools[0].description
+                if dynamic_tool_middleware and dynamic_tool_middleware.tools
+                else None
+            ),
+            remote_paths=list(skill_routes),
+        ).with_config(bindable_config(config))
     async with aphase(thread_id, "factory.graph_assembly"):
         graph = create_deep_agent(
             model=main_model,
@@ -2047,34 +2141,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ConversationOffloadingMiddleware(
                         main_model, agent_backend, manual=cfg.offload_conversation is True
                     ),
-                    PrepareAgentRunMiddleware(
-                        credential_login=credential_login,
-                        thread_id=thread_id,
-                        config=config,
-                        profile_login=profile_login,
-                        repo_instructions=repo_instructions,
-                        model_id=model_id,
-                        effort=profile_effort,
-                        title_model=title_model,
-                        source=source,
-                        user_email=user_email,
-                        linear_project_id=linear_project_id,
-                        linear_issue_number=linear_issue_number,
-                        draft_prs=sender_draft_prs,
-                        recent_thread_context_enabled=(
-                            sender_profile.get("recent_thread_context_enabled") is True
-                            if sender_profile
-                            else False
-                        ),
-                        admin_workspaces=admin_thread,
-                        sole_writer=tool_access.sole,
-                        model_selection=model_selection,
-                        routing_defaults=routing_defaults,
-                        requested_models=requested_models,
-                        saved_requested_model=thread_settings.get("requested_model"),
-                        bridge_client=bridge_client,
-                        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
-                    ),
+                    prepare_run,
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),
                     *(
@@ -2109,13 +2176,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if stop_summary_mode
                         else [check_message_queue_before_model, deliver_event_matches_before_model]
                     ),
-                    RequireUserReplyMiddleware(
-                        _registered_tool_name(slack_reply),
-                        _registered_tool_name(slack_no_reply_needed),
-                        initial_surface=(
-                            _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-                        ),
-                    ),
+                    reply_guard,
                     *(
                         [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
                         if cli_result_required
@@ -2149,7 +2210,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
-        )
+        ) | (MDA_SURFACE_EXCLUDED_TOOLS if mda_sandbox is not None else frozenset())
     elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
         await save_tool_context(thread_id, config)
     return graph

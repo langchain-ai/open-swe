@@ -5837,6 +5837,11 @@
             "title": "Description",
             "type": "string"
           },
+          "integration": {
+            "default": false,
+            "title": "Integration",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"

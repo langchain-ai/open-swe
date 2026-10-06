@@ -9,6 +9,7 @@ class ToolDescription(BaseModel):
     name: str
     description: str
     parameters: dict[str, JsonValue]
+    integration: bool = False
 
 
 class ToolArguments(RootModel[dict[str, JsonValue]]):

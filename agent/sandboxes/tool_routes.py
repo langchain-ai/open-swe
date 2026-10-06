@@ -9,9 +9,13 @@ from pydantic import BaseModel
 from starlette.types import Message, Receive, Scope, Send
 
 from agent.sandboxes.tool_access import (
+    MDA_SANDBOX_HEADER,
+    MDA_TOOLS_HEADER,
     TOOLS_HEADER,
     TOOLS_PATH,
+    MdaToolAccess,
     ToolAccess,
+    authenticate_mda_tool_access,
     authenticate_tool_access,
 )
 from agent.sandboxes.tool_models import ToolArguments, ToolDescription, ToolResult
@@ -46,7 +50,19 @@ async def require_tool_access(request: Request, response: Response) -> ToolAcces
     return await authenticate_tool_access(token)
 
 
+async def require_thread_access(request: Request, response: Response) -> ToolAccess | MdaToolAccess:
+    if mda_token := request.headers.get(MDA_TOOLS_HEADER):
+        response.headers["Cache-Control"] = "no-store"
+        return authenticate_mda_tool_access(mda_token, request.headers.get(MDA_SANDBOX_HEADER))
+    return await require_tool_access(request, response)
+
+
 Access = Annotated[ToolAccess, Depends(require_tool_access)]
+ThreadAccess = Annotated[ToolAccess | MdaToolAccess, Depends(require_thread_access)]
+
+
+def _mda_sandbox(access: ToolAccess | MdaToolAccess) -> str | None:
+    return access.sandbox_name if isinstance(access, MdaToolAccess) else None
 
 
 class ToolList(BaseModel):
@@ -58,14 +74,14 @@ class ToolList(BaseModel):
 @router.get("/list", response_model=ToolList)
 @router.get("/search", response_model=ToolList)
 async def list_tools(
-    access: Access,
+    access: ThreadAccess,
     q: Annotated[str, Query(max_length=512)] = "",
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> ToolList:
     from agent.sandboxes.tool_runtime import load_tool_surface
 
-    surface, _, _ = await load_tool_surface(access.thread_id)
+    surface, _, _ = await load_tool_surface(access.thread_id, mda_sandbox=_mda_sandbox(access))
     tools = surface.catalog(q)
     return ToolList(tools=tools[offset : offset + limit], total=len(tools))
 
@@ -98,11 +114,13 @@ async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
 async def invoke_tool(
     tool_name: Annotated[str, Path(min_length=1, max_length=256)],
     arguments: ToolArguments,
-    access: Access,
+    access: ThreadAccess,
 ) -> ToolResult:
     from agent.sandboxes.tool_runtime import load_tool_surface
 
-    surface, config, state = await load_tool_surface(access.thread_id)
+    surface, config, state = await load_tool_surface(
+        access.thread_id, mda_sandbox=_mda_sandbox(access)
+    )
     try:
         result = await surface.invoke(access.thread_id, config, state, tool_name, arguments.root)
         return ToolResult.model_validate(result)
