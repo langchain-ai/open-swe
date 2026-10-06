@@ -741,6 +741,28 @@ async def add_pending_review_comment(
     return refreshed
 
 
+class PostedReviewComment(BaseModel):
+    id: int
+    html_url: str
+
+
+async def post_review_comment(
+    owner: str, repo: str, pr_number: int, comment: PendingReviewCommentInput, *, token: str
+) -> PostedReviewComment:
+    """Post one line comment on the PR right away, outside any pending review."""
+    if not comment.body.strip():
+        raise HTTPException(422, "comment body is required")
+    head_sha = await get_pr_head_sha(owner, repo, pr_number)
+    if not head_sha:
+        raise HTTPException(502, "could not resolve PR head commit")
+    payload = await _github_post(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+        token,
+        json={"commit_id": head_sha, **_rest_review_comment(comment)},
+    )
+    return PostedReviewComment.model_validate(payload)
+
+
 _UPDATE_REVIEW_COMMENT = """
 mutation($input: UpdatePullRequestReviewCommentInput!) {
   updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
@@ -1048,6 +1070,12 @@ class PreviewFile(BaseModel):
     deletions: int
 
 
+class PreviewReply(BaseModel):
+    author: str | None = None
+    body: str
+    url: str | None = None
+
+
 class PreviewThread(BaseModel):
     thread_id: str | None = None
     author: str | None = None
@@ -1055,6 +1083,7 @@ class PreviewThread(BaseModel):
     path: str
     line: int | None = None
     url: str | None = None
+    replies: list[PreviewReply] = []
 
 
 class PreviewCheck(BaseModel):
@@ -1144,7 +1173,15 @@ def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
     parsed = PreviewThread.model_validate(thread)
     # Review bots hide their bookkeeping in HTML comments, which would otherwise
     # be the whole of what a one-line preview shows.
-    return parsed.model_copy(update={"body": _clean_comment_body(parsed.body)})
+    return parsed.model_copy(
+        update={
+            "body": _clean_comment_body(parsed.body),
+            "replies": [
+                reply.model_copy(update={"body": _clean_comment_body(reply.body)})
+                for reply in parsed.replies
+            ],
+        }
+    )
 
 
 async def get_pull_request_preview(

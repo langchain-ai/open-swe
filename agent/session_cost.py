@@ -16,6 +16,7 @@ from agent.slack.client import (
     with_slack_pending_session_cost,
     with_slack_session_cost,
 )
+from agent.slack.http import SlackRequestError
 from agent.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from agent.utils.thread_ops import langgraph_client
 
@@ -90,11 +91,12 @@ async def _mark_slack_reply_cost_pending(
     updated_text, updated_blocks = with_slack_pending_session_cost(text, blocks, clear=clear)
     if updated_text == text and updated_blocks == blocks:
         return
-    updated, error = await update_slack_message(
-        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
-    )
-    if not updated:
-        logger.warning("Could not update pending cost label", extra={"slack_error": error})
+    try:
+        await update_slack_message(
+            payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
+        )
+    except SlackRequestError as exc:
+        logger.warning("Could not update pending cost label", extra={"slack_error": exc.code})
 
 
 async def _clear_pending_cost(state: Mapping[str, object], client: LangGraphClient) -> None:
@@ -210,11 +212,12 @@ async def _refresh_once(
     if updated_text == text and updated_blocks == blocks:
         return "updated", "already current"
 
-    updated, error = await update_slack_message(
-        payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
-    )
-    if not updated:
-        return "pending", error or "Slack update failed"
+    try:
+        await update_slack_message(
+            payload["channel_id"], message_ts, updated_text, blocks=updated_blocks
+        )
+    except SlackRequestError as exc:
+        return "pending", exc.code or "Slack update failed"
     return "updated", "Slack footer updated"
 
 

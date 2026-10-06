@@ -2,13 +2,15 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+import httpx
 import httpx2
 import pytest
+from githubkit import GitHub
 
 from agent.expedited_review.readiness import PullRequestSnapshot
 from agent.github.pull_requests import PullRequest
 from agent.github.repo_files import RepoSettings
-from agent.human_review.lifecycle import _render_standard
+from agent.human_review.lifecycle import _render_standard, _unrequest_github_review
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
@@ -21,6 +23,26 @@ from agent.slack.blocks import block_payload
 from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("status", [200, 503])
+async def test_reviewer_removal_sends_delete_body_without_aborting(status: int) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    received: list[httpx.Request] = []
+
+    def respond(outgoing: httpx.Request) -> httpx.Response:
+        received.append(outgoing)
+        return httpx.Response(status, json={})
+
+    client = GitHub("token", async_transport=httpx.MockTransport(respond), auto_retry=False)
+    with patch("agent.human_review.lifecycle.github_sdk", return_value=client):
+        await _unrequest_github_review(request, "grace", "token")
+    assert len(received) == 1
+    assert received[0].method == "DELETE"
+    assert received[0].url.path == "/repos/lc/repo/pulls/7/requested_reviewers"
+    assert received[0].content == b'{"reviewers":["grace"]}'
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -91,6 +113,32 @@ def test_a_failing_check_github_does_not_require_does_not_block_the_request() ->
         failing_checks=["x"],
     )
     assert request_blockers(snapshot) == []
+
+
+@pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
+async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
+    from agent.human_review.standard import AutoAssignResult, run_deadline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        state="open",
+    )
+    request.created_at = datetime.now(UTC) - timedelta(minutes=30)
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
+        patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("agent.human_review.standard._github_approvers", AsyncMock(return_value=[])),
+        patch(
+            "agent.human_review.standard.start_auto_assign",
+            AsyncMock(return_value=AutoAssignResult("woken")),
+        ),
+    ):
+        assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
 
 
 def test_nothing_merges_without_an_approval() -> None:

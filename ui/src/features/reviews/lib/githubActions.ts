@@ -85,8 +85,7 @@ export function actionLabel(
   labels: ActionLabels,
   state: { isPending: boolean; isSuccess: boolean; isError: boolean }
 ) {
-  if (state.isPending) return labels.pending
-  if (state.isSuccess && labels.done) return labels.done
+  if (state.isPending || state.isSuccess) return labels.done ?? labels.pending
   if (state.isError) return labels.retry
   return labels.idle
 }

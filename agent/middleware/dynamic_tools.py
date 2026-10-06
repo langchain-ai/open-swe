@@ -86,8 +86,12 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         self,
         groups: Mapping[str, IntegrationGroup | Sequence[BaseTool]],
         reserved_names: Collection[str] = (),
+        *,
+        model_visible: bool = True,
     ) -> None:
+        """With ``model_visible`` false, only sandbox tool calls can reach the integrations."""
         reserved = {_LOAD_TOOL_NAME, *reserved_names}
+        self._model_visible = model_visible
         self._groups: dict[str, IntegrationGroup] = {}
         self._group_of: dict[str, str] = {}
         self._resolved: dict[str, _Resolved] = {}
@@ -176,13 +180,17 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             )
             example = json.dumps({"tool_names": [example_name]}, separators=(",", ":"))
             description += f"\nExample: {example}\nAvailable tools:\n" + "\n".join(catalog)
-        self.tools = [
-            StructuredTool.from_function(
-                coroutine=load_integration_tools,
-                name=_LOAD_TOOL_NAME,
-                description=description,
-            )
-        ]
+        self.tools = (
+            [
+                StructuredTool.from_function(
+                    coroutine=load_integration_tools,
+                    name=_LOAD_TOOL_NAME,
+                    description=description,
+                )
+            ]
+            if model_visible
+            else []
+        )
 
     @property
     def has_groups(self) -> bool:
@@ -227,6 +235,8 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        if not self._model_visible:
+            return await handler(request)
         loaded = self._loaded_names(request.state)
         if loaded:
             await self._build(loaded)
@@ -268,7 +278,11 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             return await handler(request)
         if name not in self._loaded_names(request.state):
             return ToolMessage(
-                content=f"Load {name} with load_integration_tools before calling it.",
+                content=(
+                    f"Load {name} with load_integration_tools before calling it."
+                    if self._model_visible
+                    else f"Call {name} through the sandbox tools endpoint."
+                ),
                 tool_call_id=request.tool_call["id"],
                 status="error",
             )

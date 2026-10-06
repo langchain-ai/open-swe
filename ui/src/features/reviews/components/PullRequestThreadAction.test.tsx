@@ -58,20 +58,20 @@ it("blocks the sibling action as soon as one is queued", async () => {
   })
   render(
     <QueryClientProvider client={client}>
-      <PullRequestThreadAction pr={pr} login="me" action="fix" />
+      <PullRequestThreadAction pr={pr} login="me" action="fix-checks" />
       <PullRequestThreadAction pr={pr} login="me" action="address-comments" />
     </QueryClientProvider>
   )
 
-  const fix = await screen.findByRole("button", { name: "Fix" })
+  const fix = await screen.findByRole("button", { name: "Fix checks" })
   const address = screen.getByRole("button", { name: "Address comments" })
   await waitFor(() => expect(address.hasAttribute("disabled")).toBe(false))
 
   fireEvent.click(fix)
-  await screen.findByRole("button", { name: "Queuing fix…" })
+  await screen.findByRole("button", { name: "Check fix queued" })
   finish({ thread_id: "t", already_running: false })
 
-  await screen.findByRole("button", { name: "Fix queued" })
+  await screen.findByRole("button", { name: "Check fix queued" })
   const blocked = screen.getByRole("button", { name: "Addressing comments" })
   expect(blocked.hasAttribute("disabled")).toBe(true)
 })
