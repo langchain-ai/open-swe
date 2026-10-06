@@ -1,10 +1,13 @@
 """Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
 
 import logging
+import random
+from collections import Counter
 from datetime import timedelta
+from fnmatch import fnmatchcase
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 
@@ -73,12 +76,62 @@ async def fetch_repo_file(
     return content if strict else content or None
 
 
+class ReviewChannelRule(BaseModel):
+    paths: list[str]
+    channel: str = Field(min_length=1)
+
+
+class ReviewFile(BaseModel):
+    filename: str
+
+
 class RepoSettings(BaseModel):
     """``.open-swe/settings.json``; unknown keys are ignored so the file can grow."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     review_channel: str = Field("", alias="reviewChannel")
+    review_channel_rules: list[ReviewChannelRule] = Field(
+        default_factory=list, alias="reviewChannelRules"
+    )
+
+    def channel_for_files(self, filenames: list[str]) -> str:
+        counts: Counter[str] = Counter()
+        for filename in filenames:
+            channel = next(
+                (
+                    rule.channel.strip()
+                    for rule in self.review_channel_rules
+                    if any(fnmatchcase(filename, path) for path in rule.paths)
+                ),
+                "" if self.review_channel_rules else self.review_channel.strip(),
+            )
+            if channel:
+                counts[channel] += 1
+        if not counts:
+            return "" if self.review_channel_rules else self.review_channel.strip()
+        count = max(counts.values())
+        return random.choice([candidate for candidate, total in counts.items() if total == count])
+
+    async def channel_for_pr(self, owner: str, repo: str, number: int, *, token: str) -> str:
+        if not self.review_channel_rules:
+            return self.review_channel.strip()
+        filenames: list[str] = []
+        adapter = TypeAdapter(list[ReviewFile])
+        async with github_client(token=token) as client:
+            for page in range(1, 31):
+                response = await github_request(
+                    client,
+                    "GET",
+                    f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/files",
+                    params={"per_page": "100", "page": str(page)},
+                )
+                response.raise_for_status()
+                files = adapter.validate_python(response.json())
+                filenames.extend(file.filename for file in files)
+                if len(files) < 100:
+                    return self.channel_for_files(filenames)
+        raise ValueError("Cannot route a pull request with an incomplete changed-file list")
 
     @classmethod
     async def fetch(
