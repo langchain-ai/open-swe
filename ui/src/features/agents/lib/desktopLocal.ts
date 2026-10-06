@@ -74,6 +74,14 @@ export function useLocalThread(threadId: string): DesktopLocalThread | null {
   )
 }
 
+/** This Mac's checkout for the thread, while the thread runs on a Mac. */
+export function useMacCheckout(
+  thread: Pick<AgentThread, "id" | "sandboxBridgeClient">
+): DesktopLocalThread | null {
+  const local = useLocalThread(thread.id)
+  return runsOnAMac(thread) ? local : null
+}
+
 export function useRefreshLocalThreads() {
   const queryClient = useQueryClient()
   return () =>

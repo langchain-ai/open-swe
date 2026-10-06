@@ -49,6 +49,7 @@ from agent.input_messages import (
 )
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
+from agent.sandboxes.handoff import HANDOFF_FROM_KEY
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,
@@ -69,6 +70,7 @@ from agent.threads.summary import (
     _now_ms,
     _parse_repo,
     repo_config_from_metadata,
+    thread_is_owner,
     thread_source,
 )
 from agent.transcript.attachments import PendingAttachment
@@ -115,6 +117,11 @@ _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
     "display_name": "Dashboard handoff",
+    "platform": "open-swe",
+}
+_SANDBOX_HANDOFF_SYSTEM: SystemIdentity = {
+    "id": "system:sandbox-handoff",
+    "display_name": "Sandbox handoff",
     "platform": "open-swe",
 }
 _PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
@@ -627,21 +634,44 @@ def _validate_command_images(content: Any, *, model_id: str | None) -> None:
         _image_blocks(images, model_id=model_id)
 
 
-async def _resolve_sandbox_bridge(
-    requested: object, *, owner_id: str, creating: bool
-) -> Bridge | None:
-    """The live bridge a new thread asked to run on, validated before it exists.
-
-    Checked before the thread record is written: a thread stamped with a bridge
-    nobody is answering can never be given a different sandbox later.
-    """
+async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge | None:
+    """The live bridge a thread asked to run on, validated before anything is stamped."""
     if requested is None:
         return None
     if not isinstance(requested, str) or not requested.strip():
         raise HTTPException(422, "sandbox_bridge_id must be a non-empty string")
-    if not creating:
-        raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
     return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
+
+
+async def _sandbox_handoff(
+    thread_id: str,
+    metadata: Mapping[str, Any],
+    *,
+    bridge: Bridge | None,
+    target: object,
+    login: str,
+) -> dict[str, Any] | None:
+    """The metadata that moves an existing thread to ``bridge`` or to the cloud, if it moves.
+
+    The checkout itself moves at the start of the next run, from the sandbox
+    recorded under ``HANDOFF_FROM_KEY``; a handoff still pending keeps its source.
+    """
+    if target not in (None, "cloud"):
+        raise HTTPException(422, "sandbox_target must be cloud")
+    current = metadata.get("sandbox_id")
+    if bridge is not None and bridge.sandbox_id != current:
+        if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):
+            raise HTTPException(409, "only its owner's private thread can move to their machine")
+        update: dict[str, Any] = SandboxBridgeBinding.of(bridge).dump()
+    elif bridge is None and target == "cloud" and Bridge.bridge_id_of(current) is not None:
+        update = {"sandbox_id": None, "sandbox_kind": None, "sandbox_bridge_client": None}
+    else:
+        return None
+    if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
+        raise HTTPException(409, "stop the run before moving this thread")
+    source = metadata.get(HANDOFF_FROM_KEY) or current
+    update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
+    return update
 
 
 async def _bind_thread_to_bridge(
@@ -699,6 +729,7 @@ async def _attributed_run_messages(
     creating: bool,
     email: str | None,
     client: Any,
+    sandbox_handoff: Mapping[str, Any] | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -735,6 +766,9 @@ async def _attributed_run_messages(
     notices: list[tuple[SystemIdentity, str]] = []
     if metadata.get("source") == "slack":
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
+    if sandbox_handoff is not None:
+        to_cloud = sandbox_handoff.get("sandbox_id") is None
+        notices.append((_SANDBOX_HANDOFF_SYSTEM, prompt("runs/sandbox-handoff", to_cloud=to_cloud)))
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
@@ -799,7 +833,17 @@ async def _enrich_run_start_command(
     sandbox_bridge = await _resolve_sandbox_bridge(
         client_configurable.get("sandbox_bridge_id"),
         owner_id=Principal.of_login(login, email).sender_id,
-        creating=creating,
+    )
+    sandbox_handoff = (
+        None
+        if creating
+        else await _sandbox_handoff(
+            thread_id,
+            metadata,
+            bridge=sandbox_bridge,
+            target=client_configurable.get("sandbox_target"),
+            login=login,
+        )
     )
     content = _command_message_content(params)
     if offloading and creating:
@@ -873,6 +917,7 @@ async def _enrich_run_start_command(
         creating=creating,
         email=email,
         client=client,
+        sandbox_handoff=sandbox_handoff,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -898,6 +943,7 @@ async def _enrich_run_start_command(
         PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
         PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
         "injected_dynamic_context_hashes": sorted(injected),
+        **(sandbox_handoff or {}),
     }
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
@@ -1500,10 +1546,10 @@ async def _enrich_system_run_start_command(
     if _dashboard_images_from_content(content):
         raise HTTPException(422, "machine principals cannot attach images")
 
+    if not creating and client_configurable.get("sandbox_bridge_id") is not None:
+        raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
     sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"),
-        owner_id=principal.sender_id,
-        creating=creating,
+        client_configurable.get("sandbox_bridge_id"), owner_id=principal.sender_id
     )
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:

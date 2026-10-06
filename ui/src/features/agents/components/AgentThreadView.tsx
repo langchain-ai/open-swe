@@ -29,6 +29,10 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
+import {
+  type ThreadTarget,
+  ThreadTargetMenu,
+} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -44,7 +48,10 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import {
+  type ThreadHandoff,
+  useSubmitAgentMessage,
+} from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
@@ -131,7 +138,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const session = useSession()
   // A "This Mac" thread can only run where its checkout is: the Mac whose app
   // started it. Everywhere else it is read-only.
-  const localThread = useLocalThread(thread.id)
+  const localRecord = useLocalThread(thread.id)
+  const localThread = runsOnAMac(thread) ? localRecord : null
   const runsElsewhere = runsOnAMac(thread) && !localThread
   const canPost =
     !runsElsewhere &&
@@ -143,7 +151,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     queryKey: ["local-bridge", thread.id],
     queryFn: async () =>
       (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
-    enabled: Boolean(localThread),
+    // Also kept up for a thread moving off this Mac, until its checkout is carried over.
+    enabled: Boolean(localRecord),
     retry: false,
     refetchOnWindowFocus: "always",
   })
@@ -186,11 +195,40 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [queryClient, refetchLocalRepoRefs, thread.id]
   )
-  const bridgeError = localBridge.error
-    ? localBridge.error instanceof Error
-      ? localBridge.error.message
-      : "This Mac could not be reached"
-    : null
+  const bridgeError =
+    localThread && localBridge.error
+      ? localBridge.error instanceof Error
+        ? localBridge.error.message
+        : "This Mac could not be reached"
+      : null
+  // A move takes effect with the next message, whose run carries the checkout over.
+  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const canMove =
+    Boolean(window.openSweDesktop) &&
+    !runsElsewhere &&
+    thread.sandboxBridgeClient !== "cli" &&
+    Boolean(thread.repoFullName) &&
+    thread.visibility === "private" &&
+    thread.ownerLogin?.toLowerCase() === session.data?.login.toLowerCase()
+  const prepareHandoff = useCallback(async (): Promise<
+    ThreadHandoff | undefined
+  > => {
+    if (handoff === "cloud")
+      return {
+        configurable: { sandbox_target: "cloud" },
+        sandboxBridgeClient: null,
+      }
+    if (handoff !== "local" || !window.openSweDesktop) return undefined
+    const bridgeId = await window.openSweDesktop.takeOverThread({
+      threadId: thread.id,
+      repo: thread.repoFullName,
+    })
+    return {
+      configurable: { sandbox_bridge_id: bridgeId },
+      sandboxBridgeClient: "desktop",
+    }
+  }, [handoff, thread.id, thread.repoFullName])
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -262,6 +300,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
         await ensureLocalBridge()
+        const moving = await prepareHandoff()
         await sendMessage.mutateAsync({
           content,
           images,
@@ -270,10 +309,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
           enqueue: isStreaming && queue,
+          ...(moving ? { handoff: moving } : {}),
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
         })
+        if (moving) {
+          setHandoff(null)
+          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+        }
       } catch (error) {
         restoreAutoSelection()
         throw error
@@ -285,6 +329,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ensureLocalBridge,
       followUpBehavior,
       isStreaming,
+      prepareHandoff,
+      queryClient,
       sendMessage,
     ]
   )
@@ -636,6 +682,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               : thread.sandboxBridgeClient === "cli"
                 ? "Local CLI"
                 : "Cloud"
+          }
+          targetMenu={
+            canMove ? (
+              <ThreadTargetMenu
+                value={handoff ?? runsHere}
+                pending={handoff !== null}
+                disabled={isStreaming}
+                onChange={(next) => setHandoff(next === runsHere ? null : next)}
+              />
+            ) : undefined
           }
           panelCollapsed={panelCollapsed}
           thread={thread}

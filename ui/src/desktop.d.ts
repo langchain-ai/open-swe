@@ -253,6 +253,11 @@ declare global {
         workspaceMode?: DesktopWorkspaceMode
         baseBranch?: string | null
       }) => Promise<{ bridgeId: string; repo: string | null }>
+      /** Move a cloud thread onto a new worktree here; resolves to its bridge id. */
+      takeOverThread: (input: {
+        threadId: string
+        repo: string
+      }) => Promise<string>
       /** Serve the thread's checkout again before its next run. */
       ensureLocalBridge: (threadId: string) => Promise<boolean>
       getLocalThread: (threadId: string) => Promise<DesktopLocalThread | null>
