@@ -461,6 +461,45 @@ describe("sidebar queries", () => {
     )
   })
 
+  it.each([true, false])(
+    "reactively uses onscreen detail while the sidebar request stalls (preloaded: %s)",
+    async (preloaded) => {
+      const opened = {
+        id: "opened-thread",
+        title: "Onscreen thread",
+        resolved: false,
+      } as AgentThread
+      const getThread = vi
+        .spyOn(agentsApi, "getThread")
+        .mockReturnValue(new Promise<AgentThread>(() => {}))
+      const client = testClient()
+      const key = agentThreadKeys.detail(opened.id)
+      if (preloaded) client.setQueryData(key, opened)
+      const { result } = renderHook(
+        () =>
+          useSidebarActiveThread({
+            activeThreadId: opened.id,
+            loadedThreads: [],
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>
+              {children}
+            </QueryClientProvider>
+          ),
+        }
+      )
+
+      expect(getThread).toHaveBeenCalledTimes(preloaded ? 0 : 1)
+      if (!preloaded) act(() => client.setQueryData(key, opened))
+      await waitFor(() => expect(result.current).toEqual(opened))
+
+      const updated = { ...opened, title: "Updated onscreen title" }
+      act(() => client.setQueryData(key, updated))
+      await waitFor(() => expect(result.current).toEqual(updated))
+    }
+  )
+
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {
     const opened = {
       id: "opened-thread",
