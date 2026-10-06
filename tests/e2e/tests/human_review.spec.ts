@@ -622,11 +622,12 @@ test.describe("Human review in Slack", () => {
       "Requested by",
     );
 
-    // 2. Thirty minutes pass with nobody signed up: Alice's thread for the PR
-    //    is woken and the agent picks Bob, who has yet to accept.
+    // 2. The auto-assignment timeout passes with nobody signed up: Alice's thread
+    //    for the PR is woken and the agent picks Bob, who has yet to accept.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
+      hours: 2,
     });
     await expect
       .poll(async () => (await latestRequest(request)).picks, {
@@ -743,6 +744,7 @@ test.describe("Human review in Slack", () => {
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
+      hours: 2,
     });
     await expect
       .poll(async () => (await latestRequest(request)).picks, {

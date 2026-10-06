@@ -6,7 +6,7 @@ import type {
   AgentThread,
   Message,
   SlackNotificationMode,
-  AutomationTrigger,
+  AutomationTriggerConfig,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
@@ -32,10 +32,9 @@ export class AgentsApiError extends DashboardRequestError {
 
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
@@ -47,10 +46,9 @@ export interface ScheduleCreateRequest {
 
 export interface ScheduleUpdateRequest {
   prompt?: string | null
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
   slack_channel_id?: string | null
   slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean

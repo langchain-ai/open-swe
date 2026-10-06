@@ -2,7 +2,7 @@
 
 A request is refused while the pull request is closed, a draft, conflicted, or
 failing a required check. People sign up from the card; after
-``UNCLAIMED_AFTER_MINUTES`` with nobody signed up Open SWE picks someone (see
+the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
 ``agent.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request merges once every reviewer approves on GitHub, or once
 ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval, and only while
@@ -10,7 +10,7 @@ it is otherwise ready.
 
 A ``posted`` request settles here too but never merges: its message gets an
 approved reaction, and once its pull request has sat green and unapproved for
-``UNCLAIMED_AFTER_MINUTES`` the agent picks a reviewer, the same way.
+the workspace auto-assignment timeout the agent picks a reviewer, the same way.
 """
 
 import logging
@@ -24,6 +24,7 @@ import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
+from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -51,6 +52,7 @@ from agent.human_review.people import Outcome, Participant, repo_token, resolve_
 from agent.human_review.picking import Pick, Wait, choose_reviewer
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from agent.prompts import prompt
+from agent.run_config import RunConfig
 from agent.slack.blocks import actions, block_payload, escape, section
 from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
@@ -61,11 +63,11 @@ from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.preview import skip_on_preview
 from agent.utils.thread_ops import langgraph_client
+from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
 SCHEDULER_TASK = "human_review"
-UNCLAIMED_AFTER_MINUTES = 30
 AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -74,6 +76,17 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+
+
+async def _assignment_minutes(request: HumanReviewRequest) -> int:
+    workspace = RunConfig.parse(request.run_config).workspace_slug
+    pr = request.pull_request
+    resolved = await resolve_workspace(
+        thread_workspace=workspace,
+        slack_channel_id=request.slack_channel_id,
+        repo=(pr.owner, pr.repo),
+    )
+    return (await get_workspace_settings(resolved.slug)).human_review_auto_assign_minutes
 
 
 class RequestResult(BaseModel):
@@ -318,7 +331,7 @@ async def request_review(
         return await _existing(winner)
     # Without its deadlines a request could wait forever on a reviewer who never approves.
     scheduled = await _schedule(
-        request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES)
+        request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
     ) and await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
     if not scheduled:
         await _discard(request.id)
@@ -452,13 +465,14 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
-def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
+async def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
     """Use deadline wording only when the reviewer's wait has passed."""
     now = datetime.now(UTC)
-    wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    minutes = await _assignment_minutes(request)
+    wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
     if not request.has_card and request.ready_since and now - request.ready_since >= wait:
         return (
-            f"{who}, {label} has been green for {UNCLAIMED_AFTER_MINUTES} minutes without an "
+            f"{who}, {label} has been green for {minutes} minutes without an "
             "approval, so Open SWE picked you."
         )
     if (
@@ -507,20 +521,19 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     pr = request.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
     who = mention(user)
-    notice = _pick_notice(request, who, label)
+    notice = await _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
         return _failure(added.message)
     await _request_github_review(added, github_login)
-    if not await _schedule(added, "pick_expiry", timedelta(minutes=UNCLAIMED_AFTER_MINUTES)):
+    minutes = await _assignment_minutes(added)
+    if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
         logger.warning(
             "A reviewer pick will not rotate if it is never accepted",
             extra={"request_id": str(added.id), "github_login": github_login},
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = (
-        f" Accept within {UNCLAIMED_AFTER_MINUTES} minutes, or Open SWE will ask someone else."
-    )
+    deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
     accept = actions(accept_button(added))
     thread_ts = added.slack_thread_ts or added.slack_message_ts
     thread_text = f"{notice}{why}{deadline}"
@@ -601,7 +614,9 @@ async def _settle_posted(
         if ready_since == previous:
             return
         row.ready_since = ready_since
-    wait = max(ready_since + timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - now, timedelta(0))
+    wait = max(
+        ready_since + timedelta(minutes=await _assignment_minutes(request)) - now, timedelta(0)
+    )
     if await _schedule(request, "unclaimed", wait):
         return
     # Without its deadline nothing would ever bump the post, so the next settle schedules it again.
@@ -620,8 +635,12 @@ async def _posted_deadline(request: HumanReviewRequest) -> str | None:
         return "closed"
     if current.approved_at is not None:
         return "approved"
-    waited = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
-    if current.ready_since is None or datetime.now(UTC) - current.ready_since < waited:
+    waited = timedelta(minutes=await _assignment_minutes(current)) - _SCHEDULER_EARLINESS
+    if current.ready_since is None:
+        return "not_ready"
+    elapsed = datetime.now(UTC) - current.ready_since
+    if elapsed < waited:
+        await _schedule(current, "unclaimed", waited + _SCHEDULER_EARLINESS - elapsed)
         return "not_ready"
     return None
 
@@ -663,7 +682,9 @@ async def settle(request: HumanReviewRequest) -> bool:
         )
         # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
         if request.kind == "standard" and len(request.reviewers) + len(request.picks) < picked:
-            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
+            await _schedule(
+                request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
+            )
     if request.kind == "posted":
         await _settle_posted(request, snapshot, states)
         return True
@@ -769,7 +790,7 @@ async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
     text = prompt(
         "runs/human-review-unclaimed",
         pr_url=pr.url,
-        minutes=UNCLAIMED_AFTER_MINUTES,
+        minutes=await _assignment_minutes(request),
         author=pr.author,
         posted=not request.has_card,
         asked=asked,
@@ -807,7 +828,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
 
     Reviewing on GitHub counts as accepting.
     """
-    wait = timedelta(minutes=UNCLAIMED_AFTER_MINUTES) - _SCHEDULER_EARLINESS
+    minutes = await _assignment_minutes(request)
+    wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
     stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
     logger.info(
@@ -867,7 +889,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         request,
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{UNCLAIMED_AFTER_MINUTES} minutes, so Open SWE asked someone else.",
+        f"{minutes} minutes, so Open SWE asked someone else.",
         expired=True,
     )
     current = await HumanReviewRequest.get(request.id)
@@ -905,9 +927,20 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "claimed"}
         if request.kind == "posted" and (waiting := await _posted_deadline(request)) is not None:
             return {"status": waiting}
+        if request.kind == "standard" and request.created_at:
+            remaining = (
+                request.created_at
+                + timedelta(minutes=await _assignment_minutes(request))
+                - datetime.now(UTC)
+            )
+            if remaining > _SCHEDULER_EARLINESS:
+                await _schedule(request, "unclaimed", remaining)
+                return {"status": "waiting"}
         if request.kind == "standard" and await _github_approvers(request):
             # Re-checked later in case the approval is dismissed while the request stays open.
-            await _schedule(request, "unclaimed", timedelta(minutes=UNCLAIMED_AFTER_MINUTES))
+            await _schedule(
+                request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
+            )
             return {"status": "approved"}
         return {"status": (await start_auto_assign(request)).status}
     if step == "auto_merge":
