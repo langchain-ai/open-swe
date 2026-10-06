@@ -1,0 +1,21 @@
+agent/input_messages.py
+  s_8c15db54e0c42b::t_61523179cb9ea5 16
+swagger.json
+  s_8c15db54e0c42b::t_cbe0713b15b7dd 18666
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4e478e098cdb353c6333a1719d696cf0d1b3104e",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
