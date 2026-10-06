@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 REVIEW_BODY_PREFIX = "Approved in Slack via"
 
 
-def settings_hint(action: str) -> str:
+def settings_hint(action: str, path: str = "/my-settings") -> str:
     base = dashboard_base_url()
-    return f"{action}: {base}/my-settings" if base else f"{action} in your Open SWE settings."
+    return f"{action}: {base}{path}" if base else f"{action} in your Open SWE settings."
 
 
 def github_token_hint() -> str:

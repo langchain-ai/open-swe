@@ -93,7 +93,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch, explicit, expected, email_only
 ):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(
@@ -101,7 +101,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         "dashboard_thread_url",
         lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
     )
-    update = AsyncMock(return_value=(True, None))
+    update = AsyncMock(return_value=None)
     monkeypatch.setattr(breakout, "update_slack_message", update)
     monkeypatch.setattr(
         breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
@@ -177,7 +177,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
 @pytest.mark.asyncio
 async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(monkeypatch):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(

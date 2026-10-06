@@ -40,7 +40,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from agent.database import notifications
     from agent.database.analytics import activate_reporting, load_workspace
     from agent.sandboxes.providers.registry import validate_sandbox_startup_config
-    from agent.schedules.store import migrate_automation_workspaces
+    from agent.schedules.store import import_store_automations
     from agent.transcript import listener as transcript_listener
     from agent.ui_invalidations import hub as ui_invalidations_hub
     from agent.users import User
@@ -76,18 +76,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # an import succeeds.
         logger.exception("Importing concierge mode from the LangGraph Store failed")
     try:
-        # Automations used to run in their repository's workspace; this moves
-        # the ones saved without a workspace to `default` and is a no-op once
-        # every one carries a workspace.
-        moved_automations = await migrate_automation_workspaces()
+        # Automations used to live in the LangGraph Store; this copies them into
+        # PostgreSQL and is a no-op once the Store namespaces are empty.
+        imported_automations = await import_store_automations()
     except Exception:  # noqa: BLE001
-        # Startup continues: an automation without a workspace still launches
-        # in `default` until the migration succeeds.
-        logger.exception("Moving automations without a workspace to default failed")
+        # Startup continues: automations still in the Store do not run until an
+        # import succeeds.
+        logger.exception("Importing automations from the LangGraph Store failed")
     else:
         logger.info(
-            "Moved automations without a workspace to default",
-            extra={"moved_automations": moved_automations},
+            "Imported automations from the LangGraph Store",
+            extra={"imported_automations": imported_automations},
         )
     if admins := configured_admins():
         await User.sync_admins(admins)

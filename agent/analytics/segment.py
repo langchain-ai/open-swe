@@ -62,7 +62,7 @@ async def record_webhook(event: LoggedEvent) -> None:
     action = event.payload.get("action") if isinstance(event.payload, dict) else None
     properties: dict[str, object] = {
         "source": event.source,
-        "event_type": event.event_type,
+        "event_type": event.base_event_type,
         "action": action if isinstance(action, str) else "",
         "product": "open-swe",
         "surface": "webhook",

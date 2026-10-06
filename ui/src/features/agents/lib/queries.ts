@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
+import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
@@ -32,6 +33,7 @@ import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
+import { reportError } from "@/lib/errorReporting"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -1085,6 +1087,23 @@ export function useDeleteAgentThread() {
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
+      // A "This Mac" thread also leaves a worktree and a bridge on this machine.
+      const desktop = window.openSweDesktop
+      if (desktop)
+        void desktop
+          .discardLocalThread(threadId)
+          .then((discarded) => {
+            if (discarded)
+              void queryClient.invalidateQueries({
+                queryKey: localThreadKeys.all,
+              })
+          })
+          .catch((error: unknown) =>
+            reportError({
+              title: "Couldn't clean up the thread's local worktree",
+              error,
+            })
+          )
       const path = window.location.pathname
       const chat = chatRoutes(path)
       if (path === `${chat.home}/${threadId}`) {

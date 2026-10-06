@@ -1,6 +1,9 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
+import { render, screen } from "@testing-library/react"
+
+import { ErrorToastBody } from "@/lib/errorReporting"
 import { api } from "@/lib/api"
 import { makeQueryClient } from "@/lib/query"
 
@@ -46,6 +49,21 @@ async function runFailingMutation(meta: {
     .execute(undefined)
     .catch(() => undefined)
 }
+
+it("links the existing Slack review card in a refusal", () => {
+  const permalink = "https://example.slack.com/archives/C123/p1791222470078909"
+  render(
+    <ErrorToastBody
+      message={`Dismiss the existing card. Open in Slack: ${permalink}`}
+      id="req_test"
+    />
+  )
+  expect(
+    screen
+      .getByRole("link", { name: "Open review card in Slack" })
+      .getAttribute("href")
+  ).toBe(permalink)
+})
 
 const reports = () => sent.filter((s) => s.url.endsWith("/client-errors"))
 

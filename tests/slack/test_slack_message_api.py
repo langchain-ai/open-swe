@@ -12,6 +12,7 @@ from agent.run_config import RunConfig
 from agent.slack import client as slack_utils
 from agent.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from agent.users import User, UserPreferences
+from agent.utils import url_safety
 from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
 
@@ -65,6 +66,9 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
         {"ok": True, "upload_url": "https://files.slack.com/upload/v1/test", "file_id": "F1"}
     )
     slack_api.respond({"ok": True, "files": [{"id": "F1"}]})
+    monkeypatch.setattr(
+        url_safety.socket, "getaddrinfo", lambda *args: [(None, None, None, None, ("1.1.1.1", 0))]
+    )
     uploads = []
 
     def upload(request):
@@ -77,9 +81,12 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
         "AsyncClient",
         side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
     ):
-        assert await slack_utils.upload_slack_thread_file(
-            "C1", "1.0", "plan.html", b"<html />", title="Plan", initial_comment="Preview"
-        ) == ("F1", None)
+        assert (
+            await slack_utils.upload_slack_thread_file(
+                "C1", "1.0", "plan.html", b"<html />", title="Plan", initial_comment="Preview"
+            )
+            == "F1"
+        )
     assert slack_api.calls[0] == (
         "files.getUploadURLExternal",
         {"filename": "plan.html", "length": "8"},
@@ -94,7 +101,7 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
 
 
 @pytest.mark.parametrize("redirect", [False, True])
-async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect):
+async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect, monkeypatch):
     slack_api.respond(
         {
             "ok": True,
@@ -103,6 +110,9 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect):
             if redirect
             else "https://attacker.example/upload",
         }
+    )
+    monkeypatch.setattr(
+        url_safety.socket, "getaddrinfo", lambda *args: [(None, None, None, None, ("1.1.1.1", 0))]
     )
     uploads = []
 
@@ -116,10 +126,8 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect):
         "AsyncClient",
         side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
     ):
-        assert await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x") == (
-            None,
-            "unsafe_upload_url",
-        )
+        with pytest.raises(slack_utils.SlackRequestError, match="unsafe_upload_url"):
+            await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
     assert len(slack_api.calls) == 1
     assert len(uploads) == int(redirect)
 
@@ -130,10 +138,8 @@ async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_chann
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"text": "Answer"}})
     slack_api.respond({"ok": False, "error": "thread_not_found"})
     slack_api.respond({"ok": True})
-    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == (
-        None,
-        "thread_not_found",
-    )
+    with pytest.raises(slack_utils.SlackRequestError, match="thread_not_found"):
+        await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer")
     assert [method for method, _ in slack_api.calls] == [
         "chat.postMessage",
         "conversations.replies",
@@ -145,7 +151,7 @@ async def test_reply_to_a_deleted_parent_is_removed_instead_of_left_at_the_chann
 async def test_reply_is_kept_when_the_thread_still_exists(slack_api) -> None:
     slack_api.respond({"ok": True, "ts": "2.0", "message": {"text": "Answer"}})
     slack_api.respond({"ok": True, "messages": [{"ts": "1.0"}]})
-    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == ("2.0", None)
+    assert await slack_utils.post_slack_thread_reply_with_ts("C1", "1.0", "Answer") == "2.0"
     assert [method for method, _ in slack_api.calls] == [
         "chat.postMessage",
         "conversations.replies",
@@ -176,17 +182,12 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
         ]
     )
     if delivery == "post":
-        assert await slack_utils.post_slack_top_level_message_with_ts(
-            "C1", text, blocks=blocks
-        ) == (
-            "1.0",
-            None,
+        assert (
+            await slack_utils.post_slack_top_level_message_with_ts("C1", text, blocks=blocks)
+            == "1.0"
         )
     elif delivery == "update":
-        assert await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks) == (
-            True,
-            None,
-        )
+        await slack_utils.update_slack_message("C1", "1.0", text, blocks=blocks)
     elif delivery == "ephemeral":
         assert await slack_utils.post_slack_ephemeral_message("C1", "U1", text, blocks=blocks)
     else:

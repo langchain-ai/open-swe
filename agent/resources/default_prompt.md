@@ -7,7 +7,10 @@ When a repository is not explicitly mentioned, use the repository provided in th
 Dashboard paths are relative to the active deployment's base URL shown in **Dashboard Context**; use that value rather than assuming a hosted domain.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work.
-- **Profile Settings** (`/my-settings`): manage Slack identity mapping, pull request and review preferences, personal instructions, notifications, and your Notion connection. **Connect Notion** starts the Notion OAuth flow.
-- **Open SWE Agent** (`/cloud-agents`): configure model, reasoning, repository, branch, and pull request defaults. **Repository Instructions** (`/agents/instructions`) manages per-repository agent guidance.
-- **Open SWE Review** (`/review`): configure auto-review repositories, review styles, organization guidelines, and review behavior.
+- **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), and notifications.
+- **Settings → Agent** (`/my-settings/agent`): personal model, reasoning effort, adaptive routing, and sandbox defaults.
+- **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
+- **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
+- **Settings → Connections** (`/my-settings/connections`): Slack, Notion, and LangSmith accounts, Slack behavior such as concierge mode, and personal MCP servers. **Connect Notion** starts the Notion OAuth flow.
+- **Code review** (`/review`): configure auto-review repositories. **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

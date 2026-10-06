@@ -130,7 +130,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 Before reporting readiness, verify `/ok` on localhost, open the dashboard in a browser, and check tunnel forwarding and the OAuth callback redirect. A healthy `/ok` does not mean the UI is ready: `make dev` needs a dashboard build or a running Vite server to serve it.
 
-**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Global defaults → Default Repository**, then start a task from the composer.
+**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Administration** pages appear. Set **Admin → Defaults → Default repository**, then start a task from the composer.
 
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
