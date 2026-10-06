@@ -1612,13 +1612,37 @@
       "GitHubTrigger": {
         "description": "Fires on events in one repository; its runs work in that repository.",
         "properties": {
+          "conclusion": {
+            "anyOf": [
+              {
+                "enum": [
+                  "success",
+                  "failure",
+                  "neutral",
+                  "cancelled",
+                  "skipped",
+                  "timed_out",
+                  "action_required",
+                  "stale",
+                  "startup_failure"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only workflow_run.completed events are filtered by conclusion.",
+            "title": "Conclusion"
+          },
           "events": {
             "items": {
               "enum": [
                 "issues.opened",
                 "pull_request.opened",
                 "pull_request.closed",
-                "pull_request.merged"
+                "pull_request.merged",
+                "workflow_run.completed"
               ],
               "type": "string"
             },
