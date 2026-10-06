@@ -453,7 +453,8 @@ const FileDiffSection = memo(
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
-                    (event.metaKey || event.ctrlKey)
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
                   ) {
                     event.preventDefault()
                     void submitComment()
