@@ -10,6 +10,11 @@ from agent.github.http import GITHUB_API_BASE, github_client, github_request
 
 logger = logging.getLogger(__name__)
 
+
+class RepoFileUnreadableError(RuntimeError):
+    """A repository file could not be read reliably."""
+
+
 SETTINGS_PATH = ".open-swe/settings.json"
 SETTINGS_MAX_CHARS = 10_000
 SETTINGS_FRESH_FOR = timedelta(minutes=30)
@@ -17,11 +22,18 @@ SETTINGS_MAX_AGE = timedelta(hours=24)
 
 
 async def fetch_repo_file(
-    owner: str, repo: str, path: str, ref: str | None, *, token: str | None, max_chars: int
+    owner: str,
+    repo: str,
+    path: str,
+    ref: str | None,
+    *,
+    token: str | None,
+    max_chars: int,
+    strict: bool = False,
 ) -> str | None:
     """``path`` at ``ref`` (the default branch when ``None``).
 
-    ``None`` when the file is absent, empty, larger than ``max_chars``, or unreadable.
+    With ``strict``, only absence returns ``None``; unreadable files raise.
     """
     if not owner or not repo:
         return None
@@ -36,6 +48,8 @@ async def fetch_repo_file(
             )
     except httpx2.HTTPError:
         logger.exception("repository file fetch failed", extra=extra)
+        if strict:
+            raise RepoFileUnreadableError(f"Could not read {path}") from None
         return None
     if response.status_code == 404:
         return None
@@ -44,6 +58,8 @@ async def fetch_repo_file(
             "repository file fetch returned an unexpected status",
             extra={**extra, "status_code": response.status_code},
         )
+        if strict:
+            raise RepoFileUnreadableError(f"Could not read {path}: HTTP {response.status_code}")
         return None
     content = response.text.strip()
     if len(content) > max_chars:
@@ -51,8 +67,10 @@ async def fetch_repo_file(
             "repository file exceeds the size cap; ignoring it",
             extra={**extra, "chars": len(content), "max_chars": max_chars},
         )
+        if strict:
+            raise RepoFileUnreadableError(f"Repository file {path} exceeds the size cap")
         return None
-    return content or None
+    return content if strict else content or None
 
 
 class RepoSettings(BaseModel):

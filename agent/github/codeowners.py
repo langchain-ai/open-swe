@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Self
 
+from agent.github.org_membership import team_members
 from agent.github.repo_files import fetch_repo_file
 
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
@@ -66,12 +67,38 @@ class CodeOwners:
                 return rule.owners
         return ()
 
+    async def approved_by(self, paths: list[str], approvers: set[str]) -> bool:
+        """Whether each owned path has an approval from one of its owners."""
+        teams: dict[str, list[str]] = {}
+        logins = {login.lower() for login in approvers}
+        for path in paths:
+            owners = self.owners_for(path)
+            if not owners:
+                continue
+            approved = False
+            for owner in owners:
+                handle = owner.removeprefix("@")
+                if "/" not in handle:
+                    approved |= handle.lower() in logins
+                else:
+                    if handle not in teams:
+                        org, slug = handle.split("/", 1)
+                        teams[handle] = await team_members(org, slug) or []
+                    approved |= any(login.lower() in logins for login in teams[handle])
+                if approved:
+                    break
+            if not approved:
+                return False
+        return True
+
     @classmethod
-    async def fetch(cls, owner: str, repo: str, ref: str | None, *, token: str) -> Self | None:
+    async def fetch(
+        cls, owner: str, repo: str, ref: str | None, *, token: str, strict: bool = False
+    ) -> Self | None:
         """The first CODEOWNERS file GitHub would read at ``ref``; ``None`` when there is none."""
         for path in CODEOWNERS_PATHS:
             content = await fetch_repo_file(
-                owner, repo, path, ref, token=token, max_chars=CODEOWNERS_MAX_CHARS
+                owner, repo, path, ref, token=token, max_chars=CODEOWNERS_MAX_CHARS, strict=strict
             )
             if content is not None:
                 return cls.parse(content)

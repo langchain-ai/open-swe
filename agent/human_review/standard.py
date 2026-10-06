@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.expedited_review.eligibility import MAX_FILES, fetch_changed_files
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -33,9 +34,10 @@ from agent.expedited_review.readiness import (
     review_authors,
 )
 from agent.github.ci import fetch_pr
+from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.github.repo_files import RepoSettings
+from agent.github.repo_files import RepoFileUnreadableError, RepoSettings
 from agent.human_review.card import accept_button, mention
 from agent.human_review.lifecycle import (
     drop_picks,
@@ -63,6 +65,7 @@ from agent.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
 )
 from agent.slack.dm import send_dm
 from agent.slack.http import SlackRequestError
@@ -623,12 +626,48 @@ def merge_wait(
 
 
 async def _settle_posted(
-    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str]
+    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str], token: str
 ) -> None:
-    """React once the pull request is approved; until then, time how long it has sat green."""
-    if "APPROVED" in states.values():
+    """React once the pull request's owners approve; until then, time how long it has sat green."""
+    approvers = {login for login, state in states.items() if state == "APPROVED"}
+    approved = bool(approvers)
+    if approved:
+        pr = request.pull_request
+        try:
+            codeowners = await CodeOwners.fetch(
+                pr.owner, pr.repo, pr.base_ref or None, token=token, strict=True
+            )
+        except RepoFileUnreadableError:
+            logger.warning(
+                "Cannot confirm codeowner approvals",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
+            approved = False
+            codeowners = None
+        if codeowners is not None:
+            files = await fetch_changed_files(
+                owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+            )
+            approved = (
+                files is not None
+                and len(files) < MAX_FILES
+                and await codeowners.approved_by([file.filename for file in files], approvers)
+            )
+    if approved:
         await mark_approved(request)
+        await release_picks(
+            request, ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
+        )
         return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None or row.state != "open":
+            return
+        if row.approved_at is not None:
+            row.approved_at = None
+            await remove_slack_reaction(
+                row.slack_channel_id, row.slack_message_ts, "white_check_mark"
+            )
     now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
@@ -708,6 +747,9 @@ async def settle(request: HumanReviewRequest) -> bool:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
         return False
+    if request.kind == "posted":
+        await _settle_posted(request, snapshot, states, token)
+        return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
         picked = len(request.reviewers) + len(request.picks)
         request = await release_picks(
@@ -718,9 +760,6 @@ async def settle(request: HumanReviewRequest) -> bool:
             await _schedule(
                 request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
             )
-    if request.kind == "posted":
-        await _settle_posted(request, snapshot, states)
-        return True
     waiting = merge_wait(
         [reviewer.github_login for reviewer in request.reviewers],
         request.created_at,
