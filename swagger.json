@@ -2313,6 +2313,34 @@
         "title": "MergeAction",
         "type": "object"
       },
+      "MessageIntent": {
+        "properties": {
+          "intent": {
+            "const": "message",
+            "title": "Intent",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "title",
+          "message"
+        ],
+        "title": "MessageIntent",
+        "type": "object"
+      },
       "MessageItem": {
         "properties": {
           "content": {
@@ -12188,6 +12216,7 @@
                     "address-comments": "#/components/schemas/AddressCommentsIntent",
                     "comments": "#/components/schemas/CommentBatchIntent",
                     "fix": "#/components/schemas/FixIntent",
+                    "message": "#/components/schemas/MessageIntent",
                     "open": "#/components/schemas/OpenThreadIntent"
                   },
                   "propertyName": "intent"
@@ -12195,6 +12224,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/OpenThreadIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MessageIntent"
                   },
                   {
                     "$ref": "#/components/schemas/FixIntent"

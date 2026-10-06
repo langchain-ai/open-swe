@@ -992,6 +992,7 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
+  | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
       scope: PullRequestFixScope
@@ -1751,6 +1752,12 @@ export const api = {
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
     pullRequestThread(repo, number, { intent: "open", title }),
+  messagePullRequestThread: (
+    repo: string,
+    number: number,
+    title: string,
+    message: string
+  ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod
