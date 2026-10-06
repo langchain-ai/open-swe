@@ -15,7 +15,7 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { describeCron } from "@/features/automations/lib/cron"
+import { describeTriggers } from "@/features/automations/lib/triggers"
 import {
   agentMutationKeys,
   useAgentSchedules,
@@ -62,8 +62,9 @@ export function AutomationsList({
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
         <h1 className="text-base font-medium text-foreground">Automations</h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          Run Open SWE on a recurring schedule. Each run starts a fresh agent
-          thread. {!canManage && "Workspace admins manage automation setup."}
+          Run Open SWE on a schedule or when GitHub events happen. Each run
+          starts a fresh agent thread.{" "}
+          {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
           <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
@@ -182,8 +183,8 @@ function EmptyState({ canManage }: { canManage: boolean }) {
         No automations yet
       </h3>
       <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-        Schedule Open SWE to run on a recurring cadence — review code, triage
-        issues, or keep docs up to date.
+        Run Open SWE on a schedule or when GitHub events happen — review code,
+        triage new issues, or write release notes when a pull request merges.
       </p>
       {canManage && (
         <Link
@@ -272,11 +273,7 @@ function AutomationRow({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
             <span className="flex items-center gap-1">
               <ClockIcon className="size-3.5" />
-              {schedule.trigger === "github_issue_opened"
-                ? "GitHub issue opened"
-                : schedule.schedule
-                  ? describeCron(schedule.schedule)
-                  : "No trigger"}
+              {describeTriggers(schedule)}
             </span>
             {workspaces.length > 1 && (
               <span className="flex items-center gap-1">
@@ -284,7 +281,6 @@ function AutomationRow({
                 {workspaceName}
               </span>
             )}
-            {schedule.repo && <span>{schedule.repo}</span>}
             {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
