@@ -1436,11 +1436,17 @@ async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) ->
 
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
-    """Get Slack user details from the shared profile cache."""
-    from agent.slack.users import SlackUser
-
-    user = await SlackUser.load(user_id)
-    return dict(user.payload) if user is not None else None
+    """Get current Slack user details without a cached identity fallback."""
+    if not SLACK_BOT_TOKEN:
+        return None
+    try:
+        async with SlackClient.bot() as client:
+            data = await client.users_info(user=user_id)
+        user = data.get("user")
+        return user if isinstance(user, dict) else None
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning("Slack user lookup failed", extra={"slack_error": slack_error(exc)})
+        return None
 
 
 async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:

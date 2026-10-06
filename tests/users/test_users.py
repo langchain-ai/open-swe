@@ -6,10 +6,12 @@ import pytest
 from sqlalchemy import func, select, update
 
 from agent.database import postgres
+from agent.slack.client import get_slack_user_info
 from agent.slack.users import SlackUser
 from agent.threads.participants import participant_summaries
 from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 from agent.users.avatars import avatar_for_login
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -119,6 +121,21 @@ async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_
     assert unlinked[0].id == "slack:U_UNLINKED"
     assert unlinked[0].displayName == "Unlinked participant"
     assert unlinked[0].avatarUrl == "https://slack.test/unlinked.png"
+
+
+async def test_identity_lookup_uses_current_email_and_fails_closed(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.slack import client
+
+    async with postgres.session() as session:
+        session.add(SlackUser(id="U0123", payload={"profile": {"email": "old@example.com"}}))
+    slack_api.respond({"ok": True, "user": {"profile": {"email": "new@example.com"}}})
+    assert await get_slack_user_info("U0123") == {"profile": {"email": "new@example.com"}}
+    slack_api.respond({"ok": False, "error": "user_not_found"})
+    assert await get_slack_user_info("U0123") is None
+    monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "")
+    assert await get_slack_user_info("U0123") is None
 
 
 async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
