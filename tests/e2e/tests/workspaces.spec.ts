@@ -501,7 +501,7 @@ test.describe("Workspaces", () => {
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/workspaces");
-    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Default")).toBeVisible();
     await expect(page.getByText("Snapshot ready")).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();

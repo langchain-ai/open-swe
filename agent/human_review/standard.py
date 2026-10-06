@@ -47,6 +47,7 @@ from agent.human_review.lifecycle import (
     post_standard_card,
     refresh_card,
     release_picks,
+    retire,
     update_blocked_reactions,
 )
 from agent.human_review.merging import merge_pull_request
@@ -315,6 +316,8 @@ async def request_review(
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
+    if await User.for_login("github", details.author) is None:
+        return _failure("Human review is only available for PRs authored by Open SWE users.")
     if origin.thread_id:
         pull_request = await pull_request.link_thread(origin.thread_id, source="human_review")
 
@@ -698,6 +701,9 @@ async def settle(request: HumanReviewRequest) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
+    if await User.for_login("github", snapshot.author) is None:
+        await retire(request, "cancelled", "PR author has no Open SWE account")
+        return True
     if snapshot.merged:
         await mark_merged(request)
         return True
@@ -799,6 +805,9 @@ async def start_auto_assign(
 
 
 async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssignResult:
+    if await User.for_login("github", request.pull_request.author) is None:
+        await retire(request, "cancelled", "PR author has no Open SWE account")
+        return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)
     if isinstance(choice, Wait):
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):

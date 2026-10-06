@@ -577,6 +577,7 @@ async def _seed_test_user_mappings() -> None:
         return
     from agent.users import User
 
+    await User.sign_in("github", "1003", login="octocat", display_name="PR Author")
     for user in TEST_USERS:
         signed_in = await User.sign_in(
             "github",
