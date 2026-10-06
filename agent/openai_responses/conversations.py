@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import text
 
 from agent.database import postgres
+from agent.openai_responses.associations import record_guest_thread
 from agent.openai_responses.client_tools import ClientToolSpec
 from agent.openai_responses.ids import OpenSweId
 from agent.openai_responses.models import CreateResponseRequest, InputItem
@@ -144,6 +145,7 @@ class SandboxCaller:
                 ),
             },
         )
+        await record_guest_thread(self.host_thread_id, thread_id)
         return thread_id
 
     async def start_run(

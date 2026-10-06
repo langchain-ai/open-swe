@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
+from agent.openai_responses.associations import guest_thread_ids
 from agent.review.session import ReviewSessionMetadata
 from agent.review.walkthrough import Walkthrough
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -316,13 +317,22 @@ async def _summarize_threads(
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
     await attach_subagents(summaries)
-    for summary in summaries:
+    associations = await guest_thread_ids([summary["id"] for summary in summaries])
+    ids = [thread_id for children in associations.values() for thread_id in children]
+    guests_by_id: dict[str, ThreadLike] = {}
+    for offset in range(0, len(ids), _PINNED_THREADS_BATCH_SIZE):
+        batch_ids = ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
         guests = await client.threads.search(
-            metadata={"sandbox_host_thread_id": summary["id"]},
-            limit=100,
-            select=_THREAD_LIST_SELECT,
+            ids=batch_ids, limit=len(batch_ids), select=_THREAD_LIST_SELECT
         )
         for guest in guests:
+            if guest_id := _thread_id(guest):
+                guests_by_id[guest_id] = guest
+    for summary in summaries:
+        for guest_id in associations.get(summary["id"], []):
+            guest = guests_by_id.get(guest_id)
+            if guest is None:
+                continue
             metadata = _thread_metadata(guest)
             if not thread_is_readable(metadata, viewer_login, viewer_email):
                 continue

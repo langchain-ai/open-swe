@@ -2,12 +2,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.openai_responses.associations import record_guest_thread
 from agent.threads import listing
 from agent.threads.summary import thread_is_unlisted
 
 
 @pytest.mark.asyncio
-async def test_response_guests_are_nested_and_private_guests_are_hidden(monkeypatch):
+async def test_response_guests_are_nested_and_private_guests_are_hidden(monkeypatch, registry_db):
     parent = {"id": "host", "ownerLogin": "alice", "subagents": []}
     guest = {
         "thread_id": "guest",
@@ -33,6 +34,9 @@ async def test_response_guests_are_nested_and_private_guests_are_hidden(monkeypa
     monkeypatch.setattr(listing, "_should_refresh_latest_run", lambda _: False)
     monkeypatch.setattr(listing, "_summarize_thread", AsyncMock(side_effect=[parent, child]))
     monkeypatch.setattr(listing, "attach_subagents", AsyncMock())
+    await record_guest_thread("host", "guest")
+    await record_guest_thread("host", "guest")
+    await record_guest_thread("host", "private")
     summaries = await listing._summarize_threads(client, [{}], viewer_login="alice")
     assert [item["threadId"] for item in summaries[0]["subagents"]] == ["guest"]
     assert summaries[0]["subagents"][0]["title"] == "[codex_cli] Review"
